@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 
-from PySide6.QtGui import QGuiApplication
-
 
 @dataclass
 class ClipboardSnapshot:
@@ -9,6 +7,8 @@ class ClipboardSnapshot:
 
 
 def copy_text(text: str) -> ClipboardSnapshot:
+    from PySide6.QtGui import QGuiApplication
+
     clipboard = QGuiApplication.clipboard()
     snapshot = ClipboardSnapshot(clipboard.text())
     clipboard.setText(text)
@@ -16,5 +16,6 @@ def copy_text(text: str) -> ClipboardSnapshot:
 
 
 def restore_clipboard(snapshot: ClipboardSnapshot) -> None:
-    QGuiApplication.clipboard().setText(snapshot.text)
+    from PySide6.QtGui import QGuiApplication
 
+    QGuiApplication.clipboard().setText(snapshot.text)

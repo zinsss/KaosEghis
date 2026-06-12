@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 import sqlite3
 from pathlib import Path
 
@@ -6,19 +8,23 @@ APP_DIR_NAME = "KaosEghis"
 
 
 def get_data_dir() -> Path:
-    base = Path.home() / "AppData" / "Local"
-    data_dir = base / APP_DIR_NAME
+    data_dir = Path.cwd() / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
 
 
 def get_database_path() -> Path:
-    return get_data_dir() / "KaosEghis.sqlite3"
+    return get_data_dir() / "KaosEghis.sqlite"
 
 
-def connect(path: Path | None = None) -> sqlite3.Connection:
+@contextmanager
+def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
     db_path = path or get_database_path()
-    return sqlite3.connect(db_path)
+    connection = sqlite3.connect(db_path)
+    try:
+        yield connection
+    finally:
+        connection.close()
 
 
 def initialize_database(path: Path | None = None) -> None:
