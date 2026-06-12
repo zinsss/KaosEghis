@@ -7,7 +7,6 @@ The current app is only an initial shell. It does not perform real EMR automatio
 ## Run
 
 ```powershell
-cd kaos-eghis
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -23,4 +22,3 @@ python main.py
 ## Safe Stubs
 
 The automation, macro execution, UIA targeting, clipboard, credential, scheduler, printer, and database modules are prepared as safe local foundations. Dangerous macro actions currently return blocked results or raise `NotImplementedError`.
-

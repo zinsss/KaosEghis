@@ -1,6 +1,5 @@
-from kaos_eghis.app import run
+from KaosEghis.app import run
 
 
 if __name__ == "__main__":
     raise SystemExit(run())
-

@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QFormLayout, QLineEdit, QWidget
 
-from kaos_eghis.config import DEFAULT_CONFIG
+from KaosEghis.config import DEFAULT_CONFIG
 
 
 class SettingsTab(QWidget):
@@ -17,4 +17,3 @@ class SettingsTab(QWidget):
         layout.addRow("Eghis window title match", window_title)
         layout.addRow("KaosGDD URL", kaosgdd_url)
         layout.addRow("Credential reference name", credential_ref)
-

@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QApplication
 
-from kaos_eghis.ui.main_window import MainWindow
+from KaosEghis.ui.main_window import MainWindow
 
 
 def run() -> int:
@@ -8,4 +8,3 @@ def run() -> int:
     window = MainWindow()
     window.show()
     return app.exec()
-

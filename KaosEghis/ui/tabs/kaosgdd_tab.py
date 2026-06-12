@@ -2,7 +2,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from kaos_eghis.config import DEFAULT_CONFIG
+from KaosEghis.config import DEFAULT_CONFIG
 
 
 class KaosGddTab(QWidget):
@@ -15,4 +15,3 @@ class KaosGddTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.web_view)
-

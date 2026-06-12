@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from kaos_eghis.core.macro_models import MacroRunResult, MacroStep
+from KaosEghis.core.macro_models import MacroRunResult, MacroStep
 
 
 class MacroRunner:
@@ -8,4 +8,3 @@ class MacroRunner:
         if dry_run:
             return MacroRunResult(False, "Macro execution is blocked: dry-run stub only.", 0)
         raise NotImplementedError("Real macro execution is not implemented.")
-

@@ -13,7 +13,7 @@ def get_data_dir() -> Path:
 
 
 def get_database_path() -> Path:
-    return get_data_dir() / "kaos_eghis.sqlite3"
+    return get_data_dir() / "KaosEghis.sqlite3"
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
@@ -25,4 +25,3 @@ def initialize_database(path: Path | None = None) -> None:
     schema_path = Path(__file__).with_name("schema.sql")
     with connect(path) as connection:
         connection.executescript(schema_path.read_text(encoding="utf-8"))
-

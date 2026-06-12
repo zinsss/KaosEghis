@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QMainWindow, QTabWidget
 
-from kaos_eghis.ui.tabs.eghis_assist_tab import EghisAssistTab
-from kaos_eghis.ui.tabs.kaosgdd_tab import KaosGddTab
-from kaos_eghis.ui.tabs.settings_tab import SettingsTab
+from KaosEghis.ui.tabs.eghis_assist_tab import EghisAssistTab
+from KaosEghis.ui.tabs.kaosgdd_tab import KaosGddTab
+from KaosEghis.ui.tabs.settings_tab import SettingsTab
 
 
 class MainWindow(QMainWindow):
@@ -17,4 +17,3 @@ class MainWindow(QMainWindow):
         tabs.addTab(SettingsTab(), "Settings")
 
         self.setCentralWidget(tabs)
-
