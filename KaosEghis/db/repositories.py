@@ -163,7 +163,7 @@ def update_item(
 
 
 def delete_item(connection: sqlite3.Connection, item_id: int) -> bool:
-    connection.execute("DELETE FROM macro_steps WHERE item_id = ?", (item_id,))
+    delete_macro_steps_for_item(connection, item_id)
     cursor = connection.execute("DELETE FROM items WHERE id = ?", (item_id,))
     connection.commit()
     return cursor.rowcount > 0
@@ -180,6 +180,10 @@ def list_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[Macro
         (item_id,),
     )
     return [_macro_step_from_row(row) for row in rows]
+
+
+def get_macro_step(connection: sqlite3.Connection, step_id: int) -> MacroStepRecord | None:
+    return _get_macro_step_by_id(connection, step_id)
 
 
 def create_macro_step(
@@ -256,6 +260,12 @@ def delete_macro_step(connection: sqlite3.Connection, step_id: int) -> bool:
     cursor = connection.execute("DELETE FROM macro_steps WHERE id = ?", (step_id,))
     connection.commit()
     return cursor.rowcount > 0
+
+
+def delete_macro_steps_for_item(connection: sqlite3.Connection, item_id: int) -> int:
+    cursor = connection.execute("DELETE FROM macro_steps WHERE item_id = ?", (item_id,))
+    connection.commit()
+    return cursor.rowcount
 
 
 def reorder_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[MacroStepRecord]:
