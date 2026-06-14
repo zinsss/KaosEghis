@@ -38,6 +38,7 @@ from KaosEghis.db.repositories import (
     create_ui_target,
     delete_item,
     delete_macro_step,
+    delete_macro_steps_for_item,
     delete_ui_target,
     get_item,
     get_settings,
@@ -139,6 +140,9 @@ class EghisAssistTab(QWidget):
         delete_macro_button = QPushButton("Delete Macro")
         delete_macro_button.clicked.connect(self.delete_macro)
 
+        refresh_macros_button = QPushButton("Refresh Macros")
+        refresh_macros_button.clicked.connect(self.refresh_macros)
+
         dry_run_button = QPushButton("Dry Run")
         dry_run_button.clicked.connect(self.dry_run_macro)
 
@@ -146,6 +150,7 @@ class EghisAssistTab(QWidget):
         macro_controls.addWidget(add_macro_button)
         macro_controls.addWidget(edit_macro_button)
         macro_controls.addWidget(delete_macro_button)
+        macro_controls.addWidget(refresh_macros_button)
         macro_controls.addWidget(dry_run_button)
         macro_controls.addStretch()
 
@@ -323,8 +328,7 @@ class EghisAssistTab(QWidget):
         initialize_database()
         with connect() as connection:
             update_item(connection, item_id, values["name"], "macro", values["is_enabled"])
-            for step in list_macro_steps(connection, item_id):
-                delete_macro_step(connection, step.id)
+            delete_macro_steps_for_item(connection, item_id)
             for step in values["steps"]:
                 create_macro_step(connection, item_id, **step)
             reorder_macro_steps(connection, item_id)
@@ -356,21 +360,26 @@ class EghisAssistTab(QWidget):
             steps = list_macro_steps(connection, item_id)
             errors = validate_macro_dry_run(connection, item_id)
 
-        lines = [f"Dry run only: {item.name}"]
+        lines = [f"Dry run: {item.name}"]
+        for step in steps:
+            target = f" target_id={step.target_id}" if step.target_id else ""
+            value = f" value={step.value}" if step.value else ""
+            lines.append(
+                f"{step.step_order}. {step.action}{target}{value} "
+                f"timeout={step.timeout_seconds} retries={step.retries}"
+            )
         if errors:
-            lines.append("Validation errors:")
-            lines.extend(f"- {error}" for error in errors)
+            lines.append("")
+            missing_target = _missing_target_from_error(errors[0])
+            if missing_target:
+                lines.append(f"Result: Blocked - missing UI target: {missing_target}")
+            else:
+                lines.append(f"Result: Blocked - {errors[0]}")
         else:
-            lines.append("Planned steps:")
             if not steps:
-                lines.append("- No steps defined.")
-            for step in steps:
-                target = f" target={step.target_id}" if step.target_id else ""
-                value = f" value={step.value}" if step.value else ""
-                lines.append(
-                    f"- {step.step_order}: {step.action}{target}{value} "
-                    f"timeout={step.timeout_seconds}s retries={step.retries}"
-                )
+                lines.append("No steps defined.")
+            lines.append("")
+            lines.append("Result: OK - dry run only, no actions executed.")
         self.log.setPlainText("\n".join(lines))
 
     def _selected_macro_id(self) -> int | None:
@@ -407,6 +416,17 @@ def _confirm(parent: QWidget, message: str) -> bool:
         QMessageBox.question(parent, "Confirm", message)
         == QMessageBox.StandardButton.Yes
     )
+
+
+def _missing_target_from_error(error: str) -> str | None:
+    marker = "target_id '"
+    if marker not in error:
+        return None
+    start = error.index(marker) + len(marker)
+    end = error.find("'", start)
+    if end == -1:
+        return None
+    return error[start:end]
 
 
 class UiTargetDialog(QDialog):
