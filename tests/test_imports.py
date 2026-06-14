@@ -94,9 +94,11 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
 def test_items_repository_crud(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import (
+        create_macro_step,
         create_item,
         delete_item,
         get_item,
+        list_macro_steps,
         list_items,
         update_item,
     )
@@ -120,8 +122,11 @@ def test_items_repository_crud(tmp_path) -> None:
         assert updated.is_enabled is False
 
         assert get_item(connection, item.id) is not None
+        create_macro_step(connection, item.id, 1, "wait_ms", value="100")
+        assert len(list_macro_steps(connection, item.id)) == 1
         assert delete_item(connection, item.id) is True
         assert get_item(connection, item.id) is None
+        assert list_macro_steps(connection, item.id) == []
 
 
 def test_macro_steps_repository_crud_and_reorder(tmp_path) -> None:
@@ -130,6 +135,8 @@ def test_macro_steps_repository_crud_and_reorder(tmp_path) -> None:
         create_item,
         create_macro_step,
         delete_macro_step,
+        delete_macro_steps_for_item,
+        get_macro_step,
         list_macro_steps,
         reorder_macro_steps,
         update_macro_step,
@@ -173,12 +180,15 @@ def test_macro_steps_repository_crud_and_reorder(tmp_path) -> None:
         )
         assert updated is not None
         assert updated.value == "500"
+        assert get_macro_step(connection, second.id) is not None
 
         reordered = reorder_macro_steps(connection, item.id)
         assert [step.step_order for step in reordered] == [1, 2]
 
         assert delete_macro_step(connection, first.id) is True
         assert len(list_macro_steps(connection, item.id)) == 1
+        assert delete_macro_steps_for_item(connection, item.id) == 1
+        assert list_macro_steps(connection, item.id) == []
 
 
 def test_macro_dry_run_validation_reports_missing_target(tmp_path) -> None:
