@@ -7,6 +7,7 @@ def test_core_modules_import() -> None:
     import KaosEghis.core.macro_runner
     import KaosEghis.core.safety_gate
     import KaosEghis.core.uia_inspector
+    import KaosEghis.core.wait_engine
     import KaosEghis.db.database
     import KaosEghis.db.repositories
 
@@ -257,3 +258,118 @@ def test_inspect_target_readonly_reports_missing_pywinauto(monkeypatch) -> None:
     assert result.found is False
     assert result.target_id == "target.one"
     assert "pywinauto" in result.message
+
+
+def test_wait_result_construction() -> None:
+    from KaosEghis.core.wait_engine import WaitResult
+
+    result = WaitResult(
+        success=True,
+        message="done",
+        target_id="target.one",
+        condition="exists",
+        elapsed_ms=12,
+        attempts=2,
+    )
+
+    assert result.success is True
+    assert result.condition == "exists"
+    assert result.attempts == 2
+
+
+def test_wait_condition_evaluation() -> None:
+    from KaosEghis.core.uia_inspector import UiaInspectionResult
+    from KaosEghis.core.wait_engine import is_condition_satisfied
+
+    inspection = UiaInspectionResult(
+        found=True,
+        message="found",
+        target_id="target.one",
+        automation_id=None,
+        name=None,
+        control_type=None,
+        found_name="Field",
+        found_control_type="Edit",
+        is_enabled=True,
+        is_visible=True,
+        text_value="value",
+    )
+
+    assert is_condition_satisfied(inspection, "exists") is True
+    assert is_condition_satisfied(inspection, "visible") is True
+    assert is_condition_satisfied(inspection, "enabled") is True
+    assert is_condition_satisfied(inspection, "text_non_empty") is True
+
+
+def test_wait_for_target_condition_timeout(monkeypatch) -> None:
+    from KaosEghis.core import wait_engine
+    from KaosEghis.core.uia_inspector import UiaInspectionResult
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    def inspect(_settings, target):
+        return UiaInspectionResult(
+            found=False,
+            message="not found",
+            target_id=target.target_id,
+            automation_id=target.automation_id,
+            name=target.name,
+            control_type=target.control_type,
+            found_name=None,
+            found_control_type=None,
+            is_enabled=None,
+            is_visible=None,
+            text_value=None,
+        )
+
+    monkeypatch.setattr(wait_engine, "inspect_target_readonly", inspect)
+    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", "now")
+
+    result = wait_engine.wait_for_target_condition(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "exists",
+        timeout_ms=1,
+        poll_ms=1,
+    )
+
+    assert result.success is False
+    assert result.target_id == "target.one"
+    assert result.condition == "exists"
+    assert result.attempts >= 1
+    assert "Timed out" in result.message
+
+
+def test_wait_for_target_condition_success(monkeypatch) -> None:
+    from KaosEghis.core import wait_engine
+    from KaosEghis.core.uia_inspector import UiaInspectionResult
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    def inspect(_settings, target):
+        return UiaInspectionResult(
+            found=True,
+            message="found",
+            target_id=target.target_id,
+            automation_id=target.automation_id,
+            name=target.name,
+            control_type=target.control_type,
+            found_name="Name",
+            found_control_type="Edit",
+            is_enabled=True,
+            is_visible=True,
+            text_value="ready",
+        )
+
+    monkeypatch.setattr(wait_engine, "inspect_target_readonly", inspect)
+    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", "now")
+
+    result = wait_engine.wait_for_target_condition(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "visible",
+        timeout_ms=5000,
+        poll_ms=200,
+    )
+
+    assert result.success is True
+    assert result.condition == "visible"
+    assert result.attempts == 1
