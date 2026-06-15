@@ -28,6 +28,7 @@ from KaosEghis.core.emr_detector import (
     is_target_window_active,
 )
 from KaosEghis.core.uia_inspector import inspect_target_readonly
+from KaosEghis.core.wait_engine import WaitCondition, wait_for_target_condition
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     ALLOWED_MACRO_ACTIONS,
@@ -117,12 +118,35 @@ class EghisAssistTab(QWidget):
         test_target_button = QPushButton("Test Target")
         test_target_button.clicked.connect(self.test_target)
 
+        self.wait_condition = QComboBox()
+        self.wait_condition.addItems([condition.value for condition in WaitCondition])
+
+        self.wait_timeout_ms = QSpinBox()
+        self.wait_timeout_ms.setRange(0, 60000)
+        self.wait_timeout_ms.setValue(5000)
+        self.wait_timeout_ms.setSuffix(" ms")
+
+        self.wait_poll_ms = QSpinBox()
+        self.wait_poll_ms.setRange(1, 5000)
+        self.wait_poll_ms.setValue(200)
+        self.wait_poll_ms.setSuffix(" ms")
+
+        wait_test_button = QPushButton("Wait Test")
+        wait_test_button.clicked.connect(self.wait_test_target)
+
         target_controls = QHBoxLayout()
         target_controls.addWidget(add_target_button)
         target_controls.addWidget(edit_target_button)
         target_controls.addWidget(delete_target_button)
         target_controls.addWidget(refresh_targets_button)
         target_controls.addWidget(test_target_button)
+        target_controls.addWidget(QLabel("Condition"))
+        target_controls.addWidget(self.wait_condition)
+        target_controls.addWidget(QLabel("Timeout"))
+        target_controls.addWidget(self.wait_timeout_ms)
+        target_controls.addWidget(QLabel("Poll"))
+        target_controls.addWidget(self.wait_poll_ms)
+        target_controls.addWidget(wait_test_button)
         target_controls.addStretch()
 
         macros_title = QLabel("Macros")
@@ -298,6 +322,37 @@ class EghisAssistTab(QWidget):
         lines.append(f"message: {result.message}")
         self.log.setPlainText("\n".join(lines))
 
+    def wait_test_target(self) -> None:
+        target_id = self._selected_target_id()
+        if target_id is None:
+            self.log.setPlainText("Select a target to wait for.")
+            return
+
+        initialize_database()
+        with connect() as connection:
+            settings = get_settings(connection)
+            target = _get_required_target(connection, target_id)
+
+        result = wait_for_target_condition(
+            settings,
+            target,
+            self.wait_condition.currentText(),
+            timeout_ms=self.wait_timeout_ms.value(),
+            poll_ms=self.wait_poll_ms.value(),
+        )
+        self.log.setPlainText(
+            "\n".join(
+                [
+                    f"target_id: {result.target_id}",
+                    f"condition: {result.condition}",
+                    f"success: {_yes_no(result.success)}",
+                    f"elapsed_ms: {result.elapsed_ms}",
+                    f"attempts: {result.attempts}",
+                    f"message: {result.message}",
+                ]
+            )
+        )
+
     def _selected_target_id(self) -> str | None:
         selected = self.targets_table.selectedItems()
         if not selected:
@@ -388,12 +443,7 @@ class EghisAssistTab(QWidget):
 
         lines = [f"Dry run: {item.name}"]
         for step in steps:
-            target = f" target_id={step.target_id}" if step.target_id else ""
-            value = f" value={step.value}" if step.value else ""
-            lines.append(
-                f"{step.step_order}. {step.action}{target}{value} "
-                f"timeout={step.timeout_seconds} retries={step.retries}"
-            )
+            lines.append(_dry_run_step_line(step))
         if errors:
             lines.append("")
             missing_target = _missing_target_from_error(errors[0])
@@ -433,6 +483,24 @@ def _value_or_empty(value: object | None) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _dry_run_step_line(step: MacroStepRecord) -> str:
+    target = f" target_id={step.target_id}" if step.target_id else ""
+    value = f" value={step.value}" if step.value else ""
+    if step.action == "wait_for_target":
+        return (
+            f"{step.step_order}. wait_for_target{target} "
+            f"timeout={step.timeout_seconds} retries={step.retries} (dry run only)"
+        )
+    if step.action == "wait_ms":
+        duration = step.value or ""
+        duration_text = f" duration_ms={duration}" if duration else ""
+        return f"{step.step_order}. wait_ms{duration_text} (dry run only)"
+    return (
+        f"{step.step_order}. {step.action}{target}{value} "
+        f"timeout={step.timeout_seconds} retries={step.retries}"
+    )
 
 
 def _get_required_target(connection, target_id: str) -> UiTargetRecord:
