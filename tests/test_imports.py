@@ -6,6 +6,7 @@ def test_core_modules_import() -> None:
     import KaosEghis.core.macro_models
     import KaosEghis.core.macro_runner
     import KaosEghis.core.safety_gate
+    import KaosEghis.core.uia_inspector
     import KaosEghis.db.database
     import KaosEghis.db.repositories
 
@@ -218,3 +219,41 @@ def test_macro_dry_run_validation_reports_missing_target(tmp_path) -> None:
 
         create_ui_target(connection, "missing.target")
         assert validate_macro_dry_run(connection, item.id) == []
+
+
+def test_uia_inspection_result_construction() -> None:
+    from KaosEghis.core.uia_inspector import UiaInspectionResult
+
+    result = UiaInspectionResult(
+        found=False,
+        message="not found",
+        target_id="target.one",
+        automation_id="AutoId",
+        name="Name",
+        control_type="Edit",
+        found_name=None,
+        found_control_type=None,
+        is_enabled=None,
+        is_visible=None,
+        text_value=None,
+    )
+
+    assert result.found is False
+    assert result.target_id == "target.one"
+    assert result.message == "not found"
+
+
+def test_inspect_target_readonly_reports_missing_pywinauto(monkeypatch) -> None:
+    import sys
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    monkeypatch.setitem(sys.modules, "pywinauto", None)
+    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", "now")
+
+    result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
+
+    assert result.found is False
+    assert result.target_id == "target.one"
+    assert "pywinauto" in result.message

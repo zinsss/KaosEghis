@@ -27,6 +27,7 @@ from KaosEghis.core.emr_detector import (
     get_active_window_title,
     is_target_window_active,
 )
+from KaosEghis.core.uia_inspector import inspect_target_readonly
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     ALLOWED_MACRO_ACTIONS,
@@ -270,7 +271,32 @@ class EghisAssistTab(QWidget):
         self.log.setPlainText("Target deleted." if deleted else "Target not found.")
 
     def test_target(self) -> None:
-        self.log.setPlainText("UIA target testing not implemented.")
+        target_id = self._selected_target_id()
+        if target_id is None:
+            self.log.setPlainText("Select a target to test.")
+            return
+
+        initialize_database()
+        with connect() as connection:
+            settings = get_settings(connection)
+            target = _get_required_target(connection, target_id)
+
+        result = inspect_target_readonly(settings, target)
+        lines = [
+            f"Found: {_yes_no(result.found)}",
+            f"target_id: {result.target_id}",
+            f"automation_id: {_value_or_empty(result.automation_id)}",
+            f"configured name: {_value_or_empty(result.name)}",
+            f"configured control_type: {_value_or_empty(result.control_type)}",
+            f"found_name: {_value_or_empty(result.found_name)}",
+            f"found_control_type: {_value_or_empty(result.found_control_type)}",
+            f"enabled: {_optional_yes_no(result.is_enabled)}",
+            f"visible: {_optional_yes_no(result.is_visible)}",
+        ]
+        if result.text_value:
+            lines.append(f"text_value: {result.text_value}")
+        lines.append(f"message: {result.message}")
+        self.log.setPlainText("\n".join(lines))
 
     def _selected_target_id(self) -> str | None:
         selected = self.targets_table.selectedItems()
@@ -395,6 +421,18 @@ class EghisAssistTab(QWidget):
 
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
+
+
+def _optional_yes_no(value: bool | None) -> str:
+    if value is None:
+        return ""
+    return _yes_no(value)
+
+
+def _value_or_empty(value: object | None) -> str:
+    if value is None:
+        return ""
+    return str(value)
 
 
 def _get_required_target(connection, target_id: str) -> UiTargetRecord:
