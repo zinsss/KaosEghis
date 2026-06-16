@@ -508,6 +508,8 @@ def test_inspect_target_readonly_scopes_lookup_to_parent(monkeypatch) -> None:
     assert result.found is True
     assert result.parent_found is True
     assert result.found_class_name == "RichEditD2DPT"
+    assert window.descendants_calls == 0
+    assert parent.descendants_calls == 1
 
 
 def test_inspect_target_readonly_without_parent_still_uses_window_lookup(
@@ -536,6 +538,7 @@ def test_inspect_target_readonly_without_parent_still_uses_window_lookup(
     assert result.found is True
     assert result.parent_found is None
     assert result.found_class_name == "RichEditD2DPT"
+    assert window.descendants_calls == 1
 
 
 def test_inspect_target_readonly_reports_missing_parent(monkeypatch) -> None:
@@ -562,6 +565,7 @@ def test_inspect_target_readonly_reports_missing_parent(monkeypatch) -> None:
     assert result.parent_found is False
     assert "Parent automation_id 'TreatmentSymp'" in result.message
     assert "was not found" in result.message
+    assert window.descendants_calls == 0
 
 
 def test_inspect_target_readonly_reports_multiple_parent_matches(monkeypatch) -> None:
@@ -590,6 +594,7 @@ def test_inspect_target_readonly_reports_multiple_parent_matches(monkeypatch) ->
     assert result.found is False
     assert result.parent_found is False
     assert "matched 2 elements" in result.message
+    assert window.descendants_calls == 0
 
 
 class _FakeElementInfo:
@@ -622,8 +627,10 @@ class _FakeElement:
             class_name=class_name,
         )
         self._children = children or []
+        self.descendants_calls = 0
 
     def descendants(self) -> list:
+        self.descendants_calls += 1
         return self._children
 
     def is_enabled(self) -> bool:
@@ -637,12 +644,44 @@ class _FakeWindow:
     def __init__(self, title: str, children: list) -> None:
         self._title = title
         self._children = children
+        self.descendants_calls = 0
 
     def window_text(self) -> str:
         return self._title
 
     def descendants(self) -> list:
+        self.descendants_calls += 1
         return self._children
+
+    def child_window(self, auto_id: str):
+        matches = [
+            child
+            for child in self._children
+            if child.element_info.automation_id == auto_id
+        ]
+        return _FakeChildLookup(matches)
+
+
+class _FakeChildLookup:
+    def __init__(self, matches: list) -> None:
+        self._matches = matches
+
+    def wrapper_object(self):
+        if not self._matches:
+            raise _FakeElementNotFoundError()
+        if len(self._matches) > 1:
+            raise _FakeElementAmbiguousError(len(self._matches))
+        return self._matches[0]
+
+
+class _FakeElementNotFoundError(Exception):
+    pass
+
+
+class _FakeElementAmbiguousError(Exception):
+    def __init__(self, match_count: int) -> None:
+        super().__init__(f"matched {match_count} elements")
+        self.match_count = match_count
 
 
 def _install_fake_pywinauto(monkeypatch, windows: list) -> None:

@@ -47,15 +47,10 @@ def inspect_target_readonly(
             target, f"Eghis window containing '{title_fragment}' was not found."
         )
 
-    try:
-        elements = window.descendants()
-    except Exception as error:
-        return _not_found(target, f"Unable to inspect Eghis window children: {error}")
-
     parent_found: bool | None = None
     parent_automation_id = _clean(target.parent_automation_id)
     if parent_automation_id:
-        parent, message = _find_parent_element(elements, target, parent_automation_id)
+        parent, message = _find_parent_element(window, target, parent_automation_id)
         if parent is None:
             return _not_found(target, message, parent_found=False)
         parent_found = True
@@ -67,6 +62,11 @@ def inspect_target_readonly(
                 f"Unable to inspect children of parent '{parent_automation_id}': {error}",
                 parent_found=True,
             )
+    else:
+        try:
+            elements = window.descendants()
+        except Exception as error:
+            return _not_found(target, f"Unable to inspect Eghis window children: {error}")
 
     match, message = _find_target_element(elements, target)
     if match is None:
@@ -123,26 +123,37 @@ def _find_window_by_title(windows: list[Any], title_fragment: str) -> Any | None
 
 
 def _find_parent_element(
-    elements: list[Any], target: UiTargetRecord, parent_automation_id: str
+    window: Any, target: UiTargetRecord, parent_automation_id: str
 ) -> tuple[Any | None, str]:
-    matches = [
-        element
-        for element in elements
-        if _element_automation_id(element) == parent_automation_id
-    ]
-    if not matches:
+    try:
+        parent = window.child_window(auto_id=parent_automation_id).wrapper_object()
+    except Exception as error:
+        message = _parent_lookup_error_message(target, parent_automation_id, error)
+        return None, message
+    if parent is None:
         return (
             None,
             f"Parent automation_id '{parent_automation_id}' for UI target "
             f"'{target.target_id}' was not found.",
         )
-    if len(matches) > 1:
+    return parent, "Parent found."
+
+
+def _parent_lookup_error_message(
+    target: UiTargetRecord, parent_automation_id: str, error: Exception
+) -> str:
+    error_name = type(error).__name__
+    count = getattr(error, "match_count", None)
+    if error_name in {"ElementAmbiguousError", "MatchError"} or count is not None:
+        detail = f" matched {count} elements." if count is not None else " matched multiple elements."
         return (
-            None,
             f"Parent automation_id '{parent_automation_id}' for UI target "
-            f"'{target.target_id}' matched {len(matches)} elements.",
+            f"'{target.target_id}'{detail}"
         )
-    return matches[0], "Parent found."
+    return (
+        f"Parent automation_id '{parent_automation_id}' for UI target "
+        f"'{target.target_id}' was not found."
+    )
 
 
 def _find_target_element(
