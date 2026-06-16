@@ -10,6 +10,9 @@ def test_core_modules_import() -> None:
     import KaosEghis.core.wait_engine
     import KaosEghis.db.database
     import KaosEghis.db.repositories
+    import KaosEghis.ui.main_window
+    import KaosEghis.ui.tabs.eghis_assist_tab
+    import KaosEghis.ui.tabs.kaoseghis_tab
 
 
 def test_settings_repository_can_save_and_load(tmp_path) -> None:
