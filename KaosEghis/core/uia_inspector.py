@@ -12,8 +12,10 @@ class UiaInspectionResult:
     automation_id: str | None
     name: str | None
     control_type: str | None
+    class_name: str | None
     found_name: str | None
     found_control_type: str | None
+    found_class_name: str | None
     is_enabled: bool | None
     is_visible: bool | None
     text_value: str | None
@@ -59,8 +61,10 @@ def inspect_target_readonly(
         automation_id=target.automation_id,
         name=target.name,
         control_type=target.control_type,
+        class_name=target.class_name,
         found_name=_element_name(match),
         found_control_type=_element_control_type(match),
+        found_class_name=_element_class_name(match),
         is_enabled=_safe_bool(match, "is_enabled"),
         is_visible=_safe_bool(match, "is_visible"),
         text_value=_safe_text_value(match),
@@ -75,8 +79,10 @@ def _not_found(target: UiTargetRecord, message: str) -> UiaInspectionResult:
         automation_id=target.automation_id,
         name=target.name,
         control_type=target.control_type,
+        class_name=target.class_name,
         found_name=None,
         found_control_type=None,
+        found_class_name=None,
         is_enabled=None,
         is_visible=None,
         text_value=None,
@@ -98,28 +104,31 @@ def _find_target_element(
     automation_id = _clean(target.automation_id)
     name = _clean(target.name)
     control_type = _clean(target.control_type)
+    class_name = _clean(target.class_name)
 
+    criteria = []
     if automation_id:
-        matches = [
-            element
-            for element in elements
-            if _element_automation_id(element) == automation_id
-        ]
-        return _single_match(matches, target, f"automation_id '{automation_id}'")
-
+        criteria.append(("automation_id", automation_id, _element_automation_id))
     if name:
-        matches = [element for element in elements if _element_name(element) == name]
-        return _single_match(matches, target, f"name '{name}'")
-
+        criteria.append(("name", name, _element_name))
     if control_type:
-        matches = [
-            element
-            for element in elements
-            if _element_control_type(element) == control_type
-        ]
-        return _single_match(matches, target, f"control_type '{control_type}'")
+        criteria.append(("control_type", control_type, _element_control_type))
+    if class_name:
+        criteria.append(("class_name", class_name, _element_class_name))
 
-    return None, "UI target has no automation_id, name, or control_type to inspect."
+    if not criteria:
+        return (
+            None,
+            "UI target has no automation_id, name, control_type, or class_name to inspect.",
+        )
+
+    matches = [
+        element
+        for element in elements
+        if all(reader(element) == expected for _, expected, reader in criteria)
+    ]
+    description = ", ".join(f"{field} '{value}'" for field, value, _ in criteria)
+    return _single_match(matches, target, description)
 
 
 def _single_match(
@@ -130,7 +139,7 @@ def _single_match(
     if len(matches) > 1:
         return (
             None,
-            f"UI target '{target.target_id}' matched multiple elements by {description}.",
+            f"UI target '{target.target_id}' matched {len(matches)} elements by {description}.",
         )
     return matches[0], "Target found."
 
@@ -163,6 +172,12 @@ def _element_name(element: Any) -> str | None:
 def _element_control_type(element: Any) -> str | None:
     info = getattr(element, "element_info", None)
     value = getattr(info, "control_type", None)
+    return str(value) if value else None
+
+
+def _element_class_name(element: Any) -> str | None:
+    info = getattr(element, "element_info", None)
+    value = getattr(info, "class_name", None)
     return str(value) if value else None
 
 

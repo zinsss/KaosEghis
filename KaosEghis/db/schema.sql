@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS ui_targets (
     automation_id TEXT,
     name TEXT,
     control_type TEXT,
+    class_name TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -62,4 +63,3 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (item_id) REFERENCES items(id)
 );
-
