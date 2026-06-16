@@ -9,6 +9,8 @@ class UiaInspectionResult:
     found: bool
     message: str
     target_id: str
+    parent_automation_id: str | None
+    parent_found: bool | None
     automation_id: str | None
     name: str | None
     control_type: str | None
@@ -45,19 +47,37 @@ def inspect_target_readonly(
             target, f"Eghis window containing '{title_fragment}' was not found."
         )
 
-    try:
-        elements = window.descendants()
-    except Exception as error:
-        return _not_found(target, f"Unable to inspect Eghis window children: {error}")
+    parent_found: bool | None = None
+    parent_automation_id = _clean(target.parent_automation_id)
+    if parent_automation_id:
+        parent, message = _find_parent_element(window, target, parent_automation_id)
+        if parent is None:
+            return _not_found(target, message, parent_found=False)
+        parent_found = True
+        try:
+            elements = parent.descendants()
+        except Exception as error:
+            return _not_found(
+                target,
+                f"Unable to inspect children of parent '{parent_automation_id}': {error}",
+                parent_found=True,
+            )
+    else:
+        try:
+            elements = window.descendants()
+        except Exception as error:
+            return _not_found(target, f"Unable to inspect Eghis window children: {error}")
 
     match, message = _find_target_element(elements, target)
     if match is None:
-        return _not_found(target, message)
+        return _not_found(target, message, parent_found=parent_found)
 
     return UiaInspectionResult(
         found=True,
         message="Target found by read-only UIA inspection.",
         target_id=target.target_id,
+        parent_automation_id=target.parent_automation_id,
+        parent_found=parent_found,
         automation_id=target.automation_id,
         name=target.name,
         control_type=target.control_type,
@@ -71,11 +91,15 @@ def inspect_target_readonly(
     )
 
 
-def _not_found(target: UiTargetRecord, message: str) -> UiaInspectionResult:
+def _not_found(
+    target: UiTargetRecord, message: str, parent_found: bool | None = None
+) -> UiaInspectionResult:
     return UiaInspectionResult(
         found=False,
         message=message,
         target_id=target.target_id,
+        parent_automation_id=target.parent_automation_id,
+        parent_found=parent_found,
         automation_id=target.automation_id,
         name=target.name,
         control_type=target.control_type,
@@ -96,6 +120,40 @@ def _find_window_by_title(windows: list[Any], title_fragment: str) -> Any | None
         if fragment in title.casefold():
             return window
     return None
+
+
+def _find_parent_element(
+    window: Any, target: UiTargetRecord, parent_automation_id: str
+) -> tuple[Any | None, str]:
+    try:
+        parent = window.child_window(auto_id=parent_automation_id).wrapper_object()
+    except Exception as error:
+        message = _parent_lookup_error_message(target, parent_automation_id, error)
+        return None, message
+    if parent is None:
+        return (
+            None,
+            f"Parent automation_id '{parent_automation_id}' for UI target "
+            f"'{target.target_id}' was not found.",
+        )
+    return parent, "Parent found."
+
+
+def _parent_lookup_error_message(
+    target: UiTargetRecord, parent_automation_id: str, error: Exception
+) -> str:
+    error_name = type(error).__name__
+    count = getattr(error, "match_count", None)
+    if error_name in {"ElementAmbiguousError", "MatchError"} or count is not None:
+        detail = f" matched {count} elements." if count is not None else " matched multiple elements."
+        return (
+            f"Parent automation_id '{parent_automation_id}' for UI target "
+            f"'{target.target_id}'{detail}"
+        )
+    return (
+        f"Parent automation_id '{parent_automation_id}' for UI target "
+        f"'{target.target_id}' was not found."
+    )
 
 
 def _find_target_element(

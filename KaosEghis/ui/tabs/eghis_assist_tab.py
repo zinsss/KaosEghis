@@ -95,9 +95,16 @@ class EghisAssistTab(QWidget):
         clipboard_controls.addStretch()
 
         targets_title = QLabel("UI Targets")
-        self.targets_table = QTableWidget(0, 5)
+        self.targets_table = QTableWidget(0, 6)
         self.targets_table.setHorizontalHeaderLabels(
-            ["target_id", "automation_id", "name", "control_type", "class_name"]
+            [
+                "target_id",
+                "parent_automation_id",
+                "automation_id",
+                "name",
+                "control_type",
+                "class_name",
+            ]
         )
         self.targets_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.targets_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -232,10 +239,13 @@ class EghisAssistTab(QWidget):
         self.targets_table.setRowCount(len(targets))
         for row_index, target in enumerate(targets):
             self.targets_table.setItem(row_index, 0, QTableWidgetItem(target.target_id))
-            self.targets_table.setItem(row_index, 1, QTableWidgetItem(target.automation_id or ""))
-            self.targets_table.setItem(row_index, 2, QTableWidgetItem(target.name or ""))
-            self.targets_table.setItem(row_index, 3, QTableWidgetItem(target.control_type or ""))
-            self.targets_table.setItem(row_index, 4, QTableWidgetItem(target.class_name or ""))
+            self.targets_table.setItem(
+                row_index, 1, QTableWidgetItem(target.parent_automation_id or "")
+            )
+            self.targets_table.setItem(row_index, 2, QTableWidgetItem(target.automation_id or ""))
+            self.targets_table.setItem(row_index, 3, QTableWidgetItem(target.name or ""))
+            self.targets_table.setItem(row_index, 4, QTableWidgetItem(target.control_type or ""))
+            self.targets_table.setItem(row_index, 5, QTableWidgetItem(target.class_name or ""))
         self.targets_table.resizeColumnsToContents()
 
     def add_target(self) -> None:
@@ -274,11 +284,12 @@ class EghisAssistTab(QWidget):
         with connect() as connection:
             update_ui_target(
                 connection,
-                target_id,
-                values["automation_id"],
-                values["name"],
-                values["control_type"],
-                values["class_name"],
+                target_id=target_id,
+                parent_automation_id=values["parent_automation_id"],
+                automation_id=values["automation_id"],
+                name=values["name"],
+                control_type=values["control_type"],
+                class_name=values["class_name"],
             )
         self.refresh_targets()
         self.log.setPlainText("Target updated.")
@@ -311,6 +322,8 @@ class EghisAssistTab(QWidget):
         lines = [
             f"Found: {_yes_no(result.found)}",
             f"target_id: {result.target_id}",
+            f"configured parent_automation_id: {_value_or_empty(result.parent_automation_id)}",
+            f"parent found: {_optional_yes_no(result.parent_found)}",
             f"automation_id: {_value_or_empty(result.automation_id)}",
             f"configured name: {_value_or_empty(result.name)}",
             f"configured control_type: {_value_or_empty(result.control_type)}",
@@ -545,6 +558,9 @@ class UiTargetDialog(QDialog):
         self.setWindowTitle("UI Target")
 
         self.target_id = QLineEdit(target.target_id if target else "")
+        self.parent_automation_id = QLineEdit(
+            target.parent_automation_id if target and target.parent_automation_id else ""
+        )
         self.automation_id = QLineEdit(target.automation_id if target and target.automation_id else "")
         self.name = QLineEdit(target.name if target and target.name else "")
         self.control_type = QLineEdit(target.control_type if target and target.control_type else "")
@@ -553,6 +569,7 @@ class UiTargetDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("target_id", self.target_id)
+        form.addRow("parent_automation_id", self.parent_automation_id)
         form.addRow("automation_id", self.automation_id)
         form.addRow("name", self.name)
         form.addRow("control_type", self.control_type)
@@ -571,6 +588,7 @@ class UiTargetDialog(QDialog):
     def values(self) -> dict[str, str]:
         return {
             "target_id": self.target_id.text().strip(),
+            "parent_automation_id": self.parent_automation_id.text().strip(),
             "automation_id": self.automation_id.text().strip(),
             "name": self.name.text().strip(),
             "control_type": self.control_type.text().strip(),
