@@ -63,6 +63,7 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
         created = create_ui_target(
             connection,
             target_id="login.username",
+            parent_automation_id="TreatmentSymp",
             automation_id="UserNameBox",
             name="Username",
             control_type="Edit",
@@ -71,24 +72,28 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
 
         assert created.id > 0
         assert created.target_id == "login.username"
+        assert created.parent_automation_id == "TreatmentSymp"
         assert created.automation_id == "UserNameBox"
         assert created.class_name == "RichEditD2DPT"
         assert len(list_ui_targets(connection)) == 1
 
         found = get_ui_target(connection, "login.username")
         assert found is not None
+        assert found.parent_automation_id == "TreatmentSymp"
         assert found.name == "Username"
         assert found.class_name == "RichEditD2DPT"
 
         updated = update_ui_target(
             connection,
             target_id="login.username",
+            parent_automation_id="TreatmentNote",
             automation_id="UserNameField",
             name="Login username",
             control_type="Edit",
             class_name="WindowsForms10.EDIT.app.0.141b42a_r8_ad1",
         )
         assert updated is not None
+        assert updated.parent_automation_id == "TreatmentNote"
         assert updated.automation_id == "UserNameField"
         assert updated.name == "Login username"
         assert updated.class_name == "WindowsForms10.EDIT.app.0.141b42a_r8_ad1"
@@ -98,7 +103,7 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
         assert list_ui_targets(connection) == []
 
 
-def test_database_migration_adds_ui_target_class_name(tmp_path) -> None:
+def test_database_migration_adds_ui_target_optional_columns(tmp_path) -> None:
     import sqlite3
 
     from KaosEghis.db.database import connect, initialize_database
@@ -127,11 +132,15 @@ def test_database_migration_adds_ui_target_class_name(tmp_path) -> None:
             row[1] for row in connection.execute("PRAGMA table_info(ui_targets)")
         }
         row = connection.execute(
-            "SELECT target_id, automation_id, class_name FROM ui_targets"
+            """
+            SELECT target_id, automation_id, class_name, parent_automation_id
+            FROM ui_targets
+            """
         ).fetchone()
 
     assert "class_name" in columns
-    assert row == ("existing.target", "eghisRichTextBox", None)
+    assert "parent_automation_id" in columns
+    assert row == ("existing.target", "eghisRichTextBox", None, None)
 
 
 def test_items_repository_crud(tmp_path) -> None:
@@ -270,6 +279,8 @@ def test_uia_inspection_result_construction() -> None:
         found=False,
         message="not found",
         target_id="target.one",
+        parent_automation_id="TreatmentSymp",
+        parent_found=True,
         automation_id="AutoId",
         name="Name",
         control_type="Edit",
@@ -294,7 +305,9 @@ def test_inspect_target_readonly_reports_missing_pywinauto(monkeypatch) -> None:
     from KaosEghis.db.repositories import UiTargetRecord
 
     monkeypatch.setitem(sys.modules, "pywinauto", None)
-    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", None, "now")
+    target = UiTargetRecord(
+        1, "target.one", "TreatmentSymp", "AutoId", "Name", "Edit", None, "now"
+    )
 
     result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
 
@@ -328,6 +341,8 @@ def test_wait_condition_evaluation() -> None:
         found=True,
         message="found",
         target_id="target.one",
+        parent_automation_id=None,
+        parent_found=None,
         automation_id=None,
         name=None,
         control_type=None,
@@ -356,6 +371,8 @@ def test_wait_for_target_condition_timeout(monkeypatch) -> None:
             found=False,
             message="not found",
             target_id=target.target_id,
+            parent_automation_id=target.parent_automation_id,
+            parent_found=None,
             automation_id=target.automation_id,
             name=target.name,
             control_type=target.control_type,
@@ -369,7 +386,7 @@ def test_wait_for_target_condition_timeout(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(wait_engine, "inspect_target_readonly", inspect)
-    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", None, "now")
+    target = UiTargetRecord(1, "target.one", None, "AutoId", "Name", "Edit", None, "now")
 
     result = wait_engine.wait_for_target_condition(
         {"eghis_window_title_contains": "Eghis"},
@@ -396,6 +413,8 @@ def test_wait_for_target_condition_success(monkeypatch) -> None:
             found=True,
             message="found",
             target_id=target.target_id,
+            parent_automation_id=target.parent_automation_id,
+            parent_found=None,
             automation_id=target.automation_id,
             name=target.name,
             control_type=target.control_type,
@@ -409,7 +428,7 @@ def test_wait_for_target_condition_success(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(wait_engine, "inspect_target_readonly", inspect)
-    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", None, "now")
+    target = UiTargetRecord(1, "target.one", None, "AutoId", "Name", "Edit", None, "now")
 
     result = wait_engine.wait_for_target_condition(
         {"eghis_window_title_contains": "Eghis"},
@@ -443,6 +462,7 @@ def test_uia_target_matching_uses_automation_id_and_class_name() -> None:
     target = UiTargetRecord(
         1,
         "prescription.note",
+        None,
         "eghisRichTextBox",
         None,
         None,
@@ -460,3 +480,183 @@ def test_uia_target_matching_uses_automation_id_and_class_name() -> None:
 
     assert match is not None
     assert message == "Target found."
+
+
+def test_inspect_target_readonly_scopes_lookup_to_parent(monkeypatch) -> None:
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    child_outside_parent = _FakeElement("eghisRichTextBox", class_name="WrongScope")
+    child_inside_parent = _FakeElement("eghisRichTextBox", class_name="RichEditD2DPT")
+    parent = _FakeElement("TreatmentSymp", children=[child_inside_parent])
+    window = _FakeWindow("Eghis", [parent, child_outside_parent])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "prescription.note",
+        "TreatmentSymp",
+        "eghisRichTextBox",
+        None,
+        None,
+        "RichEditD2DPT",
+        "now",
+    )
+
+    result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert result.found_class_name == "RichEditD2DPT"
+
+
+def test_inspect_target_readonly_without_parent_still_uses_window_lookup(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    child = _FakeElement("eghisRichTextBox", class_name="RichEditD2DPT")
+    window = _FakeWindow("Eghis", [child])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "prescription.note",
+        None,
+        "eghisRichTextBox",
+        None,
+        None,
+        "RichEditD2DPT",
+        "now",
+    )
+
+    result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
+
+    assert result.found is True
+    assert result.parent_found is None
+    assert result.found_class_name == "RichEditD2DPT"
+
+
+def test_inspect_target_readonly_reports_missing_parent(monkeypatch) -> None:
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    window = _FakeWindow("Eghis", [_FakeElement("OtherPane")])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "prescription.note",
+        "TreatmentSymp",
+        "eghisRichTextBox",
+        None,
+        None,
+        "RichEditD2DPT",
+        "now",
+    )
+
+    result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
+
+    assert result.found is False
+    assert result.parent_found is False
+    assert "Parent automation_id 'TreatmentSymp'" in result.message
+    assert "was not found" in result.message
+
+
+def test_inspect_target_readonly_reports_multiple_parent_matches(monkeypatch) -> None:
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    window = _FakeWindow(
+        "Eghis",
+        [_FakeElement("TreatmentSymp"), _FakeElement("TreatmentSymp")],
+    )
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "prescription.note",
+        "TreatmentSymp",
+        "eghisRichTextBox",
+        None,
+        None,
+        "RichEditD2DPT",
+        "now",
+    )
+
+    result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
+
+    assert result.found is False
+    assert result.parent_found is False
+    assert "matched 2 elements" in result.message
+
+
+class _FakeElementInfo:
+    def __init__(
+        self,
+        automation_id: str,
+        name: str | None = None,
+        control_type: str | None = None,
+        class_name: str | None = None,
+    ) -> None:
+        self.automation_id = automation_id
+        self.name = name
+        self.control_type = control_type
+        self.class_name = class_name
+
+
+class _FakeElement:
+    def __init__(
+        self,
+        automation_id: str,
+        name: str | None = None,
+        control_type: str | None = "Edit",
+        class_name: str | None = None,
+        children: list | None = None,
+    ) -> None:
+        self.element_info = _FakeElementInfo(
+            automation_id,
+            name=name,
+            control_type=control_type,
+            class_name=class_name,
+        )
+        self._children = children or []
+
+    def descendants(self) -> list:
+        return self._children
+
+    def is_enabled(self) -> bool:
+        return True
+
+    def is_visible(self) -> bool:
+        return True
+
+
+class _FakeWindow:
+    def __init__(self, title: str, children: list) -> None:
+        self._title = title
+        self._children = children
+
+    def window_text(self) -> str:
+        return self._title
+
+    def descendants(self) -> list:
+        return self._children
+
+
+def _install_fake_pywinauto(monkeypatch, windows: list) -> None:
+    from types import SimpleNamespace
+
+    class FakeDesktop:
+        def __init__(self, backend: str) -> None:
+            self.backend = backend
+
+        def windows(self) -> list:
+            return windows
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pywinauto",
+        SimpleNamespace(Desktop=FakeDesktop),
+    )
