@@ -95,9 +95,9 @@ class EghisAssistTab(QWidget):
         clipboard_controls.addStretch()
 
         targets_title = QLabel("UI Targets")
-        self.targets_table = QTableWidget(0, 4)
+        self.targets_table = QTableWidget(0, 5)
         self.targets_table.setHorizontalHeaderLabels(
-            ["target_id", "automation_id", "name", "control_type"]
+            ["target_id", "automation_id", "name", "control_type", "class_name"]
         )
         self.targets_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.targets_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -235,6 +235,7 @@ class EghisAssistTab(QWidget):
             self.targets_table.setItem(row_index, 1, QTableWidgetItem(target.automation_id or ""))
             self.targets_table.setItem(row_index, 2, QTableWidgetItem(target.name or ""))
             self.targets_table.setItem(row_index, 3, QTableWidgetItem(target.control_type or ""))
+            self.targets_table.setItem(row_index, 4, QTableWidgetItem(target.class_name or ""))
         self.targets_table.resizeColumnsToContents()
 
     def add_target(self) -> None:
@@ -277,6 +278,7 @@ class EghisAssistTab(QWidget):
                 values["automation_id"],
                 values["name"],
                 values["control_type"],
+                values["class_name"],
             )
         self.refresh_targets()
         self.log.setPlainText("Target updated.")
@@ -312,8 +314,10 @@ class EghisAssistTab(QWidget):
             f"automation_id: {_value_or_empty(result.automation_id)}",
             f"configured name: {_value_or_empty(result.name)}",
             f"configured control_type: {_value_or_empty(result.control_type)}",
+            f"configured class_name: {_value_or_empty(result.class_name)}",
             f"found_name: {_value_or_empty(result.found_name)}",
             f"found_control_type: {_value_or_empty(result.found_control_type)}",
+            f"found_class_name: {_value_or_empty(result.found_class_name)}",
             f"enabled: {_optional_yes_no(result.is_enabled)}",
             f"visible: {_optional_yes_no(result.is_visible)}",
         ]
@@ -544,6 +548,7 @@ class UiTargetDialog(QDialog):
         self.automation_id = QLineEdit(target.automation_id if target and target.automation_id else "")
         self.name = QLineEdit(target.name if target and target.name else "")
         self.control_type = QLineEdit(target.control_type if target and target.control_type else "")
+        self.class_name = QLineEdit(target.class_name if target and target.class_name else "")
         self.target_id.setEnabled(target is None)
 
         form = QFormLayout()
@@ -551,6 +556,7 @@ class UiTargetDialog(QDialog):
         form.addRow("automation_id", self.automation_id)
         form.addRow("name", self.name)
         form.addRow("control_type", self.control_type)
+        form.addRow("class_name", self.class_name)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -568,6 +574,7 @@ class UiTargetDialog(QDialog):
             "automation_id": self.automation_id.text().strip(),
             "name": self.name.text().strip(),
             "control_type": self.control_type.text().strip(),
+            "class_name": self.class_name.text().strip(),
         }
 
 

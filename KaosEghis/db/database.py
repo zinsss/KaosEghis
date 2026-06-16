@@ -31,3 +31,14 @@ def initialize_database(path: Path | None = None) -> None:
     schema_path = Path(__file__).with_name("schema.sql")
     with connect(path) as connection:
         connection.executescript(schema_path.read_text(encoding="utf-8"))
+        _migrate_ui_targets_class_name(connection)
+        connection.commit()
+
+
+def _migrate_ui_targets_class_name(connection: sqlite3.Connection) -> None:
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(ui_targets)").fetchall()
+    }
+    if "class_name" not in columns:
+        connection.execute("ALTER TABLE ui_targets ADD COLUMN class_name TEXT")

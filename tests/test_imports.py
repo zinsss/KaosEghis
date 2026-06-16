@@ -66,16 +66,19 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
             automation_id="UserNameBox",
             name="Username",
             control_type="Edit",
+            class_name="RichEditD2DPT",
         )
 
         assert created.id > 0
         assert created.target_id == "login.username"
         assert created.automation_id == "UserNameBox"
+        assert created.class_name == "RichEditD2DPT"
         assert len(list_ui_targets(connection)) == 1
 
         found = get_ui_target(connection, "login.username")
         assert found is not None
         assert found.name == "Username"
+        assert found.class_name == "RichEditD2DPT"
 
         updated = update_ui_target(
             connection,
@@ -83,14 +86,52 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
             automation_id="UserNameField",
             name="Login username",
             control_type="Edit",
+            class_name="WindowsForms10.EDIT.app.0.141b42a_r8_ad1",
         )
         assert updated is not None
         assert updated.automation_id == "UserNameField"
         assert updated.name == "Login username"
+        assert updated.class_name == "WindowsForms10.EDIT.app.0.141b42a_r8_ad1"
 
         assert delete_ui_target(connection, "login.username") is True
         assert get_ui_target(connection, "login.username") is None
         assert list_ui_targets(connection) == []
+
+
+def test_database_migration_adds_ui_target_class_name(tmp_path) -> None:
+    import sqlite3
+
+    from KaosEghis.db.database import connect, initialize_database
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE ui_targets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_id TEXT NOT NULL UNIQUE,
+                automation_id TEXT,
+                name TEXT,
+                control_type TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO ui_targets (target_id, automation_id, name, control_type)
+            VALUES ('existing.target', 'eghisRichTextBox', 'Existing', 'Edit');
+            """
+        )
+
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(ui_targets)")
+        }
+        row = connection.execute(
+            "SELECT target_id, automation_id, class_name FROM ui_targets"
+        ).fetchone()
+
+    assert "class_name" in columns
+    assert row == ("existing.target", "eghisRichTextBox", None)
 
 
 def test_items_repository_crud(tmp_path) -> None:
@@ -232,8 +273,10 @@ def test_uia_inspection_result_construction() -> None:
         automation_id="AutoId",
         name="Name",
         control_type="Edit",
+        class_name="RichEditD2DPT",
         found_name=None,
         found_control_type=None,
+        found_class_name=None,
         is_enabled=None,
         is_visible=None,
         text_value=None,
@@ -251,7 +294,7 @@ def test_inspect_target_readonly_reports_missing_pywinauto(monkeypatch) -> None:
     from KaosEghis.db.repositories import UiTargetRecord
 
     monkeypatch.setitem(sys.modules, "pywinauto", None)
-    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", "now")
+    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", None, "now")
 
     result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
 
@@ -288,8 +331,10 @@ def test_wait_condition_evaluation() -> None:
         automation_id=None,
         name=None,
         control_type=None,
+        class_name=None,
         found_name="Field",
         found_control_type="Edit",
+        found_class_name=None,
         is_enabled=True,
         is_visible=True,
         text_value="value",
@@ -314,15 +359,17 @@ def test_wait_for_target_condition_timeout(monkeypatch) -> None:
             automation_id=target.automation_id,
             name=target.name,
             control_type=target.control_type,
+            class_name=target.class_name,
             found_name=None,
             found_control_type=None,
+            found_class_name=None,
             is_enabled=None,
             is_visible=None,
             text_value=None,
         )
 
     monkeypatch.setattr(wait_engine, "inspect_target_readonly", inspect)
-    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", "now")
+    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", None, "now")
 
     result = wait_engine.wait_for_target_condition(
         {"eghis_window_title_contains": "Eghis"},
@@ -352,15 +399,17 @@ def test_wait_for_target_condition_success(monkeypatch) -> None:
             automation_id=target.automation_id,
             name=target.name,
             control_type=target.control_type,
+            class_name=target.class_name,
             found_name="Name",
             found_control_type="Edit",
+            found_class_name=None,
             is_enabled=True,
             is_visible=True,
             text_value="ready",
         )
 
     monkeypatch.setattr(wait_engine, "inspect_target_readonly", inspect)
-    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", "now")
+    target = UiTargetRecord(1, "target.one", "AutoId", "Name", "Edit", None, "now")
 
     result = wait_engine.wait_for_target_condition(
         {"eghis_window_title_contains": "Eghis"},
@@ -373,3 +422,41 @@ def test_wait_for_target_condition_success(monkeypatch) -> None:
     assert result.success is True
     assert result.condition == "visible"
     assert result.attempts == 1
+
+
+def test_uia_target_matching_uses_automation_id_and_class_name() -> None:
+    from types import SimpleNamespace
+
+    from KaosEghis.core.uia_inspector import _find_target_element
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    def element(automation_id: str, class_name: str):
+        return SimpleNamespace(
+            element_info=SimpleNamespace(
+                automation_id=automation_id,
+                name="Shared",
+                control_type="Edit",
+                class_name=class_name,
+            )
+        )
+
+    target = UiTargetRecord(
+        1,
+        "prescription.note",
+        "eghisRichTextBox",
+        None,
+        None,
+        "RichEditD2DPT",
+        "now",
+    )
+
+    match, message = _find_target_element(
+        [
+            element("eghisRichTextBox", "WindowsForms10.RichEdit20W.app"),
+            element("eghisRichTextBox", "RichEditD2DPT"),
+        ],
+        target,
+    )
+
+    assert match is not None
+    assert message == "Target found."

@@ -18,6 +18,7 @@ class UiTargetRecord:
     automation_id: str | None
     name: str | None
     control_type: str | None
+    class_name: str | None
     created_at: str
 
 
@@ -292,7 +293,7 @@ def validate_macro_dry_run(connection: sqlite3.Connection, item_id: int) -> list
 def list_ui_targets(connection: sqlite3.Connection) -> list[UiTargetRecord]:
     rows = connection.execute(
         """
-        SELECT id, target_id, automation_id, name, control_type, created_at
+        SELECT id, target_id, automation_id, name, control_type, class_name, created_at
         FROM ui_targets
         ORDER BY target_id
         """
@@ -303,7 +304,7 @@ def list_ui_targets(connection: sqlite3.Connection) -> list[UiTargetRecord]:
 def get_ui_target(connection: sqlite3.Connection, target_id: str) -> UiTargetRecord | None:
     row = connection.execute(
         """
-        SELECT id, target_id, automation_id, name, control_type, created_at
+        SELECT id, target_id, automation_id, name, control_type, class_name, created_at
         FROM ui_targets
         WHERE target_id = ?
         """,
@@ -320,17 +321,19 @@ def create_ui_target(
     automation_id: str | None = None,
     name: str | None = None,
     control_type: str | None = None,
+    class_name: str | None = None,
 ) -> UiTargetRecord:
     connection.execute(
         """
-        INSERT INTO ui_targets (target_id, automation_id, name, control_type)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO ui_targets (target_id, automation_id, name, control_type, class_name)
+        VALUES (?, ?, ?, ?, ?)
         """,
         (
             target_id.strip(),
             _blank_to_none(automation_id),
             _blank_to_none(name),
             _blank_to_none(control_type),
+            _blank_to_none(class_name),
         ),
     )
     connection.commit()
@@ -346,19 +349,22 @@ def update_ui_target(
     automation_id: str | None = None,
     name: str | None = None,
     control_type: str | None = None,
+    class_name: str | None = None,
 ) -> UiTargetRecord | None:
     connection.execute(
         """
         UPDATE ui_targets
         SET automation_id = ?,
             name = ?,
-            control_type = ?
+            control_type = ?,
+            class_name = ?
         WHERE target_id = ?
         """,
         (
             _blank_to_none(automation_id),
             _blank_to_none(name),
             _blank_to_none(control_type),
+            _blank_to_none(class_name),
             target_id,
         ),
     )
@@ -382,7 +388,8 @@ def _ui_target_from_row(row: sqlite3.Row | tuple) -> UiTargetRecord:
         automation_id=row[2],
         name=row[3],
         control_type=row[4],
-        created_at=row[5],
+        class_name=row[5],
+        created_at=row[6],
     )
 
 
