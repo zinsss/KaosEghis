@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from KaosEghis.core.paste_test import paste_text_to_target_for_test
 from KaosEghis.core.uia_inspector import inspect_target_readonly
 from KaosEghis.core.wait_engine import WaitCondition, wait_for_target_condition
 from KaosEghis.db.database import connect, initialize_database
@@ -119,6 +120,24 @@ class MacrosTab(QWidget):
         target_controls.addWidget(wait_test_button)
         target_controls.addStretch()
 
+        paste_test_label = QLabel("Paste Test")
+        self.paste_test_text = QPlainTextEdit()
+        self.paste_test_text.setPlaceholderText(
+            "Enter harmless test text for an explicit Ctrl+V paste test."
+        )
+        self.paste_test_text.setMaximumBlockCount(20)
+
+        paste_warning = QLabel(
+            "Manual test only. Use dummy/test patient or harmless empty field."
+        )
+
+        paste_test_button = QPushButton("Paste Test")
+        paste_test_button.clicked.connect(self.paste_test_target)
+
+        paste_controls = QHBoxLayout()
+        paste_controls.addWidget(paste_test_button)
+        paste_controls.addStretch()
+
         macros_title = QLabel("Macros")
         self.macros_table = QTableWidget(0, 3)
         self.macros_table.setHorizontalHeaderLabels(["id", "name", "enabled"])
@@ -159,6 +178,10 @@ class MacrosTab(QWidget):
         layout.addWidget(targets_title)
         layout.addWidget(self.targets_table)
         layout.addLayout(target_controls)
+        layout.addWidget(paste_test_label)
+        layout.addWidget(self.paste_test_text)
+        layout.addWidget(paste_warning)
+        layout.addLayout(paste_controls)
         layout.addWidget(macros_title)
         layout.addWidget(self.macros_table)
         layout.addLayout(macro_controls)
@@ -306,6 +329,45 @@ class MacrosTab(QWidget):
                     f"success: {_yes_no(result.success)}",
                     f"elapsed_ms: {result.elapsed_ms}",
                     f"attempts: {result.attempts}",
+                    f"message: {result.message}",
+                ]
+            )
+        )
+
+    def paste_test_target(self) -> None:
+        target_id = self._selected_target_id()
+        if target_id is None:
+            self.log.setPlainText("Select a target for Paste Test.")
+            return
+
+        text = self.paste_test_text.toPlainText()
+        if not text.strip():
+            self.log.setPlainText("Paste test text is empty.")
+            return
+
+        initialize_database()
+        with connect() as connection:
+            settings = get_settings(connection)
+            target = _get_required_target(connection, target_id)
+
+        result = paste_text_to_target_for_test(settings, target, text)
+        self.log.setPlainText(
+            "\n".join(
+                [
+                    f"selected target_id: {target_id}",
+                    f"text length: {len(text)}",
+                    (
+                        "resolved target found: yes"
+                        if result.success or result.focused is not None
+                        else "resolved target found: no"
+                    ),
+                    (
+                        "focus/click attempted: yes"
+                        if result.focused is not None
+                        else "focus/click attempted: no"
+                    ),
+                    f"clipboard restored: {_yes_no(result.clipboard_restored)}",
+                    f"final result: {_yes_no(result.success)}",
                     f"message: {result.message}",
                 ]
             )

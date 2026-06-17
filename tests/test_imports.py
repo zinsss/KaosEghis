@@ -5,6 +5,7 @@ def test_core_modules_import() -> None:
     import KaosEghis.core.emr_detector
     import KaosEghis.core.macro_models
     import KaosEghis.core.macro_runner
+    import KaosEghis.core.paste_test
     import KaosEghis.core.safety_gate
     import KaosEghis.core.uia_inspector
     import KaosEghis.core.wait_engine
@@ -40,13 +41,14 @@ def test_settings_repository_can_save_and_load(tmp_path) -> None:
 
 
 def test_detector_and_clipboard_imports() -> None:
-    from KaosEghis.core import clipboard_service, emr_detector
+    from KaosEghis.core import clipboard_service, emr_detector, paste_test
 
     assert callable(emr_detector.check_process_running)
     assert callable(emr_detector.find_window_by_title_contains)
     assert callable(emr_detector.get_active_window_title)
     assert callable(emr_detector.is_target_window_active)
     assert callable(clipboard_service.copy_text)
+    assert callable(paste_test.paste_text_to_target_for_test)
 
 
 def test_ui_targets_repository_crud(tmp_path) -> None:
@@ -458,6 +460,155 @@ def test_wait_for_target_condition_success(monkeypatch) -> None:
     assert result.success is True
     assert result.condition == "visible"
     assert result.attempts == 1
+
+
+def test_paste_test_rejects_empty_text() -> None:
+    from KaosEghis.core.paste_test import paste_text_to_target_for_test
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = paste_text_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "   ",
+    )
+
+    assert result.success is False
+    assert result.focused is None
+    assert result.clipboard_restored is False
+    assert "empty" in result.message
+
+
+def test_paste_test_returns_failure_when_target_unresolved(monkeypatch) -> None:
+    import KaosEghis.core.paste_test as paste_test
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    calls: list[str] = []
+
+    def fake_resolve(_settings, _target):
+        calls.append("resolve")
+        return None, None, "UI target 'symptom.text' was not found."
+
+    monkeypatch.setattr(paste_test, "resolve_target_element", fake_resolve)
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = paste_test.paste_text_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "hello",
+    )
+
+    assert calls == ["resolve"]
+    assert result.success is False
+    assert result.focused is None
+    assert "not found" in result.message
+
+
+def test_paste_test_restores_clipboard_on_keyboard_failure(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    import KaosEghis.core.paste_test as paste_test
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    class FakeElement:
+        def set_focus(self) -> None:
+            return None
+
+    restored: list[str] = []
+
+    monkeypatch.setattr(
+        paste_test,
+        "resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "Target found."),
+    )
+    monkeypatch.setattr(
+        paste_test,
+        "copy_text",
+        lambda text: SimpleNamespace(text=text, previous="old"),
+    )
+    monkeypatch.setattr(
+        paste_test,
+        "restore_clipboard",
+        lambda _snapshot: restored.append("restored"),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        SimpleNamespace(send_keys=lambda _keys: (_ for _ in ()).throw(RuntimeError("boom"))),
+    )
+
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+    result = paste_test.paste_text_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "hello",
+    )
+
+    assert result.success is False
+    assert result.focused is True
+    assert result.clipboard_restored is True
+    assert restored == ["restored"]
+    assert "failed" in result.message
+
+
+def test_paste_test_pastes_only_after_unique_resolution(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    import KaosEghis.core.paste_test as paste_test
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    class FakeElement:
+        def set_focus(self) -> None:
+            return None
+
+    calls: list[str] = []
+
+    def fake_resolve(_settings, _target):
+        calls.append("resolve")
+        return FakeElement(), None, "Target found."
+
+    monkeypatch.setattr(paste_test, "resolve_target_element", fake_resolve)
+    monkeypatch.setattr(
+        paste_test,
+        "copy_text",
+        lambda text: calls.append(f"copy:{text}") or SimpleNamespace(text=text),
+    )
+    monkeypatch.setattr(
+        paste_test,
+        "restore_clipboard",
+        lambda _snapshot: calls.append("restore"),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        SimpleNamespace(send_keys=lambda keys: calls.append(f"send:{keys}")),
+    )
+
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+    result = paste_test.paste_text_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "hello",
+    )
+
+    assert result.success is True
+    assert result.focused is True
+    assert result.clipboard_restored is True
+    assert calls == ["resolve", "copy:hello", "send:^v", "restore"]
 
 
 def test_uia_target_matching_uses_automation_id_and_class_name() -> None:

@@ -25,31 +25,39 @@ class UiaInspectionResult:
     text_value: str | None
 
 
-def inspect_target_readonly(
+def resolve_target_element(
     settings: dict[str, str], target: UiTargetRecord
-) -> UiaInspectionResult:
+) -> tuple[Any | None, bool | None, str]:
     title_fragment = settings.get("eghis_window_title_contains", "").strip()
     if not title_fragment:
-        return _not_found(target, "Eghis window title setting is empty.")
+        return None, None, "Eghis window title setting is empty."
 
     try:
         from pywinauto import Desktop
     except ImportError:
-        return _not_found(target, "pywinauto is not installed; UIA inspection unavailable.")
+        return None, None, "pywinauto is not installed; UIA inspection unavailable."
 
     try:
         desktop = Desktop(backend="uia")
         windows = desktop.windows()
     except Exception as error:
-        return _not_found(target, f"Unable to inspect UIA windows: {error}")
+        return None, None, f"Unable to inspect UIA windows: {error}"
 
     window = _find_window_by_title(windows, title_fragment)
     if window is None:
-        return _not_found(
-            target, f"Eghis window containing '{title_fragment}' was not found."
+        return (
+            None,
+            None,
+            f"Eghis window containing '{title_fragment}' was not found.",
         )
 
-    match, parent_found, message = _resolve_target_element(window, target, set())
+    return _resolve_target_element(window, target, set())
+
+
+def inspect_target_readonly(
+    settings: dict[str, str], target: UiTargetRecord
+) -> UiaInspectionResult:
+    match, parent_found, message = resolve_target_element(settings, target)
     if match is None:
         return _not_found(target, message, parent_found=parent_found)
 
