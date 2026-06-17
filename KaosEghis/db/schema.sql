@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS clipboard_variants (
 CREATE TABLE IF NOT EXISTS ui_targets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     target_id TEXT NOT NULL UNIQUE,
+    parent_target_id TEXT,
     parent_automation_id TEXT,
     automation_id TEXT,
     name TEXT,

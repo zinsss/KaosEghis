@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import Any
 
-from KaosEghis.db.repositories import UiTargetRecord
+from KaosEghis.db.database import connect
+from KaosEghis.db.repositories import UiTargetRecord, get_ui_target
 
 
 @dataclass(frozen=True)
@@ -9,6 +10,7 @@ class UiaInspectionResult:
     found: bool
     message: str
     target_id: str
+    parent_target_id: str | None
     parent_automation_id: str | None
     parent_found: bool | None
     automation_id: str | None
@@ -47,28 +49,7 @@ def inspect_target_readonly(
             target, f"Eghis window containing '{title_fragment}' was not found."
         )
 
-    parent_found: bool | None = None
-    parent_automation_id = _clean(target.parent_automation_id)
-    if parent_automation_id:
-        parent, message = _find_parent_element(window, target, parent_automation_id)
-        if parent is None:
-            return _not_found(target, message, parent_found=False)
-        parent_found = True
-        try:
-            elements = parent.descendants()
-        except Exception as error:
-            return _not_found(
-                target,
-                f"Unable to inspect children of parent '{parent_automation_id}': {error}",
-                parent_found=True,
-            )
-    else:
-        try:
-            elements = window.descendants()
-        except Exception as error:
-            return _not_found(target, f"Unable to inspect Eghis window children: {error}")
-
-    match, message = _find_target_element(elements, target)
+    match, parent_found, message = _resolve_target_element(window, target, set())
     if match is None:
         return _not_found(target, message, parent_found=parent_found)
 
@@ -76,6 +57,7 @@ def inspect_target_readonly(
         found=True,
         message="Target found by read-only UIA inspection.",
         target_id=target.target_id,
+        parent_target_id=target.parent_target_id,
         parent_automation_id=target.parent_automation_id,
         parent_found=parent_found,
         automation_id=target.automation_id,
@@ -98,6 +80,7 @@ def _not_found(
         found=False,
         message=message,
         target_id=target.target_id,
+        parent_target_id=target.parent_target_id,
         parent_automation_id=target.parent_automation_id,
         parent_found=parent_found,
         automation_id=target.automation_id,
@@ -120,6 +103,87 @@ def _find_window_by_title(windows: list[Any], title_fragment: str) -> Any | None
         if fragment in title.casefold():
             return window
     return None
+
+
+def _resolve_target_element(
+    window: Any, target: UiTargetRecord, visited_target_ids: set[str]
+) -> tuple[Any | None, bool | None, str]:
+    if target.target_id in visited_target_ids:
+        return None, False, f"Circular parent_target_id detected for '{target.target_id}'."
+
+    parent_target_id = _clean(target.parent_target_id)
+    if parent_target_id:
+        parent_target = _load_parent_target(parent_target_id)
+        if parent_target is None:
+            return (
+                None,
+                False,
+                f"Parent target '{parent_target_id}' for UI target '{target.target_id}' "
+                "is not registered.",
+            )
+        parent, _, message = _resolve_target_element(
+            window, parent_target, visited_target_ids | {target.target_id}
+        )
+        if parent is None:
+            return (
+                None,
+                False,
+                f"Parent target '{parent_target.target_id}' for UI target "
+                f"'{target.target_id}' could not be resolved: {message}",
+            )
+        try:
+            elements = parent.descendants()
+        except Exception as error:
+            return (
+                None,
+                True,
+                f"Unable to inspect children of parent target '{parent_target.target_id}': "
+                f"{error}",
+            )
+        match, message = _find_target_element(
+            elements,
+            target,
+            scope_description=f"inside parent '{parent_target.target_id}'",
+        )
+        if match is None:
+            return None, True, message
+        return match, True, "Target found."
+
+    parent_automation_id = _clean(target.parent_automation_id)
+    if parent_automation_id:
+        parent, message = _find_parent_element(window, target, parent_automation_id)
+        if parent is None:
+            return None, False, message
+        try:
+            elements = parent.descendants()
+        except Exception as error:
+            return (
+                None,
+                True,
+                f"Unable to inspect children of parent '{parent_automation_id}': {error}",
+            )
+        match, message = _find_target_element(
+            elements,
+            target,
+            scope_description=f"inside parent automation_id '{parent_automation_id}'",
+        )
+        if match is None:
+            return None, True, message
+        return match, True, "Target found."
+
+    try:
+        elements = window.descendants()
+    except Exception as error:
+        return None, None, f"Unable to inspect Eghis window children: {error}"
+    match, message = _find_target_element(elements, target)
+    if match is None:
+        return None, None, message
+    return match, None, "Target found."
+
+
+def _load_parent_target(parent_target_id: str) -> UiTargetRecord | None:
+    with connect() as connection:
+        return get_ui_target(connection, parent_target_id)
 
 
 def _find_parent_element(
@@ -157,7 +221,7 @@ def _parent_lookup_error_message(
 
 
 def _find_target_element(
-    elements: list[Any], target: UiTargetRecord
+    elements: list[Any], target: UiTargetRecord, scope_description: str | None = None
 ) -> tuple[Any | None, str]:
     automation_id = _clean(target.automation_id)
     name = _clean(target.name)
@@ -186,6 +250,8 @@ def _find_target_element(
         if all(reader(element) == expected for _, expected, reader in criteria)
     ]
     description = ", ".join(f"{field} '{value}'" for field, value, _ in criteria)
+    if scope_description:
+        description = f"{description} {scope_description}"
     return _single_match(matches, target, description)
 
 

@@ -66,6 +66,7 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
         created = create_ui_target(
             connection,
             target_id="login.username",
+            parent_target_id="login",
             parent_automation_id="TreatmentSymp",
             automation_id="UserNameBox",
             name="Username",
@@ -75,6 +76,7 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
 
         assert created.id > 0
         assert created.target_id == "login.username"
+        assert created.parent_target_id == "login"
         assert created.parent_automation_id == "TreatmentSymp"
         assert created.automation_id == "UserNameBox"
         assert created.class_name == "RichEditD2DPT"
@@ -82,6 +84,7 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
 
         found = get_ui_target(connection, "login.username")
         assert found is not None
+        assert found.parent_target_id == "login"
         assert found.parent_automation_id == "TreatmentSymp"
         assert found.name == "Username"
         assert found.class_name == "RichEditD2DPT"
@@ -89,6 +92,7 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
         updated = update_ui_target(
             connection,
             target_id="login.username",
+            parent_target_id="session.login",
             parent_automation_id="TreatmentNote",
             automation_id="UserNameField",
             name="Login username",
@@ -96,6 +100,7 @@ def test_ui_targets_repository_crud(tmp_path) -> None:
             class_name="WindowsForms10.EDIT.app.0.141b42a_r8_ad1",
         )
         assert updated is not None
+        assert updated.parent_target_id == "session.login"
         assert updated.parent_automation_id == "TreatmentNote"
         assert updated.automation_id == "UserNameField"
         assert updated.name == "Login username"
@@ -136,14 +141,15 @@ def test_database_migration_adds_ui_target_optional_columns(tmp_path) -> None:
         }
         row = connection.execute(
             """
-            SELECT target_id, automation_id, class_name, parent_automation_id
+            SELECT target_id, automation_id, class_name, parent_automation_id, parent_target_id
             FROM ui_targets
             """
         ).fetchone()
 
     assert "class_name" in columns
     assert "parent_automation_id" in columns
-    assert row == ("existing.target", "eghisRichTextBox", None, None)
+    assert "parent_target_id" in columns
+    assert row == ("existing.target", "eghisRichTextBox", None, None, None)
 
 
 def test_items_repository_crud(tmp_path) -> None:
@@ -282,6 +288,7 @@ def test_uia_inspection_result_construction() -> None:
         found=False,
         message="not found",
         target_id="target.one",
+        parent_target_id="symptom",
         parent_automation_id="TreatmentSymp",
         parent_found=True,
         automation_id="AutoId",
@@ -309,7 +316,7 @@ def test_inspect_target_readonly_reports_missing_pywinauto(monkeypatch) -> None:
 
     monkeypatch.setitem(sys.modules, "pywinauto", None)
     target = UiTargetRecord(
-        1, "target.one", "TreatmentSymp", "AutoId", "Name", "Edit", None, "now"
+        1, "target.one", None, "TreatmentSymp", "AutoId", "Name", "Edit", None, "now"
     )
 
     result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
@@ -344,6 +351,7 @@ def test_wait_condition_evaluation() -> None:
         found=True,
         message="found",
         target_id="target.one",
+        parent_target_id=None,
         parent_automation_id=None,
         parent_found=None,
         automation_id=None,
@@ -374,6 +382,7 @@ def test_wait_for_target_condition_timeout(monkeypatch) -> None:
             found=False,
             message="not found",
             target_id=target.target_id,
+            parent_target_id=target.parent_target_id,
             parent_automation_id=target.parent_automation_id,
             parent_found=None,
             automation_id=target.automation_id,
@@ -389,7 +398,9 @@ def test_wait_for_target_condition_timeout(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(wait_engine, "inspect_target_readonly", inspect)
-    target = UiTargetRecord(1, "target.one", None, "AutoId", "Name", "Edit", None, "now")
+    target = UiTargetRecord(
+        1, "target.one", None, None, "AutoId", "Name", "Edit", None, "now"
+    )
 
     result = wait_engine.wait_for_target_condition(
         {"eghis_window_title_contains": "Eghis"},
@@ -416,6 +427,7 @@ def test_wait_for_target_condition_success(monkeypatch) -> None:
             found=True,
             message="found",
             target_id=target.target_id,
+            parent_target_id=target.parent_target_id,
             parent_automation_id=target.parent_automation_id,
             parent_found=None,
             automation_id=target.automation_id,
@@ -431,7 +443,9 @@ def test_wait_for_target_condition_success(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(wait_engine, "inspect_target_readonly", inspect)
-    target = UiTargetRecord(1, "target.one", None, "AutoId", "Name", "Edit", None, "now")
+    target = UiTargetRecord(
+        1, "target.one", None, None, "AutoId", "Name", "Edit", None, "now"
+    )
 
     result = wait_engine.wait_for_target_condition(
         {"eghis_window_title_contains": "Eghis"},
@@ -466,6 +480,7 @@ def test_uia_target_matching_uses_automation_id_and_class_name() -> None:
         1,
         "prescription.note",
         None,
+        None,
         "eghisRichTextBox",
         None,
         None,
@@ -498,6 +513,7 @@ def test_inspect_target_readonly_scopes_lookup_to_parent(monkeypatch) -> None:
     target = UiTargetRecord(
         1,
         "prescription.note",
+        None,
         "TreatmentSymp",
         "eghisRichTextBox",
         None,
@@ -529,6 +545,7 @@ def test_inspect_target_readonly_without_parent_still_uses_window_lookup(
         1,
         "prescription.note",
         None,
+        None,
         "eghisRichTextBox",
         None,
         None,
@@ -554,6 +571,7 @@ def test_inspect_target_readonly_reports_missing_parent(monkeypatch) -> None:
     target = UiTargetRecord(
         1,
         "prescription.note",
+        None,
         "TreatmentSymp",
         "eghisRichTextBox",
         None,
@@ -584,6 +602,7 @@ def test_inspect_target_readonly_reports_multiple_parent_matches(monkeypatch) ->
     target = UiTargetRecord(
         1,
         "prescription.note",
+        None,
         "TreatmentSymp",
         "eghisRichTextBox",
         None,
@@ -598,6 +617,59 @@ def test_inspect_target_readonly_reports_multiple_parent_matches(monkeypatch) ->
     assert result.parent_found is False
     assert "matched 2 elements" in result.message
     assert window.descendants_calls == 0
+
+
+def test_inspect_target_readonly_uses_parent_target_id(monkeypatch, tmp_path) -> None:
+    import KaosEghis.core.uia_inspector as inspector
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_ui_target, get_ui_target
+
+    child_inside_parent = _FakeElement("eghisRichTextBox", class_name="SharedClass")
+    child_outside_parent = _FakeElement("eghisRichTextBox", class_name="SharedClass")
+    parent = _FakeElement(
+        "TreatmentSymp",
+        control_type="Pane",
+        class_name="WindowsForms10.Window.8.app.0.2bf8098_r6_ad1",
+        children=[child_inside_parent],
+    )
+    window = _FakeWindow("Eghis", [parent, child_outside_parent])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(
+            connection,
+            target_id="symptom",
+            automation_id="TreatmentSymp",
+            control_type="Pane",
+            class_name="WindowsForms10.Window.8.app.0.2bf8098_r6_ad1",
+        )
+        create_ui_target(
+            connection,
+            target_id="symptom.text",
+            parent_target_id="symptom",
+            automation_id="eghisRichTextBox",
+            control_type="Edit",
+            class_name="SharedClass",
+        )
+        target = get_ui_target(connection, "symptom.text")
+
+    assert target is not None
+
+    monkeypatch.setattr(inspector, "connect", lambda: connect(db_path))
+
+    result = inspector.inspect_target_readonly(
+        {"eghis_window_title_contains": "Eghis"}, target
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert result.parent_target_id == "symptom"
+    assert result.found_class_name == "SharedClass"
+    assert window.descendants_calls == 1
+    assert parent.descendants_calls == 1
 
 
 class _FakeElementInfo:
