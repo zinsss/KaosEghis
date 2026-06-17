@@ -44,3 +44,5 @@ def _migrate_ui_targets_columns(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE ui_targets ADD COLUMN class_name TEXT")
     if "parent_automation_id" not in columns:
         connection.execute("ALTER TABLE ui_targets ADD COLUMN parent_automation_id TEXT")
+    if "parent_target_id" not in columns:
+        connection.execute("ALTER TABLE ui_targets ADD COLUMN parent_target_id TEXT")

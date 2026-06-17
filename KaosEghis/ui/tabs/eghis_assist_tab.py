@@ -57,10 +57,11 @@ class MacrosTab(QWidget):
         title.setObjectName("pageTitle")
 
         targets_title = QLabel("UI Targets")
-        self.targets_table = QTableWidget(0, 6)
+        self.targets_table = QTableWidget(0, 7)
         self.targets_table.setHorizontalHeaderLabels(
             [
                 "target_id",
+                "parent_target_id",
                 "parent_automation_id",
                 "automation_id",
                 "name",
@@ -175,12 +176,15 @@ class MacrosTab(QWidget):
         for row_index, target in enumerate(targets):
             self.targets_table.setItem(row_index, 0, QTableWidgetItem(target.target_id))
             self.targets_table.setItem(
-                row_index, 1, QTableWidgetItem(target.parent_automation_id or "")
+                row_index, 1, QTableWidgetItem(target.parent_target_id or "")
             )
-            self.targets_table.setItem(row_index, 2, QTableWidgetItem(target.automation_id or ""))
-            self.targets_table.setItem(row_index, 3, QTableWidgetItem(target.name or ""))
-            self.targets_table.setItem(row_index, 4, QTableWidgetItem(target.control_type or ""))
-            self.targets_table.setItem(row_index, 5, QTableWidgetItem(target.class_name or ""))
+            self.targets_table.setItem(
+                row_index, 2, QTableWidgetItem(target.parent_automation_id or "")
+            )
+            self.targets_table.setItem(row_index, 3, QTableWidgetItem(target.automation_id or ""))
+            self.targets_table.setItem(row_index, 4, QTableWidgetItem(target.name or ""))
+            self.targets_table.setItem(row_index, 5, QTableWidgetItem(target.control_type or ""))
+            self.targets_table.setItem(row_index, 6, QTableWidgetItem(target.class_name or ""))
         self.targets_table.resizeColumnsToContents()
 
     def add_target(self) -> None:
@@ -220,6 +224,7 @@ class MacrosTab(QWidget):
             update_ui_target(
                 connection,
                 target_id=target_id,
+                parent_target_id=values["parent_target_id"],
                 parent_automation_id=values["parent_automation_id"],
                 automation_id=values["automation_id"],
                 name=values["name"],
@@ -257,6 +262,7 @@ class MacrosTab(QWidget):
         lines = [
             f"Found: {_yes_no(result.found)}",
             f"target_id: {result.target_id}",
+            f"configured parent_target_id: {_value_or_empty(result.parent_target_id)}",
             f"configured parent_automation_id: {_value_or_empty(result.parent_automation_id)}",
             f"parent found: {_optional_yes_no(result.parent_found)}",
             f"automation_id: {_value_or_empty(result.automation_id)}",
@@ -493,6 +499,9 @@ class UiTargetDialog(QDialog):
         self.setWindowTitle("UI Target")
 
         self.target_id = QLineEdit(target.target_id if target else "")
+        self.parent_target_id = QLineEdit(
+            target.parent_target_id if target and target.parent_target_id else ""
+        )
         self.parent_automation_id = QLineEdit(
             target.parent_automation_id if target and target.parent_automation_id else ""
         )
@@ -504,6 +513,7 @@ class UiTargetDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("target_id", self.target_id)
+        form.addRow("parent_target_id", self.parent_target_id)
         form.addRow("parent_automation_id", self.parent_automation_id)
         form.addRow("automation_id", self.automation_id)
         form.addRow("name", self.name)
@@ -523,6 +533,7 @@ class UiTargetDialog(QDialog):
     def values(self) -> dict[str, str]:
         return {
             "target_id": self.target_id.text().strip(),
+            "parent_target_id": self.parent_target_id.text().strip(),
             "parent_automation_id": self.parent_automation_id.text().strip(),
             "automation_id": self.automation_id.text().strip(),
             "name": self.name.text().strip(),
