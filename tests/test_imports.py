@@ -724,6 +724,36 @@ def test_set_value_test_fails_cleanly_if_value_pattern_missing(monkeypatch) -> N
     assert "ValuePattern" in result.message
 
 
+def test_set_value_test_fails_cleanly_if_iface_value_access_raises(monkeypatch) -> None:
+    import KaosEghis.core.write_test as write_test
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    class FakeElement:
+        @property
+        def iface_value(self):
+            raise RuntimeError("pattern unavailable")
+
+    monkeypatch.setattr(
+        write_test,
+        "resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "Target found."),
+    )
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = write_test.set_value_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "hello",
+    )
+
+    assert result.success is False
+    assert "ValuePattern is not available" in result.message
+    assert "pattern unavailable" in result.message
+
+
 def test_set_value_test_fails_cleanly_if_readonly(monkeypatch) -> None:
     import KaosEghis.core.write_test as write_test
 

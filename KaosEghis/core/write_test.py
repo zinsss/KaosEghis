@@ -63,7 +63,16 @@ def _run_set_value_test(
     if element is None:
         return _failed_result(target, "set_value", text, message)
 
-    iface_value = getattr(element, "iface_value", None)
+    try:
+        iface_value = element.iface_value
+    except Exception as error:
+        return _failed_result(
+            target,
+            "set_value",
+            text,
+            f"ValuePattern is not available for target '{target.target_id}': {error}",
+        )
+
     if iface_value is None:
         return _failed_result(
             target,
@@ -72,7 +81,10 @@ def _run_set_value_test(
             f"ValuePattern is not available for target '{target.target_id}'.",
         )
 
-    is_read_only = getattr(iface_value, "CurrentIsReadOnly", None)
+    try:
+        is_read_only = getattr(iface_value, "CurrentIsReadOnly", None)
+    except Exception:
+        is_read_only = None
     if is_read_only is True:
         return _failed_result(
             target,
