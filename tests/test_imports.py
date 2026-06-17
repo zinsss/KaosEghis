@@ -9,6 +9,7 @@ def test_core_modules_import() -> None:
     import KaosEghis.core.safety_gate
     import KaosEghis.core.uia_inspector
     import KaosEghis.core.wait_engine
+    import KaosEghis.core.write_test
     import KaosEghis.db.database
     import KaosEghis.db.repositories
     import KaosEghis.ui.main_window
@@ -41,7 +42,7 @@ def test_settings_repository_can_save_and_load(tmp_path) -> None:
 
 
 def test_detector_and_clipboard_imports() -> None:
-    from KaosEghis.core import clipboard_service, emr_detector, paste_test
+    from KaosEghis.core import clipboard_service, emr_detector, paste_test, write_test
 
     assert callable(emr_detector.check_process_running)
     assert callable(emr_detector.find_window_by_title_contains)
@@ -49,6 +50,8 @@ def test_detector_and_clipboard_imports() -> None:
     assert callable(emr_detector.is_target_window_active)
     assert callable(clipboard_service.copy_text)
     assert callable(paste_test.paste_text_to_target_for_test)
+    assert callable(write_test.set_value_to_target_for_test)
+    assert callable(write_test.set_edit_text_to_target_for_test)
 
 
 def test_ui_targets_repository_crud(tmp_path) -> None:
@@ -614,6 +617,218 @@ def test_paste_test_pastes_only_after_unique_resolution(monkeypatch) -> None:
     assert result.focused is True
     assert result.clipboard_restored is True
     assert calls == ["resolve", "copy:hello", "send:^v", "sleep:0.15", "restore"]
+
+
+def test_set_value_test_rejects_empty_text() -> None:
+    from KaosEghis.core.write_test import set_value_to_target_for_test
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = set_value_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        " ",
+    )
+
+    assert result.success is False
+    assert result.method == "set_value"
+    assert "empty" in result.message
+
+
+def test_set_value_test_fails_if_target_unresolved(monkeypatch) -> None:
+    import KaosEghis.core.write_test as write_test
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    monkeypatch.setattr(
+        write_test,
+        "resolve_target_element",
+        lambda _settings, _target: (None, None, "UI target was not found."),
+    )
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = write_test.set_value_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "hello",
+    )
+
+    assert result.success is False
+    assert "not found" in result.message
+
+
+def test_set_value_test_calls_iface_value_set_value(monkeypatch) -> None:
+    import KaosEghis.core.write_test as write_test
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    calls: list[str] = []
+
+    class FakeValuePattern:
+        CurrentIsReadOnly = False
+
+        def SetValue(self, text: str) -> None:
+            calls.append(text)
+
+    class FakeElement:
+        iface_value = FakeValuePattern()
+
+    monkeypatch.setattr(
+        write_test,
+        "resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "Target found."),
+    )
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = write_test.set_value_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "hello",
+    )
+
+    assert result.success is True
+    assert calls == ["hello"]
+
+
+def test_set_value_test_fails_cleanly_if_value_pattern_missing(monkeypatch) -> None:
+    import KaosEghis.core.write_test as write_test
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    class FakeElement:
+        pass
+
+    monkeypatch.setattr(
+        write_test,
+        "resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "Target found."),
+    )
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = write_test.set_value_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "hello",
+    )
+
+    assert result.success is False
+    assert "ValuePattern" in result.message
+
+
+def test_set_value_test_fails_cleanly_if_readonly(monkeypatch) -> None:
+    import KaosEghis.core.write_test as write_test
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    class FakeValuePattern:
+        CurrentIsReadOnly = True
+
+    class FakeElement:
+        iface_value = FakeValuePattern()
+
+    monkeypatch.setattr(
+        write_test,
+        "resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "Target found."),
+    )
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = write_test.set_value_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "hello",
+    )
+
+    assert result.success is False
+    assert "read-only" in result.message
+
+
+def test_set_edit_text_test_rejects_empty_text() -> None:
+    from KaosEghis.core.write_test import set_edit_text_to_target_for_test
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = set_edit_text_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "",
+    )
+
+    assert result.success is False
+    assert result.method == "set_edit_text"
+    assert "empty" in result.message
+
+
+def test_set_edit_text_test_fails_if_target_unresolved(monkeypatch) -> None:
+    import KaosEghis.core.write_test as write_test
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    monkeypatch.setattr(
+        write_test,
+        "resolve_target_element",
+        lambda _settings, _target: (None, None, "UI target was not found."),
+    )
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = write_test.set_edit_text_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "hello",
+    )
+
+    assert result.success is False
+    assert "not found" in result.message
+
+
+def test_set_edit_text_test_calls_element_set_edit_text(monkeypatch) -> None:
+    import KaosEghis.core.write_test as write_test
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    calls: list[str] = []
+
+    class FakeElement:
+        def set_focus(self) -> None:
+            calls.append("focus")
+
+        def set_edit_text(self, text: str) -> None:
+            calls.append(text)
+
+    monkeypatch.setattr(
+        write_test,
+        "resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "Target found."),
+    )
+    target = UiTargetRecord(
+        1, "symptom.text", "symptom", None, "eghisRichTextBox", None, "Edit", None, "now"
+    )
+
+    result = write_test.set_edit_text_to_target_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+        "hello",
+    )
+
+    assert result.success is True
+    assert result.focused is True
+    assert calls == ["focus", "hello"]
 
 
 def test_uia_target_matching_uses_automation_id_and_class_name() -> None:
