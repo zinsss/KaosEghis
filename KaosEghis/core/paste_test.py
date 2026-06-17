@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import time
 
 from KaosEghis.core.clipboard_service import copy_text, restore_clipboard
 from KaosEghis.core.uia_inspector import resolve_target_element
@@ -57,6 +58,7 @@ def paste_text_to_target_for_test(
         from pywinauto.keyboard import send_keys
 
         send_keys("^v")
+        time.sleep(0.15)
     except Exception as error:
         message = f"Paste test failed after resolving target '{target.target_id}': {error}"
         if snapshot is not None:

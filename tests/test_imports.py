@@ -590,6 +590,11 @@ def test_paste_test_pastes_only_after_unique_resolution(monkeypatch) -> None:
         "restore_clipboard",
         lambda _snapshot: calls.append("restore"),
     )
+    monkeypatch.setattr(
+        paste_test.time,
+        "sleep",
+        lambda seconds: calls.append(f"sleep:{seconds}"),
+    )
     monkeypatch.setitem(
         sys.modules,
         "pywinauto.keyboard",
@@ -608,7 +613,7 @@ def test_paste_test_pastes_only_after_unique_resolution(monkeypatch) -> None:
     assert result.success is True
     assert result.focused is True
     assert result.clipboard_restored is True
-    assert calls == ["resolve", "copy:hello", "send:^v", "restore"]
+    assert calls == ["resolve", "copy:hello", "send:^v", "sleep:0.15", "restore"]
 
 
 def test_uia_target_matching_uses_automation_id_and_class_name() -> None:
