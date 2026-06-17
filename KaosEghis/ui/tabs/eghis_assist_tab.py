@@ -23,6 +23,10 @@ from PySide6.QtWidgets import (
 from KaosEghis.core.paste_test import paste_text_to_target_for_test
 from KaosEghis.core.uia_inspector import inspect_target_readonly
 from KaosEghis.core.wait_engine import WaitCondition, wait_for_target_condition
+from KaosEghis.core.write_test import (
+    set_edit_text_to_target_for_test,
+    set_value_to_target_for_test,
+)
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     ALLOWED_MACRO_ACTIONS,
@@ -134,8 +138,16 @@ class MacrosTab(QWidget):
         paste_test_button = QPushButton("Paste Test")
         paste_test_button.clicked.connect(self.paste_test_target)
 
+        set_value_button = QPushButton("SetValue Test")
+        set_value_button.clicked.connect(self.set_value_test_target)
+
+        set_edit_text_button = QPushButton("Set Edit Text Test")
+        set_edit_text_button.clicked.connect(self.set_edit_text_test_target)
+
         paste_controls = QHBoxLayout()
         paste_controls.addWidget(paste_test_button)
+        paste_controls.addWidget(set_value_button)
+        paste_controls.addWidget(set_edit_text_button)
         paste_controls.addStretch()
 
         macros_title = QLabel("Macros")
@@ -367,6 +379,56 @@ class MacrosTab(QWidget):
                         else "focus/click attempted: no"
                     ),
                     f"clipboard restored: {_yes_no(result.clipboard_restored)}",
+                    f"final result: {_yes_no(result.success)}",
+                    f"message: {result.message}",
+                ]
+            )
+        )
+
+    def set_value_test_target(self) -> None:
+        self._run_manual_write_test("set_value")
+
+    def set_edit_text_test_target(self) -> None:
+        self._run_manual_write_test("set_edit_text")
+
+    def _run_manual_write_test(self, method: str) -> None:
+        target_id = self._selected_target_id()
+        if target_id is None:
+            self.log.setPlainText("Select a target for the write test.")
+            return
+
+        text = self.paste_test_text.toPlainText()
+        if not text.strip():
+            self.log.setPlainText("Write test text is empty.")
+            return
+
+        initialize_database()
+        with connect() as connection:
+            settings = get_settings(connection)
+            target = _get_required_target(connection, target_id)
+
+        if method == "set_value":
+            result = set_value_to_target_for_test(settings, target, text)
+        else:
+            result = set_edit_text_to_target_for_test(settings, target, text)
+
+        self.log.setPlainText(
+            "\n".join(
+                [
+                    f"selected target_id: {target_id}",
+                    f"method: {result.method}",
+                    f"text length: {len(text)}",
+                    (
+                        "resolved target: yes"
+                        if result.success or result.focused is not None
+                        or "not found" not in result.message.casefold()
+                        else "resolved target: no"
+                    ),
+                    (
+                        f"focus attempted: {_optional_yes_no(result.focused)}"
+                        if result.focused is not None
+                        else "focus attempted: "
+                    ),
                     f"final result: {_yes_no(result.success)}",
                     f"message: {result.message}",
                 ]
