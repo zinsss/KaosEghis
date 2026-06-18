@@ -11,8 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from KaosEghis.core.emr_detector import (
-    check_process_running,
-    find_window_by_title_contains,
+    detect_eghis_connection,
 )
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
@@ -81,16 +80,14 @@ class KaosEghisTab(QWidget):
 
         process_name = settings["eghis_process_name"]
         title_fragment = settings["eghis_window_title_contains"]
-        connected = check_process_running(process_name) and find_window_by_title_contains(
-            title_fragment
-        )
+        status = detect_eghis_connection(process_name, title_fragment)
 
-        if connected:
+        if status.connected:
             self.connection_dot.setStyleSheet("color: #a6e3a1;")
             self.connection_state.setText("Connected")
         else:
             self.connection_dot.setStyleSheet("color: #f38ba8;")
-            self.connection_state.setText("Disconnected")
+            self.connection_state.setText(status.message)
 
     def refresh_macros(self) -> None:
         initialize_database()
