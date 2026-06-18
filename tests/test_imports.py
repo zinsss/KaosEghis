@@ -45,7 +45,10 @@ def test_detector_and_clipboard_imports() -> None:
     from KaosEghis.core import clipboard_service, emr_detector, paste_test, write_test
 
     assert callable(emr_detector.check_process_running)
+    assert callable(emr_detector.detect_eghis_connection)
+    assert callable(emr_detector.find_matching_processes)
     assert callable(emr_detector.find_window_by_title_contains)
+    assert callable(emr_detector.find_matching_window_titles)
     assert callable(emr_detector.get_active_window_title)
     assert callable(emr_detector.is_target_window_active)
     assert callable(clipboard_service.copy_text)
@@ -859,6 +862,98 @@ def test_set_edit_text_test_calls_element_set_edit_text(monkeypatch) -> None:
     assert result.success is True
     assert result.focused is True
     assert calls == ["focus", "hello"]
+
+
+def test_process_detection_matches_executable_stem_and_cmdline(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    import KaosEghis.core.emr_detector as emr_detector
+
+    class FakePsutil:
+        AccessDenied = RuntimeError
+        NoSuchProcess = RuntimeError
+
+        @staticmethod
+        def process_iter(_attrs):
+            return [
+                SimpleNamespace(
+                    info={
+                        "name": "EGHIS Launcher.exe",
+                        "exe": r"C:\\Program Files\\Eghis\\EGHIS Launcher.exe",
+                        "cmdline": [r"C:\\Program Files\\Eghis\\EGHIS Launcher.exe"],
+                    }
+                ),
+                SimpleNamespace(
+                    info={
+                        "name": "Other.exe",
+                        "exe": r"C:\\Program Files\\Other\\Other.exe",
+                        "cmdline": [r"C:\\Program Files\\Other\\Other.exe"],
+                    }
+                ),
+            ]
+
+    monkeypatch.setitem(sys.modules, "psutil", FakePsutil)
+
+    matches = emr_detector.find_matching_processes("Eghis.exe")
+
+    assert matches == ["EGHIS Launcher.exe"]
+    assert emr_detector.check_process_running("Eghis.exe") is True
+
+
+def test_window_detection_falls_back_to_pywinauto_when_pygetwindow_empty(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    import KaosEghis.core.emr_detector as emr_detector
+
+    class FakeDesktop:
+        def __init__(self, backend: str) -> None:
+            self.backend = backend
+
+        def windows(self) -> list:
+            return [
+                SimpleNamespace(window_text=lambda: ""),
+                SimpleNamespace(window_text=lambda: "Eghis EMR - Chart"),
+            ]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pygetwindow",
+        SimpleNamespace(getAllTitles=lambda: []),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto",
+        SimpleNamespace(Desktop=FakeDesktop),
+    )
+
+    titles = emr_detector.find_matching_window_titles("Eghis")
+
+    assert titles == ["Eghis EMR - Chart"]
+    assert emr_detector.find_window_by_title_contains("Eghis") is True
+
+
+def test_detect_eghis_connection_reports_setting_mismatch_details(monkeypatch) -> None:
+    import KaosEghis.core.emr_detector as emr_detector
+
+    monkeypatch.setattr(
+        emr_detector,
+        "find_matching_processes",
+        lambda _process_name: [],
+    )
+    monkeypatch.setattr(
+        emr_detector,
+        "find_matching_window_titles",
+        lambda _title_fragment: ["Eghis EMR - Chart"],
+    )
+
+    status = emr_detector.detect_eghis_connection("Eghis.exe", "Eghis")
+
+    assert status.connected is False
+    assert status.process_running is False
+    assert status.window_found is True
+    assert "process name setting did not match" in status.message
 
 
 def test_uia_target_matching_uses_automation_id_and_class_name() -> None:
