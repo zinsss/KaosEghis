@@ -16,6 +16,7 @@ class EghisConnectorState:
     window_found: bool
     window_title: str | None
     window_handle: int | None
+    window_owner_pid: int | None
     is_active: bool
     last_seen_at: str | None
     message: str
@@ -30,12 +31,28 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
     process_info = _discover_process_info(configured_process_name)
     window_info = _discover_window_info(configured_window_title)
     window_handle = None if window_info is None else window_info.get("window_handle")
+    window_owner_pid = _get_window_owner_pid(window_handle) if window_handle is not None else None
     is_active = bool(window_handle is not None and _foreground_handle_matches(window_handle))
     last_seen_at = _timestamp_now() if process_info or window_info else None
 
     process_running = process_info is not None
     window_found = window_info is not None
 
+    if process_running and window_found and process_info["pid"] != window_owner_pid:
+        return EghisConnectorState(
+            status="red",
+            process_running=True,
+            process_name=process_info["process_name"],
+            pid=process_info["pid"],
+            exe_path=process_info["exe_path"],
+            window_found=True,
+            window_title=window_info["window_title"],
+            window_handle=window_info["window_handle"],
+            window_owner_pid=window_owner_pid,
+            is_active=is_active,
+            last_seen_at=last_seen_at,
+            message="window process mismatch",
+        )
     if process_running and window_found and is_active:
         return EghisConnectorState(
             status="green",
@@ -46,6 +63,7 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_found=True,
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
+            window_owner_pid=window_owner_pid,
             is_active=True,
             last_seen_at=last_seen_at,
             message="Connected and active",
@@ -60,6 +78,7 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_found=True,
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
+            window_owner_pid=window_owner_pid,
             is_active=False,
             last_seen_at=last_seen_at,
             message="Eghis found but not active",
@@ -74,6 +93,7 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_found=False,
             window_title=None,
             window_handle=None,
+            window_owner_pid=None,
             is_active=False,
             last_seen_at=last_seen_at,
             message="Eghis process found but window missing",
@@ -88,6 +108,7 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_found=True,
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
+            window_owner_pid=window_owner_pid,
             is_active=is_active,
             last_seen_at=last_seen_at,
             message="Eghis window found but process mismatch",
@@ -101,6 +122,7 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
         window_found=False,
         window_title=None,
         window_handle=None,
+        window_owner_pid=None,
         is_active=False,
         last_seen_at=None,
         message="Eghis not found",
@@ -126,6 +148,10 @@ def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
             blocked = replace(rediscovered, status="red", message="rediscovery failed")
             _CACHED_STATE = blocked
             return blocked
+        if rediscovered.window_owner_pid != rediscovered.pid:
+            blocked = replace(rediscovered, status="red", is_active=False, message="window process mismatch")
+            _CACHED_STATE = blocked
+            return blocked
         state = rediscovered
 
     if not state.process_running or state.pid is None or not _pid_exists(state.pid):
@@ -140,6 +166,12 @@ def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
 
     if state.window_handle is None or not _window_handle_is_valid(state.window_handle):
         blocked = replace(state, status="red", window_found=False, is_active=False, message="window handle invalid")
+        _CACHED_STATE = blocked
+        return blocked
+
+    owner_pid = _get_window_owner_pid(state.window_handle)
+    if owner_pid is None or owner_pid != state.pid:
+        blocked = replace(state, status="red", is_active=False, window_owner_pid=owner_pid, message="window process mismatch")
         _CACHED_STATE = blocked
         return blocked
 
@@ -161,7 +193,7 @@ def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
         _CACHED_STATE = blocked
         return blocked
 
-    ready = replace(state, status="green", is_active=True, last_seen_at=_timestamp_now(), message="Connected and active")
+    ready = replace(state, status="green", is_active=True, window_owner_pid=owner_pid, last_seen_at=_timestamp_now(), message="Connected and active")
     _CACHED_STATE = ready
     return ready
 
@@ -171,11 +203,14 @@ def is_cached_window_still_valid(state: EghisConnectorState) -> bool:
         return False
     if _is_state_stale(state):
         return False
-    if state.pid is not None and not _pid_exists(state.pid):
+    if state.pid is None or not _pid_exists(state.pid):
         return False
     if state.window_handle is None:
         return False
-    return _window_handle_is_valid(state.window_handle)
+    if not _window_handle_is_valid(state.window_handle):
+        return False
+    owner_pid = _get_window_owner_pid(state.window_handle)
+    return owner_pid == state.pid and owner_pid == state.window_owner_pid
 
 
 def _is_state_stale(state: EghisConnectorState) -> bool:
@@ -293,6 +328,26 @@ def _get_foreground_window_info() -> dict[str, str | int | None] | None:
     if handle is None:
         handle = getattr(active, "hWnd", None)
     return {"window_title": title, "window_handle": handle}
+
+
+def _get_window_owner_pid(window_handle: int | None) -> int | None:
+    if window_handle is None:
+        return None
+    try:
+        import win32process
+        _thread_id, pid = win32process.GetWindowThreadProcessId(window_handle)
+        return int(pid)
+    except Exception:
+        pass
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(wintypes.HWND(window_handle), ctypes.byref(pid))
+        return int(pid.value) or None
+    except Exception:
+        return None
 
 
 def _window_handle_is_valid(window_handle: int) -> bool:
