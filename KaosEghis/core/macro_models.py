@@ -4,6 +4,9 @@ from typing import Any
 
 
 class MacroAction(str, Enum):
+    WAIT = "wait"
+    KEY = "key"
+    PASTE_TEXT = "paste_text"
     TYPE_TEXT_KEYBOARD = "type_text_keyboard"
     TYPE_TEXT_CLIPBOARD = "type_text_clipboard"
     SET_TEXT_UIA = "set_text_uia"
