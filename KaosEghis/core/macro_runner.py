@@ -13,12 +13,16 @@ class MacroRunner:
     def cancel(self) -> None:
         self._cancel_requested = True
 
+    def reset_cancel(self) -> None:
+        self._cancel_requested = False
+
     def run(
         self,
         steps: Sequence[MacroStep],
         dry_run: bool = True,
         settings: dict[str, str] | None = None,
     ) -> MacroRunResult:
+        self.reset_cancel()
         if dry_run:
             return MacroRunResult(False, "Macro execution is blocked: dry-run stub only.", 0)
         if settings is None:
@@ -57,7 +61,17 @@ class MacroRunner:
         milliseconds = step.options.get("ms")
         if not isinstance(milliseconds, int) or milliseconds < 0:
             return MacroRunResult(False, "wait action requires non-negative integer params['ms'].", 0)
-        time.sleep(milliseconds / 1000.0)
+
+        deadline = time.monotonic() + (milliseconds / 1000.0)
+        while True:
+            if self._cancel_requested:
+                return MacroRunResult(False, "Macro execution canceled.", 0)
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+
+            time.sleep(min(0.05, remaining))
         return MacroRunResult(True, f"Waited {milliseconds} ms.", 1)
 
     def _run_key(self, step: MacroStep) -> MacroRunResult:
