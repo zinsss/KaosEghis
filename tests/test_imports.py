@@ -2,6 +2,7 @@ def test_core_modules_import() -> None:
     import KaosEghis.config
     import KaosEghis.core.clipboard_service
     import KaosEghis.core.credential_store
+    import KaosEghis.core.eghis_connector
     import KaosEghis.core.emr_detector
     import KaosEghis.core.macro_models
     import KaosEghis.core.macro_runner
@@ -901,6 +902,159 @@ def test_process_detection_matches_executable_stem_and_cmdline(monkeypatch) -> N
     assert emr_detector.check_process_running("Eghis.exe") is True
 
 
+
+
+def test_discover_eghis_returns_red_when_process_window_missing(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    monkeypatch.setattr(connector, "_discover_process_info", lambda _name: None)
+    monkeypatch.setattr(connector, "_discover_window_info", lambda _title: None)
+    monkeypatch.setattr(connector, "_foreground_handle_matches", lambda _handle: False)
+
+    state = connector.discover_eghis({"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
+
+    assert state.status == "red"
+    assert state.message == "Eghis not found"
+
+
+def test_discover_eghis_returns_yellow_when_found_but_not_active(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    monkeypatch.setattr(connector, "_discover_process_info", lambda _name: {"process_name": "Eghis.exe", "pid": 12, "exe_path": "C:/Eghis.exe"})
+    monkeypatch.setattr(connector, "_discover_window_info", lambda _title: {"window_title": "Eghis EMR", "window_handle": 55})
+    monkeypatch.setattr(connector, "_foreground_handle_matches", lambda _handle: False)
+    monkeypatch.setattr(connector, "_timestamp_now", lambda: "2026-06-19T12:00:00")
+
+    state = connector.discover_eghis({"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
+
+    assert state.status == "yellow"
+    assert state.message == "Eghis found but not active"
+
+
+def test_discover_eghis_returns_green_when_found_and_active(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    monkeypatch.setattr(connector, "_discover_process_info", lambda _name: {"process_name": "Eghis.exe", "pid": 12, "exe_path": "C:/Eghis.exe"})
+    monkeypatch.setattr(connector, "_discover_window_info", lambda _title: {"window_title": "Eghis EMR", "window_handle": 55})
+    monkeypatch.setattr(connector, "_foreground_handle_matches", lambda _handle: True)
+    monkeypatch.setattr(connector, "_timestamp_now", lambda: "2026-06-19T12:00:00")
+
+    state = connector.discover_eghis({"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
+
+    assert state.status == "green"
+    assert state.message == "Connected and active"
+
+
+def test_ensure_ready_for_macro_uses_cached_state_but_still_confirms_focus(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    cached = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, False, "2026-06-19T12:00:00", "cached")
+    monkeypatch.setattr(connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(connector, "_is_state_stale", lambda _state: False)
+    monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(connector, "_process_identity_matches_state", lambda _state, _settings: True)
+    monkeypatch.setattr(connector, "_window_handle_is_valid", lambda _hwnd: True)
+    monkeypatch.setattr(connector, "_has_blocking_modal_dialog", lambda _state, _settings: False)
+    calls = []
+    monkeypatch.setattr(connector, "_focus_window_handle", lambda _hwnd: calls.append("focus") or True)
+    monkeypatch.setattr(connector, "_get_foreground_window_info", lambda: {"window_handle": 55, "window_title": "Eghis EMR"})
+    monkeypatch.setattr(connector, "_timestamp_now", lambda: "2026-06-19T12:01:00")
+
+    state = connector.ensure_ready_for_macro({"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
+
+    assert calls == ["focus"]
+    assert state.status == "green"
+    assert state.message == "Connected and active"
+
+
+def test_ensure_ready_for_macro_rediscover_once_if_cached_hwnd_stale(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    stale = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 1, False, "2026-06-19T12:00:00", "stale")
+    fresh = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, False, "2026-06-19T12:00:02", "fresh")
+    monkeypatch.setattr(connector, "_CACHED_STATE", stale)
+    monkeypatch.setattr(connector, "_is_state_stale", lambda _state: False)
+    monkeypatch.setattr(connector, "_window_handle_is_valid", lambda hwnd: hwnd == 55)
+    calls = []
+    monkeypatch.setattr(connector, "refresh_cached_eghis_state", lambda _settings: calls.append("refresh") or fresh)
+    monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(connector, "_process_identity_matches_state", lambda _state, _settings: True)
+    monkeypatch.setattr(connector, "_has_blocking_modal_dialog", lambda _state, _settings: False)
+    monkeypatch.setattr(connector, "_focus_window_handle", lambda _hwnd: True)
+    monkeypatch.setattr(connector, "_get_foreground_window_info", lambda: {"window_handle": 55, "window_title": "Eghis EMR"})
+    monkeypatch.setattr(connector, "_timestamp_now", lambda: "2026-06-19T12:01:00")
+
+    state = connector.ensure_ready_for_macro({"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
+
+    assert calls == ["refresh"]
+    assert state.status == "green"
+
+
+def test_ensure_ready_for_macro_blocks_when_rediscovery_fails(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    stale = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 1, False, "2026-06-19T12:00:00", "stale")
+    failed = connector.EghisConnectorState("red", False, None, None, None, False, None, None, False, None, "Eghis not found")
+    monkeypatch.setattr(connector, "_CACHED_STATE", stale)
+    monkeypatch.setattr(connector, "_is_state_stale", lambda _state: True)
+    monkeypatch.setattr(connector, "refresh_cached_eghis_state", lambda _settings: failed)
+
+    state = connector.ensure_ready_for_macro({"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
+
+    assert state.status == "red"
+    assert state.message == "rediscovery failed"
+
+
+def test_ensure_ready_for_macro_blocks_when_modal_dialog_present(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    cached = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, False, "2026-06-19T12:00:00", "cached")
+    monkeypatch.setattr(connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(connector, "_is_state_stale", lambda _state: False)
+    monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(connector, "_process_identity_matches_state", lambda _state, _settings: True)
+    monkeypatch.setattr(connector, "_window_handle_is_valid", lambda _hwnd: True)
+    monkeypatch.setattr(connector, "_has_blocking_modal_dialog", lambda _state, _settings: True)
+
+    state = connector.ensure_ready_for_macro({"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
+
+    assert state.status == "red"
+    assert state.message == "modal/popup detected"
+
+
+def test_ensure_ready_for_macro_blocks_on_wrong_foreground_after_focus(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    cached = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, False, "2026-06-19T12:00:00", "cached")
+    monkeypatch.setattr(connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(connector, "_is_state_stale", lambda _state: False)
+    monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(connector, "_process_identity_matches_state", lambda _state, _settings: True)
+    monkeypatch.setattr(connector, "_window_handle_is_valid", lambda _hwnd: True)
+    monkeypatch.setattr(connector, "_has_blocking_modal_dialog", lambda _state, _settings: False)
+    monkeypatch.setattr(connector, "_focus_window_handle", lambda _hwnd: True)
+    monkeypatch.setattr(connector, "_get_foreground_window_info", lambda: {"window_handle": 999, "window_title": "Other app"})
+    monkeypatch.setattr(connector, "_foreground_looks_like_modal", lambda _fg, _state, _settings: False)
+
+    state = connector.ensure_ready_for_macro({"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
+
+    assert state.status == "red"
+    assert state.message == "foreground mismatch"
+
+
+def test_macro_runner_blocks_real_execution_without_green_connector() -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    import KaosEghis.core.macro_runner as macro_runner
+
+    class FakeState:
+        status = "red"
+        message = "Eghis not running"
+
+    macro_runner.ensure_ready_for_macro = lambda _settings: FakeState()
+    result = MacroRunner().run([], dry_run=False, settings={"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
+
+    assert result.success is False
+    assert result.message == "Macro execution blocked: Eghis not running"
 def test_window_detection_falls_back_to_pywinauto_when_pygetwindow_empty(monkeypatch) -> None:
     import sys
     from types import SimpleNamespace

@@ -1,6 +1,9 @@
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import PurePath
+
+
+CACHE_TTL_SECONDS = 10
 
 
 @dataclass(frozen=True)
@@ -26,7 +29,8 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
     configured_window_title = settings.get("eghis_window_title_contains", "")
     process_info = _discover_process_info(configured_process_name)
     window_info = _discover_window_info(configured_window_title)
-    is_active = _is_window_active(configured_window_title)
+    window_handle = None if window_info is None else window_info.get("window_handle")
+    is_active = bool(window_handle is not None and _foreground_handle_matches(window_handle))
     last_seen_at = _timestamp_now() if process_info or window_info else None
 
     process_running = process_info is not None
@@ -114,34 +118,74 @@ def refresh_cached_eghis_state(settings: dict[str, str]) -> EghisConnectorState:
 
 
 def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
+    global _CACHED_STATE
     state = get_cached_eghis_state()
-    if state is None or not is_cached_window_still_valid(state):
-        state = refresh_cached_eghis_state(settings)
+    if state is None or _is_state_stale(state) or not is_cached_window_still_valid(state):
+        rediscovered = refresh_cached_eghis_state(settings)
+        if not rediscovered.process_running or not rediscovered.window_found:
+            blocked = replace(rediscovered, status="red", message="rediscovery failed")
+            _CACHED_STATE = blocked
+            return blocked
+        state = rediscovered
 
-    if not state.process_running or not state.window_found:
-        return state
+    if not state.process_running or state.pid is None or not _pid_exists(state.pid):
+        blocked = replace(state, status="red", is_active=False, message="Eghis not running")
+        _CACHED_STATE = blocked
+        return blocked
+
+    if not _process_identity_matches_state(state, settings):
+        blocked = replace(state, status="red", is_active=False, message="Eghis not running")
+        _CACHED_STATE = blocked
+        return blocked
+
+    if state.window_handle is None or not _window_handle_is_valid(state.window_handle):
+        blocked = replace(state, status="red", window_found=False, is_active=False, message="window handle invalid")
+        _CACHED_STATE = blocked
+        return blocked
+
+    if _has_blocking_modal_dialog(state, settings):
+        blocked = replace(state, status="red", is_active=False, message="modal/popup detected")
+        _CACHED_STATE = blocked
+        return blocked
+
     if not state.is_active:
-        return replace(
-            state,
-            status="yellow",
-            message="Eghis window is not active. Click Eghis and retry.",
-        )
-    return replace(state, status="green", message="Connected and active")
+        if not _focus_window_handle(state.window_handle):
+            blocked = replace(state, status="red", is_active=False, message="focus failed")
+            _CACHED_STATE = blocked
+            return blocked
+
+    foreground = _get_foreground_window_info()
+    if foreground is None or foreground.get("window_handle") != state.window_handle:
+        reason = "modal/popup detected" if _foreground_looks_like_modal(foreground, state, settings) else "foreground mismatch"
+        blocked = replace(state, status="red", is_active=False, message=reason)
+        _CACHED_STATE = blocked
+        return blocked
+
+    ready = replace(state, status="green", is_active=True, last_seen_at=_timestamp_now(), message="Connected and active")
+    _CACHED_STATE = ready
+    return ready
 
 
 def is_cached_window_still_valid(state: EghisConnectorState) -> bool:
     if not state.window_found:
         return False
+    if _is_state_stale(state):
+        return False
     if state.pid is not None and not _pid_exists(state.pid):
         return False
-    current_window = _discover_window_info(state.window_title or "")
-    if current_window is None:
+    if state.window_handle is None:
         return False
-    if state.window_handle is not None and current_window["window_handle"] is not None:
-        return current_window["window_handle"] == state.window_handle
-    if state.window_title:
-        return current_window["window_title"] == state.window_title
-    return False
+    return _window_handle_is_valid(state.window_handle)
+
+
+def _is_state_stale(state: EghisConnectorState) -> bool:
+    if not state.last_seen_at:
+        return True
+    try:
+        seen = datetime.fromisoformat(state.last_seen_at)
+    except ValueError:
+        return True
+    return datetime.now() - seen > timedelta(seconds=CACHE_TTL_SECONDS)
 
 
 def _discover_process_info(process_name: str) -> dict[str, str | int] | None:
@@ -174,12 +218,10 @@ def _discover_window_info(title_fragment: str) -> dict[str, str | int | None] | 
     tokens = _normalized_candidates(title_fragment)
     if not tokens:
         return None
-
     for window in _windows_from_pygetwindow():
         title = (window.get("window_title") or "").strip()
         if title and any(token in title.casefold() for token in tokens):
             return window
-
     for window in _windows_from_pywinauto():
         title = (window.get("window_title") or "").strip()
         if title and any(token in title.casefold() for token in tokens):
@@ -192,12 +234,10 @@ def _windows_from_pygetwindow() -> list[dict[str, str | int | None]]:
         import pygetwindow
     except ImportError:
         return []
-
     try:
         windows = pygetwindow.getAllWindows()
     except Exception:
         return []
-
     results: list[dict[str, str | int | None]] = []
     for window in windows:
         title = getattr(window, "title", "") or ""
@@ -213,12 +253,10 @@ def _windows_from_pywinauto() -> list[dict[str, str | int | None]]:
         from pywinauto import Desktop
     except ImportError:
         return []
-
     try:
         windows = Desktop(backend="uia").windows()
     except Exception:
         return []
-
     results: list[dict[str, str | int | None]] = []
     for window in windows:
         try:
@@ -232,10 +270,92 @@ def _windows_from_pywinauto() -> list[dict[str, str | int | None]]:
     return results
 
 
-def _is_window_active(title_fragment: str) -> bool:
-    from KaosEghis.core.emr_detector import is_target_window_active
+def _foreground_handle_matches(window_handle: int) -> bool:
+    foreground = _get_foreground_window_info()
+    if foreground is None:
+        return False
+    return foreground.get("window_handle") == window_handle
 
-    return is_target_window_active(title_fragment)
+
+def _get_foreground_window_info() -> dict[str, str | int | None] | None:
+    try:
+        import pygetwindow
+    except ImportError:
+        return None
+    try:
+        active = pygetwindow.getActiveWindow()
+    except Exception:
+        return None
+    if active is None:
+        return None
+    title = getattr(active, "title", "") or ""
+    handle = getattr(active, "_hWnd", None)
+    if handle is None:
+        handle = getattr(active, "hWnd", None)
+    return {"window_title": title, "window_handle": handle}
+
+
+def _window_handle_is_valid(window_handle: int) -> bool:
+    if window_handle is None:
+        return False
+    windows = _windows_from_pygetwindow() + _windows_from_pywinauto()
+    return any(window.get("window_handle") == window_handle for window in windows)
+
+
+def _focus_window_handle(window_handle: int) -> bool:
+    try:
+        import pygetwindow
+        window = pygetwindow.Win32Window(window_handle)
+        window.activate()
+        return True
+    except Exception:
+        pass
+    try:
+        from pywinauto import Desktop
+        Desktop(backend="uia").window(handle=window_handle).set_focus()
+        return True
+    except Exception:
+        return False
+
+
+def _has_blocking_modal_dialog(state: EghisConnectorState, settings: dict[str, str]) -> bool:
+    foreground = _get_foreground_window_info()
+    return _foreground_looks_like_modal(foreground, state, settings)
+
+
+def _foreground_looks_like_modal(
+    foreground: dict[str, str | int | None] | None,
+    state: EghisConnectorState,
+    settings: dict[str, str],
+) -> bool:
+    if foreground is None:
+        return False
+    foreground_handle = foreground.get("window_handle")
+    if foreground_handle == state.window_handle:
+        return False
+    title = str(foreground.get("window_title") or "")
+    fragment = settings.get("eghis_window_title_contains", "").strip().casefold()
+    state_title = (state.window_title or "").casefold()
+    return bool(
+        title
+        and (
+            (fragment and fragment in title.casefold())
+            or (state_title and state_title in title.casefold())
+        )
+    )
+
+
+def _process_identity_matches_state(state: EghisConnectorState, settings: dict[str, str]) -> bool:
+    configured = settings.get("eghis_process_name", "")
+    tokens = _normalized_candidates(configured)
+    if not tokens:
+        return False
+    process_info = {
+        "name": state.process_name or "",
+        "exe": state.exe_path or "",
+        "cmdline": [state.exe_path] if state.exe_path else [],
+    }
+    return _match_process(process_info, tokens) is not None
 
 
 def _pid_exists(pid: int) -> bool:
