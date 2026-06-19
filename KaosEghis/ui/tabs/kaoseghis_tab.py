@@ -10,9 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from KaosEghis.core.emr_detector import (
-    detect_eghis_connection,
-)
+from KaosEghis.core.eghis_connector import refresh_cached_eghis_state
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     get_item,
@@ -30,11 +28,14 @@ class KaosEghisTab(QWidget):
         self.connection_dot = QLabel("●")
         self.connection_label = QLabel("Eghis EMR Connection")
         self.connection_state = QLabel()
+        refresh_connection_button = QPushButton("Refresh Eghis Connection")
+        refresh_connection_button.clicked.connect(self.refresh_connection_status)
 
         connection_row = QHBoxLayout()
         connection_row.addWidget(self.connection_dot)
         connection_row.addWidget(self.connection_label)
         connection_row.addWidget(self.connection_state)
+        connection_row.addWidget(refresh_connection_button)
         connection_row.addStretch()
 
         presets_title = QLabel("Preset Automations")
@@ -78,16 +79,14 @@ class KaosEghisTab(QWidget):
         with connect() as connection:
             settings = get_settings(connection)
 
-        process_name = settings["eghis_process_name"]
-        title_fragment = settings["eghis_window_title_contains"]
-        status = detect_eghis_connection(process_name, title_fragment)
-
-        if status.connected:
-            self.connection_dot.setStyleSheet("color: #a6e3a1;")
-            self.connection_state.setText("Connected")
-        else:
-            self.connection_dot.setStyleSheet("color: #f38ba8;")
-            self.connection_state.setText(status.message)
+        state = refresh_cached_eghis_state(settings)
+        color = {
+            "green": "#a6e3a1",
+            "yellow": "#f9e2af",
+            "red": "#f38ba8",
+        }.get(state.status, "#f38ba8")
+        self.connection_dot.setStyleSheet(f"color: {color};")
+        self.connection_state.setText(state.message)
 
     def refresh_macros(self) -> None:
         initialize_database()
