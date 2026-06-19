@@ -3,6 +3,7 @@ def test_core_modules_import() -> None:
     import KaosEghis.core.clipboard_service
     import KaosEghis.core.credential_store
     import KaosEghis.core.emr_detector
+    import KaosEghis.core.eghis_key_paste_test
     import KaosEghis.core.macro_models
     import KaosEghis.core.macro_runner
     import KaosEghis.core.paste_test
@@ -42,7 +43,13 @@ def test_settings_repository_can_save_and_load(tmp_path) -> None:
 
 
 def test_detector_and_clipboard_imports() -> None:
-    from KaosEghis.core import clipboard_service, emr_detector, paste_test, write_test
+    from KaosEghis.core import (
+        clipboard_service,
+        eghis_key_paste_test,
+        emr_detector,
+        paste_test,
+        write_test,
+    )
 
     assert callable(emr_detector.check_process_running)
     assert callable(emr_detector.detect_eghis_connection)
@@ -51,6 +58,9 @@ def test_detector_and_clipboard_imports() -> None:
     assert callable(emr_detector.find_matching_window_titles)
     assert callable(emr_detector.get_active_window_title)
     assert callable(emr_detector.is_target_window_active)
+    assert callable(
+        eghis_key_paste_test.paste_to_eghis_field_by_function_key_for_test
+    )
     assert callable(clipboard_service.copy_text)
     assert callable(paste_test.paste_text_to_target_for_test)
     assert callable(write_test.set_value_to_target_for_test)
@@ -862,6 +872,247 @@ def test_set_edit_text_test_calls_element_set_edit_text(monkeypatch) -> None:
     assert result.success is True
     assert result.focused is True
     assert calls == ["focus", "hello"]
+
+
+def test_function_key_paste_test_rejects_empty_text() -> None:
+    from KaosEghis.core.eghis_key_paste_test import (
+        paste_to_eghis_field_by_function_key_for_test,
+    )
+
+    result = paste_to_eghis_field_by_function_key_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        "Symptom",
+        "F1",
+        "   ",
+    )
+
+    assert result.success is False
+    assert result.text_length == 3
+    assert result.key_sent is False
+    assert result.paste_sent is False
+    assert "empty" in result.message
+
+
+def test_function_key_paste_test_rejects_invalid_function_key() -> None:
+    from KaosEghis.core.eghis_key_paste_test import (
+        paste_to_eghis_field_by_function_key_for_test,
+    )
+
+    result = paste_to_eghis_field_by_function_key_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        "Symptom",
+        "F9",
+        "hello",
+    )
+
+    assert result.success is False
+    assert result.key_sent is False
+    assert "not supported" in result.message
+
+
+def test_function_key_paste_test_rejects_invalid_destination() -> None:
+    from KaosEghis.core.eghis_key_paste_test import (
+        paste_to_eghis_field_by_function_key_for_test,
+    )
+
+    result = paste_to_eghis_field_by_function_key_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        "Billing",
+        "F1",
+        "hello",
+    )
+
+    assert result.success is False
+    assert result.key_sent is False
+    assert "Destination 'Billing'" in result.message
+
+
+def test_function_key_paste_test_rejects_empty_title_setting() -> None:
+    from KaosEghis.core.eghis_key_paste_test import (
+        paste_to_eghis_field_by_function_key_for_test,
+    )
+
+    result = paste_to_eghis_field_by_function_key_for_test(
+        {"eghis_window_title_contains": "   "},
+        "Symptom",
+        "F1",
+        "hello",
+    )
+
+    assert result.success is False
+    assert result.eghis_active is False
+    assert "title setting is empty" in result.message
+
+
+def test_function_key_paste_test_rejects_when_eghis_inactive(monkeypatch) -> None:
+    import KaosEghis.core.eghis_key_paste_test as eghis_key_paste_test
+
+    monkeypatch.setattr(
+        eghis_key_paste_test,
+        "is_target_window_active",
+        lambda _title: False,
+    )
+
+    result = eghis_key_paste_test.paste_to_eghis_field_by_function_key_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        "Symptom",
+        "F1",
+        "hello",
+    )
+
+    assert result.success is False
+    assert result.eghis_active is False
+    assert "not active" in result.message
+
+
+def test_function_key_paste_test_sends_function_key_before_ctrl_v(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    import KaosEghis.core.eghis_key_paste_test as eghis_key_paste_test
+
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        eghis_key_paste_test,
+        "is_target_window_active",
+        lambda _title: True,
+    )
+    monkeypatch.setattr(
+        eghis_key_paste_test,
+        "copy_text",
+        lambda text: calls.append(f"copy:{text}") or SimpleNamespace(text=text),
+    )
+    monkeypatch.setattr(
+        eghis_key_paste_test,
+        "restore_clipboard",
+        lambda _snapshot: calls.append("restore"),
+    )
+    monkeypatch.setattr(
+        eghis_key_paste_test.time,
+        "sleep",
+        lambda seconds: calls.append(f"sleep:{seconds}"),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        SimpleNamespace(send_keys=lambda keys: calls.append(f"send:{keys}")),
+    )
+
+    result = eghis_key_paste_test.paste_to_eghis_field_by_function_key_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        "Symptom",
+        "F1",
+        "hello",
+    )
+
+    assert result.success is True
+    assert result.key_sent is True
+    assert result.paste_sent is True
+    assert result.clipboard_restored is True
+    assert calls == [
+        "copy:hello",
+        "send:{F1}",
+        "sleep:0.3",
+        "send:^v",
+        "sleep:0.15",
+        "restore",
+    ]
+
+
+def test_function_key_paste_test_restores_clipboard_after_success(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    import KaosEghis.core.eghis_key_paste_test as eghis_key_paste_test
+
+    restored: list[str] = []
+
+    monkeypatch.setattr(
+        eghis_key_paste_test,
+        "is_target_window_active",
+        lambda _title: True,
+    )
+    monkeypatch.setattr(
+        eghis_key_paste_test,
+        "copy_text",
+        lambda text: SimpleNamespace(text=text),
+    )
+    monkeypatch.setattr(
+        eghis_key_paste_test,
+        "restore_clipboard",
+        lambda _snapshot: restored.append("restored"),
+    )
+    monkeypatch.setattr(eghis_key_paste_test.time, "sleep", lambda _seconds: None)
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        SimpleNamespace(send_keys=lambda _keys: None),
+    )
+
+    result = eghis_key_paste_test.paste_to_eghis_field_by_function_key_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        "Orders",
+        "F3",
+        "hello",
+    )
+
+    assert result.success is True
+    assert result.clipboard_restored is True
+    assert restored == ["restored"]
+
+
+def test_function_key_paste_test_restores_clipboard_after_send_failure(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    import KaosEghis.core.eghis_key_paste_test as eghis_key_paste_test
+
+    restored: list[str] = []
+    calls: list[str] = []
+
+    def send_keys(keys: str) -> None:
+        calls.append(keys)
+        if keys == "^v":
+            raise RuntimeError("paste failed")
+
+    monkeypatch.setattr(
+        eghis_key_paste_test,
+        "is_target_window_active",
+        lambda _title: True,
+    )
+    monkeypatch.setattr(
+        eghis_key_paste_test,
+        "copy_text",
+        lambda text: SimpleNamespace(text=text),
+    )
+    monkeypatch.setattr(
+        eghis_key_paste_test,
+        "restore_clipboard",
+        lambda _snapshot: restored.append("restored"),
+    )
+    monkeypatch.setattr(eghis_key_paste_test.time, "sleep", lambda _seconds: None)
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        SimpleNamespace(send_keys=send_keys),
+    )
+
+    result = eghis_key_paste_test.paste_to_eghis_field_by_function_key_for_test(
+        {"eghis_window_title_contains": "Eghis"},
+        "Diagnosis",
+        "F2",
+        "hello",
+    )
+
+    assert result.success is False
+    assert result.key_sent is True
+    assert result.paste_sent is False
+    assert result.clipboard_restored is True
+    assert calls == ["{F2}", "^v"]
+    assert restored == ["restored"]
 
 
 def test_process_detection_matches_executable_stem_and_cmdline(monkeypatch) -> None:

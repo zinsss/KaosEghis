@@ -20,6 +20,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from KaosEghis.core.eghis_key_paste_test import (
+    paste_to_eghis_field_by_function_key_for_test,
+)
 from KaosEghis.core.paste_test import paste_text_to_target_for_test
 from KaosEghis.core.uia_inspector import inspect_target_readonly
 from KaosEghis.core.wait_engine import WaitCondition, wait_for_target_condition
@@ -150,6 +153,22 @@ class MacrosTab(QWidget):
         paste_controls.addWidget(set_edit_text_button)
         paste_controls.addStretch()
 
+        function_key_controls = QHBoxLayout()
+        for function_key, destination in [
+            ("F1", "Symptom"),
+            ("F2", "Diagnosis"),
+            ("F3", "Orders"),
+            ("F4", "Patient Notes"),
+        ]:
+            button = QPushButton(f"{function_key} {destination} Paste Test")
+            button.clicked.connect(
+                lambda _checked=False, dest=destination, key=function_key: (
+                    self.function_key_paste_test(dest, key)
+                )
+            )
+            function_key_controls.addWidget(button)
+        function_key_controls.addStretch()
+
         macros_title = QLabel("Macros")
         self.macros_table = QTableWidget(0, 3)
         self.macros_table.setHorizontalHeaderLabels(["id", "name", "enabled"])
@@ -194,6 +213,7 @@ class MacrosTab(QWidget):
         layout.addWidget(self.paste_test_text)
         layout.addWidget(paste_warning)
         layout.addLayout(paste_controls)
+        layout.addLayout(function_key_controls)
         layout.addWidget(macros_title)
         layout.addWidget(self.macros_table)
         layout.addLayout(macro_controls)
@@ -391,6 +411,39 @@ class MacrosTab(QWidget):
     def set_edit_text_test_target(self) -> None:
         self._run_manual_write_test("set_edit_text")
 
+    def function_key_paste_test(self, destination: str, function_key: str) -> None:
+        text = self.paste_test_text.toPlainText()
+        if not text.strip():
+            self.log.setPlainText("Paste test text is empty.")
+            return
+
+        initialize_database()
+        with connect() as connection:
+            settings = get_settings(connection)
+
+        result = paste_to_eghis_field_by_function_key_for_test(
+            settings,
+            destination,
+            function_key,
+            text,
+        )
+        self.log.setPlainText(
+            "\n".join(
+                [
+                    f"destination: {result.destination}",
+                    f"function key: {result.function_key}",
+                    f"text length: {result.text_length}",
+                    f"Eghis active: {_yes_no(result.eghis_active)}",
+                    f"popup check passed: {_popup_check_text(result.popup_check_passed)}",
+                    f"function key sent: {_yes_no(result.key_sent)}",
+                    f"Ctrl+V sent: {_yes_no(result.paste_sent)}",
+                    f"clipboard restored: {_yes_no(result.clipboard_restored)}",
+                    f"final result: {_yes_no(result.success)}",
+                    f"message: {result.message}",
+                ]
+            )
+        )
+
     def _run_manual_write_test(self, method: str) -> None:
         target_id = self._selected_target_id()
         if target_id is None:
@@ -558,6 +611,12 @@ def _yes_no(value: bool) -> str:
 def _optional_yes_no(value: bool | None) -> str:
     if value is None:
         return ""
+    return _yes_no(value)
+
+
+def _popup_check_text(value: bool | None) -> str:
+    if value is None:
+        return "not checked"
     return _yes_no(value)
 
 
