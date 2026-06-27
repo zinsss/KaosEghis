@@ -20,6 +20,8 @@ class SettingsTab(QWidget):
         self.window_title = QLineEdit()
         self.kaosgdd_url = QLineEdit()
         self.credential_ref = QLineEdit()
+        self.eghis_db_connection_string = QLineEdit()
+        self.eghis_db_image_study_query = QLineEdit()
         self.status = QLabel()
 
         save_button = QPushButton("Save Settings")
@@ -38,6 +40,8 @@ class SettingsTab(QWidget):
         form.addRow("Eghis window title contains", self.window_title)
         form.addRow("KaosGDD URL", self.kaosgdd_url)
         form.addRow("Credential reference name", self.credential_ref)
+        form.addRow("Eghis DB connection string", self.eghis_db_connection_string)
+        form.addRow("Eghis image study query (placeholder)", self.eghis_db_image_study_query)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
@@ -55,6 +59,12 @@ class SettingsTab(QWidget):
         self.window_title.setText(settings["eghis_window_title_contains"])
         self.kaosgdd_url.setText(settings["kaosgdd_url"])
         self.credential_ref.setText(settings["credential_reference_name"])
+        self.eghis_db_connection_string.setText(
+            settings["eghis_db_connection_string"]
+        )
+        self.eghis_db_image_study_query.setText(
+            settings["eghis_db_image_study_query"]
+        )
         self.status.setText("Settings loaded.")
 
     def save_settings(self) -> None:
@@ -63,6 +73,8 @@ class SettingsTab(QWidget):
             "eghis_window_title_contains": self.window_title.text().strip(),
             "kaosgdd_url": self.kaosgdd_url.text().strip(),
             "credential_reference_name": self.credential_ref.text().strip(),
+            "eghis_db_connection_string": self.eghis_db_connection_string.text().strip(),
+            "eghis_db_image_study_query": self.eghis_db_image_study_query.text().strip(),
         }
         initialize_database()
         with connect() as connection:

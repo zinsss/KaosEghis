@@ -123,3 +123,29 @@ def test_pacs_panel_instantiates_with_local_sqlite(tmp_path) -> None:
     panel.delete_selected()
 
     assert panel is not None
+
+
+def test_pacs_panel_poll_status_remains_visible_after_poll_now(
+    tmp_path, monkeypatch
+) -> None:
+    import os
+
+    from PySide6.QtWidgets import QApplication
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel
+    from KaosEghis.core.pacs_polling import PollResult
+
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    QApplication.instance() or QApplication([])
+
+    monkeypatch.setattr(
+        pacs_panel,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda _settings, _db_path: PollResult(inserted=0, updated=1, skipped=2),
+    )
+
+    db_path = Path(tmp_path / "KaosEghis.sqlite")
+    panel = pacs_panel.PacsPanel(db_path=db_path)
+    panel.poll_now()
+
+    assert panel.polling_status.text() == "Polling status: inserted=0, updated=1, skipped=2"

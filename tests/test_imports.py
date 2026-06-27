@@ -2,6 +2,7 @@ def test_core_modules_import() -> None:
     import KaosEghis.config
     import KaosEghis.core.clipboard_service
     import KaosEghis.core.credential_store
+    import KaosEghis.core.pacs_polling
     import KaosEghis.core.eghis_connector
     import KaosEghis.core.emr_detector
     import KaosEghis.core.eghis_key_paste_test

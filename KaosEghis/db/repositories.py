@@ -8,6 +8,8 @@ DEFAULT_SETTINGS = {
     "eghis_window_title_contains": "Eghis",
     "kaosgdd_url": "https://kaosgdd.net",
     "credential_reference_name": "default",
+    "eghis_db_connection_string": "",
+    "eghis_db_image_study_query": "",
 }
 
 
