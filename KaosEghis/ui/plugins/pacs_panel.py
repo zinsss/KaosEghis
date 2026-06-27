@@ -14,9 +14,11 @@ from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     PacsWorklistItemRecord,
     create_pacs_worklist_item,
+    get_settings,
     list_pacs_worklist_items,
     update_pacs_worklist_status,
 )
+from KaosEghis.core.pacs_polling import poll_eghis_image_orders_into_local_worklist
 
 
 class PacsPanel(QWidget):
@@ -135,7 +137,16 @@ class PacsPanel(QWidget):
         self.worklist_table.resizeColumnsToContents()
 
     def poll_now(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+
         self.polling_status.setText("Polling status: manual poll requested")
+        result = poll_eghis_image_orders_into_local_worklist(settings, self._db_path)
+        self.polling_status.setText(
+            "Polling status: inserted="
+            f"{result.inserted}, updated={result.updated}, skipped={result.skipped}"
+        )
         self.refresh_rows()
         self.polling_status.setText("Polling status: idle")
 

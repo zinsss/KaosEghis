@@ -7,6 +7,8 @@ class AppConfig:
     eghis_window_title_contains: str = "Eghis"
     kaosgdd_url: str = "https://kaosgdd.net"
     credential_reference_name: str = "default"
+    eghis_db_connection_string: str = ""
+    eghis_db_image_study_query: str = ""
 
 
 DEFAULT_CONFIG = AppConfig()
