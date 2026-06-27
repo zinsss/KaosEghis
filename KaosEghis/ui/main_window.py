@@ -1,8 +1,9 @@
 from PySide6.QtWidgets import QMainWindow, QTabWidget
 
-from KaosEghis.ui.tabs.eghis_assist_tab import MacrosTab
 from KaosEghis.ui.tabs.kaoseghis_tab import KaosEghisTab
+from KaosEghis.ui.tabs.kaosclip_tab import KaosClipTab
 from KaosEghis.ui.tabs.kaosgdd_tab import KaosGddTab
+from KaosEghis.ui.tabs.plugins_tab import PluginsTab
 from KaosEghis.ui.tabs.settings_tab import SettingsTab
 
 
@@ -14,8 +15,9 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(KaosEghisTab(), "KaosEghis")
-        tabs.addTab(KaosGddTab(), "KaosGDD")
-        tabs.addTab(MacrosTab(), "Macros")
+        tabs.addTab(KaosGddTab(), "KaosGdd")
+        tabs.addTab(KaosClipTab(), "KaosClip")
+        tabs.addTab(PluginsTab(), "Plugins")
         tabs.addTab(SettingsTab(), "Settings")
 
         self.setCentralWidget(tabs)
