@@ -1,6 +1,10 @@
 from PySide6.QtCore import QUrl
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+
+try:
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+except ImportError:  # pragma: no cover - depends on optional Qt WebEngine install
+    QWebEngineView = None
 
 from KaosEghis.config import DEFAULT_CONFIG
 from KaosEghis.db.database import connect, initialize_database
@@ -11,11 +15,17 @@ class KaosGddTab(QWidget):
     def __init__(self) -> None:
         super().__init__()
 
-        self.web_view = QWebEngineView()
-        self.web_view.setUrl(QUrl(_kaosgdd_url()))
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        if QWebEngineView is None:
+            fallback = QLabel("KaosGdd webview not available.")
+            fallback.setMargin(12)
+            layout.addWidget(fallback)
+            return
+
+        self.web_view = QWebEngineView()
+        self.web_view.setUrl(QUrl(_kaosgdd_url()))
         layout.addWidget(self.web_view)
 
 
