@@ -46,6 +46,22 @@ class MacroStepRecord:
     retries: int
 
 
+@dataclass(frozen=True)
+class PacsWorklistItemRecord:
+    id: int
+    status: str
+    patient_name: str | None
+    chart_no: str | None
+    study: str | None
+    modality: str | None
+    requested_at: str | None
+    accession_or_order_id: str | None
+    source: str
+    error_message: str | None
+    created_at: str
+    updated_at: str
+
+
 SUPPORTED_ITEM_TYPES = {"clipboard", "randomized_clipboard", "macro", "workflow"}
 ALLOWED_MACRO_ACTIONS = {
     "check_process",
@@ -57,6 +73,8 @@ ALLOWED_MACRO_ACTIONS = {
     "mouse_click",
     "wait_ms",
 }
+
+ALLOWED_PACS_WORKLIST_STATUS = {"active", "done", "cancelled", "error"}
 
 
 def get_settings(connection: sqlite3.Connection) -> dict[str, str]:
@@ -271,6 +289,120 @@ def delete_macro_steps_for_item(connection: sqlite3.Connection, item_id: int) ->
     return cursor.rowcount
 
 
+def create_pacs_worklist_item(
+    connection: sqlite3.Connection,
+    *,
+    status: str,
+    patient_name: str | None = None,
+    chart_no: str | None = None,
+    study: str | None = None,
+    modality: str | None = None,
+    requested_at: str | None = None,
+    accession_or_order_id: str | None = None,
+    source: str = "manual",
+    error_message: str | None = None,
+) -> PacsWorklistItemRecord:
+    _validate_pacs_worklist_status(status)
+    cursor = connection.execute(
+        """
+        INSERT INTO pacs_worklist_items
+            (status, patient_name, chart_no, study, modality, requested_at, accession_or_order_id, source, error_message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            status,
+            _blank_to_none(patient_name),
+            _blank_to_none(chart_no),
+            _blank_to_none(study),
+            _blank_to_none(modality),
+            _blank_to_none(requested_at),
+            _blank_to_none(accession_or_order_id),
+            _blank_to_none(source) or "manual",
+            _blank_to_none(error_message),
+        ),
+    )
+    connection.commit()
+    created = get_pacs_worklist_item(connection, cursor.lastrowid)
+    if created is None:
+        raise RuntimeError("Failed to create PACS worklist item.")
+    return created
+
+
+def list_pacs_worklist_items(
+    connection: sqlite3.Connection,
+    status: str | None = None,
+) -> list[PacsWorklistItemRecord]:
+    if status is None:
+        rows = connection.execute(
+            """
+            SELECT id, status, patient_name, chart_no, study, modality, requested_at,
+                   accession_or_order_id, source, error_message, created_at, updated_at
+            FROM pacs_worklist_items
+            ORDER BY requested_at DESC, id DESC
+            """
+        )
+    else:
+        _validate_pacs_worklist_status(status)
+        rows = connection.execute(
+            """
+            SELECT id, status, patient_name, chart_no, study, modality, requested_at,
+                   accession_or_order_id, source, error_message, created_at, updated_at
+            FROM pacs_worklist_items
+            WHERE status = ?
+            ORDER BY requested_at DESC, id DESC
+            """,
+            (status,),
+        )
+    return [_pacs_worklist_item_from_row(row) for row in rows]
+
+
+def get_pacs_worklist_item(
+    connection: sqlite3.Connection, item_id: int
+) -> PacsWorklistItemRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, status, patient_name, chart_no, study, modality, requested_at,
+               accession_or_order_id, source, error_message, created_at, updated_at
+        FROM pacs_worklist_items
+        WHERE id = ?
+        """,
+        (item_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _pacs_worklist_item_from_row(row)
+
+
+def update_pacs_worklist_status(
+    connection: sqlite3.Connection,
+    item_id: int,
+    status: str,
+    error_message: str | None = None,
+) -> bool:
+    _validate_pacs_worklist_status(status)
+    cursor = connection.execute(
+        """
+        UPDATE pacs_worklist_items
+        SET status = ?,
+            error_message = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (status, _blank_to_none(error_message), item_id),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def delete_pacs_worklist_item(connection: sqlite3.Connection, item_id: int) -> bool:
+    cursor = connection.execute(
+        "DELETE FROM pacs_worklist_items WHERE id = ?",
+        (item_id,),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
 def reorder_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[MacroStepRecord]:
     steps = list_macro_steps(connection, item_id)
     for index, step in enumerate(steps, start=1):
@@ -442,6 +574,25 @@ def _macro_step_from_row(row: sqlite3.Row | tuple) -> MacroStepRecord:
     )
 
 
+def _pacs_worklist_item_from_row(
+    row: sqlite3.Row | tuple,
+) -> PacsWorklistItemRecord:
+    return PacsWorklistItemRecord(
+        id=row[0],
+        status=row[1],
+        patient_name=row[2],
+        chart_no=row[3],
+        study=row[4],
+        modality=row[5],
+        requested_at=row[6],
+        accession_or_order_id=row[7],
+        source=row[8],
+        error_message=row[9],
+        created_at=row[10],
+        updated_at=row[11],
+    )
+
+
 def _get_macro_step_by_id(
     connection: sqlite3.Connection, step_id: int
 ) -> MacroStepRecord | None:
@@ -473,3 +624,8 @@ def _validate_item_type(item_type: str) -> None:
 def _validate_macro_action(action: str) -> None:
     if action not in ALLOWED_MACRO_ACTIONS:
         raise ValueError(f"Unsupported macro action: {action}")
+
+
+def _validate_pacs_worklist_status(status: str) -> None:
+    if status not in ALLOWED_PACS_WORKLIST_STATUS:
+        raise ValueError(f"Unsupported PACS worklist status: {status}")
