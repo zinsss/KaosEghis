@@ -1,6 +1,6 @@
+from pathlib import Path
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -10,10 +10,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from KaosEghis.db.database import connect, initialize_database
+from KaosEghis.db.repositories import (
+    PacsWorklistItemRecord,
+    create_pacs_worklist_item,
+    list_pacs_worklist_items,
+    update_pacs_worklist_status,
+)
+
 
 class PacsPanel(QWidget):
-    """Visible working-status scaffold for the KaosEghis-pacs plugin."""
-
     WORKLIST_COLUMNS = [
         "Status",
         "Patient",
@@ -24,116 +30,140 @@ class PacsPanel(QWidget):
         "Accession / Order ID",
     ]
 
-    MOCK_ROWS = [
-        ["Active", "", "", "Chest X-ray", "CR", "", ""],
-        ["Done", "", "", "", "", "", ""],
-        ["Cancelled", "", "", "", "", "", ""],
-        ["Error", "", "", "", "", "", ""],
-    ]
-
-    def __init__(self) -> None:
+    def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
 
-        title = QLabel("KaosEghis-pacs")
-        title.setObjectName("pluginTitle")
+        self._db_path = db_path
+        self._visible_items: list[PacsWorklistItemRecord] = []
+        self._active_filter = "all"
 
+        title = QLabel("KaosEghis-pacs")
+        title.setObjectName("pageTitle")
         self.eghis_db_status = QLabel("Eghis DB: not connected")
-        self.kaospacs_status = QLabel("KaosPACS server: not connected")
-        self.polling_status = QLabel("Polling: idle")
+        self.pacs_server_status = QLabel("KaosPACS server: unknown")
+        self.polling_status = QLabel("Polling status: stopped")
 
         status_row = QHBoxLayout()
         status_row.addWidget(self.eghis_db_status)
-        status_row.addWidget(self.kaospacs_status)
+        status_row.addWidget(self.pacs_server_status)
         status_row.addWidget(self.polling_status)
         status_row.addStretch()
 
-        self.status_filter = QComboBox()
-        self.status_filter.addItems(["Active", "Done", "Cancelled", "Error", "All"])
-        self.status_filter.currentTextChanged.connect(self.apply_filter)
-
-        refresh_button = QPushButton("Refresh")
-        refresh_button.clicked.connect(self.refresh_worklist)
-
-        poll_button = QPushButton("Poll now")
-        poll_button.clicked.connect(self.poll_now)
-
-        insert_button = QPushButton("Manual insert")
-        insert_button.clicked.connect(self.manual_insert)
-
-        cancel_button = QPushButton("Delete / Cancel selected")
-        cancel_button.clicked.connect(self.cancel_selected)
-
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("Filter:"))
-        controls.addWidget(self.status_filter)
-        controls.addWidget(refresh_button)
-        controls.addWidget(poll_button)
-        controls.addWidget(insert_button)
-        controls.addWidget(cancel_button)
-        controls.addStretch()
-
         self.worklist_table = QTableWidget(0, len(self.WORKLIST_COLUMNS))
         self.worklist_table.setHorizontalHeaderLabels(self.WORKLIST_COLUMNS)
-        self.worklist_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.worklist_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
         self.worklist_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.worklist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
-        self.footer_status = QLabel("UI scaffold only. No PACS DB polling or MWL push is active yet.")
+        self.filter_buttons = []
+        for status in ("Active", "Done", "Cancelled", "Error", "All"):
+            button = QPushButton(status)
+            button.clicked.connect(self._make_filter_handler(status.lower()))
+            self.filter_buttons.append(button)
+
+        self.filter_bar = QHBoxLayout()
+        for button in self.filter_buttons:
+            self.filter_bar.addWidget(button)
+        self.filter_bar.addStretch()
+
+        refresh_button = QPushButton("Refresh")
+        refresh_button.clicked.connect(self.refresh_rows)
+        poll_button = QPushButton("Poll now")
+        poll_button.clicked.connect(self.poll_now)
+        manual_insert_button = QPushButton("Manual insert")
+        manual_insert_button.clicked.connect(self.manual_insert_row)
+        delete_button = QPushButton("Delete / Cancel selected")
+        delete_button.clicked.connect(self.delete_selected)
+
+        action_row = QHBoxLayout()
+        action_row.addWidget(refresh_button)
+        action_row.addWidget(poll_button)
+        action_row.addWidget(manual_insert_button)
+        action_row.addWidget(delete_button)
+        action_row.addStretch()
+
+        footer = QLabel(
+            "Local PACS worklist only. No Eghis polling or KaosPACS push yet."
+        )
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
         layout.addLayout(status_row)
-        layout.addLayout(controls)
         layout.addWidget(self.worklist_table)
-        layout.addWidget(self.footer_status)
+        layout.addLayout(self.filter_bar)
+        layout.addLayout(action_row)
+        layout.addWidget(footer)
 
-        self._rows = [row[:] for row in self.MOCK_ROWS]
-        self.apply_filter()
+        self._set_db_labels()
+        self.refresh_rows()
 
-    def refresh_worklist(self) -> None:
-        self.footer_status.setText("Worklist refreshed from local scaffold data only.")
-        self.apply_filter()
+    def _set_db_labels(self) -> None:
+        self.eghis_db_status.setText("Eghis DB: local sqlite")
+        self.pacs_server_status.setText("KaosPACS server: not connected")
 
-    def poll_now(self) -> None:
-        self.polling_status.setText("Polling: not connected")
-        self.footer_status.setText("Poll now requested, but real PACS polling is not implemented in this PR.")
+    def _make_filter_handler(self, status: str):
+        def handler() -> None:
+            self._active_filter = status
+            self.refresh_rows()
 
-    def manual_insert(self) -> None:
-        self._rows.append(["Active", "Manual patient", "", "Manual study", "", "", "manual-local"])
-        self.footer_status.setText("Added local mock worklist row. No backend write was performed.")
-        self.apply_filter()
+        return handler
 
-    def cancel_selected(self) -> None:
-        selected_row = self._selected_source_row_index()
-        if selected_row is None:
-            self.footer_status.setText("Select a worklist row to delete/cancel.")
-            return
-        self._rows[selected_row][0] = "Cancelled"
-        self.footer_status.setText("Selected local mock worklist row marked Cancelled.")
-        self.apply_filter()
+    def refresh_rows(self) -> None:
+        initialize_database(self._db_path)
+        status_filter = None if self._active_filter == "all" else self._active_filter
 
-    def apply_filter(self) -> None:
-        current_filter = self.status_filter.currentText()
-        filtered_rows = [
-            (index, row)
-            for index, row in enumerate(self._rows)
-            if current_filter == "All" or row[0] == current_filter
-        ]
-        self.worklist_table.setRowCount(len(filtered_rows))
-        for table_row, (source_index, row) in enumerate(filtered_rows):
-            for column, value in enumerate(row):
-                item = QTableWidgetItem(value)
-                if column == 0:
-                    item.setData(256, source_index)
-                self.worklist_table.setItem(table_row, column, item)
+        with connect(self._db_path) as connection:
+            items = list_pacs_worklist_items(connection, status_filter)
+
+        self._visible_items = items
+        self.worklist_table.setRowCount(len(items))
+        for row_index, item in enumerate(items):
+            row = [
+                item.status,
+                item.patient_name or "",
+                item.chart_no or "",
+                item.study or "",
+                item.modality or "",
+                item.requested_at or "",
+                item.accession_or_order_id or "",
+            ]
+            for col_index, value in enumerate(row):
+                self.worklist_table.setItem(row_index, col_index, QTableWidgetItem(value))
+
         self.worklist_table.resizeColumnsToContents()
 
-    def _selected_source_row_index(self) -> int | None:
+    def poll_now(self) -> None:
+        self.polling_status.setText("Polling status: manual poll requested")
+        self.refresh_rows()
+        self.polling_status.setText("Polling status: idle")
+
+    def manual_insert_row(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            create_pacs_worklist_item(
+                connection,
+                status="active",
+                patient_name="Manual Sample",
+                chart_no="CH-MANUAL",
+                study="Manual Entry",
+                modality="UNK",
+                requested_at="now",
+                accession_or_order_id="AC-MANUAL",
+            )
+        self.refresh_rows()
+
+    def delete_selected(self) -> None:
         selected = self.worklist_table.selectedItems()
         if not selected:
-            return None
-        first_item = self.worklist_table.item(selected[0].row(), 0)
-        if first_item is None:
-            return None
-        value = first_item.data(256)
-        return int(value) if value is not None else None
+            return
+
+        row = selected[0].row()
+        if row < 0 or row >= len(self._visible_items):
+            return
+
+        with connect(self._db_path) as connection:
+            item_id = self._visible_items[row].id
+            update_pacs_worklist_status(connection, item_id, "cancelled")
+        self.refresh_rows()

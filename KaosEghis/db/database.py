@@ -32,6 +32,7 @@ def initialize_database(path: Path | None = None) -> None:
     with connect(path) as connection:
         connection.executescript(schema_path.read_text(encoding="utf-8"))
         _migrate_ui_targets_columns(connection)
+        _migrate_pacs_worklist(connection)
         connection.commit()
 
 
@@ -46,3 +47,36 @@ def _migrate_ui_targets_columns(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE ui_targets ADD COLUMN parent_automation_id TEXT")
     if "parent_target_id" not in columns:
         connection.execute("ALTER TABLE ui_targets ADD COLUMN parent_target_id TEXT")
+
+
+def _migrate_pacs_worklist(connection: sqlite3.Connection) -> None:
+    table_exists = connection.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type='table' AND name='pacs_worklist_items'
+        """
+    ).fetchone()
+    if not table_exists:
+        return
+
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(pacs_worklist_items)").fetchall()
+    }
+    if "error_message" not in columns:
+        connection.execute(
+            "ALTER TABLE pacs_worklist_items ADD COLUMN error_message TEXT"
+        )
+    if "source" not in columns:
+        connection.execute(
+            "ALTER TABLE pacs_worklist_items ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"
+        )
+    if "status" not in columns:
+        connection.execute(
+            "ALTER TABLE pacs_worklist_items ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"
+        )
+    if "updated_at" not in columns:
+        connection.execute(
+            "ALTER TABLE pacs_worklist_items ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        )

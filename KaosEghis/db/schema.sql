@@ -65,3 +65,18 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (item_id) REFERENCES items(id)
 );
+
+CREATE TABLE IF NOT EXISTS pacs_worklist_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL CHECK (status IN ('active', 'done', 'cancelled', 'error')),
+    patient_name TEXT,
+    chart_no TEXT,
+    study TEXT,
+    modality TEXT,
+    requested_at TEXT,
+    accession_or_order_id TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    error_message TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
