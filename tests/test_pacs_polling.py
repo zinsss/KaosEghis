@@ -1,4 +1,7 @@
-from KaosEghis.core.pacs_polling import poll_eghis_image_orders_into_local_worklist
+from KaosEghis.core.pacs_polling import (
+    poll_eghis_image_orders_into_local_worklist,
+    poll_image_orders,
+)
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import list_pacs_worklist_items
 
@@ -32,6 +35,32 @@ def test_poll_service_no_db_config_is_noop(tmp_path, monkeypatch) -> None:
     assert result.skipped == 0
     assert not calls
     assert len(rows) == 0
+
+
+def test_poll_image_orders_no_query_returns_no_rows() -> None:
+    rows = poll_image_orders({"eghis_db_connection_string": "Driver=SQLite"})
+    assert rows == []
+
+
+def test_poll_service_db_config_without_query_is_noop(tmp_path) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    result = poll_eghis_image_orders_into_local_worklist(
+        {
+            "eghis_db_connection_string": "Driver=SQLite",
+            "eghis_db_image_study_query": "",
+        },
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        rows = list_pacs_worklist_items(connection)
+
+    assert result.inserted == 0
+    assert result.updated == 0
+    assert result.skipped == 0
+    assert rows == []
 
 
 def test_poll_service_inserts_mock_order(tmp_path, monkeypatch) -> None:
@@ -103,3 +132,40 @@ def test_poll_service_does_not_duplicate_orders(tmp_path, monkeypatch) -> None:
     assert second.updated == 1
     assert len(rows) == 1
     assert rows[0].accession_or_order_id == "AC-002"
+
+
+def test_poll_service_skips_rows_without_accession_or_order_id(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    from KaosEghis.core import pacs_polling
+
+    def fake_poll_image_orders(
+        _settings: dict[str, str],
+    ) -> list[dict[str, str | None]]:
+        return [
+            {
+                "status": "active",
+                "patient_name": "Alice",
+                "chart_no": "C001",
+                "study": "Chest",
+                "modality": "CR",
+                "requested_at": "2026-01-01T00:00:00",
+                "accession_or_order_id": "   ",
+            }
+        ]
+
+    monkeypatch.setattr(pacs_polling, "poll_image_orders", fake_poll_image_orders)
+    result = poll_eghis_image_orders_into_local_worklist(
+        {"eghis_db_connection_string": "read-only-scaffold"},
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        rows = list_pacs_worklist_items(connection)
+
+    assert result.inserted == 0
+    assert result.updated == 0
+    assert result.skipped == 1
+    assert rows == []

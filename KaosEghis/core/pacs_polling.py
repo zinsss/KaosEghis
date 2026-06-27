@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from KaosEghis.db.database import connect, get_database_path, initialize_database
 from KaosEghis.db.repositories import create_pacs_worklist_item
@@ -21,34 +22,25 @@ def poll_image_orders(settings: dict[str, str]) -> list[dict[str, str | None]]:
     if not connection_string:
         return []
 
-    # Read-only scaffold: safe placeholder data until real DB integration is added.
     query = (settings.get("eghis_db_image_study_query") or "").strip()
-    if query:
+    if not query:
         return []
 
-    return [
-        {
-            "status": "active",
-            "patient_name": "Sample Patient",
-            "chart_no": "CH-0001",
-            "study": "Sample study",
-            "modality": "XR",
-            "requested_at": "2026-01-01T00:00:00",
-            "accession_or_order_id": "KPE-ORDER-001",
-            "source": "eghis-poll-mock",
-        }
-    ]
+    # Read-only scaffold: adapter/query boundary only. Real query execution is not
+    # implemented in this PR, so the safe default remains a no-op.
+    return []
 
 
 def poll_eghis_image_orders_into_local_worklist(
     settings: dict[str, str],
     db_path: Path | None = None,
+    poller: Callable[[dict[str, str]], list[dict[str, str | None]]] | None = None,
 ) -> PollResult:
     if not (settings.get("eghis_db_connection_string") or "").strip():
         return PollResult(inserted=0, updated=0, skipped=0)
 
     initialize_database(db_path)
-    orders = poll_image_orders(settings)
+    orders = (poller or poll_image_orders)(settings)
     inserted = 0
     updated = 0
     skipped = 0

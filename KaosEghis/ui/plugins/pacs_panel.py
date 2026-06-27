@@ -141,14 +141,12 @@ class PacsPanel(QWidget):
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
 
-        self.polling_status.setText("Polling status: manual poll requested")
         result = poll_eghis_image_orders_into_local_worklist(settings, self._db_path)
-        self.polling_status.setText(
-            "Polling status: inserted="
-            f"{result.inserted}, updated={result.updated}, skipped={result.skipped}"
-        )
         self.refresh_rows()
-        self.polling_status.setText("Polling status: idle")
+        self.polling_status.setText(
+            "Polling status: "
+            f"inserted={result.inserted}, updated={result.updated}, skipped={result.skipped}"
+        )
 
     def manual_insert_row(self) -> None:
         initialize_database(self._db_path)
