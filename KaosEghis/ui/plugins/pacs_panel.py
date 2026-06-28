@@ -143,6 +143,9 @@ class PacsPanel(QWidget):
 
         result = poll_eghis_image_orders_into_local_worklist(settings, self._db_path)
         self.refresh_rows()
+        if result.message is not None:
+            self.polling_status.setText(f"Polling status: {result.message}")
+            return
         self.polling_status.setText(
             "Polling status: "
             f"inserted={result.inserted}, updated={result.updated}, skipped={result.skipped}"
