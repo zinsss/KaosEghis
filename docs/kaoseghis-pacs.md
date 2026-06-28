@@ -32,11 +32,33 @@ Visible panel:
 Current behaviors:
 
 - refresh local rows
+- explicit KaosPACS health check
 - poll now
 - sync to KaosPACS
 - manual insert
 - cancel selected local row
 - filter by status
+- show per-row KaosPACS sync state columns
+
+Current PACS table columns:
+
+- `Status`
+- `Patient`
+- `Chart No`
+- `Study`
+- `Modality`
+- `Requested At`
+- `Accession / Order ID`
+- `KaosPACS Status`
+- `Last Synced`
+- `Sync Error`
+
+Current button separation:
+
+- `Refresh` -> local SQLite reload only
+- `Check KaosPACS` -> `GET /health` only
+- `Poll now` -> Eghis DB to local SQLite only
+- `Sync to KaosPACS` -> local SQLite to KaosPACS only
 
 Filter states:
 
@@ -113,6 +135,18 @@ Current sync rule:
 - cancelled rows are never sent as active entries
 - previously-sent cancelled rows trigger `POST /worklist/cancel`
 - cancelled rows that were never sent remain local-only and are skipped
+- sync shows operator summary counts before/after action
+
+Current sync UX rule:
+
+- if there are active local rows, operator confirmation is required before sync
+- sync summary includes:
+  - active rows
+  - cancelled pending rows
+  - sent
+  - cancelled
+  - errors
+  - skipped
 
 Current local MWL sync states:
 
