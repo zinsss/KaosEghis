@@ -13,6 +13,7 @@ def _app():
 def test_plugin_ui_modules_import() -> None:
     import KaosEghis.ui.plugins.flu_panel
     import KaosEghis.ui.plugins.pacs_panel
+    import KaosEghis.ui.plugins.pacs_worklist_dialog
     import KaosEghis.ui.plugins.weekly_visits_panel
     import KaosEghis.ui.tabs.kaosclip_tab
     import KaosEghis.ui.tabs.plugins_tab
@@ -50,6 +51,52 @@ def test_pacs_panel_has_required_worklist_columns() -> None:
         "Sync Error",
     ]
     assert "PACS Worklist" in [label.text() for label in panel.findChildren(QLabel)]
+
+
+def test_pacs_worklist_dialog_instantiates() -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_worklist_dialog import PacsWorklistDialog
+
+    dialog = PacsWorklistDialog()
+
+    assert dialog.status_combo.currentText() == "active"
+
+
+def test_pacs_worklist_dialog_validation_rejects_missing_accession() -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_worklist_dialog import PacsWorklistDialog
+
+    dialog = PacsWorklistDialog()
+    dialog.study_edit.setText("Chest")
+    dialog.modality_edit.setText("CR")
+
+    assert dialog.validate_form() == "Accession / Order ID is required."
+
+
+def test_pacs_worklist_dialog_validation_rejects_missing_study() -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_worklist_dialog import PacsWorklistDialog
+
+    dialog = PacsWorklistDialog()
+    dialog.accession_edit.setText("ACC-1")
+    dialog.modality_edit.setText("CR")
+
+    assert dialog.validate_form() == "Study is required."
+
+
+def test_pacs_worklist_dialog_validation_rejects_missing_modality() -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_worklist_dialog import PacsWorklistDialog
+
+    dialog = PacsWorklistDialog()
+    dialog.accession_edit.setText("ACC-1")
+    dialog.study_edit.setText("Chest")
+
+    assert dialog.validate_form() == "Modality is required."
 
 
 def test_pacs_panel_does_not_check_kaospacs_health_on_init(monkeypatch, tmp_path) -> None:
@@ -256,6 +303,191 @@ def test_pacs_panel_sync_cancel_does_not_call_api(monkeypatch, tmp_path) -> None
 
     assert calls == {"health": 0, "sync": 0}
     assert panel.polling_status.text() == "KaosPACS sync: canceled"
+
+
+def test_pacs_panel_manual_insert_creates_local_row(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.db.database import connect
+    from KaosEghis.db.repositories import list_pacs_worklist_items
+
+    payload = {
+        "patient_name": "Alice",
+        "chart_no": "C001",
+        "study": "Chest",
+        "modality": "CR",
+        "requested_at": "2026-06-28 09:30",
+        "accession_or_order_id": "ACC-900",
+        "status": "active",
+    }
+
+    class FakeDialog:
+        DialogCode = pacs_panel_module.PacsWorklistDialog.DialogCode
+
+        def __init__(self, parent=None, item=None):
+            self.item = item
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+        def get_form_data(self):
+            return payload
+
+    monkeypatch.setattr(pacs_panel_module, "PacsWorklistDialog", FakeDialog)
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.manual_insert_row()
+
+    with connect(db_path) as connection:
+        rows = list_pacs_worklist_items(connection)
+
+    assert len(rows) == 1
+    assert rows[0].patient_name == "Alice"
+    assert rows[0].source == "manual"
+    assert rows[0].kaospacs_mwl_status == "not_sent"
+
+
+def test_pacs_panel_edit_selected_updates_local_row(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_pacs_worklist_item, get_pacs_worklist_item
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        created = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            chart_no="C001",
+            study="Chest",
+            modality="CR",
+            requested_at="2026-06-28 09:30",
+            accession_or_order_id="ACC-901",
+            source="manual",
+        )
+
+    payload = {
+        "patient_name": "Bob",
+        "chart_no": "C002",
+        "study": "Spine",
+        "modality": "MR",
+        "requested_at": "2026-06-29 10:00",
+        "accession_or_order_id": "ACC-902",
+        "status": "done",
+    }
+
+    class FakeDialog:
+        DialogCode = pacs_panel_module.PacsWorklistDialog.DialogCode
+
+        def __init__(self, parent=None, item=None):
+            self.item = item
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+        def get_form_data(self):
+            return payload
+
+    monkeypatch.setattr(pacs_panel_module, "PacsWorklistDialog", FakeDialog)
+
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.worklist_table.selectRow(0)
+    panel.edit_selected()
+
+    with connect(db_path) as connection:
+        updated = get_pacs_worklist_item(connection, created.id)
+
+    assert updated is not None
+    assert updated.patient_name == "Bob"
+    assert updated.chart_no == "C002"
+    assert updated.study == "Spine"
+    assert updated.modality == "MR"
+    assert updated.status == "done"
+
+
+def test_pacs_panel_edit_sent_row_preserves_kaospacs_status(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_pacs_worklist_item,
+        get_pacs_worklist_item,
+        update_pacs_worklist_sync_state,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        created = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            chart_no="C001",
+            study="Chest",
+            modality="CR",
+            requested_at="2026-06-28 09:30",
+            accession_or_order_id="ACC-903",
+            source="manual",
+        )
+        update_pacs_worklist_sync_state(
+            connection,
+            created.id,
+            kaospacs_mwl_status="sent",
+            kaospacs_mwl_last_synced_at="2026-06-28T12:00:00+00:00",
+        )
+
+    payload = {
+        "patient_name": "Alice Updated",
+        "chart_no": "C001",
+        "study": "Chest Follow-up",
+        "modality": "CR",
+        "requested_at": "2026-06-28 09:30",
+        "accession_or_order_id": "ACC-903",
+        "status": "active",
+    }
+
+    class FakeDialog:
+        DialogCode = pacs_panel_module.PacsWorklistDialog.DialogCode
+
+        def __init__(self, parent=None, item=None):
+            self.item = item
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+        def get_form_data(self):
+            return payload
+
+    monkeypatch.setattr(pacs_panel_module, "PacsWorklistDialog", FakeDialog)
+
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.worklist_table.selectRow(0)
+    panel.edit_selected()
+
+    with connect(db_path) as connection:
+        updated = get_pacs_worklist_item(connection, created.id)
+
+    assert updated is not None
+    assert updated.study == "Chest Follow-up"
+    assert updated.kaospacs_mwl_status == "sent"
+    assert updated.kaospacs_mwl_last_synced_at == "2026-06-28T12:00:00+00:00"
+
+
+def test_pacs_panel_edit_selected_with_no_row_does_not_crash(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    panel = PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    panel.edit_selected()
+
+    assert panel is not None
 
 
 def test_flu_panel_can_load_week_without_backend() -> None:

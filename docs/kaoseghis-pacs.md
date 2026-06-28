@@ -35,7 +35,8 @@ Current behaviors:
 - explicit KaosPACS health check
 - poll now
 - sync to KaosPACS
-- manual insert
+- manual insert via dialog
+- edit selected local row via dialog
 - cancel selected local row
 - filter by status
 - show per-row KaosPACS sync state columns
@@ -59,6 +60,24 @@ Current button separation:
 - `Check KaosPACS` -> `GET /health` only
 - `Poll now` -> Eghis DB to local SQLite only
 - `Sync to KaosPACS` -> local SQLite to KaosPACS only
+- `Manual insert` -> local SQLite create only
+- `Edit selected` -> local SQLite update only
+
+Manual dialog fields:
+
+- `Patient`
+- `Chart No`
+- `Study`
+- `Modality`
+- `Requested At`
+- `Accession / Order ID`
+- `Status`
+
+Manual dialog validation:
+
+- `Accession / Order ID` required
+- `Study` required
+- `Modality` required
 
 Filter states:
 
@@ -155,6 +174,12 @@ Current local MWL sync states:
 - `cancelled`
 - `error`
 
+Manual row editing rule:
+
+- editing a local row does not auto-sync to KaosPACS
+- editing a previously-sent row does not change `kaospacs_mwl_status`
+- sync state changes only during explicit `Sync to KaosPACS`
+
 Payload privacy rule:
 
 - do not send DOB
@@ -228,6 +253,7 @@ Current mapping rule:
 - local PACS worklist table
 - repository CRUD
 - PACS panel
+- manual PACS row create/edit dialog
 - read-only PostgreSQL adapter
 - cancellation-aware update behavior
 - local KaosPACS API bridge

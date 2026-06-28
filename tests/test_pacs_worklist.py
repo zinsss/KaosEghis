@@ -6,6 +6,8 @@ from KaosEghis.db.repositories import (
     delete_pacs_worklist_item,
     get_pacs_worklist_item,
     list_pacs_worklist_items,
+    update_pacs_worklist_item,
+    update_pacs_worklist_sync_state,
     update_pacs_worklist_status,
 )
 
@@ -72,6 +74,48 @@ def test_pacs_worklist_repository_crud(tmp_path) -> None:
         assert get_pacs_worklist_item(connection, created.id) is None
 
 
+def test_pacs_worklist_update_preserves_sync_state(tmp_path) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        created = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            chart_no="C001",
+            study="CT",
+            modality="CT",
+            requested_at="2026-06-01",
+            accession_or_order_id="A001",
+            source="manual",
+        )
+        update_pacs_worklist_sync_state(
+            connection,
+            created.id,
+            kaospacs_mwl_status="sent",
+            kaospacs_mwl_last_synced_at="2026-06-28T12:00:00+00:00",
+        )
+
+        updated = update_pacs_worklist_item(
+            connection,
+            created.id,
+            status="done",
+            patient_name="Alice Updated",
+            chart_no="C009",
+            study="MR",
+            modality="MR",
+            requested_at="2026-06-02",
+            accession_or_order_id="A009",
+            source="manual",
+        )
+
+    assert updated is not None
+    assert updated.patient_name == "Alice Updated"
+    assert updated.kaospacs_mwl_status == "sent"
+    assert updated.kaospacs_mwl_last_synced_at == "2026-06-28T12:00:00+00:00"
+
+
 def test_pacs_worklist_status_validation(tmp_path) -> None:
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
@@ -109,18 +153,42 @@ def test_pacs_worklist_list_filter(tmp_path) -> None:
         assert [i.status for i in list_pacs_worklist_items(connection, "error")] == ["error"]
 
 
-def test_pacs_panel_instantiates_with_local_sqlite(tmp_path) -> None:
+def test_pacs_panel_instantiates_with_local_sqlite(tmp_path, monkeypatch) -> None:
     import os
 
     from PySide6.QtWidgets import QApplication
 
-    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel
 
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     QApplication.instance() or QApplication([])
 
+    payload = {
+        "patient_name": "Smoke Test",
+        "chart_no": "SM-1",
+        "study": "XR",
+        "modality": "CR",
+        "requested_at": "2026-06-28 10:00",
+        "accession_or_order_id": "ACC-SMOKE",
+        "status": "active",
+    }
+
+    class FakeDialog:
+        DialogCode = pacs_panel.PacsWorklistDialog.DialogCode
+
+        def __init__(self, parent=None, item=None):
+            self.item = item
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+        def get_form_data(self):
+            return payload
+
+    monkeypatch.setattr(pacs_panel, "PacsWorklistDialog", FakeDialog)
+
     db_path = Path(tmp_path / "KaosEghis.sqlite")
-    panel = PacsPanel(db_path=db_path)
+    panel = pacs_panel.PacsPanel(db_path=db_path)
     panel.refresh_rows()
     panel.manual_insert_row()
     panel.refresh_rows()

@@ -17,6 +17,7 @@ from KaosEghis.db.repositories import (
     create_pacs_worklist_item,
     get_settings,
     list_pacs_worklist_items,
+    update_pacs_worklist_item,
     update_pacs_worklist_status,
 )
 from KaosEghis.core.kaospacs_client import (
@@ -24,6 +25,7 @@ from KaosEghis.core.kaospacs_client import (
     sync_local_worklist_to_kaospacs,
 )
 from KaosEghis.core.pacs_polling import poll_eghis_image_orders_into_local_worklist
+from KaosEghis.ui.plugins.pacs_worklist_dialog import PacsWorklistDialog
 
 
 class PacsPanel(QWidget):
@@ -88,6 +90,8 @@ class PacsPanel(QWidget):
         self.sync_button.clicked.connect(self.sync_to_kaospacs)
         self.manual_insert_button = QPushButton("Manual insert")
         self.manual_insert_button.clicked.connect(self.manual_insert_row)
+        self.edit_button = QPushButton("Edit selected")
+        self.edit_button.clicked.connect(self.edit_selected)
         self.delete_button = QPushButton("Delete / Cancel selected")
         self.delete_button.clicked.connect(self.delete_selected)
 
@@ -97,6 +101,7 @@ class PacsPanel(QWidget):
         action_row.addWidget(self.poll_button)
         action_row.addWidget(self.sync_button)
         action_row.addWidget(self.manual_insert_button)
+        action_row.addWidget(self.edit_button)
         action_row.addWidget(self.delete_button)
         action_row.addStretch()
 
@@ -210,32 +215,59 @@ class PacsPanel(QWidget):
         )
 
     def manual_insert_row(self) -> None:
+        dialog = PacsWorklistDialog(self)
+        if dialog.exec() != PacsWorklistDialog.DialogCode.Accepted:
+            return
+
+        payload = dialog.get_form_data()
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             create_pacs_worklist_item(
                 connection,
-                status="active",
-                patient_name="Manual Sample",
-                chart_no="CH-MANUAL",
-                study="Manual Entry",
-                modality="UNK",
-                requested_at="now",
-                accession_or_order_id="AC-MANUAL",
+                status=payload["status"] or "active",
+                patient_name=payload["patient_name"],
+                chart_no=payload["chart_no"],
+                study=payload["study"],
+                modality=payload["modality"],
+                requested_at=payload["requested_at"],
+                accession_or_order_id=payload["accession_or_order_id"],
+                source="manual",
+            )
+        self.refresh_rows()
+
+    def edit_selected(self) -> None:
+        item = self._selected_visible_item()
+        if item is None:
+            return
+
+        dialog = PacsWorklistDialog(self, item=item)
+        if dialog.exec() != PacsWorklistDialog.DialogCode.Accepted:
+            return
+
+        payload = dialog.get_form_data()
+        with connect(self._db_path) as connection:
+            update_pacs_worklist_item(
+                connection,
+                item.id,
+                status=payload["status"],
+                patient_name=payload["patient_name"],
+                chart_no=payload["chart_no"],
+                study=payload["study"],
+                modality=payload["modality"],
+                requested_at=payload["requested_at"],
+                accession_or_order_id=payload["accession_or_order_id"],
+                source=item.source,
+                error_message=item.error_message,
             )
         self.refresh_rows()
 
     def delete_selected(self) -> None:
-        selected = self.worklist_table.selectedItems()
-        if not selected:
-            return
-
-        row = selected[0].row()
-        if row < 0 or row >= len(self._visible_items):
+        item = self._selected_visible_item()
+        if item is None:
             return
 
         with connect(self._db_path) as connection:
-            item_id = self._visible_items[row].id
-            update_pacs_worklist_status(connection, item_id, "cancelled")
+            update_pacs_worklist_status(connection, item.id, "cancelled")
         self.refresh_rows()
 
     def _build_sync_summary(self, items: list[PacsWorklistItemRecord]) -> dict[str, int]:
@@ -264,3 +296,13 @@ class PacsPanel(QWidget):
             )
             == QMessageBox.StandardButton.Yes
         )
+
+    def _selected_visible_item(self) -> PacsWorklistItemRecord | None:
+        selected = self.worklist_table.selectedItems()
+        if not selected:
+            return None
+
+        row = selected[0].row()
+        if row < 0 or row >= len(self._visible_items):
+            return None
+        return self._visible_items[row]
