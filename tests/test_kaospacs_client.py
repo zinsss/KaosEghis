@@ -117,6 +117,30 @@ def test_push_kaospacs_worklist_sends_entries(monkeypatch) -> None:
     assert captured["body"] == {"entries": [{"AccessionNumber": "ACC-1"}]}
 
 
+def test_push_kaospacs_worklist_matches_kaospacs_contract(monkeypatch) -> None:
+    import KaosEghis.core.kaospacs_client as client
+
+    captured = {}
+
+    def fake_urlopen(req, timeout=0):
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeResponse({"ok": True})
+
+    monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
+
+    push_kaospacs_worklist(
+        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        [{"AccessionNumber": "ACC-1"}, {"AccessionNumber": "ACC-2"}],
+    )
+
+    assert isinstance(captured["body"], dict)
+    assert list(captured["body"].keys()) == ["entries"]
+    assert captured["body"]["entries"] == [
+        {"AccessionNumber": "ACC-1"},
+        {"AccessionNumber": "ACC-2"},
+    ]
+
+
 def test_successful_sync_marks_sent(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)

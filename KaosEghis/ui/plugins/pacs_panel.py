@@ -46,7 +46,7 @@ class PacsPanel(QWidget):
         title = QLabel("PACS Worklist")
         title.setObjectName("pageTitle")
         self.eghis_db_status = QLabel("Eghis DB: not connected")
-        self.pacs_server_status = QLabel("KaosPACS server: unknown")
+        self.pacs_server_status = QLabel("KaosPACS server: not checked")
         self.polling_status = QLabel("Polling status: stopped")
 
         status_row = QHBoxLayout()
@@ -75,7 +75,7 @@ class PacsPanel(QWidget):
         self.filter_bar.addStretch()
 
         refresh_button = QPushButton("Refresh")
-        refresh_button.clicked.connect(self.refresh_rows)
+        refresh_button.clicked.connect(self.refresh_panel)
         poll_button = QPushButton("Poll now")
         poll_button.clicked.connect(self.poll_now)
         sync_button = QPushButton("Sync to KaosPACS")
@@ -110,6 +110,10 @@ class PacsPanel(QWidget):
 
     def _set_db_labels(self) -> None:
         self.eghis_db_status.setText("Eghis DB: local sqlite")
+        initialize_database(self._db_path)
+        self.pacs_server_status.setText("KaosPACS server: not checked")
+
+    def _refresh_kaospacs_status(self) -> None:
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
@@ -153,11 +157,16 @@ class PacsPanel(QWidget):
 
         self.worklist_table.resizeColumnsToContents()
 
+    def refresh_panel(self) -> None:
+        self._refresh_kaospacs_status()
+        self.refresh_rows()
+
     def poll_now(self) -> None:
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
 
+        self._refresh_kaospacs_status()
         result = poll_eghis_image_orders_into_local_worklist(settings, self._db_path)
         self.refresh_rows()
         if result.message is not None:
@@ -172,6 +181,7 @@ class PacsPanel(QWidget):
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
+        self._refresh_kaospacs_status()
         result = sync_local_worklist_to_kaospacs(settings, self._db_path)
         self.refresh_rows()
         self.polling_status.setText(

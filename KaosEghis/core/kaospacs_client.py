@@ -34,6 +34,8 @@ def fetch_kaospacs_worklist(settings: dict[str, str]) -> dict:
 
 
 def push_kaospacs_worklist(settings: dict[str, str], entries: list[dict]) -> dict:
+    # KaosPACS PUT /worklist expects the same JSON file shape it serves:
+    # {"entries": [...]}
     return _request_json(settings, "PUT", "/worklist", {"entries": entries})
 
 
