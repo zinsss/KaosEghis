@@ -13,6 +13,7 @@ def _app():
 def test_plugin_ui_modules_import() -> None:
     import KaosEghis.ui.plugins.flu_panel
     import KaosEghis.ui.plugins.pacs_panel
+    import KaosEghis.ui.plugins.weekly_visits_panel
     import KaosEghis.ui.tabs.kaosclip_tab
     import KaosEghis.ui.tabs.plugins_tab
 
@@ -54,3 +55,14 @@ def test_flu_panel_can_load_week_without_backend() -> None:
     panel.load_week()
 
     assert "not connected" in panel.preview.toPlainText()
+
+
+def test_weekly_visits_panel_can_load_without_backend(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.weekly_visits_panel import WeeklyVisitsPanel
+
+    panel = WeeklyVisitsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+
+    assert panel.REPORT_COLUMNS == ["Age Group", "Visits", "Patients"]
+    assert "unavailable" in panel.report_status.text()

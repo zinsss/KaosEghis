@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import re
 from typing import Callable
 
 from KaosEghis.db.database import connect, get_database_path, initialize_database
 from KaosEghis.db.repositories import create_pacs_worklist_item
+from KaosEghis.core.eghis_db import (
+    EghisDbQueryRejectedError,
+    EghisDbUnavailableError,
+    run_readonly_query,
+)
 
 _CANONICAL_ALIASES = {
     "patient_name": ["patient_name", "PatientName", "PATIENT_NAME", "pname", "수진자명"],
@@ -41,10 +45,6 @@ _CANONICAL_ALIASES = {
         "처방번호",
     ],
 }
-_WRITE_SQL_PATTERN = re.compile(
-    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|MERGE|EXEC|CALL)\b",
-    re.IGNORECASE,
-)
 _DEFAULT_IMAGE_ORDER_QUERY = """
 SELECT
     CASE
@@ -194,36 +194,15 @@ def _poll_image_orders_from_db(
     query = _resolve_image_study_query(settings)
     if not connection_string or not query:
         return []
-    if _WRITE_SQL_PATTERN.search(query):
-        raise QueryRejectedError("Configured SQL was rejected by the read-only safety gate.")
 
     try:
-        import psycopg2  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise PollingUnavailableError("psycopg2 is not installed.") from exc
-
-    # KaosEghis-pacs reads Eghis DB as an EMR-side adapter and writes only to the
-    # local KaosEghis SQLite worklist. It does not push to KaosPACS in this PR.
-    connection = psycopg2.connect(connection_string)
-
-    try:
-        try:
-            connection.set_session(readonly=True, autocommit=True)
-        except Exception:
-            connection.autocommit = True
-        cursor = connection.cursor()
-        try:
-            cursor.execute(query)
-            column_names = [column[0] for column in cursor.description or []]
-            rows = cursor.fetchall()
-        finally:
-            close_cursor = getattr(cursor, "close", None)
-            if callable(close_cursor):
-                close_cursor()
-    finally:
-        close_connection = getattr(connection, "close", None)
-        if callable(close_connection):
-            close_connection()
+        # KaosEghis-pacs reads Eghis DB as an EMR-side adapter and writes only to the
+        # local KaosEghis SQLite worklist. It does not push to KaosPACS in this PR.
+        column_names, rows = run_readonly_query(connection_string, query)
+    except EghisDbQueryRejectedError as exc:
+        raise QueryRejectedError(str(exc)) from exc
+    except EghisDbUnavailableError as exc:
+        raise PollingUnavailableError(str(exc)) from exc
 
     return [_map_db_row_to_order(column_names, row) for row in rows]
 
