@@ -80,3 +80,15 @@ def _migrate_pacs_worklist(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE pacs_worklist_items ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
         )
+    if "kaospacs_mwl_status" not in columns:
+        connection.execute(
+            "ALTER TABLE pacs_worklist_items ADD COLUMN kaospacs_mwl_status TEXT NOT NULL DEFAULT 'not_sent'"
+        )
+    if "kaospacs_mwl_last_synced_at" not in columns:
+        connection.execute(
+            "ALTER TABLE pacs_worklist_items ADD COLUMN kaospacs_mwl_last_synced_at TEXT"
+        )
+    if "kaospacs_mwl_error" not in columns:
+        connection.execute(
+            "ALTER TABLE pacs_worklist_items ADD COLUMN kaospacs_mwl_error TEXT"
+        )

@@ -10,6 +10,8 @@ DEFAULT_SETTINGS = {
     "credential_reference_name": "default",
     "eghis_db_connection_string": "",
     "eghis_db_image_study_query": "",
+    "kaospacs_api_base_url": "http://127.0.0.1:8055",
+    "kaospacs_api_timeout_seconds": "5",
 }
 
 
@@ -60,6 +62,9 @@ class PacsWorklistItemRecord:
     accession_or_order_id: str | None
     source: str
     error_message: str | None
+    kaospacs_mwl_status: str
+    kaospacs_mwl_last_synced_at: str | None
+    kaospacs_mwl_error: str | None
     created_at: str
     updated_at: str
 
@@ -338,7 +343,9 @@ def list_pacs_worklist_items(
         rows = connection.execute(
             """
             SELECT id, status, patient_name, chart_no, study, modality, requested_at,
-                   accession_or_order_id, source, error_message, created_at, updated_at
+                   accession_or_order_id, source, error_message,
+                   kaospacs_mwl_status, kaospacs_mwl_last_synced_at, kaospacs_mwl_error,
+                   created_at, updated_at
             FROM pacs_worklist_items
             ORDER BY requested_at DESC, id DESC
             """
@@ -348,7 +355,9 @@ def list_pacs_worklist_items(
         rows = connection.execute(
             """
             SELECT id, status, patient_name, chart_no, study, modality, requested_at,
-                   accession_or_order_id, source, error_message, created_at, updated_at
+                   accession_or_order_id, source, error_message,
+                   kaospacs_mwl_status, kaospacs_mwl_last_synced_at, kaospacs_mwl_error,
+                   created_at, updated_at
             FROM pacs_worklist_items
             WHERE status = ?
             ORDER BY requested_at DESC, id DESC
@@ -364,7 +373,9 @@ def get_pacs_worklist_item(
     row = connection.execute(
         """
         SELECT id, status, patient_name, chart_no, study, modality, requested_at,
-               accession_or_order_id, source, error_message, created_at, updated_at
+               accession_or_order_id, source, error_message,
+               kaospacs_mwl_status, kaospacs_mwl_last_synced_at, kaospacs_mwl_error,
+               created_at, updated_at
         FROM pacs_worklist_items
         WHERE id = ?
         """,
@@ -391,6 +402,34 @@ def update_pacs_worklist_status(
         WHERE id = ?
         """,
         (status, _blank_to_none(error_message), item_id),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def update_pacs_worklist_sync_state(
+    connection: sqlite3.Connection,
+    item_id: int,
+    *,
+    kaospacs_mwl_status: str,
+    kaospacs_mwl_last_synced_at: str | None = None,
+    kaospacs_mwl_error: str | None = None,
+) -> bool:
+    cursor = connection.execute(
+        """
+        UPDATE pacs_worklist_items
+        SET kaospacs_mwl_status = ?,
+            kaospacs_mwl_last_synced_at = ?,
+            kaospacs_mwl_error = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            kaospacs_mwl_status,
+            _blank_to_none(kaospacs_mwl_last_synced_at),
+            _blank_to_none(kaospacs_mwl_error),
+            item_id,
+        ),
     )
     connection.commit()
     return cursor.rowcount > 0
@@ -590,8 +629,11 @@ def _pacs_worklist_item_from_row(
         accession_or_order_id=row[7],
         source=row[8],
         error_message=row[9],
-        created_at=row[10],
-        updated_at=row[11],
+        kaospacs_mwl_status=row[10],
+        kaospacs_mwl_last_synced_at=row[11],
+        kaospacs_mwl_error=row[12],
+        created_at=row[13],
+        updated_at=row[14],
     )
 
 

@@ -9,6 +9,8 @@ class AppConfig:
     credential_reference_name: str = "default"
     eghis_db_connection_string: str = ""
     eghis_db_image_study_query: str = ""
+    kaospacs_api_base_url: str = "http://127.0.0.1:8055"
+    kaospacs_api_timeout_seconds: str = "5"
 
 
 DEFAULT_CONFIG = AppConfig()

@@ -22,6 +22,8 @@ class SettingsTab(QWidget):
         self.credential_ref = QLineEdit()
         self.eghis_db_connection_string = QLineEdit()
         self.eghis_db_image_study_query = QLineEdit()
+        self.kaospacs_api_base_url = QLineEdit()
+        self.kaospacs_api_timeout_seconds = QLineEdit()
         self.status = QLabel()
 
         save_button = QPushButton("Save Settings")
@@ -42,6 +44,8 @@ class SettingsTab(QWidget):
         form.addRow("Credential reference name", self.credential_ref)
         form.addRow("Eghis DB connection string", self.eghis_db_connection_string)
         form.addRow("Eghis image study query (placeholder)", self.eghis_db_image_study_query)
+        form.addRow("KaosPACS API base URL", self.kaospacs_api_base_url)
+        form.addRow("KaosPACS API timeout seconds", self.kaospacs_api_timeout_seconds)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
@@ -65,6 +69,10 @@ class SettingsTab(QWidget):
         self.eghis_db_image_study_query.setText(
             settings["eghis_db_image_study_query"]
         )
+        self.kaospacs_api_base_url.setText(settings["kaospacs_api_base_url"])
+        self.kaospacs_api_timeout_seconds.setText(
+            settings["kaospacs_api_timeout_seconds"]
+        )
         self.status.setText("Settings loaded.")
 
     def save_settings(self) -> None:
@@ -75,6 +83,8 @@ class SettingsTab(QWidget):
             "credential_reference_name": self.credential_ref.text().strip(),
             "eghis_db_connection_string": self.eghis_db_connection_string.text().strip(),
             "eghis_db_image_study_query": self.eghis_db_image_study_query.text().strip(),
+            "kaospacs_api_base_url": self.kaospacs_api_base_url.text().strip(),
+            "kaospacs_api_timeout_seconds": self.kaospacs_api_timeout_seconds.text().strip(),
         }
         initialize_database()
         with connect() as connection:
