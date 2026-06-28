@@ -52,12 +52,16 @@ def test_pacs_panel_has_required_worklist_columns() -> None:
 def test_flu_panel_can_load_week_without_backend() -> None:
     _app()
 
+    from PySide6.QtWidgets import QLabel
+
     from KaosEghis.ui.plugins.flu_panel import FluPanel
 
     panel = FluPanel()
-    panel.load_week()
+    panel.load_report()
 
-    assert "not connected" in panel.preview.toPlainText()
+    labels = [label.text() for label in panel.findChildren(QLabel)]
+    assert "Weekly - Influenza Report" in labels
+    assert "Total Visits(Practice) Count: 0" in panel.report_output.toPlainText()
 
 
 def test_weekly_visits_panel_can_load_without_backend(tmp_path) -> None:
@@ -94,5 +98,5 @@ def test_plugins_tab_groups_weekly_panel_under_kaoseghis_flu() -> None:
     tab = PluginsTab()
     labels = [label.text() for label in tab.findChildren(QLabel)]
 
-    assert "KaosEghis-flu" in labels
     assert "Weekly - Influenza Report" in labels
+    assert "PACS Worklist" in labels
