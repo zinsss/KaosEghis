@@ -45,6 +45,30 @@ _WRITE_SQL_PATTERN = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|MERGE|EXEC|CALL)\b",
     re.IGNORECASE,
 )
+_DEFAULT_IMAGE_ORDER_QUERY = """
+SELECT
+    CASE
+        WHEN ord.dc_yn = 'Y' THEN 'cancelled'
+        ELSE 'active'
+    END AS status,
+    ord.ptnt_nm AS patient_name,
+    ord.ptnt_no AS patient_id,
+    ord.proc_nm AS order_name,
+    ord.proc_cd AS modality_code,
+    ord.ordr_dtime AS order_datetime,
+    COALESCE(NULLIF(m.accession_no, ''), m.eghis_key) AS accession_or_order_id,
+    m.eghis_key,
+    ord.dc_yn
+FROM public.mwl AS m
+JOIN public.h2opd_doct_ord AS ord
+    ON split_part(m.eghis_key, '_', 1) = ord.recept_no
+   AND split_part(m.eghis_key, '_', 2) = ord.ord_no
+   AND split_part(m.eghis_key, '_', 3) = ord.ord_seq_no
+WHERE ord.scheduled_proc_status = '100'
+  AND ord.proc_dept_cd = 'XRAY'
+  AND ord.ordr_dtime::date = CURRENT_DATE
+ORDER BY ord.ordr_dtime DESC
+""".strip()
 
 
 @dataclass(frozen=True)
@@ -66,10 +90,6 @@ class QueryRejectedError(RuntimeError):
 def poll_image_orders(settings: dict[str, str]) -> list[dict[str, str | None]]:
     connection_string = (settings.get("eghis_db_connection_string") or "").strip()
     if not connection_string:
-        return []
-
-    query = (settings.get("eghis_db_image_study_query") or "").strip()
-    if not query:
         return []
 
     return _poll_image_orders_from_db(settings)
@@ -109,7 +129,7 @@ def poll_eghis_image_orders_into_local_worklist(
 
             existing = connection.execute(
                 """
-                SELECT id
+                SELECT id, status
                 FROM pacs_worklist_items
                 WHERE accession_or_order_id = ?
                 """,
@@ -143,6 +163,10 @@ def poll_eghis_image_orders_into_local_worklist(
                 updated += 1
                 continue
 
+            if status == "cancelled":
+                skipped += 1
+                continue
+
             create_pacs_worklist_item(
                 connection,
                 status=status,
@@ -164,29 +188,26 @@ def _poll_image_orders_from_db(
     settings: dict[str, str],
 ) -> list[dict[str, str | None]]:
     connection_string = (settings.get("eghis_db_connection_string") or "").strip()
-    query = (settings.get("eghis_db_image_study_query") or "").strip()
+    query = _resolve_image_study_query(settings)
     if not connection_string or not query:
         return []
     if _WRITE_SQL_PATTERN.search(query):
         raise QueryRejectedError("Configured SQL was rejected by the read-only safety gate.")
 
     try:
-        import pyodbc  # type: ignore[import-not-found]
+        import psycopg2  # type: ignore[import-not-found]
     except ImportError as exc:
-        raise PollingUnavailableError("pyodbc is not installed.") from exc
+        raise PollingUnavailableError("psycopg2 is not installed.") from exc
 
     # KaosEghis-pacs reads Eghis DB as an EMR-side adapter and writes only to the
     # local KaosEghis SQLite worklist. It does not push to KaosPACS in this PR.
-    try:
-        connection = pyodbc.connect(
-            connection_string,
-            autocommit=True,
-            readonly=True,
-        )
-    except TypeError:
-        connection = pyodbc.connect(connection_string, autocommit=True)
+    connection = psycopg2.connect(connection_string)
 
     try:
+        try:
+            connection.set_session(readonly=True, autocommit=True)
+        except Exception:
+            connection.autocommit = True
         cursor = connection.cursor()
         try:
             cursor.execute(query)
@@ -222,6 +243,7 @@ def _map_db_row_to_order(
     # Store only the minimum local worklist fields. Ignore any extra DB columns so
     # resident ID, DOB, sex, phone, address, diagnosis, EMR notes, and raw rows do
     # not enter KaosEghis local SQLite through this adapter.
+    order["status"] = _stringify(_lookup_alias(row_map, ["status"])) or "active"
     for key in (
         "patient_name",
         "chart_no",
@@ -258,3 +280,10 @@ def _stringify(value: object | None) -> str | None:
     if value is None:
         return None
     return _blank_to_none(str(value))
+
+
+def _resolve_image_study_query(settings: dict[str, str]) -> str:
+    configured = (settings.get("eghis_db_image_study_query") or "").strip()
+    if configured:
+        return configured
+    return _DEFAULT_IMAGE_ORDER_QUERY
