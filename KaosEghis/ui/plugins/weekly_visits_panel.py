@@ -33,7 +33,7 @@ class WeeklyVisitsPanel(QWidget):
         self._db_path = db_path
         iso_today = date.today().isocalendar()
 
-        title = QLabel("KaosEghis-weekly-treatment-counts")
+        title = QLabel("KaosEghis-weekly-practice-count")
         title.setObjectName("pluginTitle")
 
         self.db_status = QLabel("Eghis DB: not configured")
@@ -73,7 +73,7 @@ class WeeklyVisitsPanel(QWidget):
         self.report_table.setHorizontalHeaderLabels(self.REPORT_COLUMNS)
 
         footer = QLabel(
-            "Weekly treatment counts by age group from the Eghis PostgreSQL database. "
+            "Weekly practice counts by age group from the Eghis PostgreSQL database. "
             "Patients is a secondary distinct-patient count."
         )
 

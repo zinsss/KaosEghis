@@ -1,4 +1,4 @@
-"""Weekly age-group treatment-count reporting against the Eghis PostgreSQL database."""
+"""Weekly age-group practice-count reporting against the Eghis PostgreSQL database."""
 
 from __future__ import annotations
 
