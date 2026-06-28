@@ -91,10 +91,15 @@ def test_poll_image_orders_uses_default_postgres_query_when_query_blank(
     assert executed_queries == [_DEFAULT_IMAGE_ORDER_QUERY]
     assert "public.mwl" in executed_queries[0]
     assert "public.h2opd_doct_ord" in executed_queries[0]
-    assert "scheduled_proc_status = '100'" in executed_queries[0]
+    assert "m.scheduled_proc_status = '100'" in executed_queries[0]
     assert "proc_dept_cd = 'XRAY'" in executed_queries[0]
+    assert "m.patient_id AS patient_id" in executed_queries[0]
+    assert "m.patient_name AS patient_name" in executed_queries[0]
+    assert "o.recept_no = split_part(m.eghis_key, '_', 1)" in executed_queries[0]
+    assert "CAST(o.ord_no AS text) = split_part(m.eghis_key, '_', 2)" in executed_queries[0]
+    assert "CAST(o.ord_seq_no AS text) = split_part(m.eghis_key, '_', 3)" in executed_queries[0]
     assert "dc_yn != 'Y'" not in executed_queries[0]
-    assert "OR ord.dc_yn = 'Y'" in executed_queries[0]
+    assert "COALESCE(o.dc_yn, 'N') = 'Y'" in executed_queries[0]
 
 
 def test_poll_image_orders_rejects_write_sql() -> None:
@@ -148,9 +153,9 @@ def test_map_db_row_aliases_to_canonical_order_and_ignores_extra_fields() -> Non
         [
             "수진자명",
             "차트번호",
-            "처방명",
-            "검사구분",
-            "처방일시",
+            "study",
+            "modality",
+            "requested_at",
             "처방번호",
             "status",
             "DOB",
@@ -367,6 +372,72 @@ def test_poll_service_skips_cancelled_order_without_existing_local_row(
     assert result.updated == 0
     assert result.skipped == 1
     assert rows == []
+
+
+def test_pacs_local_storage_does_not_include_sensitive_fields(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    from KaosEghis.core import pacs_polling
+
+    def fake_poll_image_orders(
+        _settings: dict[str, str],
+    ) -> list[dict[str, str | None]]:
+        return [
+            {
+                "status": "active",
+                "patient_name": "Alice",
+                "chart_no": "C001",
+                "study": "Chest",
+                "modality": "CR",
+                "requested_at": "2026-01-01T00:00:00",
+                "accession_or_order_id": "AC-004",
+                "source": "eghis-db",
+                "patient_birth_date": "1990-01-01",
+                "patient_sex": "F",
+                "resident_id": "123456-1234567",
+                "phone": "01012345678",
+                "address": "secret",
+                "diagnosis": "secret",
+                "raw_row": "secret",
+            }
+        ]
+
+    monkeypatch.setattr(pacs_polling, "poll_image_orders", fake_poll_image_orders)
+    result = poll_eghis_image_orders_into_local_worklist(
+        {"eghis_db_connection_string": "postgresql://example"},
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(pacs_worklist_items)")
+        }
+        row = connection.execute(
+            """
+            SELECT patient_name, chart_no, study, modality, requested_at,
+                   accession_or_order_id, status, source, error_message
+            FROM pacs_worklist_items
+            WHERE accession_or_order_id = ?
+            """,
+            ("AC-004",),
+        ).fetchone()
+
+    assert result.inserted == 1
+    assert "patient_birth_date" not in columns
+    assert "patient_sex" not in columns
+    assert "resident_id" not in columns
+    assert row == (
+        "Alice",
+        "C001",
+        "Chest",
+        "CR",
+        "2026-01-01T00:00:00",
+        "AC-004",
+        "active",
+        "eghis-db",
+        None,
+    )
 
 
 def test_poll_service_skips_rows_without_accession_or_order_id(

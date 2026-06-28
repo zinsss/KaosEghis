@@ -66,3 +66,29 @@ def test_weekly_visits_panel_can_load_without_backend(tmp_path) -> None:
 
     assert panel.REPORT_COLUMNS == ["Age Group", "Visits", "Patients"]
     assert "unavailable" in panel.report_status.text()
+
+
+def test_weekly_visits_panel_label_contains_kaoseghis_flu(tmp_path) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QLabel
+
+    from KaosEghis.ui.plugins.weekly_visits_panel import WeeklyVisitsPanel
+
+    panel = WeeklyVisitsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    labels = [label.text() for label in panel.findChildren(QLabel)]
+
+    assert "KaosEghis-flu weekly practice-count report" in labels
+
+
+def test_plugins_tab_groups_weekly_panel_under_kaoseghis_flu() -> None:
+    _app()
+
+    from PySide6.QtWidgets import QLabel
+
+    from KaosEghis.ui.tabs.plugins_tab import PluginsTab
+
+    tab = PluginsTab()
+    labels = [label.text() for label in tab.findChildren(QLabel)]
+
+    assert "KaosEghis-flu statistics" in labels

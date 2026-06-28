@@ -33,7 +33,7 @@ class WeeklyVisitsPanel(QWidget):
         self._db_path = db_path
         iso_today = date.today().isocalendar()
 
-        title = QLabel("KaosEghis-weekly-practice-count")
+        title = QLabel("KaosEghis-flu weekly practice-count report")
         title.setObjectName("pluginTitle")
 
         self.db_status = QLabel("Eghis DB: not configured")

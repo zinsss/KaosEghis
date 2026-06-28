@@ -48,29 +48,42 @@ _CANONICAL_ALIASES = {
 _DEFAULT_IMAGE_ORDER_QUERY = """
 SELECT
     CASE
-        WHEN ord.dc_yn = 'Y' THEN 'cancelled'
+        WHEN COALESCE(o.dc_yn, 'N') = 'Y' THEN 'cancelled'
         ELSE 'active'
     END AS status,
-    ord.ptnt_nm AS patient_name,
-    ord.ptnt_no AS patient_id,
-    ord.proc_nm AS order_name,
-    ord.proc_cd AS modality_code,
-    ord.ordr_dtime AS order_datetime,
+    m.patient_name AS patient_name,
+    m.patient_id AS patient_id,
+    COALESCE(m.scheduled_proc_desc, m.requested_proc_desc) AS study,
+    CASE
+        WHEN m.scheduled_modality = 'BMD' OR o.ord_cd = 'HC342' THEN 'BMD'
+        WHEN m.scheduled_modality = 'DR' THEN 'CR'
+        ELSE m.scheduled_modality
+    END AS modality,
+    COALESCE(
+        m.scheduled_dttm,
+        m.imaging_request_dttm,
+        m.trigger_dttm,
+        m.replica_dttm
+    ) AS requested_at,
     COALESCE(NULLIF(m.accession_no, ''), m.eghis_key) AS accession_or_order_id,
     m.eghis_key,
-    ord.dc_yn
+    o.dc_yn
 FROM public.mwl AS m
-JOIN public.h2opd_doct_ord AS ord
-    ON split_part(m.eghis_key, '_', 1) = ord.recept_no
-   AND split_part(m.eghis_key, '_', 2) = ord.ord_no
-   AND split_part(m.eghis_key, '_', 3) = ord.ord_seq_no
-WHERE ord.proc_dept_cd = 'XRAY'
+JOIN public.h2opd_doct_ord AS o
+    ON o.recept_no = split_part(m.eghis_key, '_', 1)
+   AND CAST(o.ord_no AS text) = split_part(m.eghis_key, '_', 2)
+   AND CAST(o.ord_seq_no AS text) = split_part(m.eghis_key, '_', 3)
+WHERE o.proc_dept_cd = 'XRAY'
   AND (
-      ord.scheduled_proc_status = '100'
-      OR ord.dc_yn = 'Y'
+      m.scheduled_proc_status = '100'
+      OR COALESCE(o.dc_yn, 'N') = 'Y'
   )
-  AND ord.ordr_dtime::date = CURRENT_DATE
-ORDER BY ord.ordr_dtime DESC
+ORDER BY COALESCE(
+    m.scheduled_dttm,
+    m.imaging_request_dttm,
+    m.trigger_dttm,
+    m.replica_dttm
+) DESC
 """.strip()
 
 
