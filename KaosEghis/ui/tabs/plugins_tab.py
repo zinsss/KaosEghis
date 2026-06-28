@@ -15,7 +15,7 @@ class PluginsTab(QWidget):
         splitter.addWidget(PacsPanel())
         splitter.addWidget(FluPanel())
         splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(1, 3)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)

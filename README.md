@@ -22,3 +22,7 @@ python main.py
 ## Safe Stubs
 
 The automation, macro execution, UIA targeting, clipboard, credential, scheduler, printer, and database modules are prepared as safe local foundations. Dangerous macro actions currently return blocked results or raise `NotImplementedError`.
+
+## PACS Privacy
+
+`KaosEghis-pacs` stores only the minimum local worklist data needed to bridge Eghis image-study orders. It does not store resident ID, DOB, sex, phone number, address, diagnosis, EMR notes, insurance details, or raw Eghis DB rows.

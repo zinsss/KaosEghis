@@ -39,7 +39,7 @@ class PacsPanel(QWidget):
         self._visible_items: list[PacsWorklistItemRecord] = []
         self._active_filter = "all"
 
-        title = QLabel("KaosEghis-pacs")
+        title = QLabel("PACS Worklist")
         title.setObjectName("pageTitle")
         self.eghis_db_status = QLabel("Eghis DB: not connected")
         self.pacs_server_status = QLabel("KaosPACS server: unknown")
@@ -143,6 +143,9 @@ class PacsPanel(QWidget):
 
         result = poll_eghis_image_orders_into_local_worklist(settings, self._db_path)
         self.refresh_rows()
+        if result.message is not None:
+            self.polling_status.setText(f"Polling status: {result.message}")
+            return
         self.polling_status.setText(
             "Polling status: "
             f"inserted={result.inserted}, updated={result.updated}, skipped={result.skipped}"

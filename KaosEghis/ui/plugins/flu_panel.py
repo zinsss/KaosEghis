@@ -1,111 +1,154 @@
-from datetime import date
+from __future__ import annotations
 
-from PySide6.QtCore import QDate
+from datetime import date
+from pathlib import Path
+
 from PySide6.QtWidgets import (
-    QCalendarWidget,
-    QComboBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from KaosEghis.core.weekly_age_reporting import (
+    AGE_GROUP_ORDER,
+    WeeklyAgeReportingUnavailableError,
+    fetch_weekly_age_report,
+    iso_week_range,
+)
+from KaosEghis.db.database import connect, initialize_database
+from KaosEghis.db.repositories import get_settings
+
 
 class FluPanel(QWidget):
-    """Visible working-status scaffold for the KaosEghis-flu plugin."""
+    """Weekly influenza report surface backed by the age-group practice count query."""
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
 
-        title = QLabel("KaosEghis-flu")
+        self._db_path = db_path
+        iso_today = date.today().isocalendar()
+        self._current_year = iso_today.year
+
+        title = QLabel("Weekly - Influenza Report")
         title.setObjectName("pluginTitle")
 
-        self.db_status = QLabel("Eghis DB access: not connected")
-        self.report_status = QLabel("Report readiness: waiting")
+        self.week_input = QLineEdit(f"{iso_today.week}")
+        self.week_input.setMaxLength(2)
+        self.week_input.setFixedWidth(48)
+        self.date_range_label = QLabel()
 
-        status_row = QHBoxLayout()
-        status_row.addWidget(self.db_status)
-        status_row.addWidget(self.report_status)
-        status_row.addStretch()
-
-        self.week_selector = QComboBox()
-        self.week_selector.addItems(_epidemiologic_week_labels())
-
-        self.calendar = QCalendarWidget()
-        self.calendar.setGridVisible(True)
-        self.calendar.selectionChanged.connect(self.sync_week_from_calendar)
-
-        load_button = QPushButton("Load week")
-        load_button.clicked.connect(self.load_week)
-
-        generate_button = QPushButton("Generate report")
-        generate_button.clicked.connect(self.generate_report)
-
-        export_button = QPushButton("Export / Copy")
-        export_button.clicked.connect(self.export_report)
+        search_button = QPushButton("Search")
+        search_button.clicked.connect(self.load_report)
 
         controls = QHBoxLayout()
-        controls.addWidget(QLabel("Week:"))
-        controls.addWidget(self.week_selector)
-        controls.addWidget(load_button)
-        controls.addWidget(generate_button)
-        controls.addWidget(export_button)
+        controls.addWidget(QLabel("Week No."))
+        controls.addWidget(self.week_input)
+        controls.addWidget(QLabel(":"))
+        controls.addWidget(self.date_range_label)
+        controls.addWidget(search_button)
         controls.addStretch()
 
-        self.preview = QPlainTextEdit()
-        self.preview.setReadOnly(True)
-        self.preview.setPlaceholderText("Weekly influenza surveillance report preview will appear here.")
+        self.report_output = QPlainTextEdit()
+        self.report_output.setReadOnly(True)
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
-        layout.addLayout(status_row)
         layout.addLayout(controls)
-        layout.addWidget(self.calendar)
-        layout.addWidget(self.preview)
+        layout.addWidget(self.report_output)
 
-        self.load_week()
+        self.load_report()
 
-    def sync_week_from_calendar(self) -> None:
-        selected = self.calendar.selectedDate()
-        iso_year, iso_week, _weekday = date(selected.year(), selected.month(), selected.day()).isocalendar()
-        label = f"{iso_year}-W{iso_week:02d}"
-        index = self.week_selector.findText(label)
-        if index >= 0:
-            self.week_selector.setCurrentIndex(index)
+    def load_report(self) -> None:
+        week_text = self.week_input.text().strip()
+        try:
+            week_number = int(week_text)
+        except ValueError:
+            self.date_range_label.setText("Invalid week")
+            self.report_output.setPlainText("Enter a valid ISO week number.")
+            return
 
-    def load_week(self) -> None:
-        week = self.week_selector.currentText()
-        self.report_status.setText("Report readiness: not connected")
-        self.preview.setPlainText(
-            f"KaosEghis-flu weekly report scaffold\n\n"
-            f"Selected week: {week}\n"
-            "Eghis DB access is not connected in this UI scaffold PR.\n"
-            "Existing Flu report services can be wired here in a later backend PR."
+        try:
+            start_ymd, end_ymd = iso_week_range(self._current_year, week_number)
+        except ValueError as exc:
+            self.date_range_label.setText("Invalid week")
+            self.report_output.setPlainText(str(exc))
+            return
+
+        self.date_range_label.setText(_format_display_range(start_ymd, end_ymd))
+
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+
+        if not (settings.get("eghis_db_connection_string") or "").strip():
+            self.report_output.setPlainText(
+                _render_report(
+                    year=self._current_year,
+                    week_number=week_number,
+                    start_ymd=start_ymd,
+                    end_ymd=end_ymd,
+                    visit_count=0,
+                    counts_by_age={label: 0 for label in AGE_GROUP_ORDER},
+                )
+            )
+            return
+
+        try:
+            rows = fetch_weekly_age_report(
+                settings,
+                year=self._current_year,
+                start_week=week_number,
+                end_week=week_number,
+            )
+        except WeeklyAgeReportingUnavailableError as exc:
+            self.report_output.setPlainText(str(exc))
+            return
+
+        counts_by_age = {label: 0 for label in AGE_GROUP_ORDER}
+        total_visits = 0
+        for row in rows:
+            if row.age_group in counts_by_age:
+                counts_by_age[row.age_group] = row.visit_count
+                total_visits += row.visit_count
+
+        self.report_output.setPlainText(
+            _render_report(
+                year=self._current_year,
+                week_number=week_number,
+                start_ymd=start_ymd,
+                end_ymd=end_ymd,
+                visit_count=total_visits,
+                counts_by_age=counts_by_age,
+            )
         )
 
-    def generate_report(self) -> None:
-        week = self.week_selector.currentText()
-        self.report_status.setText("Report readiness: preview only")
-        self.preview.setPlainText(
-            f"Weekly national influenza surveillance report\n"
-            f"Week: {week}\n\n"
-            "Status: preview only.\n"
-            "No Eghis database query was executed.\n"
-            "No public-health report file was exported."
-        )
 
-    def export_report(self) -> None:
-        self.report_status.setText("Report readiness: export not connected")
-        self.preview.appendPlainText("\nExport / Copy requested, but backend export is not implemented in this PR.")
+def _format_display_range(start_ymd: str, end_ymd: str) -> str:
+    start_date = date(int(start_ymd[:4]), int(start_ymd[4:6]), int(start_ymd[6:8]))
+    end_date = date(int(end_ymd[:4]), int(end_ymd[4:6]), int(end_ymd[6:8]))
+    return f"{start_date:%Y-%m-%d}~{end_date:%m-%d}"
 
 
-def _epidemiologic_week_labels() -> list[str]:
-    today = date.today()
-    current_year = today.isocalendar().year
-    labels: list[str] = []
-    for year in [current_year - 1, current_year, current_year + 1]:
-        for week in range(1, 54):
-            labels.append(f"{year}-W{week:02d}")
-    return labels
+def _render_report(
+    *,
+    year: int,
+    week_number: int,
+    start_ymd: str,
+    end_ymd: str,
+    visit_count: int,
+    counts_by_age: dict[str, int],
+) -> str:
+    start_date = date(int(start_ymd[:4]), int(start_ymd[4:6]), int(start_ymd[6:8]))
+    end_date = date(int(end_ymd[:4]), int(end_ymd[4:6]), int(end_ymd[6:8]))
+    lines = [
+        f"Week {week_number}, {year}-{start_date:%m-%d} ~ {end_date:%m-%d}",
+        f"Total Visits(Practice) Count: {visit_count}",
+    ]
+    for label in AGE_GROUP_ORDER:
+        display_label = label.replace("1-6", "01~06")
+        lines.append(f"{display_label} : {counts_by_age.get(label, 0)}")
+    return "\n".join(lines)

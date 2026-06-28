@@ -12,6 +12,7 @@ dependencies = [
     "keyring>=25",
     "psutil>=5.9",
     "pygetwindow>=0.0.9",
+    "psycopg2-binary>=2.9",
 ]
 
 [tool.setuptools.packages.find]
