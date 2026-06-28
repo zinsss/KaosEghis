@@ -39,7 +39,7 @@ class PacsPanel(QWidget):
         self._visible_items: list[PacsWorklistItemRecord] = []
         self._active_filter = "all"
 
-        title = QLabel("KaosEghis-pacs")
+        title = QLabel("PACS Worklist")
         title.setObjectName("pageTitle")
         self.eghis_db_status = QLabel("Eghis DB: not connected")
         self.pacs_server_status = QLabel("KaosPACS server: unknown")

@@ -31,6 +31,8 @@ def test_plugins_tab_can_be_instantiated_without_backends() -> None:
 def test_pacs_panel_has_required_worklist_columns() -> None:
     _app()
 
+    from PySide6.QtWidgets import QLabel
+
     from KaosEghis.ui.plugins.pacs_panel import PacsPanel
 
     panel = PacsPanel()
@@ -44,6 +46,7 @@ def test_pacs_panel_has_required_worklist_columns() -> None:
         "Requested At",
         "Accession / Order ID",
     ]
+    assert "PACS Worklist" in [label.text() for label in panel.findChildren(QLabel)]
 
 
 def test_flu_panel_can_load_week_without_backend() -> None:
@@ -91,4 +94,5 @@ def test_plugins_tab_groups_weekly_panel_under_kaoseghis_flu() -> None:
     tab = PluginsTab()
     labels = [label.text() for label in tab.findChildren(QLabel)]
 
-    assert "KaosEghis-flu statistics" in labels
+    assert "KaosEghis-flu" in labels
+    assert "Weekly - Influenza Report" in labels

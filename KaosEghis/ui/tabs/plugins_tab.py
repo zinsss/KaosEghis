@@ -25,7 +25,7 @@ class PluginsTab(QWidget):
 
 def _build_flu_group() -> QWidget:
     container = QWidget()
-    title = QLabel("KaosEghis-flu statistics")
+    title = QLabel("KaosEghis-flu")
     title.setObjectName("pluginTitle")
 
     layout = QVBoxLayout(container)

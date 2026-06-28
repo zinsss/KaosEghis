@@ -19,7 +19,7 @@ class FluPanel(QWidget):
     def __init__(self) -> None:
         super().__init__()
 
-        title = QLabel("KaosEghis-flu")
+        title = QLabel("Weekly - Influenza Report")
         title.setObjectName("pluginTitle")
 
         self.db_status = QLabel("Eghis DB access: not connected")
