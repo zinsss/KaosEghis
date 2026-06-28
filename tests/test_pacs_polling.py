@@ -94,6 +94,7 @@ def test_poll_image_orders_uses_default_postgres_query_when_query_blank(
     assert "scheduled_proc_status = '100'" in executed_queries[0]
     assert "proc_dept_cd = 'XRAY'" in executed_queries[0]
     assert "dc_yn != 'Y'" not in executed_queries[0]
+    assert "OR ord.dc_yn = 'Y'" in executed_queries[0]
 
 
 def test_poll_image_orders_rejects_write_sql() -> None:

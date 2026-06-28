@@ -64,8 +64,11 @@ JOIN public.h2opd_doct_ord AS ord
     ON split_part(m.eghis_key, '_', 1) = ord.recept_no
    AND split_part(m.eghis_key, '_', 2) = ord.ord_no
    AND split_part(m.eghis_key, '_', 3) = ord.ord_seq_no
-WHERE ord.scheduled_proc_status = '100'
-  AND ord.proc_dept_cd = 'XRAY'
+WHERE ord.proc_dept_cd = 'XRAY'
+  AND (
+      ord.scheduled_proc_status = '100'
+      OR ord.dc_yn = 'Y'
+  )
   AND ord.ordr_dtime::date = CURRENT_DATE
 ORDER BY ord.ordr_dtime DESC
 """.strip()
