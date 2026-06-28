@@ -407,6 +407,57 @@ def update_pacs_worklist_status(
     return cursor.rowcount > 0
 
 
+def update_pacs_worklist_item(
+    connection: sqlite3.Connection,
+    item_id: int,
+    *,
+    status: str,
+    patient_name: str | None = None,
+    chart_no: str | None = None,
+    study: str | None = None,
+    modality: str | None = None,
+    requested_at: str | None = None,
+    accession_or_order_id: str | None = None,
+    source: str | None = None,
+    error_message: str | None = None,
+) -> PacsWorklistItemRecord | None:
+    _validate_pacs_worklist_status(status)
+    current = get_pacs_worklist_item(connection, item_id)
+    if current is None:
+        return None
+
+    connection.execute(
+        """
+        UPDATE pacs_worklist_items
+        SET status = ?,
+            patient_name = ?,
+            chart_no = ?,
+            study = ?,
+            modality = ?,
+            requested_at = ?,
+            accession_or_order_id = ?,
+            source = ?,
+            error_message = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            status,
+            _blank_to_none(patient_name),
+            _blank_to_none(chart_no),
+            _blank_to_none(study),
+            _blank_to_none(modality),
+            _blank_to_none(requested_at),
+            _blank_to_none(accession_or_order_id),
+            _blank_to_none(source) or current.source,
+            _blank_to_none(error_message),
+            item_id,
+        ),
+    )
+    connection.commit()
+    return get_pacs_worklist_item(connection, item_id)
+
+
 def update_pacs_worklist_sync_state(
     connection: sqlite3.Connection,
     item_id: int,
