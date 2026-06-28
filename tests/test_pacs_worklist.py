@@ -29,6 +29,9 @@ def test_database_migration_creates_pacs_worklist_table(tmp_path) -> None:
     assert "accession_or_order_id" in columns
     assert "source" in columns
     assert "error_message" in columns
+    assert "kaospacs_mwl_status" in columns
+    assert "kaospacs_mwl_last_synced_at" in columns
+    assert "kaospacs_mwl_error" in columns
 
 
 def test_pacs_worklist_repository_crud(tmp_path) -> None:
@@ -50,6 +53,7 @@ def test_pacs_worklist_repository_crud(tmp_path) -> None:
         assert created.id > 0
         assert created.status == "active"
         assert created.patient_name == "Alice"
+        assert created.kaospacs_mwl_status == "not_sent"
 
         listed = list_pacs_worklist_items(connection)
         assert len(listed) == 1

@@ -49,6 +49,43 @@ def test_pacs_panel_has_required_worklist_columns() -> None:
     assert "PACS Worklist" in [label.text() for label in panel.findChildren(QLabel)]
 
 
+def test_pacs_panel_does_not_check_kaospacs_health_on_init(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    calls = []
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "check_kaospacs_health",
+        lambda settings: calls.append(settings) or True,
+    )
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+
+    assert calls == []
+    assert panel.pacs_server_status.text() == "KaosPACS server: not checked"
+
+
+def test_pacs_panel_refresh_checks_kaospacs_health(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    calls = []
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "check_kaospacs_health",
+        lambda settings: calls.append(settings) or True,
+    )
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    panel.refresh_panel()
+
+    assert len(calls) == 1
+    assert panel.pacs_server_status.text() == "KaosPACS server: healthy"
+
+
 def test_flu_panel_can_load_week_without_backend() -> None:
     _app()
 

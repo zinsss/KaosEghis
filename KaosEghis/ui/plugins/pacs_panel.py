@@ -18,6 +18,10 @@ from KaosEghis.db.repositories import (
     list_pacs_worklist_items,
     update_pacs_worklist_status,
 )
+from KaosEghis.core.kaospacs_client import (
+    check_kaospacs_health,
+    sync_local_worklist_to_kaospacs,
+)
 from KaosEghis.core.pacs_polling import poll_eghis_image_orders_into_local_worklist
 
 
@@ -42,7 +46,7 @@ class PacsPanel(QWidget):
         title = QLabel("PACS Worklist")
         title.setObjectName("pageTitle")
         self.eghis_db_status = QLabel("Eghis DB: not connected")
-        self.pacs_server_status = QLabel("KaosPACS server: unknown")
+        self.pacs_server_status = QLabel("KaosPACS server: not checked")
         self.polling_status = QLabel("Polling status: stopped")
 
         status_row = QHBoxLayout()
@@ -71,9 +75,11 @@ class PacsPanel(QWidget):
         self.filter_bar.addStretch()
 
         refresh_button = QPushButton("Refresh")
-        refresh_button.clicked.connect(self.refresh_rows)
+        refresh_button.clicked.connect(self.refresh_panel)
         poll_button = QPushButton("Poll now")
         poll_button.clicked.connect(self.poll_now)
+        sync_button = QPushButton("Sync to KaosPACS")
+        sync_button.clicked.connect(self.sync_to_kaospacs)
         manual_insert_button = QPushButton("Manual insert")
         manual_insert_button.clicked.connect(self.manual_insert_row)
         delete_button = QPushButton("Delete / Cancel selected")
@@ -82,6 +88,7 @@ class PacsPanel(QWidget):
         action_row = QHBoxLayout()
         action_row.addWidget(refresh_button)
         action_row.addWidget(poll_button)
+        action_row.addWidget(sync_button)
         action_row.addWidget(manual_insert_button)
         action_row.addWidget(delete_button)
         action_row.addStretch()
@@ -103,7 +110,21 @@ class PacsPanel(QWidget):
 
     def _set_db_labels(self) -> None:
         self.eghis_db_status.setText("Eghis DB: local sqlite")
-        self.pacs_server_status.setText("KaosPACS server: not connected")
+        initialize_database(self._db_path)
+        self.pacs_server_status.setText("KaosPACS server: not checked")
+
+    def _refresh_kaospacs_status(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+        try:
+            healthy = check_kaospacs_health(settings)
+        except RuntimeError:
+            healthy = False
+        if healthy:
+            self.pacs_server_status.setText("KaosPACS server: healthy")
+        else:
+            self.pacs_server_status.setText("KaosPACS server: unavailable")
 
     def _make_filter_handler(self, status: str):
         def handler() -> None:
@@ -136,11 +157,16 @@ class PacsPanel(QWidget):
 
         self.worklist_table.resizeColumnsToContents()
 
+    def refresh_panel(self) -> None:
+        self._refresh_kaospacs_status()
+        self.refresh_rows()
+
     def poll_now(self) -> None:
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
 
+        self._refresh_kaospacs_status()
         result = poll_eghis_image_orders_into_local_worklist(settings, self._db_path)
         self.refresh_rows()
         if result.message is not None:
@@ -149,6 +175,18 @@ class PacsPanel(QWidget):
         self.polling_status.setText(
             "Polling status: "
             f"inserted={result.inserted}, updated={result.updated}, skipped={result.skipped}"
+        )
+
+    def sync_to_kaospacs(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+        self._refresh_kaospacs_status()
+        result = sync_local_worklist_to_kaospacs(settings, self._db_path)
+        self.refresh_rows()
+        self.polling_status.setText(
+            "KaosPACS sync: "
+            f"sent={result.sent}, cancelled={result.cancelled}, errors={result.errors}, skipped={result.skipped}"
         )
 
     def manual_insert_row(self) -> None:

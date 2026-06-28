@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS pacs_worklist_items (
     accession_or_order_id TEXT,
     source TEXT NOT NULL DEFAULT 'manual',
     error_message TEXT,
+    kaospacs_mwl_status TEXT NOT NULL DEFAULT 'not_sent',
+    kaospacs_mwl_last_synced_at TEXT,
+    kaospacs_mwl_error TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
