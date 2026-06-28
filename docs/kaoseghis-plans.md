@@ -70,6 +70,7 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - keep PR documentation and repo docs current
 - stabilize PACS read path and cancellation semantics
 - stabilize KaosPACS sync-state behavior
+- improve PACS operator visibility for sync state and manual sync safety
 - refine flu reporting UX and export/report format
 - reconcile visible UI with older tab remnants and placeholder surfaces
 

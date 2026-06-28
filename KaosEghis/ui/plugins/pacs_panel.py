@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -34,6 +35,9 @@ class PacsPanel(QWidget):
         "Modality",
         "Requested At",
         "Accession / Order ID",
+        "KaosPACS Status",
+        "Last Synced",
+        "Sync Error",
     ]
 
     def __init__(self, db_path: Path | None = None) -> None:
@@ -74,27 +78,30 @@ class PacsPanel(QWidget):
             self.filter_bar.addWidget(button)
         self.filter_bar.addStretch()
 
-        refresh_button = QPushButton("Refresh")
-        refresh_button.clicked.connect(self.refresh_panel)
-        poll_button = QPushButton("Poll now")
-        poll_button.clicked.connect(self.poll_now)
-        sync_button = QPushButton("Sync to KaosPACS")
-        sync_button.clicked.connect(self.sync_to_kaospacs)
-        manual_insert_button = QPushButton("Manual insert")
-        manual_insert_button.clicked.connect(self.manual_insert_row)
-        delete_button = QPushButton("Delete / Cancel selected")
-        delete_button.clicked.connect(self.delete_selected)
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.refresh_rows)
+        self.check_kaospacs_button = QPushButton("Check KaosPACS")
+        self.check_kaospacs_button.clicked.connect(self.check_kaospacs_connection)
+        self.poll_button = QPushButton("Poll now")
+        self.poll_button.clicked.connect(self.poll_now)
+        self.sync_button = QPushButton("Sync to KaosPACS")
+        self.sync_button.clicked.connect(self.sync_to_kaospacs)
+        self.manual_insert_button = QPushButton("Manual insert")
+        self.manual_insert_button.clicked.connect(self.manual_insert_row)
+        self.delete_button = QPushButton("Delete / Cancel selected")
+        self.delete_button.clicked.connect(self.delete_selected)
 
         action_row = QHBoxLayout()
-        action_row.addWidget(refresh_button)
-        action_row.addWidget(poll_button)
-        action_row.addWidget(sync_button)
-        action_row.addWidget(manual_insert_button)
-        action_row.addWidget(delete_button)
+        action_row.addWidget(self.refresh_button)
+        action_row.addWidget(self.check_kaospacs_button)
+        action_row.addWidget(self.poll_button)
+        action_row.addWidget(self.sync_button)
+        action_row.addWidget(self.manual_insert_button)
+        action_row.addWidget(self.delete_button)
         action_row.addStretch()
 
         footer = QLabel(
-            "Local PACS worklist only. No Eghis polling or KaosPACS push yet."
+            "Local PACS worklist. Poll from Eghis DB and sync to KaosPACS are manual only."
         )
 
         layout = QVBoxLayout(self)
@@ -133,13 +140,15 @@ class PacsPanel(QWidget):
 
         return handler
 
-    def refresh_rows(self) -> None:
+    def _load_visible_items(self) -> list[PacsWorklistItemRecord]:
         initialize_database(self._db_path)
         status_filter = None if self._active_filter == "all" else self._active_filter
 
         with connect(self._db_path) as connection:
-            items = list_pacs_worklist_items(connection, status_filter)
+            return list_pacs_worklist_items(connection, status_filter)
 
+    def refresh_rows(self) -> None:
+        items = self._load_visible_items()
         self._visible_items = items
         self.worklist_table.setRowCount(len(items))
         for row_index, item in enumerate(items):
@@ -151,22 +160,23 @@ class PacsPanel(QWidget):
                 item.modality or "",
                 item.requested_at or "",
                 item.accession_or_order_id or "",
+                item.kaospacs_mwl_status or "",
+                item.kaospacs_mwl_last_synced_at or "",
+                item.kaospacs_mwl_error or "",
             ]
             for col_index, value in enumerate(row):
                 self.worklist_table.setItem(row_index, col_index, QTableWidgetItem(value))
 
         self.worklist_table.resizeColumnsToContents()
 
-    def refresh_panel(self) -> None:
+    def check_kaospacs_connection(self) -> None:
         self._refresh_kaospacs_status()
-        self.refresh_rows()
 
     def poll_now(self) -> None:
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
 
-        self._refresh_kaospacs_status()
         result = poll_eghis_image_orders_into_local_worklist(settings, self._db_path)
         self.refresh_rows()
         if result.message is not None:
@@ -181,12 +191,22 @@ class PacsPanel(QWidget):
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
+            items = list_pacs_worklist_items(connection)
+
+        sync_summary = self._build_sync_summary(items)
+        if sync_summary["active_rows"] > 0 and not self._confirm_sync(sync_summary):
+            self.polling_status.setText("KaosPACS sync: canceled")
+            return
+
         self._refresh_kaospacs_status()
         result = sync_local_worklist_to_kaospacs(settings, self._db_path)
         self.refresh_rows()
         self.polling_status.setText(
             "KaosPACS sync: "
-            f"sent={result.sent}, cancelled={result.cancelled}, errors={result.errors}, skipped={result.skipped}"
+            f"active rows={sync_summary['active_rows']}, "
+            f"cancelled pending rows={sync_summary['cancelled_pending_rows']}, "
+            f"sent={result.sent}, cancelled={result.cancelled}, "
+            f"errors={result.errors}, skipped={result.skipped}"
         )
 
     def manual_insert_row(self) -> None:
@@ -217,3 +237,30 @@ class PacsPanel(QWidget):
             item_id = self._visible_items[row].id
             update_pacs_worklist_status(connection, item_id, "cancelled")
         self.refresh_rows()
+
+    def _build_sync_summary(self, items: list[PacsWorklistItemRecord]) -> dict[str, int]:
+        return {
+            "active_rows": sum(1 for item in items if item.status == "active"),
+            "cancelled_pending_rows": sum(
+                1
+                for item in items
+                if item.status == "cancelled" and item.kaospacs_mwl_status == "sent"
+            ),
+        }
+
+    def _confirm_sync(self, sync_summary: dict[str, int]) -> bool:
+        message = (
+            "Sync local PACS worklist to KaosPACS?\n\n"
+            f"Active rows: {sync_summary['active_rows']}\n"
+            f"Cancelled pending rows: {sync_summary['cancelled_pending_rows']}"
+        )
+        return (
+            QMessageBox.question(
+                self,
+                "Confirm KaosPACS Sync",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        )
