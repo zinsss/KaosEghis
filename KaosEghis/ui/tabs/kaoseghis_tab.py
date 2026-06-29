@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from KaosEghis.core.macro_runner import MacroRunner
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     create_item,
@@ -104,8 +105,10 @@ class MacrosPage(QWidget):
         self.add_macro_button.clicked.connect(self.add_macro)
         self.edit_macro_button = QPushButton("Edit selected macro")
         self.edit_macro_button.clicked.connect(self.edit_macro)
-        self.test_macro_button = QPushButton("Test selected macro")
-        self.test_macro_button.clicked.connect(self.test_macro)
+        self.dry_run_button = QPushButton("Dry run")
+        self.dry_run_button.clicked.connect(self.dry_run_macro)
+        self.run_macro_button = QPushButton("Run selected macro")
+        self.run_macro_button.clicked.connect(self.run_macro)
         self.delete_macro_button = QPushButton("Delete selected macro")
         self.delete_macro_button.clicked.connect(self.delete_macro)
         self.refresh_button = QPushButton("Refresh")
@@ -114,7 +117,8 @@ class MacrosPage(QWidget):
         controls = QHBoxLayout()
         controls.addWidget(self.add_macro_button)
         controls.addWidget(self.edit_macro_button)
-        controls.addWidget(self.test_macro_button)
+        controls.addWidget(self.dry_run_button)
+        controls.addWidget(self.run_macro_button)
         controls.addWidget(self.delete_macro_button)
         controls.addWidget(self.refresh_button)
         controls.addStretch()
@@ -190,15 +194,42 @@ class MacrosPage(QWidget):
         self.refresh_view()
         self.log.setPlainText("Macro updated.")
 
-    def test_macro(self) -> None:
+    def dry_run_macro(self) -> None:
         item_id = self._selected_macro_id()
         if item_id is None:
-            self.log.setPlainText("Select a macro to test.")
+            self.log.setPlainText("Select a macro to dry run.")
             return
 
-        initialize_database()
-        with connect() as connection:
-            self.log.setPlainText(_build_dry_run_output(connection, item_id))
+        result = MacroRunner().execute_macro(item_id, dry_run=True)
+        self.log.setPlainText(result.message)
+
+    def run_macro(self) -> None:
+        item_id = self._selected_macro_id()
+        if item_id is None:
+            self.log.setPlainText("Select a macro to run.")
+            return
+
+        if (
+            QMessageBox.question(
+                self,
+                "Confirm Macro Execution",
+                "Run the selected macro now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            self.log.setPlainText("Macro execution canceled.")
+            return
+
+        result = MacroRunner().execute_macro(item_id, dry_run=False)
+        lines = [
+            f"success: {_yes_no(result.success)}",
+            f"executed_steps: {result.executed_steps}",
+            f"failed_step: {result.failed_step or ''}",
+            f"message: {result.message}",
+        ]
+        self.log.setPlainText("\n".join(lines))
 
     def delete_macro(self) -> None:
         item_id = self._selected_macro_id()
