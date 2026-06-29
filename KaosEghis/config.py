@@ -13,6 +13,7 @@ class AppConfig:
     kaospacs_api_timeout_seconds: str = "5"
     pacs_auto_poll_enabled: str = "false"
     pacs_poll_interval_seconds: str = "60"
+    pacs_dry_run: str = "false"
 
 
 DEFAULT_CONFIG = AppConfig()

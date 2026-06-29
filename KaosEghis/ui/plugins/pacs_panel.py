@@ -205,6 +205,7 @@ class PacsPanel(QWidget):
         self._load_polling_settings()
         self.refresh_rows()
         self.refresh_audit()
+        self._update_startup_readiness_status()
 
     def _set_db_labels(self) -> None:
         self.eghis_db_status.setText("Eghis DB: local sqlite")
@@ -300,11 +301,11 @@ class PacsPanel(QWidget):
             self.polling_status.setText("KaosPACS sync: canceled")
             return
 
-        self._refresh_kaospacs_status()
         result = sync_local_worklist_to_kaospacs(settings, self._db_path)
         self.refresh_rows()
+        dry_run_prefix = "KaosPACS sync (DRY RUN): " if result.dry_run else "KaosPACS sync: "
         summary = (
-            "KaosPACS sync: "
+            f"{dry_run_prefix}"
             f"active rows={sync_summary['active_rows']}, "
             f"cancelled pending rows={sync_summary['cancelled_pending_rows']}, "
             f"sent={result.sent}, cancelled={result.cancelled}, "
@@ -313,9 +314,10 @@ class PacsPanel(QWidget):
         self.polling_status.setText(summary)
         self._log_audit_aggregate(
             event_type="sync",
-            summary=(
+            summary=self._prefix_dry_run_summary(
+                result.dry_run,
                 f"sent={result.sent}, cancelled={result.cancelled}, "
-                f"errors={result.errors}, skipped={result.skipped}"
+                f"errors={result.errors}, skipped={result.skipped}",
             ),
         )
         self.refresh_audit()
@@ -328,24 +330,27 @@ class PacsPanel(QWidget):
         result = reconcile_kaospacs_worklist_to_local(settings, self._db_path)
         self.refresh_rows()
         if result.message is not None:
-            self.polling_status.setText(f"KaosPACS reconcile: {result.message}")
+            prefix = "KaosPACS reconcile (DRY RUN)" if result.dry_run else "KaosPACS reconcile"
+            self.polling_status.setText(f"{prefix}: {result.message}")
             self._log_audit_error(
                 summary="reconcile failed",
                 error_message=result.message,
+                dry_run=result.dry_run,
             )
             self.refresh_audit()
             return
         summary = (
-            "KaosPACS reconcile: "
+            f"{'KaosPACS reconcile (DRY RUN): ' if result.dry_run else 'KaosPACS reconcile: '}"
             f"done={result.done}, cancelled={result.cancelled}, "
             f"skipped={result.skipped}, errors={result.errors}"
         )
         self.polling_status.setText(summary)
         self._log_audit_aggregate(
             event_type="reconcile",
-            summary=(
+            summary=self._prefix_dry_run_summary(
+                result.dry_run,
                 f"done={result.done}, cancelled={result.cancelled}, "
-                f"skipped={result.skipped}, errors={result.errors}"
+                f"skipped={result.skipped}, errors={result.errors}",
             ),
         )
         self.refresh_audit()
@@ -574,6 +579,31 @@ class PacsPanel(QWidget):
             return cls.MIN_POLL_INTERVAL_SECONDS
         return interval
 
+    def _update_startup_readiness_status(self) -> None:
+        readiness = self._build_startup_readiness()
+        self.polling_status.setText(readiness)
+
+    def _build_startup_readiness(self) -> str:
+        try:
+            initialize_database(self._db_path)
+            with connect(self._db_path) as connection:
+                settings = get_settings(connection)
+        except Exception:
+            return "Startup readiness: configuration unavailable"
+
+        auto_poll_enabled = self._parse_auto_poll_enabled(
+            settings.get("pacs_auto_poll_enabled")
+        )
+        interval_seconds = self._normalize_poll_interval(
+            settings.get("pacs_poll_interval_seconds")
+        )
+        dry_run_enabled = (settings.get("pacs_dry_run") or "").strip().lower() == "true"
+        return (
+            "Startup readiness: sqlite=ok, settings=ok, "
+            f"auto_poll={'on' if auto_poll_enabled else 'off'}, "
+            f"interval={interval_seconds}s, dry_run={'on' if dry_run_enabled else 'off'}"
+        )
+
     def clear_audit(self) -> None:
         confirmed = QMessageBox.question(
             self,
@@ -615,13 +645,19 @@ class PacsPanel(QWidget):
                 summary=self._sanitize_audit_summary(summary),
             )
 
-    def _log_audit_error(self, *, summary: str, error_message: str) -> None:
+    def _log_audit_error(
+        self,
+        *,
+        summary: str,
+        error_message: str,
+        dry_run: bool = False,
+    ) -> None:
         sanitized_error = self._sanitize_audit_error(error_message)
         with connect(self._db_path) as connection:
             create_pacs_audit_event(
                 connection,
                 event_type="error",
-                summary=sanitized_error,
+                summary=self._prefix_dry_run_summary(dry_run, sanitized_error),
                 error_message=sanitized_error,
             )
 
@@ -695,3 +731,9 @@ class PacsPanel(QWidget):
         ):
             return "unavailable"
         return "unknown error"
+
+    @staticmethod
+    def _prefix_dry_run_summary(dry_run: bool, summary: str) -> str:
+        if dry_run:
+            return f"DRY RUN - {summary}"
+        return summary

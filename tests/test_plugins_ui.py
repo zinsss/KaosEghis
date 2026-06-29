@@ -150,7 +150,7 @@ def test_pacs_panel_startup_does_not_call_poll_sync_or_health(monkeypatch, tmp_p
 
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
 
-    calls = {"health": 0, "poll": 0, "sync": 0}
+    calls = {"health": 0, "poll": 0, "sync": 0, "reconcile": 0}
     monkeypatch.setattr(
         pacs_panel_module,
         "check_kaospacs_health",
@@ -166,10 +166,16 @@ def test_pacs_panel_startup_does_not_call_poll_sync_or_health(monkeypatch, tmp_p
         "sync_local_worklist_to_kaospacs",
         lambda settings, db_path: calls.__setitem__("sync", calls["sync"] + 1),
     )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "reconcile_kaospacs_worklist_to_local",
+        lambda settings, db_path: calls.__setitem__("reconcile", calls["reconcile"] + 1),
+    )
 
-    pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
 
-    assert calls == {"health": 0, "poll": 0, "sync": 0}
+    assert calls == {"health": 0, "poll": 0, "sync": 0, "reconcile": 0}
+    assert panel.polling_status.text().startswith("Startup readiness: sqlite=ok, settings=ok")
 
 
 def test_pacs_panel_check_button_checks_kaospacs_health(monkeypatch, tmp_path) -> None:
@@ -511,7 +517,7 @@ def test_pacs_panel_sync_to_kaospacs_requires_confirmation_and_shows_summary(
     panel = pacs_panel_module.PacsPanel(db_path=db_path)
     panel.sync_button.click()
 
-    assert calls == {"health": 1, "poll": 0, "sync": 1}
+    assert calls == {"health": 0, "poll": 0, "sync": 1}
     assert (
         panel.polling_status.text()
         == "KaosPACS sync: active rows=1, cancelled pending rows=1, sent=1, cancelled=1, errors=0, skipped=0"

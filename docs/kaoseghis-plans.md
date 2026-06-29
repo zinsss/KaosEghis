@@ -55,6 +55,7 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - read-only PACS PostgreSQL adapter
 - KaosPACS local API bridge
 - weekly age/practice-count reporting
+- PACS production-readiness hardening
 
 ## In-Progress or Partially Integrated Areas
 
@@ -68,14 +69,8 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 ### High Priority
 
 - keep PR documentation and repo docs current
-- stabilize PACS read path and cancellation semantics
-- stabilize KaosPACS sync-state behavior
-- improve PACS operator visibility for sync state and manual sync safety
-- improve PACS local row editing ergonomics without widening sync scope
-- add optional PACS UI-process auto polling while keeping KaosPACS sync manual
-- add manual KaosPACS reconciliation without automatic state changes
-- harden PACS settings UX and validation in-app
-- add local PACS audit visibility without storing sensitive clinical payloads
+- keep PACS deployment checklist and production-readiness docs current
+- keep PACS dry-run behavior explicit and safe
 - refine flu reporting UX and export/report format
 - reconcile visible UI with older tab remnants and placeholder surfaces
 

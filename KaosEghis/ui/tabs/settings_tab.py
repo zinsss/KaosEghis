@@ -26,6 +26,7 @@ class SettingsTab(QWidget):
         "kaospacs_api_timeout_seconds": DEFAULT_SETTINGS["kaospacs_api_timeout_seconds"],
         "pacs_auto_poll_enabled": DEFAULT_SETTINGS["pacs_auto_poll_enabled"],
         "pacs_poll_interval_seconds": DEFAULT_SETTINGS["pacs_poll_interval_seconds"],
+        "pacs_dry_run": DEFAULT_SETTINGS["pacs_dry_run"],
     }
 
     def __init__(self, db_path: Path | None = None) -> None:
@@ -42,6 +43,7 @@ class SettingsTab(QWidget):
         self.kaospacs_api_base_url = QLineEdit()
         self.kaospacs_api_timeout_seconds = QLineEdit()
         self.pacs_auto_poll_enabled = QCheckBox("Enable PACS auto poll")
+        self.pacs_dry_run = QCheckBox("Enable PACS dry run")
         self.pacs_poll_interval_seconds = QSpinBox()
         self.pacs_poll_interval_seconds.setMinimum(15)
         self.pacs_poll_interval_seconds.setMaximum(86400)
@@ -50,7 +52,8 @@ class SettingsTab(QWidget):
         self.pacs_info = QLabel(
             "PACS settings control Eghis DB polling and KaosPACS API access. "
             "Sync remains manual unless auto-poll is enabled; auto-poll only polls "
-            "Eghis into local SQLite and never syncs to KaosPACS."
+            "Eghis into local SQLite and never syncs to KaosPACS. "
+            "PACS dry run keeps polling live but simulates sync and reconcile."
         )
         self.toggle_connection_string_button = QPushButton("Show")
         self.toggle_connection_string_button.clicked.connect(
@@ -86,6 +89,7 @@ class SettingsTab(QWidget):
         pacs_form.addRow("KaosPACS API base URL", self.kaospacs_api_base_url)
         pacs_form.addRow("KaosPACS API timeout seconds", self.kaospacs_api_timeout_seconds)
         pacs_form.addRow(self.pacs_auto_poll_enabled)
+        pacs_form.addRow(self.pacs_dry_run)
         pacs_form.addRow("PACS poll interval seconds", self.pacs_poll_interval_seconds)
 
         self.save_pacs_button = QPushButton("Save PACS settings")
@@ -135,6 +139,9 @@ class SettingsTab(QWidget):
         self.pacs_auto_poll_enabled.setChecked(
             settings["pacs_auto_poll_enabled"].strip().lower() == "true"
         )
+        self.pacs_dry_run.setChecked(
+            settings["pacs_dry_run"].strip().lower() == "true"
+        )
         self.pacs_poll_interval_seconds.setValue(
             self._normalize_poll_interval(settings["pacs_poll_interval_seconds"])
         )
@@ -177,6 +184,7 @@ class SettingsTab(QWidget):
             self.PACS_DEFAULTS["kaospacs_api_timeout_seconds"]
         )
         self.pacs_auto_poll_enabled.setChecked(False)
+        self.pacs_dry_run.setChecked(False)
         self.pacs_poll_interval_seconds.setValue(
             self._normalize_poll_interval(
                 self.PACS_DEFAULTS["pacs_poll_interval_seconds"]
@@ -219,6 +227,7 @@ class SettingsTab(QWidget):
             "kaospacs_api_base_url": self.kaospacs_api_base_url.text().strip(),
             "kaospacs_api_timeout_seconds": normalized_timeout,
             "pacs_auto_poll_enabled": "true" if self.pacs_auto_poll_enabled.isChecked() else "false",
+            "pacs_dry_run": "true" if self.pacs_dry_run.isChecked() else "false",
             "pacs_poll_interval_seconds": str(
                 self._normalize_poll_interval(self.pacs_poll_interval_seconds.value())
             ),
