@@ -15,6 +15,7 @@ Current scope:
 - read-only Eghis PostgreSQL polling
 - local SQLite worklist persistence
 - local KaosPACS API bridge
+- PACS settings UI in app
 - operator-facing worklist panel
 
 Explicitly not in current scope:
@@ -140,6 +141,15 @@ Additional PACS polling settings:
 - `pacs_auto_poll_enabled`
 - `pacs_poll_interval_seconds`
 
+Editable PACS settings in UI:
+
+- `eghis_db_connection_string`
+- `eghis_db_image_study_query`
+- `kaospacs_api_base_url`
+- `kaospacs_api_timeout_seconds`
+- `pacs_auto_poll_enabled`
+- `pacs_poll_interval_seconds`
+
 This is the intended local persistence boundary.
 
 ## Privacy Rules
@@ -168,6 +178,16 @@ Configured settings:
 
 - `kaospacs_api_base_url`
 - `kaospacs_api_timeout_seconds`
+
+Settings UI rules:
+
+- connection string is hidden by default
+- optional show/hide toggle
+- KaosPACS connection test uses `GET /health` only
+- settings test does not poll Eghis DB
+- settings test does not sync worklist
+- settings test does not reconcile worklist
+- settings UI must not display the connection string in status labels
 
 Current API boundary:
 
@@ -296,6 +316,7 @@ Current mapping rule:
 
 - local PACS worklist table
 - repository CRUD
+- PACS settings UI
 - PACS panel
 - manual PACS row create/edit dialog
 - optional PACS auto-poll timer in panel process
