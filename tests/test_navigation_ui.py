@@ -24,6 +24,8 @@ def test_main_window_top_level_tabs_are_exact() -> None:
         "PACS",
         "Flu-Report",
     ]
+    assert 520 <= window.width() <= 680
+    assert 760 <= window.height() <= 900
 
 
 def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
