@@ -612,14 +612,86 @@ class PacsPanel(QWidget):
             create_pacs_audit_event(
                 connection,
                 event_type=event_type,
-                summary=summary,
+                summary=self._sanitize_audit_summary(summary),
             )
 
     def _log_audit_error(self, *, summary: str, error_message: str) -> None:
+        sanitized_error = self._sanitize_audit_error(error_message)
         with connect(self._db_path) as connection:
             create_pacs_audit_event(
                 connection,
                 event_type="error",
-                summary=summary,
-                error_message=error_message,
+                summary=sanitized_error,
+                error_message=sanitized_error,
             )
+
+    @staticmethod
+    def _sanitize_audit_summary(summary: str) -> str:
+        normalized = " ".join((summary or "").split())
+        if not normalized:
+            return "unknown error"
+
+        if "=" in normalized and all(
+            token.strip() and "=" in token for token in normalized.split(",")
+        ):
+            return normalized
+
+        lowered = normalized.lower()
+        safe_phrases = {
+            "manual local worklist row created",
+            "manual local worklist row updated",
+            "selected local worklist row marked cancelled",
+            "skipped overlap",
+        }
+        if lowered in safe_phrases:
+            return lowered
+
+        return PacsPanel._sanitize_audit_error(normalized)
+
+    @staticmethod
+    def _sanitize_audit_error(error_message: str | None) -> str:
+        lowered = (error_message or "").strip().lower()
+        if not lowered:
+            return "unknown error"
+        if "timeout" in lowered or "timed out" in lowered:
+            return "timeout"
+        if any(
+            token in lowered
+            for token in (
+                "connection",
+                "connect",
+                "refused",
+                "unreachable",
+                "dns",
+                "network",
+                "socket",
+            )
+        ):
+            return "connection failed"
+        if any(
+            token in lowered
+            for token in (
+                "invalid payload",
+                "invalid json",
+                "bad payload",
+                "missing field",
+                "malformed",
+                "schema",
+                "decode",
+                "parse",
+            )
+        ):
+            return "invalid payload"
+        if any(
+            token in lowered
+            for token in (
+                "unavailable",
+                "not available",
+                "query rejected",
+                "driver missing",
+                "not configured",
+                "unsupported",
+            )
+        ):
+            return "unavailable"
+        return "unknown error"

@@ -885,6 +885,70 @@ def test_pacs_panel_reconcile_creates_aggregate_audit_only(monkeypatch, tmp_path
     assert audit_rows[0].summary == "done=1, cancelled=2, skipped=3, errors=0"
 
 
+def test_pacs_panel_audit_error_is_sanitized_before_storage(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.kaospacs_client import KaosPacsReconcileResult
+    from KaosEghis.db.database import connect
+    from KaosEghis.db.repositories import list_pacs_audit_events
+
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "reconcile_kaospacs_worklist_to_local",
+        lambda settings, db_path: KaosPacsReconcileResult(
+            done=0,
+            cancelled=0,
+            skipped=0,
+            errors=1,
+            message="Connection refused for patient Alice during payload parse failure",
+        ),
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.reconcile_button.click()
+
+    with connect(db_path) as connection:
+        audit_rows = list_pacs_audit_events(connection)
+
+    assert audit_rows[0].event_type == "error"
+    assert audit_rows[0].summary == "connection failed"
+    assert audit_rows[0].error_message == "connection failed"
+    assert "Alice" not in audit_rows[0].error_message
+
+
+def test_pacs_panel_poll_message_is_sanitized_before_storage(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.pacs_polling import PollResult
+    from KaosEghis.db.database import connect
+    from KaosEghis.db.repositories import list_pacs_audit_events
+
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda _settings, _db_path: PollResult(
+            inserted=0,
+            updated=0,
+            skipped=0,
+            message="Query rejected after payload parse error for Sample Patient",
+        ),
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.poll_now()
+
+    with connect(db_path) as connection:
+        audit_rows = list_pacs_audit_events(connection)
+
+    assert audit_rows[0].event_type == "poll"
+    assert audit_rows[0].summary == "invalid payload"
+    assert "Sample Patient" not in audit_rows[0].summary
+
+
 def test_pacs_panel_copy_audit_summary_excludes_patient_name(monkeypatch, tmp_path) -> None:
     _app()
 
@@ -914,6 +978,33 @@ def test_pacs_panel_copy_audit_summary_excludes_patient_name(monkeypatch, tmp_pa
 
     assert "Alice" not in copied["text"]
     assert "ACC-1" in copied["text"]
+
+
+def test_pacs_panel_copy_audit_summary_uses_sanitized_error_text(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.db.database import connect, initialize_database
+
+    copied = {}
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "copy_text",
+        lambda text: copied.setdefault("text", text),
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel._log_audit_error(
+        summary="Connection refused for patient Alice",
+        error_message="Timeout while connecting to Alice endpoint",
+    )
+    panel.refresh_audit()
+    panel.copy_audit_summary()
+
+    assert "Alice" not in copied["text"]
+    assert "timeout" in copied["text"]
 
 
 def test_pacs_panel_clear_audit_does_not_delete_worklist_items(monkeypatch, tmp_path) -> None:
