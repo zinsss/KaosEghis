@@ -53,6 +53,32 @@ def test_pacs_panel_has_required_worklist_columns() -> None:
     assert "PACS Worklist" in [label.text() for label in panel.findChildren(QLabel)]
 
 
+def test_pacs_panel_default_auto_poll_setting_is_false(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    panel = PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+
+    assert panel.auto_poll_checkbox.isChecked() is False
+    assert panel.interval_spinbox.value() == 60
+    assert panel._poll_timer.isActive() is False
+
+
+def test_pacs_panel_invalid_interval_falls_back_to_60() -> None:
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    assert PacsPanel._normalize_poll_interval("invalid") == 60
+    assert PacsPanel._normalize_poll_interval(None) == 60
+
+
+def test_pacs_panel_interval_below_15_is_clamped_to_15() -> None:
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    assert PacsPanel._normalize_poll_interval("1") == 15
+    assert PacsPanel._normalize_poll_interval(14) == 15
+
+
 def test_pacs_worklist_dialog_instantiates() -> None:
     _app()
 
@@ -117,6 +143,33 @@ def test_pacs_panel_does_not_check_kaospacs_health_on_init(monkeypatch, tmp_path
     assert panel.pacs_server_status.text() == "KaosPACS server: not checked"
 
 
+def test_pacs_panel_startup_does_not_call_poll_sync_or_health(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    calls = {"health": 0, "poll": 0, "sync": 0}
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "check_kaospacs_health",
+        lambda settings: calls.__setitem__("health", calls["health"] + 1) or True,
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1),
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "sync_local_worklist_to_kaospacs",
+        lambda settings, db_path: calls.__setitem__("sync", calls["sync"] + 1),
+    )
+
+    pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+
+    assert calls == {"health": 0, "poll": 0, "sync": 0}
+
+
 def test_pacs_panel_check_button_checks_kaospacs_health(monkeypatch, tmp_path) -> None:
     _app()
 
@@ -164,6 +217,55 @@ def test_pacs_panel_refresh_stays_local_only(monkeypatch, tmp_path) -> None:
     assert calls == {"health": 0, "poll": 0, "sync": 0}
 
 
+def test_pacs_panel_apply_settings_persists_values(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect
+    from KaosEghis.db.repositories import get_settings
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    panel = PacsPanel(db_path=db_path)
+    panel.auto_poll_checkbox.setChecked(True)
+    panel.interval_spinbox.setValue(45)
+    panel.apply_polling_settings()
+
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+
+    assert settings["pacs_auto_poll_enabled"] == "true"
+    assert settings["pacs_poll_interval_seconds"] == "45"
+
+
+def test_pacs_panel_timer_starts_only_when_enabled(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    panel = PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    panel.auto_poll_checkbox.setChecked(True)
+    panel.interval_spinbox.setValue(45)
+    panel.apply_polling_settings()
+
+    assert panel._poll_timer.isActive() is True
+    assert panel._poll_timer.interval() == 45000
+
+
+def test_pacs_panel_timer_stops_when_disabled(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    panel = PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    panel.auto_poll_checkbox.setChecked(True)
+    panel.interval_spinbox.setValue(45)
+    panel.apply_polling_settings()
+    panel.auto_poll_checkbox.setChecked(False)
+    panel.apply_polling_settings()
+
+    assert panel._poll_timer.isActive() is False
+
+
 def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
     _app()
 
@@ -193,6 +295,123 @@ def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
 
     assert calls == {"health": 0, "poll": 1, "sync": 0}
     assert panel.polling_status.text() == "Polling status: inserted=1, updated=0, skipped=0"
+    assert panel.last_poll_time_label.text() != "Last poll time: never"
+    assert panel.last_poll_result_label.text() == "Last poll result: inserted=1, updated=0, skipped=0"
+
+
+def test_pacs_panel_timer_tick_calls_poll_not_sync(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.pacs_polling import PollResult
+
+    calls = {"poll": 0, "sync": 0}
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1)
+        or PollResult(inserted=0, updated=0, skipped=0),
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "sync_local_worklist_to_kaospacs",
+        lambda settings, db_path: calls.__setitem__("sync", calls["sync"] + 1),
+    )
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    panel._handle_poll_timer_tick()
+
+    assert calls == {"poll": 1, "sync": 0}
+
+
+def test_pacs_panel_overlapping_poll_is_skipped(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    calls = {"poll": 0}
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1),
+    )
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    panel._poll_in_progress = True
+    panel._handle_poll_timer_tick()
+
+    assert calls["poll"] == 0
+    assert panel.last_poll_result_label.text() == "Last poll result: skipped overlap"
+    assert panel.polling_status.text() == "Polling status: skipped overlap"
+
+
+def test_pacs_panel_saved_auto_poll_true_starts_timer_without_polling(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "pacs_auto_poll_enabled": "true",
+                "pacs_poll_interval_seconds": "45",
+            },
+        )
+
+    calls = {"poll": 0, "sync": 0, "health": 0}
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1),
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "sync_local_worklist_to_kaospacs",
+        lambda settings, db_path: calls.__setitem__("sync", calls["sync"] + 1),
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "check_kaospacs_health",
+        lambda settings: calls.__setitem__("health", calls["health"] + 1) or True,
+    )
+
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+
+    assert panel._poll_timer.isActive() is True
+    assert panel._poll_timer.interval() == 45000
+    assert calls == {"poll": 0, "sync": 0, "health": 0}
+
+
+def test_pacs_panel_saved_invalid_interval_falls_back_to_60_on_startup(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "pacs_auto_poll_enabled": "true",
+                "pacs_poll_interval_seconds": "abc",
+            },
+        )
+
+    panel = PacsPanel(db_path=db_path)
+
+    assert panel.interval_spinbox.value() == 60
+    assert panel._poll_timer.isActive() is True
+    assert panel._poll_timer.interval() == 60000
 
 
 def test_pacs_panel_sync_to_kaospacs_requires_confirmation_and_shows_summary(

@@ -1,6 +1,6 @@
 # KaosEghis Plans
 
-Last updated: 2026-06-28
+Last updated: 2026-06-29
 
 ## Current Working State
 
@@ -72,6 +72,7 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - stabilize KaosPACS sync-state behavior
 - improve PACS operator visibility for sync state and manual sync safety
 - improve PACS local row editing ergonomics without widening sync scope
+- add optional PACS UI-process auto polling while keeping KaosPACS sync manual
 - refine flu reporting UX and export/report format
 - reconcile visible UI with older tab remnants and placeholder surfaces
 

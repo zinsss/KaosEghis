@@ -12,6 +12,8 @@ DEFAULT_SETTINGS = {
     "eghis_db_image_study_query": "",
     "kaospacs_api_base_url": "http://127.0.0.1:8055",
     "kaospacs_api_timeout_seconds": "5",
+    "pacs_auto_poll_enabled": "false",
+    "pacs_poll_interval_seconds": "60",
 }
 
 

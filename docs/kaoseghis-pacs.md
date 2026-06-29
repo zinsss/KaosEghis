@@ -1,6 +1,6 @@
 # KaosEghis PACS
 
-Last updated: 2026-06-28
+Last updated: 2026-06-29
 
 Project name: `KaosEghis-pacs`
 
@@ -34,12 +34,14 @@ Current behaviors:
 - refresh local rows
 - explicit KaosPACS health check
 - poll now
+- optional UI-process auto poll timer
 - sync to KaosPACS
 - manual insert via dialog
 - edit selected local row via dialog
 - cancel selected local row
 - filter by status
 - show per-row KaosPACS sync state columns
+- show last poll time and result
 
 Current PACS table columns:
 
@@ -62,6 +64,26 @@ Current button separation:
 - `Sync to KaosPACS` -> local SQLite to KaosPACS only
 - `Manual insert` -> local SQLite create only
 - `Edit selected` -> local SQLite update only
+- `Apply polling settings` -> save panel-local auto-poll settings and start/stop timer
+
+Polling controls:
+
+- `Auto poll`
+- `Interval seconds`
+- `Apply polling settings`
+- `Last poll time`
+- `Last poll result`
+
+Auto-poll rules:
+
+- off by default
+- persisted in app settings
+- minimum interval `15` seconds
+- invalid or missing interval falls back to `60`
+- timer runs only inside the open PACS panel UI process
+- timer never syncs to KaosPACS
+- timer never checks KaosPACS health automatically
+- timer skips overlapping polls
 
 Manual dialog fields:
 
@@ -110,6 +132,11 @@ Additional local bridge state:
 - `kaospacs_mwl_status`
 - `kaospacs_mwl_last_synced_at`
 - `kaospacs_mwl_error`
+
+Additional PACS polling settings:
+
+- `pacs_auto_poll_enabled`
+- `pacs_poll_interval_seconds`
 
 This is the intended local persistence boundary.
 
@@ -254,6 +281,7 @@ Current mapping rule:
 - repository CRUD
 - PACS panel
 - manual PACS row create/edit dialog
+- optional PACS auto-poll timer in panel process
 - read-only PostgreSQL adapter
 - cancellation-aware update behavior
 - local KaosPACS API bridge
@@ -263,7 +291,7 @@ Current mapping rule:
 
 - MWL write/export
 - DICOM service integration
-- scheduler-driven polling
+- scheduler-driven polling outside the running UI process
 
 ## Maintenance Triggers
 
