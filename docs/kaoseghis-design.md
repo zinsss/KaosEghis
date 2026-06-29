@@ -1,6 +1,6 @@
 # KaosEghis Design
 
-Last updated: 2026-06-28
+Last updated: 2026-06-29
 
 ## Purpose
 
@@ -150,6 +150,14 @@ Examples of data explicitly not intended for long-term local storage:
 - EMR notes
 - insurance details
 - raw Eghis DB rows
+- raw KaosPACS payloads
+
+For KaosEghis-pacs specifically:
+
+- Eghis DB access is read-only
+- local worklist is minimum necessary only
+- local PACS audit excludes patient names and raw exception text
+- KaosEghis-pacs talks to Orthanc/MWL/DICOM only through KaosPACS, never directly
 
 ### Incremental Delivery
 

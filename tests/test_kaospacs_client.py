@@ -309,6 +309,69 @@ def test_cancelled_never_sent_row_is_not_sent(tmp_path, monkeypatch) -> None:
     assert loaded.kaospacs_mwl_status == "not_sent"
 
 
+def test_dry_run_sync_makes_no_api_changes(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    import KaosEghis.core.kaospacs_client as client
+    from KaosEghis.db.repositories import update_pacs_worklist_sync_state
+
+    with connect(db_path) as connection:
+        active_item = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            accession_or_order_id="ACC-DRY-1",
+            study="Chest",
+            modality="CR",
+        )
+        cancelled_item = create_pacs_worklist_item(
+            connection,
+            status="cancelled",
+            patient_name="Bob",
+            accession_or_order_id="ACC-DRY-2",
+            study="Spine",
+            modality="MR",
+        )
+        update_pacs_worklist_sync_state(
+            connection,
+            cancelled_item.id,
+            kaospacs_mwl_status="sent",
+        )
+
+    calls = {"push": 0, "cancel": 0}
+    monkeypatch.setattr(
+        client,
+        "push_kaospacs_worklist",
+        lambda settings, entries: calls.__setitem__("push", calls["push"] + 1),
+    )
+    monkeypatch.setattr(
+        client,
+        "cancel_kaospacs_order",
+        lambda settings, accession_number: calls.__setitem__("cancel", calls["cancel"] + 1),
+    )
+
+    result = sync_local_worklist_to_kaospacs(
+        {
+            "kaospacs_api_base_url": "http://127.0.0.1:8055",
+            "pacs_dry_run": "true",
+        },
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        loaded_active = get_pacs_worklist_item(connection, active_item.id)
+        loaded_cancelled = get_pacs_worklist_item(connection, cancelled_item.id)
+
+    assert result.dry_run is True
+    assert result.sent == 1
+    assert result.cancelled == 1
+    assert calls == {"push": 0, "cancel": 0}
+    assert loaded_active is not None
+    assert loaded_cancelled is not None
+    assert loaded_active.kaospacs_mwl_status == "not_sent"
+    assert loaded_cancelled.kaospacs_mwl_status == "sent"
+
+
 def test_reconcile_completed_kaospacs_row_marks_local_done(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
@@ -480,3 +543,58 @@ def test_reconcile_does_not_create_new_local_rows_from_kaospacs(tmp_path, monkey
 
     assert result.skipped == 2
     assert rows == 0
+
+
+def test_dry_run_reconcile_makes_no_status_changes(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    import KaosEghis.core.kaospacs_client as client
+
+    with connect(db_path) as connection:
+        done_candidate = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            accession_or_order_id="ACC-DRY-R1",
+            study="Chest",
+            modality="CR",
+        )
+        cancelled_candidate = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Bob",
+            accession_or_order_id="ACC-DRY-R2",
+            study="Spine",
+            modality="MR",
+        )
+
+    monkeypatch.setattr(
+        client,
+        "fetch_kaospacs_worklist",
+        lambda settings: {
+            "entries": [
+                {"AccessionNumber": "ACC-DRY-R1", "CompletedAt": "2026-06-29T12:00:00Z"},
+                {"RequestedProcedureID": "ACC-DRY-R2", "CancelledAt": "2026-06-29T12:10:00Z"},
+            ]
+        },
+    )
+
+    result = reconcile_kaospacs_worklist_to_local(
+        {
+            "kaospacs_api_base_url": "http://127.0.0.1:8055",
+            "pacs_dry_run": "true",
+        },
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        loaded_done_candidate = get_pacs_worklist_item(connection, done_candidate.id)
+        loaded_cancelled_candidate = get_pacs_worklist_item(connection, cancelled_candidate.id)
+
+    assert result.dry_run is True
+    assert result.done == 1
+    assert result.cancelled == 1
+    assert loaded_done_candidate is not None
+    assert loaded_cancelled_candidate is not None
+    assert loaded_done_candidate.status == "active"
+    assert loaded_cancelled_candidate.status == "active"

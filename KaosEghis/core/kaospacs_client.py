@@ -22,6 +22,7 @@ class KaosPacsSyncResult:
     errors: int
     skipped: int
     message: str | None = None
+    dry_run: bool = False
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class KaosPacsReconcileResult:
     skipped: int
     errors: int
     message: str | None = None
+    dry_run: bool = False
 
 
 def check_kaospacs_health(settings: dict[str, str]) -> bool:
@@ -83,6 +85,7 @@ def sync_local_worklist_to_kaospacs(
     active_entries: list[dict] = []
     active_items: list[PacsWorklistItemRecord] = []
     cancelled_items: list[PacsWorklistItemRecord] = []
+    dry_run = _is_pacs_dry_run(settings)
 
     for item in items:
         if not item.accession_or_order_id:
@@ -96,6 +99,15 @@ def sync_local_worklist_to_kaospacs(
                 cancelled_items.append(item)
             else:
                 skipped += 1
+
+    if dry_run:
+        return KaosPacsSyncResult(
+            sent=len(active_items),
+            cancelled=len(cancelled_items),
+            errors=errors,
+            skipped=skipped,
+            dry_run=True,
+        )
 
     if active_entries:
         try:
@@ -149,6 +161,7 @@ def sync_local_worklist_to_kaospacs(
         cancelled=cancelled,
         errors=errors,
         skipped=skipped,
+        dry_run=False,
     )
 
 
@@ -172,6 +185,7 @@ def reconcile_kaospacs_worklist_to_local(
             skipped=0,
             errors=1,
             message=str(exc),
+            dry_run=_is_pacs_dry_run(settings),
         )
 
     entries = payload.get("entries", [])
@@ -182,8 +196,10 @@ def reconcile_kaospacs_worklist_to_local(
             skipped=0,
             errors=1,
             message="invalid worklist payload",
+            dry_run=_is_pacs_dry_run(settings),
         )
 
+    dry_run = _is_pacs_dry_run(settings)
     with connect(db_file) as connection:
         items = list_pacs_worklist_items(connection)
         item_by_identifier = _index_local_items(items)
@@ -205,7 +221,9 @@ def reconcile_kaospacs_worklist_to_local(
             remote_status = _reconciliation_status(entry)
             if remote_status == "done":
                 if local_item.status != "done":
-                    if _update_local_status_for_reconciliation(connection, local_item.id, "done"):
+                    if dry_run:
+                        done += 1
+                    elif _update_local_status_for_reconciliation(connection, local_item.id, "done"):
                         done += 1
                     else:
                         errors += 1
@@ -213,7 +231,9 @@ def reconcile_kaospacs_worklist_to_local(
                     skipped += 1
             elif remote_status == "cancelled":
                 if local_item.status != "cancelled":
-                    if _update_local_status_for_reconciliation(connection, local_item.id, "cancelled"):
+                    if dry_run:
+                        cancelled += 1
+                    elif _update_local_status_for_reconciliation(connection, local_item.id, "cancelled"):
                         cancelled += 1
                     else:
                         errors += 1
@@ -227,6 +247,7 @@ def reconcile_kaospacs_worklist_to_local(
         cancelled=cancelled,
         skipped=skipped,
         errors=errors,
+        dry_run=dry_run,
     )
 
 
@@ -357,3 +378,7 @@ def _request_json(
 
 def _utc_now_text() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _is_pacs_dry_run(settings: dict[str, str]) -> bool:
+    return (settings.get("pacs_dry_run") or "").strip().lower() == "true"

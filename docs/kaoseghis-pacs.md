@@ -2,127 +2,84 @@
 
 Last updated: 2026-06-29
 
-Project name: `KaosEghis-pacs`
-
-Current visible panel title: `PACS Worklist`
+Project name: `KaosEghis-pacs`  
+Panel title: `PACS Worklist`
 
 ## Purpose
 
-KaosEghis-pacs is the Eghis-side bridge for imaging worklist preparation.
+KaosEghis-pacs is the Eghis-side PACS bridge inside the KaosEghis desktop app.
 
 Current scope:
 
-- read-only Eghis PostgreSQL polling
-- local SQLite worklist persistence
-- local KaosPACS API bridge
-- PACS settings UI in app
-- operator-facing worklist panel
+- read-only Eghis DB polling
+- local SQLite PACS worklist persistence
+- local PACS audit
+- explicit KaosPACS API sync
+- explicit KaosPACS reconciliation
+- operator-facing PACS settings and worklist tools
 
-Explicitly not in current scope:
+This project does not implement direct DICOM behavior in KaosEghis itself.
 
-- MWL write
-- DICOM networking logic
-- background scheduler
+## Architecture
 
-## Current UI
+```text
+Eghis DB (read-only)
+        |
+        v
+KaosEghis-pacs
+        |
+        |-- Local SQLite worklist
+        |
+        |-- Local audit
+        |
+        `-- KaosPACS API
+                |
+                v
+             KaosPACS
+                |
+                v
+        Orthanc / MWL / DICOM
+```
 
-Visible panel:
+Architecture rules:
 
-- [KaosEghis/ui/plugins/pacs_panel.py](/E:/Kaos/KaosEghis/KaosEghis/ui/plugins/pacs_panel.py)
+- Eghis DB access is read-only.
+- KaosEghis-pacs communicates only through the KaosPACS local API.
+- KaosEghis-pacs never writes directly into Orthanc.
+- KaosEghis-pacs never writes directly to DICOM.
+- KaosEghis-pacs never writes directly to MWL.
 
-Current behaviors:
+## Runtime Boundaries
 
-- refresh local rows
-- explicit KaosPACS health check
-- poll now
-- optional UI-process auto poll timer
-- sync to KaosPACS
-- reconcile from KaosPACS
-- manual insert via dialog
-- edit selected local row via dialog
-- cancel selected local row
-- filter by status
-- local PACS audit section
-- show per-row KaosPACS sync state columns
-- show last poll time and result
+### Poll
 
-Current PACS table columns:
+- source: Eghis DB
+- direction: Eghis DB -> local SQLite
+- write target: local `pacs_worklist_items`
+- read-only against Eghis DB
 
-- `Status`
-- `Patient`
-- `Chart No`
-- `Study`
-- `Modality`
-- `Requested At`
-- `Accession / Order ID`
-- `KaosPACS Status`
-- `Last Synced`
-- `Sync Error`
+### Sync
 
-Current button separation:
+- source: local SQLite
+- direction: local SQLite -> KaosPACS API
+- no direct Orthanc/MWL/DICOM write
+- active rows only
+- cancelled previously-sent rows call the KaosPACS cancel endpoint
 
-- `Refresh` -> local SQLite reload only
-- `Check KaosPACS` -> `GET /health` only
-- `Poll now` -> Eghis DB to local SQLite only
-- `Sync to KaosPACS` -> local SQLite to KaosPACS only
-- `Reconcile from KaosPACS` -> KaosPACS API to local SQLite status reconciliation only
-- `Manual insert` -> local SQLite create only
-- `Edit selected` -> local SQLite update only
-- `Apply polling settings` -> save panel-local auto-poll settings and start/stop timer
-- `Refresh audit` -> local PACS audit reload only
-- `Clear audit` -> local PACS audit clear only
-- `Copy audit summary` -> copy visible audit rows as plain text only
+### Reconcile
 
-Polling controls:
-
-- `Auto poll`
-- `Interval seconds`
-- `Apply polling settings`
-- `Last poll time`
-- `Last poll result`
-
-Auto-poll rules:
-
-- off by default
-- persisted in app settings
-- minimum interval `15` seconds
-- invalid or missing interval falls back to `60`
-- timer runs only inside the open PACS panel UI process
-- timer never syncs to KaosPACS
-- timer never checks KaosPACS health automatically
-- timer skips overlapping polls
-
-Manual dialog fields:
-
-- `Patient`
-- `Chart No`
-- `Study`
-- `Modality`
-- `Requested At`
-- `Accession / Order ID`
-- `Status`
-
-Manual dialog validation:
-
-- `Accession / Order ID` required
-- `Study` required
-- `Modality` required
-
-Filter states:
-
-- `active`
-- `done`
-- `cancelled`
-- `error`
-- `all`
+- source: KaosPACS API
+- direction: KaosPACS API -> local SQLite status update
+- never creates new local rows from KaosPACS
+- never deletes local rows
 
 ## Local Storage Model
 
-Local table:
+Local worklist table:
 
 - `pacs_worklist_items`
 
-Allowed local fields:
+Allowed local worklist fields:
 
 - `patient_name`
 - `chart_no`
@@ -132,15 +89,13 @@ Allowed local fields:
 - `accession_or_order_id`
 - `status`
 - `source`
-- `error_message`
-
-Additional local bridge state:
-
 - `kaospacs_mwl_status`
 - `kaospacs_mwl_last_synced_at`
 - `kaospacs_mwl_error`
+- `created_at`
+- `updated_at`
 
-Local PACS audit table:
+Local audit table:
 
 - `pacs_audit_events`
 
@@ -155,12 +110,85 @@ Allowed local audit fields:
 - `error_message`
 - `created_at`
 
-Additional PACS polling settings:
+## Privacy Rules
 
-- `pacs_auto_poll_enabled`
-- `pacs_poll_interval_seconds`
+KaosEghis-pacs does not permanently store:
 
-Editable PACS settings in UI:
+- resident registration number
+- DOB
+- sex
+- phone
+- address
+- diagnosis
+- EMR notes
+- insurance information
+- raw SQL result rows
+- raw KaosPACS payloads
+
+KaosEghis-pacs stores only the minimum local worklist data needed to bridge Eghis image-study orders. It does not store resident ID, DOB, sex, phone number, address, diagnosis, EMR notes, insurance details, or raw Eghis DB rows.
+
+Audit logs intentionally exclude sensitive patient information.
+
+Audit rules:
+
+- do not store patient name in audit
+- do not store raw exception text in audit
+- do not store raw SQL result rows in audit
+- do not store raw KaosPACS payloads in audit
+- use aggregate summaries for poll, sync, and reconcile
+- use sanitized error categories only:
+  - `connection failed`
+  - `timeout`
+  - `invalid payload`
+  - `unavailable`
+  - `unknown error`
+
+## Current UI
+
+Visible panel module:
+
+- [KaosEghis/ui/plugins/pacs_panel.py](/E:/Kaos/KaosEghis/KaosEghis/ui/plugins/pacs_panel.py)
+
+Visible PACS actions:
+
+- `Refresh`
+- `Check KaosPACS`
+- `Poll now`
+- `Sync to KaosPACS`
+- `Reconcile from KaosPACS`
+- `Manual insert`
+- `Edit selected`
+- `Delete / Cancel selected`
+- `Refresh audit`
+- `Clear audit`
+- `Copy audit summary`
+
+Current table columns:
+
+- `Status`
+- `Patient`
+- `Chart No`
+- `Study`
+- `Modality`
+- `Requested At`
+- `Accession / Order ID`
+- `KaosPACS Status`
+- `Last Synced`
+- `Sync Error`
+
+Audit table columns:
+
+- `Time`
+- `Type`
+- `Accession / Order ID`
+- `Status Before`
+- `Status After`
+- `Summary`
+- `Error`
+
+## PACS Settings
+
+Editable PACS settings in the Settings tab:
 
 - `eghis_db_connection_string`
 - `eghis_db_image_study_query`
@@ -168,218 +196,119 @@ Editable PACS settings in UI:
 - `kaospacs_api_timeout_seconds`
 - `pacs_auto_poll_enabled`
 - `pacs_poll_interval_seconds`
+- `pacs_dry_run`
 
-This is the intended local persistence boundary.
-
-## Privacy Rules
-
-Do not store:
-
-- patient DOB
-- sex
-- resident ID
-- phone
-- address
-- diagnosis
-- EMR notes
-- insurance details
-- raw Eghis DB rows
-
-Do not store in PACS audit:
-
-- patient name
-- resident ID
-- DOB
-- sex
-- phone
-- address
-- diagnosis
-- EMR notes
-- insurance details
-- raw Eghis DB rows
-- raw KaosPACS payloads
-- raw SQL result rows
-
-The PACS adapter must normalize to the local worklist model and discard everything else.
-
-## KaosPACS API Bridge
-
-Bridge module:
-
-- [KaosEghis/core/kaospacs_client.py](/E:/Kaos/KaosEghis/KaosEghis/core/kaospacs_client.py)
-
-Configured settings:
-
-- `kaospacs_api_base_url`
-- `kaospacs_api_timeout_seconds`
-
-Settings UI rules:
+Rules:
 
 - connection string is hidden by default
-- optional show/hide toggle
-- KaosPACS connection test uses `GET /health` only
-- settings test does not poll Eghis DB
-- settings test does not sync worklist
-- settings test does not reconcile worklist
-- settings UI must not display the connection string in status labels
+- poll interval minimum is `15` seconds
+- auto poll is off by default
+- dry run is off by default
+- testing KaosPACS connection uses `GET /health` only
 
-Current API boundary:
+## Startup Validation
 
-- `GET /health`
-- `GET /worklist`
-- `PUT /worklist`
-- `POST /worklist/complete`
-- `POST /worklist/cancel`
+On PACS panel startup, KaosEghis-pacs validates:
 
-Current sync rule:
+- SQLite availability
+- PACS settings readability
+- poll timer configuration normalization
+- current dry-run state
 
-- only local `active` worklist rows are sent in `PUT /worklist`
-- cancelled rows are never sent as active entries
-- previously-sent cancelled rows trigger `POST /worklist/cancel`
-- cancelled rows that were never sent remain local-only and are skipped
-- sync shows operator summary counts before/after action
+Startup does not:
 
-Current sync UX rule:
+- poll automatically
+- sync automatically
+- reconcile automatically
+- check KaosPACS automatically
 
-- if there are active local rows, operator confirmation is required before sync
-- sync summary includes:
-  - active rows
-  - cancelled pending rows
-  - sent
-  - cancelled
-  - errors
-  - skipped
+Startup reports configuration readiness only.
 
-Current audit rule:
+## Dry-Run Mode
 
-- log aggregate PACS workflow action summaries only
-- do not log every polled row
-- do not log raw KaosPACS payloads
-- do not log patient names
-- local PACS audit is operator-visible only and local to KaosEghis SQLite
+Setting:
 
-Current reconciliation rule:
+- `pacs_dry_run`
 
-- fetch `GET /worklist` from KaosPACS
-- match local rows by:
-  - `AccessionNumber`
-  - `RequestedProcedureID`
-  - `ScheduledProcedureStepID`
-- if remote row is completed, mark local row `done`
-- if remote row is cancelled, mark local row `cancelled`
-- never create new local rows from KaosPACS
-- never delete local rows
-- never revert local `done` or `cancelled` rows back to `active`
-- reconciliation is manual only
-- reconciliation does not call sync or local Eghis polling
+Behavior:
 
-Current local MWL sync states:
+- Poll: normal
+- Sync: simulate only
+- Reconcile: simulate only
 
-- `not_sent`
-- `sent`
-- `cancelled`
-- `error`
+Dry-run rules:
 
-Manual row editing rule:
+- no KaosPACS modifying API calls are made
+- sync state is not changed locally during dry-run sync
+- local worklist status is not changed during dry-run reconcile
+- operator-visible status text includes `DRY RUN`
+- audit summaries include `DRY RUN`
 
-- editing a local row does not auto-sync to KaosPACS
-- editing a previously-sent row does not change `kaospacs_mwl_status`
-- sync state changes only during explicit `Sync to KaosPACS`
+## Deployment Checklist
 
-Payload privacy rule:
+### Prerequisites
 
-- do not send DOB
-- do not send sex
-- do not send resident ID
-- do not send phone
-- do not send address
-- do not send diagnosis
-- do not send EMR notes
-- do not send insurance details
+- PostgreSQL connectivity available from the workstation
+- KaosPACS reachable from the workstation
+- local SQLite initialized
+- KaosPACS API endpoint reachable
+- poll interval configured
+- auto poll disabled by default unless explicitly enabled
 
-## Current Read-Only Query Path
+### Operator Checklist
 
-Main module:
+- [ ] Poll now works
+- [ ] Local worklist updates
+- [ ] Manual insert works
+- [ ] Manual edit works
+- [ ] Sync to KaosPACS works
+- [ ] Reconcile works
+- [ ] Audit works
+- [ ] Auto poll works
+- [ ] Settings persist
+- [ ] No PHI appears in audit
+
+## Current Query Boundary
+
+Primary module:
 
 - [KaosEghis/core/pacs_polling.py](/E:/Kaos/KaosEghis/KaosEghis/core/pacs_polling.py)
 
-Shared DB helper:
+Current default query boundary:
 
-- [KaosEghis/core/eghis_db.py](/E:/Kaos/KaosEghis/KaosEghis/core/eghis_db.py)
-
-Default query shape currently targets:
-
-- `public.mwl m`
-- `public.h2opd_doct_ord o`
-
-Join strategy:
-
-- `o.recept_no = split_part(m.eghis_key, '_', 1)`
-- `CAST(o.ord_no AS text) = split_part(m.eghis_key, '_', 2)`
-- `CAST(o.ord_seq_no AS text) = split_part(m.eghis_key, '_', 3)`
-
-Key PACS logic:
-
+- `public.mwl`
+- `public.h2opd_doct_ord`
+- `m.scheduled_proc_status = '100'`
 - `o.proc_dept_cd = 'XRAY'`
-- active visibility via `m.scheduled_proc_status = '100'`
-- cancelled visibility via `COALESCE(o.dc_yn, 'N') = 'Y'`
-
-Returned canonical fields:
-
-- `status`
-- `patient_name`
-- `chart_no`
-- `study`
-- `modality`
-- `requested_at`
-- `accession_or_order_id`
-- `source`
-
-## Cancellation Semantics
-
-Cancelled remote rows are not permanently ignored.
-
-Current rule:
-
-- if a remote row comes back cancelled and the local row already exists, update local status to `cancelled`
-- if a remote row comes back cancelled and no local row exists yet, skip insertion
-
-This preserves local tracking for previously seen orders while avoiding creation of never-seen cancelled rows.
-
-## Modality Mapping
-
-Current mapping rule:
-
-- `BMD` if `m.scheduled_modality = 'BMD'` or `o.ord_cd = 'HC342'`
-- `CR` if `m.scheduled_modality = 'DR'`
-- otherwise use `m.scheduled_modality`
+- cancellation tracking through `o.dc_yn`
 
 ## Completed
 
-- local PACS worklist table
-- repository CRUD
+- Plugins UI
+- Local worklist
+- Read-only PostgreSQL adapter
+- Cancellation tracking
+- KaosPACS API bridge
+- Manual worklist editor
+- Auto polling
+- Reconciliation
 - PACS settings UI
-- PACS panel
-- local PACS audit view
-- manual PACS row create/edit dialog
-- optional PACS auto-poll timer in panel process
-- read-only PostgreSQL adapter
-- cancellation-aware update behavior
-- local KaosPACS API bridge
-- manual KaosPACS-to-local reconciliation
-- local MWL sync-state tracking
+- Local audit
 
-## Not Done
+## Not In Scope
 
-- MWL write/export
-- DICOM service integration
-- scheduler-driven polling outside the running UI process
+- direct DICOM writes
+- direct Orthanc writes
+- direct MWL writes
+- background scheduler outside the running UI process
 
-## Maintenance Triggers
+## Maintenance Rule
 
 Update this document whenever:
 
-- the PACS query changes
-- local worklist fields change
-- cancellation behavior changes
-- KaosPACS integration begins
+- local PACS fields change
+- API boundary changes
+- privacy rules change
+- startup validation changes
+- dry-run behavior changes
+- deployment guidance changes

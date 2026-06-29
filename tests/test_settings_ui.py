@@ -35,6 +35,7 @@ def test_save_pacs_settings_persists_values(tmp_path) -> None:
     tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
     tab.kaospacs_api_timeout_seconds.setText("5")
     tab.pacs_auto_poll_enabled.setChecked(True)
+    tab.pacs_dry_run.setChecked(True)
     tab.pacs_poll_interval_seconds.setValue(45)
     tab.save_pacs_settings()
 
@@ -46,6 +47,7 @@ def test_save_pacs_settings_persists_values(tmp_path) -> None:
     assert settings["kaospacs_api_base_url"] == "http://127.0.0.1:8055"
     assert settings["kaospacs_api_timeout_seconds"] == "5"
     assert settings["pacs_auto_poll_enabled"] == "true"
+    assert settings["pacs_dry_run"] == "true"
     assert settings["pacs_poll_interval_seconds"] == "45"
 
 
@@ -63,6 +65,7 @@ def test_reset_pacs_settings_restores_defaults(tmp_path) -> None:
     tab.kaospacs_api_base_url.setText("https://example")
     tab.kaospacs_api_timeout_seconds.setText("9")
     tab.pacs_auto_poll_enabled.setChecked(True)
+    tab.pacs_dry_run.setChecked(True)
     tab.pacs_poll_interval_seconds.setValue(45)
     tab.reset_pacs_settings_to_defaults()
 
@@ -74,6 +77,7 @@ def test_reset_pacs_settings_restores_defaults(tmp_path) -> None:
     assert settings["kaospacs_api_base_url"] == "http://127.0.0.1:8055"
     assert settings["kaospacs_api_timeout_seconds"] == "5"
     assert settings["pacs_auto_poll_enabled"] == "false"
+    assert settings["pacs_dry_run"] == "false"
     assert settings["pacs_poll_interval_seconds"] == "60"
 
 

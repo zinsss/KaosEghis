@@ -14,6 +14,7 @@ DEFAULT_SETTINGS = {
     "kaospacs_api_timeout_seconds": "5",
     "pacs_auto_poll_enabled": "false",
     "pacs_poll_interval_seconds": "60",
+    "pacs_dry_run": "false",
 }
 
 
