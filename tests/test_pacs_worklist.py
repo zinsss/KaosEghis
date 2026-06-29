@@ -2,9 +2,12 @@ from pathlib import Path
 
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
+    clear_pacs_audit_events,
+    create_pacs_audit_event,
     create_pacs_worklist_item,
     delete_pacs_worklist_item,
     get_pacs_worklist_item,
+    list_pacs_audit_events,
     list_pacs_worklist_items,
     update_pacs_worklist_item,
     update_pacs_worklist_sync_state,
@@ -34,6 +37,26 @@ def test_database_migration_creates_pacs_worklist_table(tmp_path) -> None:
     assert "kaospacs_mwl_status" in columns
     assert "kaospacs_mwl_last_synced_at" in columns
     assert "kaospacs_mwl_error" in columns
+
+
+def test_database_migration_creates_pacs_audit_table(tmp_path) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(pacs_audit_events)")
+        }
+
+    assert "event_type" in columns
+    assert "worklist_item_id" in columns
+    assert "accession_or_order_id" in columns
+    assert "status_before" in columns
+    assert "status_after" in columns
+    assert "summary" in columns
+    assert "error_message" in columns
+    assert "created_at" in columns
 
 
 def test_pacs_worklist_repository_crud(tmp_path) -> None:
@@ -130,6 +153,60 @@ def test_pacs_worklist_status_validation(tmp_path) -> None:
             raise AssertionError("Expected ValueError")
 
     assert "Unsupported PACS worklist status" in message
+
+
+def test_pacs_audit_repository_create_list_filter_and_clear(tmp_path) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        create_pacs_audit_event(
+            connection,
+            event_type="poll",
+            accession_or_order_id="ACC-1",
+            summary="inserted=1, updated=0, skipped=0",
+        )
+        create_pacs_audit_event(
+            connection,
+            event_type="sync",
+            accession_or_order_id="ACC-2",
+            status_before="active",
+            status_after="done",
+            summary="sent=1, cancelled=0, errors=0, skipped=0",
+        )
+
+        listed = list_pacs_audit_events(connection)
+        filtered = list_pacs_audit_events(connection, event_type="poll")
+        cleared = clear_pacs_audit_events(connection)
+
+    assert len(listed) == 2
+    assert listed[0].summary
+    assert [event.event_type for event in filtered] == ["poll"]
+    assert cleared == 2
+
+
+def test_clear_audit_does_not_delete_worklist_items(tmp_path) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            accession_or_order_id="ACC-1",
+            study="Chest",
+            modality="CR",
+        )
+        create_pacs_audit_event(
+            connection,
+            event_type="poll",
+            accession_or_order_id="ACC-1",
+            summary="inserted=1, updated=0, skipped=0",
+        )
+        clear_pacs_audit_events(connection)
+        rows = list_pacs_worklist_items(connection)
+
+    assert len(rows) == 1
 
 
 def test_pacs_worklist_list_filter(tmp_path) -> None:

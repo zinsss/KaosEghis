@@ -52,6 +52,7 @@ def test_pacs_panel_has_required_worklist_columns() -> None:
     ]
     assert "PACS Worklist" in [label.text() for label in panel.findChildren(QLabel)]
     assert any(button.text() == "Reconcile from KaosPACS" for button in panel.findChildren(type(panel.refresh_button)))
+    assert any(button.text() == "Refresh audit" for button in panel.findChildren(type(panel.refresh_button)))
 
 
 def test_pacs_panel_default_auto_poll_setting_is_false(tmp_path) -> None:
@@ -564,7 +565,7 @@ def test_pacs_panel_manual_insert_creates_local_row(monkeypatch, tmp_path) -> No
 
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
     from KaosEghis.db.database import connect
-    from KaosEghis.db.repositories import list_pacs_worklist_items
+    from KaosEghis.db.repositories import list_pacs_audit_events, list_pacs_worklist_items
 
     payload = {
         "patient_name": "Alice",
@@ -596,11 +597,14 @@ def test_pacs_panel_manual_insert_creates_local_row(monkeypatch, tmp_path) -> No
 
     with connect(db_path) as connection:
         rows = list_pacs_worklist_items(connection)
+        audit_rows = list_pacs_audit_events(connection)
 
     assert len(rows) == 1
     assert rows[0].patient_name == "Alice"
     assert rows[0].source == "manual"
     assert rows[0].kaospacs_mwl_status == "not_sent"
+    assert audit_rows[0].event_type == "manual_insert"
+    assert "Alice" not in audit_rows[0].summary
 
 
 def test_pacs_panel_edit_selected_updates_local_row(monkeypatch, tmp_path) -> None:
@@ -608,7 +612,11 @@ def test_pacs_panel_edit_selected_updates_local_row(monkeypatch, tmp_path) -> No
 
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
     from KaosEghis.db.database import connect, initialize_database
-    from KaosEghis.db.repositories import create_pacs_worklist_item, get_pacs_worklist_item
+    from KaosEghis.db.repositories import (
+        create_pacs_worklist_item,
+        get_pacs_worklist_item,
+        list_pacs_audit_events,
+    )
 
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
@@ -655,6 +663,7 @@ def test_pacs_panel_edit_selected_updates_local_row(monkeypatch, tmp_path) -> No
 
     with connect(db_path) as connection:
         updated = get_pacs_worklist_item(connection, created.id)
+        audit_rows = list_pacs_audit_events(connection)
 
     assert updated is not None
     assert updated.patient_name == "Bob"
@@ -662,6 +671,8 @@ def test_pacs_panel_edit_selected_updates_local_row(monkeypatch, tmp_path) -> No
     assert updated.study == "Spine"
     assert updated.modality == "MR"
     assert updated.status == "done"
+    assert audit_rows[0].event_type == "manual_edit"
+    assert "Bob" not in audit_rows[0].summary
 
 
 def test_pacs_panel_edit_sent_row_preserves_kaospacs_status(monkeypatch, tmp_path) -> None:
@@ -742,6 +753,214 @@ def test_pacs_panel_edit_selected_with_no_row_does_not_crash(tmp_path) -> None:
     panel.edit_selected()
 
     assert panel is not None
+
+
+def test_pacs_panel_cancel_selected_creates_audit_event(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_pacs_worklist_item,
+        list_pacs_audit_events,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            accession_or_order_id="ACC-100",
+            study="Chest",
+            modality="CR",
+        )
+
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.worklist_table.selectRow(0)
+    panel.delete_selected()
+
+    with connect(db_path) as connection:
+        audit_rows = list_pacs_audit_events(connection)
+
+    assert audit_rows[0].event_type == "cancel_selected"
+    assert audit_rows[0].status_before == "active"
+    assert audit_rows[0].status_after == "cancelled"
+
+
+def test_pacs_panel_poll_creates_aggregate_audit_only(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.pacs_polling import PollResult
+    from KaosEghis.db.database import connect
+    from KaosEghis.db.repositories import list_pacs_audit_events
+
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda _settings, _db_path: PollResult(inserted=1, updated=2, skipped=3),
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.poll_now()
+
+    with connect(db_path) as connection:
+        audit_rows = list_pacs_audit_events(connection)
+
+    assert audit_rows[0].event_type == "poll"
+    assert audit_rows[0].summary == "inserted=1, updated=2, skipped=3"
+    assert "patient" not in audit_rows[0].summary.lower()
+
+
+def test_pacs_panel_sync_creates_aggregate_audit_only(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.kaospacs_client import KaosPacsSyncResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_pacs_worklist_item, list_pacs_audit_events
+    from PySide6.QtWidgets import QMessageBox
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            accession_or_order_id="ACC-1",
+            study="Chest",
+            modality="CR",
+        )
+
+    monkeypatch.setattr(
+        pacs_panel_module.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "check_kaospacs_health",
+        lambda settings: True,
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "sync_local_worklist_to_kaospacs",
+        lambda settings, db_path: KaosPacsSyncResult(sent=1, cancelled=0, errors=0, skipped=0),
+    )
+
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.sync_button.click()
+
+    with connect(db_path) as connection:
+        audit_rows = list_pacs_audit_events(connection)
+
+    assert audit_rows[0].event_type == "sync"
+    assert audit_rows[0].summary == "sent=1, cancelled=0, errors=0, skipped=0"
+
+
+def test_pacs_panel_reconcile_creates_aggregate_audit_only(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.kaospacs_client import KaosPacsReconcileResult
+    from KaosEghis.db.database import connect
+    from KaosEghis.db.repositories import list_pacs_audit_events
+
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "reconcile_kaospacs_worklist_to_local",
+        lambda settings, db_path: KaosPacsReconcileResult(done=1, cancelled=2, skipped=3, errors=0),
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.reconcile_button.click()
+
+    with connect(db_path) as connection:
+        audit_rows = list_pacs_audit_events(connection)
+
+    assert audit_rows[0].event_type == "reconcile"
+    assert audit_rows[0].summary == "done=1, cancelled=2, skipped=3, errors=0"
+
+
+def test_pacs_panel_copy_audit_summary_excludes_patient_name(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_pacs_audit_event
+
+    copied = {}
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "copy_text",
+        lambda text: copied.setdefault("text", text),
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_pacs_audit_event(
+            connection,
+            event_type="poll",
+            accession_or_order_id="ACC-1",
+            summary="inserted=1, updated=0, skipped=0",
+        )
+
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.copy_audit_summary()
+
+    assert "Alice" not in copied["text"]
+    assert "ACC-1" in copied["text"]
+
+
+def test_pacs_panel_clear_audit_does_not_delete_worklist_items(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_pacs_audit_event,
+        create_pacs_worklist_item,
+        list_pacs_audit_events,
+        list_pacs_worklist_items,
+    )
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(
+        pacs_panel_module.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            accession_or_order_id="ACC-1",
+            study="Chest",
+            modality="CR",
+        )
+        create_pacs_audit_event(
+            connection,
+            event_type="poll",
+            accession_or_order_id="ACC-1",
+            summary="inserted=1, updated=0, skipped=0",
+        )
+
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel.clear_audit()
+
+    with connect(db_path) as connection:
+        audit_rows = list_pacs_audit_events(connection)
+        worklist_rows = list_pacs_worklist_items(connection)
+
+    assert audit_rows == []
+    assert len(worklist_rows) == 1
 
 
 def test_flu_panel_can_load_week_without_backend() -> None:

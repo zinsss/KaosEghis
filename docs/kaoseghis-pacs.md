@@ -42,6 +42,7 @@ Current behaviors:
 - edit selected local row via dialog
 - cancel selected local row
 - filter by status
+- local PACS audit section
 - show per-row KaosPACS sync state columns
 - show last poll time and result
 
@@ -68,6 +69,9 @@ Current button separation:
 - `Manual insert` -> local SQLite create only
 - `Edit selected` -> local SQLite update only
 - `Apply polling settings` -> save panel-local auto-poll settings and start/stop timer
+- `Refresh audit` -> local PACS audit reload only
+- `Clear audit` -> local PACS audit clear only
+- `Copy audit summary` -> copy visible audit rows as plain text only
 
 Polling controls:
 
@@ -136,6 +140,21 @@ Additional local bridge state:
 - `kaospacs_mwl_last_synced_at`
 - `kaospacs_mwl_error`
 
+Local PACS audit table:
+
+- `pacs_audit_events`
+
+Allowed local audit fields:
+
+- `event_type`
+- `worklist_item_id`
+- `accession_or_order_id`
+- `status_before`
+- `status_after`
+- `summary`
+- `error_message`
+- `created_at`
+
 Additional PACS polling settings:
 
 - `pacs_auto_poll_enabled`
@@ -165,6 +184,21 @@ Do not store:
 - EMR notes
 - insurance details
 - raw Eghis DB rows
+
+Do not store in PACS audit:
+
+- patient name
+- resident ID
+- DOB
+- sex
+- phone
+- address
+- diagnosis
+- EMR notes
+- insurance details
+- raw Eghis DB rows
+- raw KaosPACS payloads
+- raw SQL result rows
 
 The PACS adapter must normalize to the local worklist model and discard everything else.
 
@@ -215,6 +249,14 @@ Current sync UX rule:
   - cancelled
   - errors
   - skipped
+
+Current audit rule:
+
+- log aggregate PACS workflow action summaries only
+- do not log every polled row
+- do not log raw KaosPACS payloads
+- do not log patient names
+- local PACS audit is operator-visible only and local to KaosEghis SQLite
 
 Current reconciliation rule:
 
@@ -318,6 +360,7 @@ Current mapping rule:
 - repository CRUD
 - PACS settings UI
 - PACS panel
+- local PACS audit view
 - manual PACS row create/edit dialog
 - optional PACS auto-poll timer in panel process
 - read-only PostgreSQL adapter

@@ -83,3 +83,15 @@ CREATE TABLE IF NOT EXISTS pacs_worklist_items (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS pacs_audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    worklist_item_id INTEGER,
+    accession_or_order_id TEXT,
+    status_before TEXT,
+    status_after TEXT,
+    summary TEXT NOT NULL,
+    error_message TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

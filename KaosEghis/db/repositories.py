@@ -71,6 +71,19 @@ class PacsWorklistItemRecord:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class PacsAuditEventRecord:
+    id: int
+    event_type: str
+    worklist_item_id: int | None
+    accession_or_order_id: str | None
+    status_before: str | None
+    status_after: str | None
+    summary: str
+    error_message: str | None
+    created_at: str
+
+
 SUPPORTED_ITEM_TYPES = {"clipboard", "randomized_clipboard", "macro", "workflow"}
 ALLOWED_MACRO_ACTIONS = {
     "check_process",
@@ -84,6 +97,15 @@ ALLOWED_MACRO_ACTIONS = {
 }
 
 ALLOWED_PACS_WORKLIST_STATUS = {"active", "done", "cancelled", "error"}
+ALLOWED_PACS_AUDIT_EVENT_TYPES = {
+    "poll",
+    "manual_insert",
+    "manual_edit",
+    "cancel_selected",
+    "sync",
+    "reconcile",
+    "error",
+}
 
 
 def get_settings(connection: sqlite3.Connection) -> dict[str, str]:
@@ -497,6 +519,95 @@ def delete_pacs_worklist_item(connection: sqlite3.Connection, item_id: int) -> b
     return cursor.rowcount > 0
 
 
+def create_pacs_audit_event(
+    connection: sqlite3.Connection,
+    *,
+    event_type: str,
+    worklist_item_id: int | None = None,
+    accession_or_order_id: str | None = None,
+    status_before: str | None = None,
+    status_after: str | None = None,
+    summary: str,
+    error_message: str | None = None,
+) -> PacsAuditEventRecord:
+    _validate_pacs_audit_event_type(event_type)
+    cursor = connection.execute(
+        """
+        INSERT INTO pacs_audit_events
+            (
+                event_type,
+                worklist_item_id,
+                accession_or_order_id,
+                status_before,
+                status_after,
+                summary,
+                error_message
+            )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event_type,
+            worklist_item_id,
+            _blank_to_none(accession_or_order_id),
+            _blank_to_none(status_before),
+            _blank_to_none(status_after),
+            summary.strip(),
+            _blank_to_none(error_message),
+        ),
+    )
+    connection.commit()
+    created = connection.execute(
+        """
+        SELECT id, event_type, worklist_item_id, accession_or_order_id, status_before,
+               status_after, summary, error_message, created_at
+        FROM pacs_audit_events
+        WHERE id = ?
+        """,
+        (cursor.lastrowid,),
+    ).fetchone()
+    if created is None:
+        raise RuntimeError("Failed to create PACS audit event.")
+    return _pacs_audit_event_from_row(created)
+
+
+def list_pacs_audit_events(
+    connection: sqlite3.Connection,
+    limit: int = 100,
+    event_type: str | None = None,
+) -> list[PacsAuditEventRecord]:
+    if event_type is None:
+        rows = connection.execute(
+            """
+            SELECT id, event_type, worklist_item_id, accession_or_order_id, status_before,
+                   status_after, summary, error_message, created_at
+            FROM pacs_audit_events
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    else:
+        _validate_pacs_audit_event_type(event_type)
+        rows = connection.execute(
+            """
+            SELECT id, event_type, worklist_item_id, accession_or_order_id, status_before,
+                   status_after, summary, error_message, created_at
+            FROM pacs_audit_events
+            WHERE event_type = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (event_type, limit),
+        )
+    return [_pacs_audit_event_from_row(row) for row in rows]
+
+
+def clear_pacs_audit_events(connection: sqlite3.Connection) -> int:
+    cursor = connection.execute("DELETE FROM pacs_audit_events")
+    connection.commit()
+    return cursor.rowcount
+
+
 def reorder_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[MacroStepRecord]:
     steps = list_macro_steps(connection, item_id)
     for index, step in enumerate(steps, start=1):
@@ -690,6 +801,22 @@ def _pacs_worklist_item_from_row(
     )
 
 
+def _pacs_audit_event_from_row(
+    row: sqlite3.Row | tuple,
+) -> PacsAuditEventRecord:
+    return PacsAuditEventRecord(
+        id=row[0],
+        event_type=row[1],
+        worklist_item_id=row[2],
+        accession_or_order_id=row[3],
+        status_before=row[4],
+        status_after=row[5],
+        summary=row[6],
+        error_message=row[7],
+        created_at=row[8],
+    )
+
+
 def _get_macro_step_by_id(
     connection: sqlite3.Connection, step_id: int
 ) -> MacroStepRecord | None:
@@ -726,3 +853,8 @@ def _validate_macro_action(action: str) -> None:
 def _validate_pacs_worklist_status(status: str) -> None:
     if status not in ALLOWED_PACS_WORKLIST_STATUS:
         raise ValueError(f"Unsupported PACS worklist status: {status}")
+
+
+def _validate_pacs_audit_event_type(event_type: str) -> None:
+    if event_type not in ALLOWED_PACS_AUDIT_EVENT_TYPES:
+        raise ValueError(f"Unsupported PACS audit event type: {event_type}")
