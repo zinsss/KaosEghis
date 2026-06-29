@@ -33,6 +33,7 @@ def initialize_database(path: Path | None = None) -> None:
         connection.executescript(schema_path.read_text(encoding="utf-8"))
         _migrate_ui_targets_columns(connection)
         _migrate_pacs_worklist(connection)
+        _migrate_pacs_audit_events(connection)
         connection.commit()
 
 
@@ -92,3 +93,31 @@ def _migrate_pacs_worklist(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE pacs_worklist_items ADD COLUMN kaospacs_mwl_error TEXT"
         )
+
+
+def _migrate_pacs_audit_events(connection: sqlite3.Connection) -> None:
+    table_exists = connection.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type='table' AND name='pacs_audit_events'
+        """
+    ).fetchone()
+    if table_exists:
+        return
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pacs_audit_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            worklist_item_id INTEGER,
+            accession_or_order_id TEXT,
+            status_before TEXT,
+            status_after TEXT,
+            summary TEXT NOT NULL,
+            error_message TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )

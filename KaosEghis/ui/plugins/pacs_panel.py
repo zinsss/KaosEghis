@@ -4,6 +4,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -17,14 +18,19 @@ from PySide6.QtWidgets import (
 
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
+    PacsAuditEventRecord,
     PacsWorklistItemRecord,
+    clear_pacs_audit_events,
+    create_pacs_audit_event,
     create_pacs_worklist_item,
     get_settings,
+    list_pacs_audit_events,
     list_pacs_worklist_items,
     set_settings,
     update_pacs_worklist_item,
     update_pacs_worklist_status,
 )
+from KaosEghis.core.clipboard_service import copy_text
 from KaosEghis.core.kaospacs_client import (
     check_kaospacs_health,
     reconcile_kaospacs_worklist_to_local,
@@ -49,12 +55,22 @@ class PacsPanel(QWidget):
         "Last Synced",
         "Sync Error",
     ]
+    AUDIT_COLUMNS = [
+        "Time",
+        "Type",
+        "Accession / Order ID",
+        "Status Before",
+        "Status After",
+        "Summary",
+        "Error",
+    ]
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
 
         self._db_path = db_path
         self._visible_items: list[PacsWorklistItemRecord] = []
+        self._visible_audit_events: list[PacsAuditEventRecord] = []
         self._active_filter = "all"
         self._poll_in_progress = False
         self._poll_timer = QTimer(self)
@@ -87,6 +103,26 @@ class PacsPanel(QWidget):
         self.worklist_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.worklist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
+        self.audit_filter_combo = QComboBox()
+        self.audit_filter_combo.addItems(
+            ["All", "poll", "manual_insert", "manual_edit", "cancel_selected", "sync", "reconcile", "error"]
+        )
+        self.audit_filter_combo.currentTextChanged.connect(self.refresh_audit)
+        self.refresh_audit_button = QPushButton("Refresh audit")
+        self.refresh_audit_button.clicked.connect(self.refresh_audit)
+        self.clear_audit_button = QPushButton("Clear audit")
+        self.clear_audit_button.clicked.connect(self.clear_audit)
+        self.copy_audit_button = QPushButton("Copy audit summary")
+        self.copy_audit_button.clicked.connect(self.copy_audit_summary)
+
+        self.audit_table = QTableWidget(0, len(self.AUDIT_COLUMNS))
+        self.audit_table.setHorizontalHeaderLabels(self.AUDIT_COLUMNS)
+        self.audit_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.audit_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self.audit_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+
         self.filter_buttons = []
         for status in ("Active", "Done", "Cancelled", "Error", "All"):
             button = QPushButton(status)
@@ -112,6 +148,14 @@ class PacsPanel(QWidget):
         polling_settings_row.addWidget(self.interval_spinbox)
         polling_settings_row.addWidget(self.apply_polling_settings_button)
         polling_settings_row.addStretch()
+
+        audit_controls_row = QHBoxLayout()
+        audit_controls_row.addWidget(QLabel("PACS audit"))
+        audit_controls_row.addWidget(self.audit_filter_combo)
+        audit_controls_row.addWidget(self.refresh_audit_button)
+        audit_controls_row.addWidget(self.clear_audit_button)
+        audit_controls_row.addWidget(self.copy_audit_button)
+        audit_controls_row.addStretch()
 
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_rows)
@@ -153,11 +197,14 @@ class PacsPanel(QWidget):
         layout.addWidget(self.worklist_table)
         layout.addLayout(self.filter_bar)
         layout.addLayout(action_row)
+        layout.addLayout(audit_controls_row)
+        layout.addWidget(self.audit_table)
         layout.addWidget(footer)
 
         self._set_db_labels()
         self._load_polling_settings()
         self.refresh_rows()
+        self.refresh_audit()
 
     def _set_db_labels(self) -> None:
         self.eghis_db_status.setText("Eghis DB: local sqlite")
@@ -213,6 +260,29 @@ class PacsPanel(QWidget):
 
         self.worklist_table.resizeColumnsToContents()
 
+    def refresh_audit(self) -> None:
+        initialize_database(self._db_path)
+        event_type = self.audit_filter_combo.currentText()
+        selected_event_type = None if event_type == "All" else event_type
+        with connect(self._db_path) as connection:
+            events = list_pacs_audit_events(connection, limit=100, event_type=selected_event_type)
+
+        self._visible_audit_events = events
+        self.audit_table.setRowCount(len(events))
+        for row_index, event in enumerate(events):
+            row = [
+                event.created_at,
+                event.event_type,
+                event.accession_or_order_id or "",
+                event.status_before or "",
+                event.status_after or "",
+                event.summary,
+                event.error_message or "",
+            ]
+            for col_index, value in enumerate(row):
+                self.audit_table.setItem(row_index, col_index, QTableWidgetItem(value))
+        self.audit_table.resizeColumnsToContents()
+
     def check_kaospacs_connection(self) -> None:
         self._refresh_kaospacs_status()
 
@@ -233,13 +303,22 @@ class PacsPanel(QWidget):
         self._refresh_kaospacs_status()
         result = sync_local_worklist_to_kaospacs(settings, self._db_path)
         self.refresh_rows()
-        self.polling_status.setText(
+        summary = (
             "KaosPACS sync: "
             f"active rows={sync_summary['active_rows']}, "
             f"cancelled pending rows={sync_summary['cancelled_pending_rows']}, "
             f"sent={result.sent}, cancelled={result.cancelled}, "
             f"errors={result.errors}, skipped={result.skipped}"
         )
+        self.polling_status.setText(summary)
+        self._log_audit_aggregate(
+            event_type="sync",
+            summary=(
+                f"sent={result.sent}, cancelled={result.cancelled}, "
+                f"errors={result.errors}, skipped={result.skipped}"
+            ),
+        )
+        self.refresh_audit()
 
     def reconcile_from_kaospacs(self) -> None:
         initialize_database(self._db_path)
@@ -250,12 +329,26 @@ class PacsPanel(QWidget):
         self.refresh_rows()
         if result.message is not None:
             self.polling_status.setText(f"KaosPACS reconcile: {result.message}")
+            self._log_audit_error(
+                summary="reconcile failed",
+                error_message=result.message,
+            )
+            self.refresh_audit()
             return
-        self.polling_status.setText(
+        summary = (
             "KaosPACS reconcile: "
             f"done={result.done}, cancelled={result.cancelled}, "
             f"skipped={result.skipped}, errors={result.errors}"
         )
+        self.polling_status.setText(summary)
+        self._log_audit_aggregate(
+            event_type="reconcile",
+            summary=(
+                f"done={result.done}, cancelled={result.cancelled}, "
+                f"skipped={result.skipped}, errors={result.errors}"
+            ),
+        )
+        self.refresh_audit()
 
     def manual_insert_row(self) -> None:
         dialog = PacsWorklistDialog(self)
@@ -265,7 +358,7 @@ class PacsPanel(QWidget):
         payload = dialog.get_form_data()
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
-            create_pacs_worklist_item(
+            created = create_pacs_worklist_item(
                 connection,
                 status=payload["status"] or "active",
                 patient_name=payload["patient_name"],
@@ -276,7 +369,17 @@ class PacsPanel(QWidget):
                 accession_or_order_id=payload["accession_or_order_id"],
                 source="manual",
             )
+            create_pacs_audit_event(
+                connection,
+                event_type="manual_insert",
+                worklist_item_id=created.id,
+                accession_or_order_id=created.accession_or_order_id,
+                status_before=None,
+                status_after=created.status,
+                summary="manual local worklist row created",
+            )
         self.refresh_rows()
+        self.refresh_audit()
 
     def edit_selected(self) -> None:
         item = self._selected_visible_item()
@@ -289,7 +392,7 @@ class PacsPanel(QWidget):
 
         payload = dialog.get_form_data()
         with connect(self._db_path) as connection:
-            update_pacs_worklist_item(
+            updated = update_pacs_worklist_item(
                 connection,
                 item.id,
                 status=payload["status"],
@@ -302,7 +405,18 @@ class PacsPanel(QWidget):
                 source=item.source,
                 error_message=item.error_message,
             )
+            if updated is not None:
+                create_pacs_audit_event(
+                    connection,
+                    event_type="manual_edit",
+                    worklist_item_id=updated.id,
+                    accession_or_order_id=updated.accession_or_order_id,
+                    status_before=item.status,
+                    status_after=updated.status,
+                    summary="manual local worklist row updated",
+                )
         self.refresh_rows()
+        self.refresh_audit()
 
     def delete_selected(self) -> None:
         item = self._selected_visible_item()
@@ -310,8 +424,18 @@ class PacsPanel(QWidget):
             return
 
         with connect(self._db_path) as connection:
-            update_pacs_worklist_status(connection, item.id, "cancelled")
+            if update_pacs_worklist_status(connection, item.id, "cancelled"):
+                create_pacs_audit_event(
+                    connection,
+                    event_type="cancel_selected",
+                    worklist_item_id=item.id,
+                    accession_or_order_id=item.accession_or_order_id,
+                    status_before=item.status,
+                    status_after="cancelled",
+                    summary="selected local worklist row marked cancelled",
+                )
         self.refresh_rows()
+        self.refresh_audit()
 
     def apply_polling_settings(self) -> None:
         enabled_value = "true" if self.auto_poll_checkbox.isChecked() else "false"
@@ -396,6 +520,11 @@ class PacsPanel(QWidget):
         if self._poll_in_progress:
             self.last_poll_result_label.setText("Last poll result: skipped overlap")
             self.polling_status.setText("Polling status: skipped overlap")
+            self._log_audit_aggregate(
+                event_type="poll",
+                summary="skipped overlap",
+            )
+            self.refresh_audit()
             return
 
         self._poll_in_progress = True
@@ -412,12 +541,22 @@ class PacsPanel(QWidget):
             if result.message is not None:
                 self.last_poll_result_label.setText(f"Last poll result: {result.message}")
                 self.polling_status.setText(f"Polling status: {result.message}")
+                self._log_audit_aggregate(
+                    event_type="poll",
+                    summary=result.message,
+                )
+                self.refresh_audit()
                 return
             summary = (
                 f"inserted={result.inserted}, updated={result.updated}, skipped={result.skipped}"
             )
             self.last_poll_result_label.setText(f"Last poll result: {summary}")
             self.polling_status.setText(f"Polling status: {summary}")
+            self._log_audit_aggregate(
+                event_type="poll",
+                summary=summary,
+            )
+            self.refresh_audit()
         finally:
             self._poll_in_progress = False
 
@@ -434,3 +573,125 @@ class PacsPanel(QWidget):
         if interval < cls.MIN_POLL_INTERVAL_SECONDS:
             return cls.MIN_POLL_INTERVAL_SECONDS
         return interval
+
+    def clear_audit(self) -> None:
+        confirmed = QMessageBox.question(
+            self,
+            "Clear PACS Audit",
+            "Clear local PACS audit events?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmed != QMessageBox.StandardButton.Yes:
+            return
+
+        with connect(self._db_path) as connection:
+            clear_pacs_audit_events(connection)
+        self.refresh_audit()
+
+    def copy_audit_summary(self) -> None:
+        lines = []
+        for event in self._visible_audit_events:
+            lines.append(
+                " | ".join(
+                    [
+                        event.created_at,
+                        event.event_type,
+                        event.accession_or_order_id or "",
+                        event.status_before or "",
+                        event.status_after or "",
+                        event.summary,
+                        event.error_message or "",
+                    ]
+                ).strip()
+            )
+        copy_text("\n".join(lines))
+
+    def _log_audit_aggregate(self, *, event_type: str, summary: str) -> None:
+        with connect(self._db_path) as connection:
+            create_pacs_audit_event(
+                connection,
+                event_type=event_type,
+                summary=self._sanitize_audit_summary(summary),
+            )
+
+    def _log_audit_error(self, *, summary: str, error_message: str) -> None:
+        sanitized_error = self._sanitize_audit_error(error_message)
+        with connect(self._db_path) as connection:
+            create_pacs_audit_event(
+                connection,
+                event_type="error",
+                summary=sanitized_error,
+                error_message=sanitized_error,
+            )
+
+    @staticmethod
+    def _sanitize_audit_summary(summary: str) -> str:
+        normalized = " ".join((summary or "").split())
+        if not normalized:
+            return "unknown error"
+
+        if "=" in normalized and all(
+            token.strip() and "=" in token for token in normalized.split(",")
+        ):
+            return normalized
+
+        lowered = normalized.lower()
+        safe_phrases = {
+            "manual local worklist row created",
+            "manual local worklist row updated",
+            "selected local worklist row marked cancelled",
+            "skipped overlap",
+        }
+        if lowered in safe_phrases:
+            return lowered
+
+        return PacsPanel._sanitize_audit_error(normalized)
+
+    @staticmethod
+    def _sanitize_audit_error(error_message: str | None) -> str:
+        lowered = (error_message or "").strip().lower()
+        if not lowered:
+            return "unknown error"
+        if "timeout" in lowered or "timed out" in lowered:
+            return "timeout"
+        if any(
+            token in lowered
+            for token in (
+                "connection",
+                "connect",
+                "refused",
+                "unreachable",
+                "dns",
+                "network",
+                "socket",
+            )
+        ):
+            return "connection failed"
+        if any(
+            token in lowered
+            for token in (
+                "invalid payload",
+                "invalid json",
+                "bad payload",
+                "missing field",
+                "malformed",
+                "schema",
+                "decode",
+                "parse",
+            )
+        ):
+            return "invalid payload"
+        if any(
+            token in lowered
+            for token in (
+                "unavailable",
+                "not available",
+                "query rejected",
+                "driver missing",
+                "not configured",
+                "unsupported",
+            )
+        ):
+            return "unavailable"
+        return "unknown error"
