@@ -1,68 +1,131 @@
+from __future__ import annotations
+
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from KaosEghis.core.eghis_connector import refresh_cached_eghis_state
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
+    create_item,
+    create_macro_step,
+    delete_item,
+    delete_macro_steps_for_item,
     get_item,
     get_settings,
     list_items,
     list_macro_steps,
+    reorder_macro_steps,
+    update_item,
     validate_macro_dry_run,
 )
+from KaosEghis.ui.tabs.eghis_assist_tab import MacroEditorDialog
+from KaosEghis.ui.tabs.settings_tab import SettingsTab
 
 
 class KaosEghisTab(QWidget):
+    TOP_PAGES = ["Macros", "Presets", "EMR", "Settings"]
+
     def __init__(self) -> None:
         super().__init__()
 
-        self.connection_dot = QLabel("●")
-        self.connection_label = QLabel("Eghis EMR Connection")
-        self.connection_state = QLabel()
-        refresh_connection_button = QPushButton("Refresh Eghis Connection")
-        refresh_connection_button.clicked.connect(self.refresh_connection_status)
+        self.nav_buttons: dict[str, QPushButton] = {}
+        self.top_nav_row = QHBoxLayout()
+        self.stacked_widget = QStackedWidget()
 
-        connection_row = QHBoxLayout()
-        connection_row.addWidget(self.connection_dot)
-        connection_row.addWidget(self.connection_label)
-        connection_row.addWidget(self.connection_state)
-        connection_row.addWidget(refresh_connection_button)
-        connection_row.addStretch()
+        self.macros_page = MacrosPage()
+        self.presets_page = PresetsPage()
+        self.emr_page = EmrSummaryPage()
+        self.settings_page = SettingsTab()
 
-        presets_title = QLabel("Preset Automations")
+        for page in (
+            self.macros_page,
+            self.presets_page,
+            self.emr_page,
+            self.settings_page,
+        ):
+            self.stacked_widget.addWidget(page)
+
+        for index, name in enumerate(self.TOP_PAGES):
+            button = QPushButton(name)
+            button.setCheckable(True)
+            button.clicked.connect(
+                lambda _checked=False, page_index=index: self.show_page(page_index)
+            )
+            self.nav_buttons[name] = button
+            self.top_nav_row.addWidget(button)
+        self.top_nav_row.addStretch()
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(self.top_nav_row)
+        layout.addWidget(self.stacked_widget)
+
+        self.show_page(0)
+
+    def show_page(self, index: int) -> None:
+        self.stacked_widget.setCurrentIndex(index)
+        for button_index, name in enumerate(self.TOP_PAGES):
+            self.nav_buttons[name].setChecked(button_index == index)
+
+        current_widget = self.stacked_widget.currentWidget()
+        if hasattr(current_widget, "refresh_view"):
+            current_widget.refresh_view()
+        elif hasattr(current_widget, "load_settings"):
+            current_widget.load_settings()
+
+
+class MacrosPage(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+
+        title = QLabel("Macros")
+        title.setObjectName("pageTitle")
+
+        self.automation_summary = QLabel()
+        self.automation_summary.setObjectName("macroSummary")
+
         self.macros_table = QTableWidget(0, 3)
         self.macros_table.setHorizontalHeaderLabels(["id", "name", "enabled"])
         self.macros_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.macros_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.macros_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
-        refresh_button = QPushButton("Refresh")
-        refresh_button.clicked.connect(self.refresh_view)
-
-        dry_run_button = QPushButton("Dry Run")
-        dry_run_button.clicked.connect(self.dry_run_macro)
+        self.add_macro_button = QPushButton("Add macro")
+        self.add_macro_button.clicked.connect(self.add_macro)
+        self.edit_macro_button = QPushButton("Edit selected macro")
+        self.edit_macro_button.clicked.connect(self.edit_macro)
+        self.test_macro_button = QPushButton("Test selected macro")
+        self.test_macro_button.clicked.connect(self.test_macro)
+        self.delete_macro_button = QPushButton("Delete selected macro")
+        self.delete_macro_button.clicked.connect(self.delete_macro)
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.refresh_view)
 
         controls = QHBoxLayout()
-        controls.addWidget(refresh_button)
-        controls.addWidget(dry_run_button)
+        controls.addWidget(self.add_macro_button)
+        controls.addWidget(self.edit_macro_button)
+        controls.addWidget(self.test_macro_button)
+        controls.addWidget(self.delete_macro_button)
+        controls.addWidget(self.refresh_button)
         controls.addStretch()
 
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
-        self.log.setPlaceholderText("Daily preset status will appear here.")
+        self.log.setPlaceholderText("Macro dry-run output will appear here.")
 
         layout = QVBoxLayout(self)
-        layout.addLayout(connection_row)
-        layout.addWidget(presets_title)
+        layout.addWidget(title)
+        layout.addWidget(self.automation_summary)
         layout.addWidget(self.macros_table)
         layout.addLayout(controls)
         layout.addWidget(self.log)
@@ -70,25 +133,6 @@ class KaosEghisTab(QWidget):
         self.refresh_view()
 
     def refresh_view(self) -> None:
-        self.refresh_connection_status()
-        self.refresh_macros()
-        self.log.setPlainText("Preset automations refreshed.")
-
-    def refresh_connection_status(self) -> None:
-        initialize_database()
-        with connect() as connection:
-            settings = get_settings(connection)
-
-        state = refresh_cached_eghis_state(settings)
-        color = {
-            "green": "#a6e3a1",
-            "yellow": "#f9e2af",
-            "red": "#f38ba8",
-        }.get(state.status, "#f38ba8")
-        self.connection_dot.setStyleSheet(f"color: {color};")
-        self.connection_state.setText(state.message)
-
-    def refresh_macros(self) -> None:
         initialize_database()
         with connect() as connection:
             macros = list_items(connection, "macro")
@@ -97,18 +141,81 @@ class KaosEghisTab(QWidget):
         for row_index, macro in enumerate(macros):
             self.macros_table.setItem(row_index, 0, QTableWidgetItem(str(macro.id)))
             self.macros_table.setItem(row_index, 1, QTableWidgetItem(macro.name))
-            self.macros_table.setItem(row_index, 2, QTableWidgetItem(_yes_no(macro.is_enabled)))
+            self.macros_table.setItem(
+                row_index, 2, QTableWidgetItem(_yes_no(macro.is_enabled))
+            )
         self.macros_table.resizeColumnsToContents()
+        macro_ids = ", ".join(str(macro.id) for macro in macros) or "None"
+        self.automation_summary.setText(f"Saved automation IDs: {macro_ids}")
 
-    def dry_run_macro(self) -> None:
+    def add_macro(self) -> None:
+        dialog = MacroEditorDialog(self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        values = dialog.values()
+        if not values["name"]:
+            self.log.setPlainText("Macro name is required.")
+            return
+        initialize_database()
+        with connect() as connection:
+            item = create_item(connection, values["name"], "macro", values["is_enabled"])
+            for step in values["steps"]:
+                create_macro_step(connection, item.id, **step)
+            reorder_macro_steps(connection, item.id)
+        self.refresh_view()
+        self.log.setPlainText("Macro added.")
+
+    def edit_macro(self) -> None:
         item_id = self._selected_macro_id()
         if item_id is None:
-            self.log.setPlainText("Select a preset automation to dry run.")
+            self.log.setPlainText("Select a macro to edit.")
+            return
+
+        initialize_database()
+        with connect() as connection:
+            item = _get_required_item(connection, item_id)
+            steps = list_macro_steps(connection, item_id)
+
+        dialog = MacroEditorDialog(self, item, steps)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        values = dialog.values()
+        initialize_database()
+        with connect() as connection:
+            update_item(connection, item_id, values["name"], "macro", values["is_enabled"])
+            delete_macro_steps_for_item(connection, item_id)
+            for step in values["steps"]:
+                create_macro_step(connection, item_id, **step)
+            reorder_macro_steps(connection, item_id)
+        self.refresh_view()
+        self.log.setPlainText("Macro updated.")
+
+    def test_macro(self) -> None:
+        item_id = self._selected_macro_id()
+        if item_id is None:
+            self.log.setPlainText("Select a macro to test.")
             return
 
         initialize_database()
         with connect() as connection:
             self.log.setPlainText(_build_dry_run_output(connection, item_id))
+
+    def delete_macro(self) -> None:
+        item_id = self._selected_macro_id()
+        if item_id is None:
+            self.log.setPlainText("Select a macro to delete.")
+            return
+        if (
+            QMessageBox.question(self, "Confirm", "Delete selected macro?")
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
+        initialize_database()
+        with connect() as connection:
+            deleted = delete_item(connection, item_id)
+        self.refresh_view()
+        self.log.setPlainText("Macro deleted." if deleted else "Macro not found.")
 
     def _selected_macro_id(self) -> int | None:
         selected = self.macros_table.selectedItems()
@@ -118,6 +225,110 @@ class KaosEghisTab(QWidget):
         if item is None:
             return None
         return int(item.text())
+
+
+class PresetsPage(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+
+        title = QLabel("Presets")
+        title.setObjectName("pageTitle")
+
+        self.presets_table = QTableWidget(0, 3)
+        self.presets_table.setHorizontalHeaderLabels(["id", "name", "type"])
+        self.presets_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.presets_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.presets_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        self.empty_state = QLabel("No preset strings configured.")
+        self.empty_state.setObjectName("presetEmptyState")
+
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.refresh_view)
+
+        controls = QHBoxLayout()
+        controls.addWidget(self.refresh_button)
+        controls.addStretch()
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(title)
+        layout.addWidget(self.empty_state)
+        layout.addWidget(self.presets_table)
+        layout.addLayout(controls)
+
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        initialize_database()
+        with connect() as connection:
+            preset_items = []
+            for item_type in ("clipboard", "randomized_clipboard"):
+                preset_items.extend(list_items(connection, item_type))
+
+        self.presets_table.setRowCount(len(preset_items))
+        for row_index, item in enumerate(preset_items):
+            self.presets_table.setItem(row_index, 0, QTableWidgetItem(str(item.id)))
+            self.presets_table.setItem(row_index, 1, QTableWidgetItem(item.name))
+            self.presets_table.setItem(row_index, 2, QTableWidgetItem(item.item_type))
+        self.presets_table.resizeColumnsToContents()
+        has_presets = bool(preset_items)
+        self.empty_state.setVisible(not has_presets)
+        self.presets_table.setVisible(has_presets)
+
+
+class EmrSummaryPage(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+
+        title = QLabel("EMR")
+        title.setObjectName("pageTitle")
+
+        self.process_name = QLabel()
+        self.window_title = QLabel()
+        self.credential_reference_name = QLabel()
+        self.saved_automation_ids = QLabel()
+
+        form = QFormLayout()
+        form.addRow("eghis_process_name", self.process_name)
+        form.addRow("eghis_window_title_contains", self.window_title)
+        form.addRow("credential_reference_name", self.credential_reference_name)
+        form.addRow("saved automation IDs", self.saved_automation_ids)
+
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.refresh_view)
+
+        controls = QHBoxLayout()
+        controls.addWidget(self.refresh_button)
+        controls.addStretch()
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(title)
+        layout.addLayout(form)
+        layout.addLayout(controls)
+        layout.addStretch()
+
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        initialize_database()
+        with connect() as connection:
+            settings = get_settings(connection)
+            macros = list_items(connection, "macro")
+
+        self.process_name.setText(settings.get("eghis_process_name", ""))
+        self.window_title.setText(settings.get("eghis_window_title_contains", ""))
+        self.credential_reference_name.setText(
+            settings.get("credential_reference_name", "")
+        )
+        macro_ids = ", ".join(str(macro.id) for macro in macros) or "None"
+        self.saved_automation_ids.setText(macro_ids)
+
+
+def _get_required_item(connection, item_id: int):
+    item = get_item(connection, item_id)
+    if item is not None:
+        return item
+    raise RuntimeError("Item not found.")
 
 
 def _build_dry_run_output(connection, item_id: int) -> str:
