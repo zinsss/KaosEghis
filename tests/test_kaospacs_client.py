@@ -5,6 +5,7 @@ from KaosEghis.core.kaospacs_client import (
     _build_kaospacs_entry,
     cancel_kaospacs_order,
     check_kaospacs_health,
+    reconcile_kaospacs_worklist_to_local,
     push_kaospacs_worklist,
     sync_local_worklist_to_kaospacs,
 )
@@ -306,3 +307,176 @@ def test_cancelled_never_sent_row_is_not_sent(tmp_path, monkeypatch) -> None:
     assert cancel_calls == []
     assert loaded is not None
     assert loaded.kaospacs_mwl_status == "not_sent"
+
+
+def test_reconcile_completed_kaospacs_row_marks_local_done(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    import KaosEghis.core.kaospacs_client as client
+
+    with connect(db_path) as connection:
+        item = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            accession_or_order_id="ACC-1000",
+            study="Chest",
+            modality="CR",
+        )
+
+    monkeypatch.setattr(
+        client,
+        "fetch_kaospacs_worklist",
+        lambda settings: {"entries": [{"AccessionNumber": "ACC-1000", "CompletedAt": "2026-06-29T12:00:00Z"}]},
+    )
+
+    result = reconcile_kaospacs_worklist_to_local(
+        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        loaded = get_pacs_worklist_item(connection, item.id)
+
+    assert result.done == 1
+    assert result.cancelled == 0
+    assert loaded is not None
+    assert loaded.status == "done"
+
+
+def test_reconcile_cancelled_kaospacs_row_marks_local_cancelled(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    import KaosEghis.core.kaospacs_client as client
+
+    with connect(db_path) as connection:
+        item = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            accession_or_order_id="ACC-1001",
+            study="Chest",
+            modality="CR",
+        )
+
+    monkeypatch.setattr(
+        client,
+        "fetch_kaospacs_worklist",
+        lambda settings: {"entries": [{"RequestedProcedureID": "ACC-1001", "CancelledAt": "2026-06-29T12:00:00Z"}]},
+    )
+
+    result = reconcile_kaospacs_worklist_to_local(
+        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        loaded = get_pacs_worklist_item(connection, item.id)
+
+    assert result.done == 0
+    assert result.cancelled == 1
+    assert loaded is not None
+    assert loaded.status == "cancelled"
+
+
+def test_reconcile_unmatched_kaospacs_row_is_skipped(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    import KaosEghis.core.kaospacs_client as client
+
+    monkeypatch.setattr(
+        client,
+        "fetch_kaospacs_worklist",
+        lambda settings: {"entries": [{"AccessionNumber": "ACC-NOT-FOUND", "CompletedAt": "2026-06-29T12:00:00Z"}]},
+    )
+
+    result = reconcile_kaospacs_worklist_to_local(
+        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        rows = connection.execute("SELECT COUNT(*) FROM pacs_worklist_items").fetchone()[0]
+
+    assert result.skipped == 1
+    assert result.done == 0
+    assert result.cancelled == 0
+    assert rows == 0
+
+
+def test_reconcile_local_done_or_cancelled_is_not_reverted(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    import KaosEghis.core.kaospacs_client as client
+
+    with connect(db_path) as connection:
+        done_item = create_pacs_worklist_item(
+            connection,
+            status="done",
+            patient_name="Done",
+            accession_or_order_id="ACC-1002",
+            study="Chest",
+            modality="CR",
+        )
+        cancelled_item = create_pacs_worklist_item(
+            connection,
+            status="cancelled",
+            patient_name="Cancelled",
+            accession_or_order_id="ACC-1003",
+            study="Chest",
+            modality="CR",
+        )
+
+    monkeypatch.setattr(
+        client,
+        "fetch_kaospacs_worklist",
+        lambda settings: {
+            "entries": [
+                {"AccessionNumber": "ACC-1002", "Active": True},
+                {"ScheduledProcedureStepID": "ACC-1003", "Active": True},
+            ]
+        },
+    )
+
+    result = reconcile_kaospacs_worklist_to_local(
+        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        loaded_done = get_pacs_worklist_item(connection, done_item.id)
+        loaded_cancelled = get_pacs_worklist_item(connection, cancelled_item.id)
+
+    assert result.skipped == 2
+    assert loaded_done is not None
+    assert loaded_cancelled is not None
+    assert loaded_done.status == "done"
+    assert loaded_cancelled.status == "cancelled"
+
+
+def test_reconcile_does_not_create_new_local_rows_from_kaospacs(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    import KaosEghis.core.kaospacs_client as client
+
+    monkeypatch.setattr(
+        client,
+        "fetch_kaospacs_worklist",
+        lambda settings: {
+            "entries": [
+                {"AccessionNumber": "ACC-NEW-1", "CompletedAt": "2026-06-29T12:00:00Z"},
+                {"RequestedProcedureID": "ACC-NEW-2", "CancelledAt": "2026-06-29T12:00:00Z"},
+            ]
+        },
+    )
+
+    result = reconcile_kaospacs_worklist_to_local(
+        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        rows = connection.execute("SELECT COUNT(*) FROM pacs_worklist_items").fetchone()[0]
+
+    assert result.skipped == 2
+    assert rows == 0

@@ -36,6 +36,7 @@ Current behaviors:
 - poll now
 - optional UI-process auto poll timer
 - sync to KaosPACS
+- reconcile from KaosPACS
 - manual insert via dialog
 - edit selected local row via dialog
 - cancel selected local row
@@ -62,6 +63,7 @@ Current button separation:
 - `Check KaosPACS` -> `GET /health` only
 - `Poll now` -> Eghis DB to local SQLite only
 - `Sync to KaosPACS` -> local SQLite to KaosPACS only
+- `Reconcile from KaosPACS` -> KaosPACS API to local SQLite status reconciliation only
 - `Manual insert` -> local SQLite create only
 - `Edit selected` -> local SQLite update only
 - `Apply polling settings` -> save panel-local auto-poll settings and start/stop timer
@@ -194,6 +196,21 @@ Current sync UX rule:
   - errors
   - skipped
 
+Current reconciliation rule:
+
+- fetch `GET /worklist` from KaosPACS
+- match local rows by:
+  - `AccessionNumber`
+  - `RequestedProcedureID`
+  - `ScheduledProcedureStepID`
+- if remote row is completed, mark local row `done`
+- if remote row is cancelled, mark local row `cancelled`
+- never create new local rows from KaosPACS
+- never delete local rows
+- never revert local `done` or `cancelled` rows back to `active`
+- reconciliation is manual only
+- reconciliation does not call sync or local Eghis polling
+
 Current local MWL sync states:
 
 - `not_sent`
@@ -285,6 +302,7 @@ Current mapping rule:
 - read-only PostgreSQL adapter
 - cancellation-aware update behavior
 - local KaosPACS API bridge
+- manual KaosPACS-to-local reconciliation
 - local MWL sync-state tracking
 
 ## Not Done
