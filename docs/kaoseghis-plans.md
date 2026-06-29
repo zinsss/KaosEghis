@@ -74,6 +74,7 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - improve PACS local row editing ergonomics without widening sync scope
 - add optional PACS UI-process auto polling while keeping KaosPACS sync manual
 - add manual KaosPACS reconciliation without automatic state changes
+- harden PACS settings UX and validation in-app
 - refine flu reporting UX and export/report format
 - reconcile visible UI with older tab remnants and placeholder surfaces
 
