@@ -68,7 +68,7 @@ class MacroRunner:
         if settings is None:
             return MacroRunResult(
                 False,
-                "Macro execution blocked: Eghis connector settings are required.",
+                "window not ready",
                 0,
                 None,
             )
@@ -77,7 +77,7 @@ class MacroRunner:
         if state.status != "green":
             return MacroRunResult(
                 False,
-                f"Macro execution blocked: {state.message}",
+                "window not ready",
                 0,
                 None,
             )
@@ -95,9 +95,13 @@ class MacroRunner:
                 failed_step = step.options.get("step_order")
                 if not isinstance(failed_step, int):
                     failed_step = executed_steps + 1
+                sanitized_message = self._sanitize_failure_message(
+                    self._action_name(step),
+                    result.message,
+                )
                 return MacroRunResult(
                     False,
-                    result.message,
+                    sanitized_message,
                     executed_steps,
                     failed_step,
                 )
@@ -133,7 +137,7 @@ class MacroRunner:
         if action == "wait_window":
             return self._run_wait_window(step, self._require_settings())
         if action == "wait_text_or_image":
-            return MacroRunResult(False, "wait_text_or_image is not implemented yet.", 0, None)
+            return MacroRunResult(False, "unsupported action", 0, None)
         if action == "click":
             return self._run_click(step, self._require_settings())
         if action in {"hotkey", "key"}:
@@ -144,7 +148,7 @@ class MacroRunner:
             return self._run_paste_text(step)
         if action == "preset_text":
             return self._run_preset_text(step, self._require_settings())
-        return MacroRunResult(False, f"Unsupported macro action: {action}", 0, None)
+        return MacroRunResult(False, "unsupported action", 0, None)
 
     def _run_delay(self, step: MacroStep) -> MacroRunResult:
         milliseconds = step.options.get("ms", step.value)
@@ -156,7 +160,7 @@ class MacroRunner:
         if not isinstance(milliseconds, int) or milliseconds < 0:
             return MacroRunResult(
                 False,
-                "delay_ms action requires non-negative integer params['ms'].",
+                "unknown error",
                 0,
                 None,
             )
@@ -176,7 +180,7 @@ class MacroRunner:
     def _run_focus_window(self, settings: dict[str, str]) -> MacroRunResult:
         state = ensure_ready_for_macro(settings)
         if state.status != "green":
-            return MacroRunResult(False, f"focus_window failed: {state.message}", 0, None)
+            return MacroRunResult(False, "window not ready", 0, None)
         return MacroRunResult(True, "Focused configured Eghis window.", 1, None)
 
     def _run_wait_window(
@@ -193,49 +197,49 @@ class MacroRunner:
             if self._cancel_requested:
                 return MacroRunResult(False, "Macro execution canceled.", 0, None)
             if time.monotonic() >= deadline:
-                return MacroRunResult(False, "wait_window timed out.", 0, None)
+                return MacroRunResult(False, "timeout", 0, None)
             time.sleep(0.05)
 
     def _run_click(self, step: MacroStep, settings: dict[str, str]) -> MacroRunResult:
         if not step.target_id:
-            return MacroRunResult(False, "click action requires target_id.", 0, None)
+            return MacroRunResult(False, "target not found", 0, None)
         target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
         if target is None:
             return MacroRunResult(False, resolve_message, 0, None)
         try:
             target.click_input()
-        except Exception as error:
-            return MacroRunResult(False, f"click action failed: {error}", 0, None)
+        except Exception:
+            return MacroRunResult(False, "input failed", 0, None)
         return MacroRunResult(True, f"Clicked target '{step.target_id}'.", 1, None)
 
     def _run_hotkey(self, step: MacroStep) -> MacroRunResult:
         key = step.options.get("key", step.value)
         if not isinstance(key, str) or not key:
-            return MacroRunResult(False, "hotkey action requires string params['key'].", 0, None)
+            return MacroRunResult(False, "unknown error", 0, None)
         try:
             from pywinauto.keyboard import send_keys
 
             send_keys(key)
-        except Exception as error:
-            return MacroRunResult(False, f"hotkey action failed: {error}", 0, None)
+        except Exception:
+            return MacroRunResult(False, "input failed", 0, None)
         return MacroRunResult(True, f"Sent hotkey: {key}", 1, None)
 
     def _run_type_text(self, step: MacroStep) -> MacroRunResult:
         text = step.options.get("text", step.value)
         if not isinstance(text, str) or not text:
-            return MacroRunResult(False, "type_text action requires string text.", 0, None)
+            return MacroRunResult(False, "unknown error", 0, None)
         try:
             from pywinauto.keyboard import send_keys
 
             send_keys(text)
-        except Exception as error:
-            return MacroRunResult(False, f"type_text action failed: {error}", 0, None)
+        except Exception:
+            return MacroRunResult(False, "input failed", 0, None)
         return MacroRunResult(True, "Typed text.", 1, None)
 
     def _run_paste_text(self, step: MacroStep) -> MacroRunResult:
         text = step.options.get("text", step.value)
         if not isinstance(text, str) or not text:
-            return MacroRunResult(False, "paste_text action requires string text.", 0, None)
+            return MacroRunResult(False, "clipboard failed", 0, None)
 
         snapshot = None
         try:
@@ -244,18 +248,18 @@ class MacroRunner:
 
             send_keys("^v")
             time.sleep(0.15)
-        except Exception as error:
+        except Exception:
             if snapshot is not None:
                 try:
                     restore_clipboard(snapshot)
                 except Exception:
                     pass
-            return MacroRunResult(False, f"paste_text action failed: {error}", 0, None)
+            return MacroRunResult(False, "input failed" if snapshot is not None else "clipboard failed", 0, None)
 
         try:
             restore_clipboard(snapshot)
-        except Exception as error:
-            return MacroRunResult(False, f"paste_text restore failed: {error}", 0, None)
+        except Exception:
+            return MacroRunResult(False, "clipboard failed", 0, None)
         return MacroRunResult(True, "Pasted text.", 1, None)
 
     def _run_preset_text(
@@ -265,11 +269,11 @@ class MacroRunner:
     ) -> MacroRunResult:
         reference = step.options.get("preset", step.value)
         if not isinstance(reference, str) or not reference.strip():
-            return MacroRunResult(False, "preset_text action requires a preset reference.", 0, None)
+            return MacroRunResult(False, "clipboard failed", 0, None)
 
         text = self._resolve_preset_text(reference.strip())
         if text is None:
-            return MacroRunResult(False, f"preset_text action could not resolve preset '{reference}'.", 0, None)
+            return MacroRunResult(False, "clipboard failed", 0, None)
 
         preset_step = MacroStep(
             action="paste_text",
@@ -337,7 +341,7 @@ class MacroRunner:
                 (target_id,),
             ).fetchone()
         if target is None:
-            return None, f"UI target '{target_id}' is not registered."
+            return None, "target not found"
 
         from KaosEghis.db.repositories import _ui_target_from_row
 
@@ -345,7 +349,11 @@ class MacroRunner:
             settings, _ui_target_from_row(target)
         )
         if element is None:
-            return None, message
+            if "timed out" in message.casefold() or "timeout" in message.casefold():
+                return None, "timeout"
+            if "window" in message.casefold():
+                return None, "window not ready"
+            return None, "target not found"
         return element, "Target resolved."
 
     def _dry_run_step_line(self, step: MacroStep, index: int) -> str:
@@ -382,6 +390,36 @@ class MacroRunner:
         if self._current_settings is None:
             raise RuntimeError("Macro execution blocked: Eghis connector settings are required.")
         return self._current_settings
+
+    @staticmethod
+    def _sanitize_failure_message(action: str, message: str) -> str:
+        lowered = (message or "").strip().casefold()
+        if lowered in {
+            "target not found",
+            "input failed",
+            "clipboard failed",
+            "window not ready",
+            "timeout",
+            "unsupported action",
+            "unknown error",
+            "macro execution canceled.",
+        }:
+            return message
+        if "target" in lowered:
+            return "target not found"
+        if "window" in lowered or "focus" in lowered:
+            return "window not ready"
+        if "timeout" in lowered or "timed out" in lowered:
+            return "timeout"
+        if "clipboard" in lowered or "preset" in lowered:
+            return "clipboard failed"
+        if "unsupported" in lowered or action == "wait_text_or_image":
+            return "unsupported action"
+        if action in {"click", "hotkey", "key", "type_text", "paste_text"}:
+            if "clipboard" in lowered and action == "paste_text":
+                return "clipboard failed"
+            return "input failed"
+        return "unknown error"
 
 
 def _db_macro_step_to_runtime_step(step) -> MacroStep:

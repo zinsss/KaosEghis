@@ -86,7 +86,7 @@ def test_macro_stops_on_failed_step(monkeypatch, tmp_path) -> None:
     assert result.success is False
     assert result.executed_steps == 1
     assert result.failed_step == 2
-    assert result.message == "wait_text_or_image is not implemented yet."
+    assert result.message == "unsupported action"
 
 
 def test_preset_text_resolves_clipboard_item(monkeypatch, tmp_path) -> None:
@@ -235,3 +235,132 @@ def test_app_startup_does_not_execute_macro(monkeypatch) -> None:
 
     assert window is not None
     assert calls == []
+
+
+def test_click_failure_is_sanitized(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="button.ok", automation_id="OkButton")
+        item = create_item(connection, "Click Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "click", target_id="button.ok")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def click_input(self) -> None:
+            raise RuntimeError("low-level click failure")
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "raw internals"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.message == "input failed"
+
+
+def test_target_resolution_failure_is_sanitized(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="button.ok", automation_id="OkButton")
+        item = create_item(connection, "Resolve Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "click", target_id="button.ok")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (None, None, "ElementAmbiguousError: raw internals"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.message == "target not found"
+
+
+def test_hotkey_failure_is_sanitized(monkeypatch, tmp_path) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Hotkey Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "hotkey", value="^a")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda _keys: (_ for _ in ()).throw(RuntimeError("raw send_keys failure")))})(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.message == "input failed"
+
+
+def test_clipboard_failures_are_sanitized(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Paste Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "paste_text", value="hello")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda _text: (_ for _ in ()).throw(RuntimeError("raw clipboard failure")),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.message == "clipboard failed"
