@@ -51,6 +51,7 @@ def test_pacs_panel_has_required_worklist_columns() -> None:
         "Sync Error",
     ]
     assert "PACS Worklist" in [label.text() for label in panel.findChildren(QLabel)]
+    assert any(button.text() == "Reconcile from KaosPACS" for button in panel.findChildren(type(panel.refresh_button)))
 
 
 def test_pacs_panel_default_auto_poll_setting_is_false(tmp_path) -> None:
@@ -322,6 +323,40 @@ def test_pacs_panel_timer_tick_calls_poll_not_sync(monkeypatch, tmp_path) -> Non
     panel._handle_poll_timer_tick()
 
     assert calls == {"poll": 1, "sync": 0}
+
+
+def test_pacs_panel_reconcile_button_calls_reconcile_not_poll_or_sync(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.kaospacs_client import KaosPacsReconcileResult
+
+    calls = {"poll": 0, "sync": 0, "reconcile": 0}
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1),
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "sync_local_worklist_to_kaospacs",
+        lambda settings, db_path: calls.__setitem__("sync", calls["sync"] + 1),
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "reconcile_kaospacs_worklist_to_local",
+        lambda settings, db_path: calls.__setitem__("reconcile", calls["reconcile"] + 1)
+        or KaosPacsReconcileResult(done=1, cancelled=2, skipped=3, errors=0),
+    )
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    panel.reconcile_button.click()
+
+    assert calls == {"poll": 0, "sync": 0, "reconcile": 1}
+    assert (
+        panel.polling_status.text()
+        == "KaosPACS reconcile: done=1, cancelled=2, skipped=3, errors=0"
+    )
 
 
 def test_pacs_panel_overlapping_poll_is_skipped(monkeypatch, tmp_path) -> None:

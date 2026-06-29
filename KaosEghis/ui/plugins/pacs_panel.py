@@ -27,6 +27,7 @@ from KaosEghis.db.repositories import (
 )
 from KaosEghis.core.kaospacs_client import (
     check_kaospacs_health,
+    reconcile_kaospacs_worklist_to_local,
     sync_local_worklist_to_kaospacs,
 )
 from KaosEghis.core.pacs_polling import poll_eghis_image_orders_into_local_worklist
@@ -120,6 +121,8 @@ class PacsPanel(QWidget):
         self.poll_button.clicked.connect(self.poll_now)
         self.sync_button = QPushButton("Sync to KaosPACS")
         self.sync_button.clicked.connect(self.sync_to_kaospacs)
+        self.reconcile_button = QPushButton("Reconcile from KaosPACS")
+        self.reconcile_button.clicked.connect(self.reconcile_from_kaospacs)
         self.manual_insert_button = QPushButton("Manual insert")
         self.manual_insert_button.clicked.connect(self.manual_insert_row)
         self.edit_button = QPushButton("Edit selected")
@@ -132,6 +135,7 @@ class PacsPanel(QWidget):
         action_row.addWidget(self.check_kaospacs_button)
         action_row.addWidget(self.poll_button)
         action_row.addWidget(self.sync_button)
+        action_row.addWidget(self.reconcile_button)
         action_row.addWidget(self.manual_insert_button)
         action_row.addWidget(self.edit_button)
         action_row.addWidget(self.delete_button)
@@ -235,6 +239,22 @@ class PacsPanel(QWidget):
             f"cancelled pending rows={sync_summary['cancelled_pending_rows']}, "
             f"sent={result.sent}, cancelled={result.cancelled}, "
             f"errors={result.errors}, skipped={result.skipped}"
+        )
+
+    def reconcile_from_kaospacs(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+
+        result = reconcile_kaospacs_worklist_to_local(settings, self._db_path)
+        self.refresh_rows()
+        if result.message is not None:
+            self.polling_status.setText(f"KaosPACS reconcile: {result.message}")
+            return
+        self.polling_status.setText(
+            "KaosPACS reconcile: "
+            f"done={result.done}, cancelled={result.cancelled}, "
+            f"skipped={result.skipped}, errors={result.errors}"
         )
 
     def manual_insert_row(self) -> None:

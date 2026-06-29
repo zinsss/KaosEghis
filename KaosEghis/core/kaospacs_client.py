@@ -24,6 +24,15 @@ class KaosPacsSyncResult:
     message: str | None = None
 
 
+@dataclass(frozen=True)
+class KaosPacsReconcileResult:
+    done: int
+    cancelled: int
+    skipped: int
+    errors: int
+    message: str | None = None
+
+
 def check_kaospacs_health(settings: dict[str, str]) -> bool:
     payload = _request_json(settings, "GET", "/health")
     return bool(payload)
@@ -143,6 +152,84 @@ def sync_local_worklist_to_kaospacs(
     )
 
 
+def reconcile_kaospacs_worklist_to_local(
+    settings: dict[str, str],
+    db_path: Path | None = None,
+) -> KaosPacsReconcileResult:
+    initialize_database(db_path)
+    db_file = db_path or get_database_path()
+    done = 0
+    cancelled = 0
+    skipped = 0
+    errors = 0
+
+    try:
+        payload = fetch_kaospacs_worklist(settings)
+    except RuntimeError as exc:
+        return KaosPacsReconcileResult(
+            done=0,
+            cancelled=0,
+            skipped=0,
+            errors=1,
+            message=str(exc),
+        )
+
+    entries = payload.get("entries", [])
+    if not isinstance(entries, list):
+        return KaosPacsReconcileResult(
+            done=0,
+            cancelled=0,
+            skipped=0,
+            errors=1,
+            message="invalid worklist payload",
+        )
+
+    with connect(db_file) as connection:
+        items = list_pacs_worklist_items(connection)
+        item_by_identifier = _index_local_items(items)
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                skipped += 1
+                continue
+
+            local_item = _match_local_item(item_by_identifier, entry)
+            if local_item is None:
+                skipped += 1
+                continue
+
+            if local_item.status in {"done", "cancelled"}:
+                skipped += 1
+                continue
+
+            remote_status = _reconciliation_status(entry)
+            if remote_status == "done":
+                if local_item.status != "done":
+                    if _update_local_status_for_reconciliation(connection, local_item.id, "done"):
+                        done += 1
+                    else:
+                        errors += 1
+                else:
+                    skipped += 1
+            elif remote_status == "cancelled":
+                if local_item.status != "cancelled":
+                    if _update_local_status_for_reconciliation(connection, local_item.id, "cancelled"):
+                        cancelled += 1
+                    else:
+                        errors += 1
+                else:
+                    skipped += 1
+            else:
+                skipped += 1
+
+    return KaosPacsReconcileResult(
+        done=done,
+        cancelled=cancelled,
+        skipped=skipped,
+        errors=errors,
+    )
+
+
 def _build_kaospacs_entry(item: PacsWorklistItemRecord) -> dict[str, str]:
     accession_number = item.accession_or_order_id or ""
     requested_date, requested_time = _split_date_time(item.requested_at)
@@ -176,6 +263,67 @@ def _split_date_time(value: str | None) -> tuple[str, str]:
         return normalized.replace("-", ""), ""
     date_part, time_part = normalized.split(" ", 1)
     return date_part.replace("-", ""), time_part.replace(":", "")
+
+
+def _index_local_items(
+    items: list[PacsWorklistItemRecord],
+) -> dict[str, PacsWorklistItemRecord]:
+    index: dict[str, PacsWorklistItemRecord] = {}
+    for item in items:
+        if not item.accession_or_order_id:
+            continue
+        index[item.accession_or_order_id] = item
+    return index
+
+
+def _match_local_item(
+    item_by_identifier: dict[str, PacsWorklistItemRecord],
+    entry: dict,
+) -> PacsWorklistItemRecord | None:
+    for key in ("AccessionNumber", "RequestedProcedureID", "ScheduledProcedureStepID"):
+        value = _text(entry.get(key))
+        if value and value in item_by_identifier:
+            return item_by_identifier[value]
+    return None
+
+
+def _reconciliation_status(entry: dict) -> str | None:
+    active = entry.get("Active")
+    cancelled_at = _text(entry.get("CancelledAt"))
+    completed_at = _text(entry.get("CompletedAt"))
+    cancel_reason = _text(entry.get("CancelReason"))
+
+    if cancelled_at or cancel_reason:
+        return "cancelled"
+    if completed_at:
+        return "done"
+    if active is False:
+        return "done"
+    return None
+
+
+def _update_local_status_for_reconciliation(
+    connection,
+    item_id: int,
+    status: str,
+) -> bool:
+    cursor = connection.execute(
+        """
+        UPDATE pacs_worklist_items
+        SET status = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (status, item_id),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def _text(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
 def _request_json(
