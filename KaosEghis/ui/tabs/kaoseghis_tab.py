@@ -26,6 +26,7 @@ from KaosEghis.db.repositories import (
     get_item,
     list_items,
     list_macro_steps,
+    resolve_macro_emr_target_profile,
     reorder_macro_steps,
     update_item,
     validate_macro_dry_run,
@@ -46,7 +47,7 @@ class KaosEghisTab(QWidget):
         self.top_nav_row = QHBoxLayout()
         self.stacked_widget = QStackedWidget()
 
-        self.macros_page = MacrosPage()
+        self.macros_page = MacrosPage(db_path)
         self.presets_page = PresetsPage()
         self.emr_page = EmrTargetsPage(db_path)
         self.settings_page = SettingsTab(db_path)
@@ -88,8 +89,9 @@ class KaosEghisTab(QWidget):
 
 
 class MacrosPage(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
+        self._db_path = db_path
 
         title = QLabel("Macros")
         title.setObjectName("pageTitle")
@@ -97,8 +99,10 @@ class MacrosPage(QWidget):
         self.automation_summary = QLabel()
         self.automation_summary.setObjectName("macroSummary")
 
-        self.macros_table = QTableWidget(0, 3)
-        self.macros_table.setHorizontalHeaderLabels(["id", "name", "enabled"])
+        self.macros_table = QTableWidget(0, 4)
+        self.macros_table.setHorizontalHeaderLabels(
+            ["id", "name", "EMR profile", "enabled"]
+        )
         self.macros_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.macros_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.macros_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -139,17 +143,24 @@ class MacrosPage(QWidget):
         self.refresh_view()
 
     def refresh_view(self) -> None:
-        initialize_database()
-        with connect() as connection:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
             macros = list_items(connection, "macro")
 
         self.macros_table.setRowCount(len(macros))
-        for row_index, macro in enumerate(macros):
-            self.macros_table.setItem(row_index, 0, QTableWidgetItem(str(macro.id)))
-            self.macros_table.setItem(row_index, 1, QTableWidgetItem(macro.name))
-            self.macros_table.setItem(
-                row_index, 2, QTableWidgetItem(_yes_no(macro.is_enabled))
-            )
+        with connect(self._db_path) as connection:
+            for row_index, macro in enumerate(macros):
+                profile = resolve_macro_emr_target_profile(connection, macro)
+                self.macros_table.setItem(row_index, 0, QTableWidgetItem(str(macro.id)))
+                self.macros_table.setItem(row_index, 1, QTableWidgetItem(macro.name))
+                self.macros_table.setItem(
+                    row_index,
+                    2,
+                    QTableWidgetItem(profile.name if profile is not None else ""),
+                )
+                self.macros_table.setItem(
+                    row_index, 3, QTableWidgetItem(_yes_no(macro.is_enabled))
+                )
         self.macros_table.resizeColumnsToContents()
         macro_ids = ", ".join(str(macro.id) for macro in macros) or "None"
         self.automation_summary.setText(f"Saved automation IDs: {macro_ids}")
@@ -162,9 +173,15 @@ class MacrosPage(QWidget):
         if not values["name"]:
             self.log.setPlainText("Macro name is required.")
             return
-        initialize_database()
-        with connect() as connection:
-            item = create_item(connection, values["name"], "macro", values["is_enabled"])
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            item = create_item(
+                connection,
+                values["name"],
+                "macro",
+                values["is_enabled"],
+                values["emr_target_profile_id"],
+            )
             for step in values["steps"]:
                 create_macro_step(connection, item.id, **step)
             reorder_macro_steps(connection, item.id)
@@ -177,8 +194,8 @@ class MacrosPage(QWidget):
             self.log.setPlainText("Select a macro to edit.")
             return
 
-        initialize_database()
-        with connect() as connection:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
             item = _get_required_item(connection, item_id)
             steps = list_macro_steps(connection, item_id)
 
@@ -186,9 +203,16 @@ class MacrosPage(QWidget):
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         values = dialog.values()
-        initialize_database()
-        with connect() as connection:
-            update_item(connection, item_id, values["name"], "macro", values["is_enabled"])
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            update_item(
+                connection,
+                item_id,
+                values["name"],
+                "macro",
+                values["is_enabled"],
+                values["emr_target_profile_id"],
+            )
             delete_macro_steps_for_item(connection, item_id)
             for step in values["steps"]:
                 create_macro_step(connection, item_id, **step)
@@ -202,7 +226,7 @@ class MacrosPage(QWidget):
             self.log.setPlainText("Select a macro to dry run.")
             return
 
-        result = MacroRunner().execute_macro(item_id, dry_run=True)
+        result = MacroRunner(self._db_path).execute_macro(item_id, dry_run=True)
         self.log.setPlainText(result.message)
 
     def run_macro(self) -> None:
@@ -224,7 +248,7 @@ class MacrosPage(QWidget):
             self.log.setPlainText("Macro execution canceled.")
             return
 
-        result = MacroRunner().execute_macro(item_id, dry_run=False)
+        result = MacroRunner(self._db_path).execute_macro(item_id, dry_run=False)
         lines = [
             f"success: {_yes_no(result.success)}",
             f"executed_steps: {result.executed_steps}",
@@ -244,8 +268,8 @@ class MacrosPage(QWidget):
         ):
             return
 
-        initialize_database()
-        with connect() as connection:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
             deleted = delete_item(connection, item_id)
         self.refresh_view()
         self.log.setPlainText("Macro deleted." if deleted else "Macro not found.")
@@ -321,9 +345,13 @@ def _build_dry_run_output(connection, item_id: int) -> str:
     if item is None:
         return "Macro not found."
 
+    profile = resolve_macro_emr_target_profile(connection, item)
     steps = list_macro_steps(connection, item_id)
     errors = validate_macro_dry_run(connection, item_id)
     lines = [f"Dry run: {item.name}"]
+    lines.append(
+        f"Profile: {profile.name if profile is not None else '(No EMR profile)'}"
+    )
     for step in steps:
         lines.append(_dry_run_step_line(step))
     if errors:

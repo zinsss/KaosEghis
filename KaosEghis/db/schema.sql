@@ -9,8 +9,10 @@ CREATE TABLE IF NOT EXISTS items (
     name TEXT NOT NULL,
     item_type TEXT NOT NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
+    emr_target_profile_id INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (emr_target_profile_id) REFERENCES emr_target_profiles(id)
 );
 
 CREATE TABLE IF NOT EXISTS clipboard_variants (

@@ -72,6 +72,12 @@ Responsibilities:
 - limited supported actions
 - future EMR profile-aware resolution boundary
 
+Current transition state:
+
+- macros can now be bound to an EMR target profile
+- dry run can report the resolved profile name
+- actual click/send/paste target resolution is intentionally not switched over yet
+
 ### EMR Target Foundation
 
 Modules:

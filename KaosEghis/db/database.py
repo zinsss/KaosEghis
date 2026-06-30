@@ -43,6 +43,7 @@ def initialize_database(path: Path | None = None) -> None:
     schema_path = Path(__file__).with_name("schema.sql")
     with connect(path) as connection:
         connection.executescript(schema_path.read_text(encoding="utf-8"))
+        _migrate_items(connection)
         _migrate_ui_targets_columns(connection)
         _migrate_pacs_worklist(connection)
         _migrate_pacs_audit_events(connection)
@@ -70,6 +71,14 @@ def _migrate_ui_targets_columns(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE ui_targets ADD COLUMN parent_automation_id TEXT")
     if "parent_target_id" not in columns:
         connection.execute("ALTER TABLE ui_targets ADD COLUMN parent_target_id TEXT")
+
+
+def _migrate_items(connection: sqlite3.Connection) -> None:
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(items)").fetchall()
+    }
+    if "emr_target_profile_id" not in columns:
+        connection.execute("ALTER TABLE items ADD COLUMN emr_target_profile_id INTEGER")
 
 
 def _migrate_pacs_worklist(connection: sqlite3.Connection) -> None:

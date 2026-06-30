@@ -13,7 +13,12 @@ from KaosEghis.core.eghis_connector import (
 from KaosEghis.core.macro_models import MacroRunResult, MacroStep
 from KaosEghis.core.uia_inspector import resolve_target_element
 from KaosEghis.db.database import connect, get_database_path
-from KaosEghis.db.repositories import get_item, get_settings, list_macro_steps
+from KaosEghis.db.repositories import (
+    get_item,
+    get_settings,
+    list_macro_steps,
+    resolve_macro_emr_target_profile,
+)
 
 
 class MacroRunner:
@@ -21,6 +26,7 @@ class MacroRunner:
         self._cancel_requested = False
         self._db_path = db_path
         self._current_settings: dict[str, str] | None = None
+        self._current_profile_name: str | None = None
 
     def cancel(self) -> None:
         self._cancel_requested = True
@@ -39,12 +45,14 @@ class MacroRunner:
             item = get_item(connection, item_id)
             if item is None:
                 return MacroRunResult(False, "Macro not found.", 0, None)
+            profile = resolve_macro_emr_target_profile(connection, item)
 
             steps = [
                 _db_macro_step_to_runtime_step(step)
                 for step in list_macro_steps(connection, item_id)
             ]
             run_settings = settings or get_settings(connection)
+        self._current_profile_name = profile.name if profile is not None else None
 
         if not dry_run and not item.is_enabled:
             return MacroRunResult(False, "Macro execution blocked: macro is disabled.", 0, None)
@@ -115,7 +123,11 @@ class MacroRunner:
         return MacroRunResult(True, "Macro execution completed.", executed_steps, None)
 
     def _build_dry_run_result(self, steps: Sequence[MacroStep]) -> MacroRunResult:
-        lines = ["Dry run only. Planned macro steps:"]
+        profile_name = self._current_profile_name or "(No EMR profile)"
+        lines = [
+            f"Dry run only. Profile: {profile_name}",
+            "Planned macro steps:",
+        ]
         for index, step in enumerate(steps, start=1):
             lines.append(self._dry_run_step_line(step, index))
         if not steps:

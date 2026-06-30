@@ -37,6 +37,7 @@ class ItemRecord:
     name: str
     item_type: str
     is_enabled: bool
+    emr_target_profile_id: int | None
     created_at: str
     updated_at: str
 
@@ -184,7 +185,7 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
     if item_type is None:
         rows = connection.execute(
             """
-            SELECT id, name, item_type, is_enabled, created_at, updated_at
+            SELECT id, name, item_type, is_enabled, emr_target_profile_id, created_at, updated_at
             FROM items
             ORDER BY name
             """
@@ -192,7 +193,7 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
     else:
         rows = connection.execute(
             """
-            SELECT id, name, item_type, is_enabled, created_at, updated_at
+            SELECT id, name, item_type, is_enabled, emr_target_profile_id, created_at, updated_at
             FROM items
             WHERE item_type = ?
             ORDER BY name
@@ -205,7 +206,7 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
 def get_item(connection: sqlite3.Connection, item_id: int) -> ItemRecord | None:
     row = connection.execute(
         """
-        SELECT id, name, item_type, is_enabled, created_at, updated_at
+        SELECT id, name, item_type, is_enabled, emr_target_profile_id, created_at, updated_at
         FROM items
         WHERE id = ?
         """,
@@ -221,14 +222,15 @@ def create_item(
     name: str,
     item_type: str,
     is_enabled: bool = True,
+    emr_target_profile_id: int | None = None,
 ) -> ItemRecord:
     _validate_item_type(item_type)
     cursor = connection.execute(
         """
-        INSERT INTO items (name, item_type, is_enabled)
-        VALUES (?, ?, ?)
+        INSERT INTO items (name, item_type, is_enabled, emr_target_profile_id)
+        VALUES (?, ?, ?, ?)
         """,
-        (name.strip(), item_type, int(is_enabled)),
+        (name.strip(), item_type, int(is_enabled), emr_target_profile_id),
     )
     connection.commit()
     created = get_item(connection, cursor.lastrowid)
@@ -243,6 +245,7 @@ def update_item(
     name: str,
     item_type: str,
     is_enabled: bool,
+    emr_target_profile_id: int | None = None,
 ) -> ItemRecord | None:
     _validate_item_type(item_type)
     connection.execute(
@@ -251,10 +254,11 @@ def update_item(
         SET name = ?,
             item_type = ?,
             is_enabled = ?,
+            emr_target_profile_id = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (name.strip(), item_type, int(is_enabled), item_id),
+        (name.strip(), item_type, int(is_enabled), emr_target_profile_id, item_id),
     )
     connection.commit()
     return get_item(connection, item_id)
@@ -914,6 +918,26 @@ def list_emr_ui_targets(
     return [_emr_ui_target_from_row(row) for row in rows]
 
 
+def get_emr_ui_target_by_key(
+    connection: sqlite3.Connection,
+    profile_id: int,
+    target_key: str,
+) -> EmrUiTargetRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, profile_id, target_key, label, description, automation_id,
+               control_type, class_name, name_match, parent_target_key,
+               created_at, updated_at
+        FROM emr_ui_targets
+        WHERE profile_id = ? AND target_key = ?
+        """,
+        (profile_id, target_key),
+    ).fetchone()
+    if row is None:
+        return None
+    return _emr_ui_target_from_row(row)
+
+
 def get_emr_ui_target(
     connection: sqlite3.Connection, ui_target_id: int
 ) -> EmrUiTargetRecord | None:
@@ -1044,12 +1068,34 @@ def reorder_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[Ma
 
 def validate_macro_dry_run(connection: sqlite3.Connection, item_id: int) -> list[str]:
     errors: list[str] = []
+    item = get_item(connection, item_id)
+    profile = resolve_macro_emr_target_profile(connection, item)
     for step in list_macro_steps(connection, item_id):
-        if step.target_id and get_ui_target(connection, step.target_id) is None:
-            errors.append(
-                f"Step {step.step_order}: target_id '{step.target_id}' is not registered."
-            )
+        if not step.target_id:
+            continue
+        if profile is not None and get_emr_ui_target_by_key(
+            connection, profile.id, step.target_id
+        ) is not None:
+            continue
+        if get_ui_target(connection, step.target_id) is not None:
+            continue
+        errors.append(
+            f"Step {step.step_order}: target_id '{step.target_id}' is not registered."
+        )
     return errors
+
+
+def resolve_macro_emr_target_profile(
+    connection: sqlite3.Connection,
+    item: ItemRecord | None,
+) -> EmrTargetProfileRecord | None:
+    if item is None:
+        return get_default_emr_target_profile(connection)
+    if item.emr_target_profile_id is not None:
+        profile = get_emr_target_profile(connection, item.emr_target_profile_id)
+        if profile is not None:
+            return profile
+    return get_default_emr_target_profile(connection)
 
 
 def list_ui_targets(connection: sqlite3.Connection) -> list[UiTargetRecord]:
@@ -1184,8 +1230,9 @@ def _item_from_row(row: sqlite3.Row | tuple) -> ItemRecord:
         name=row[1],
         item_type=row[2],
         is_enabled=bool(row[3]),
-        created_at=row[4],
-        updated_at=row[5],
+        emr_target_profile_id=row[4],
+        created_at=row[5],
+        updated_at=row[6],
     )
 
 
