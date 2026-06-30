@@ -178,6 +178,17 @@ def test_pacs_panel_startup_does_not_call_poll_sync_or_health(monkeypatch, tmp_p
     assert panel.polling_status.text().startswith("Startup readiness: sqlite=ok, settings=ok")
 
 
+def test_pacs_panel_startup_readiness_shows_active_sqlite_path(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    panel = PacsPanel(db_path=db_path)
+
+    assert f"db={db_path.resolve()}" in panel.polling_status.text()
+
+
 def test_pacs_panel_check_button_checks_kaospacs_health(monkeypatch, tmp_path) -> None:
     _app()
 

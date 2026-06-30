@@ -1,20 +1,30 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+import os
 import sqlite3
 from pathlib import Path
 
 
 APP_DIR_NAME = "KaosEghis"
+DATA_DIR_ENV_VAR = "KAOSEGHIS_DATA_DIR"
 
 
 def get_data_dir() -> Path:
-    data_dir = Path.cwd() / "data"
+    override = os.environ.get(DATA_DIR_ENV_VAR, "").strip()
+    if override:
+        data_dir = Path(override).expanduser()
+    else:
+        data_dir = _default_user_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
     return data_dir
 
 
 def get_database_path() -> Path:
     return get_data_dir() / "KaosEghis.sqlite"
+
+
+def describe_database_path(path: Path | None = None) -> str:
+    return str((path or get_database_path()).resolve())
 
 
 @contextmanager
@@ -35,6 +45,13 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_pacs_worklist(connection)
         _migrate_pacs_audit_events(connection)
         connection.commit()
+
+
+def _default_user_data_dir() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    if local_app_data:
+        return Path(local_app_data).expanduser() / APP_DIR_NAME
+    return Path.home() / f".{APP_DIR_NAME.lower()}"
 
 
 def _migrate_ui_targets_columns(connection: sqlite3.Connection) -> None:
