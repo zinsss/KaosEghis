@@ -33,6 +33,7 @@ from KaosEghis.core.write_test import (
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     ALLOWED_MACRO_ACTIONS,
+    build_macro_dry_run_preview,
     EmrUiTargetRecord,
     ItemRecord,
     MacroStepRecord,
@@ -61,6 +62,20 @@ from KaosEghis.db.repositories import (
     update_ui_target,
     validate_macro_dry_run,
 )
+
+
+TARGET_BASED_ACTIONS = {
+    "click",
+    "mouse_click",
+    "paste_text",
+    "preset_text",
+    "read_text_uia",
+    "set_text_uia",
+    "type_text",
+    "type_text_clipboard",
+    "type_text_keyboard",
+    "wait_for_target",
+}
 
 
 class MacrosTab(QWidget):
@@ -599,24 +614,21 @@ class MacrosTab(QWidget):
         with connect() as connection:
             item = _get_required_item(connection, item_id)
             profile = resolve_macro_emr_target_profile(connection, item)
-            steps = list_macro_steps(connection, item_id)
-            errors = validate_macro_dry_run(connection, item_id)
+            preview = build_macro_dry_run_preview(connection, item_id)
 
         lines = [f"Dry run: {item.name}"]
         lines.append(
             f"Profile: {profile.name if profile is not None else '(No EMR profile)'}"
         )
-        for step in steps:
-            lines.append(_dry_run_step_line(step))
-        if errors:
+        for warning in preview.warnings:
+            lines.append(f"Warning: {warning}")
+        for step in preview.steps:
+            lines.extend(_dry_run_preview_lines(step))
+        if preview.warnings or any(step.warnings for step in preview.steps):
             lines.append("")
-            missing_target = _missing_target_from_error(errors[0])
-            if missing_target:
-                lines.append(f"Result: Blocked - missing UI target: {missing_target}")
-            else:
-                lines.append(f"Result: Blocked - {errors[0]}")
+            lines.append("Result: Review warnings before real execution.")
         else:
-            if not steps:
+            if not preview.steps:
                 lines.append("No steps defined.")
             lines.append("")
             lines.append("Result: OK - dry run only, no actions executed.")
@@ -671,6 +683,31 @@ def _dry_run_step_line(step: MacroStepRecord) -> str:
         f"{step.step_order}. {step.action}{target}{value} "
         f"timeout={step.timeout_seconds} retries={step.retries}"
     )
+
+
+def _dry_run_preview_lines(step_preview) -> list[str]:
+    target = f" target_key={step_preview.target_key}" if step_preview.target_key else ""
+    label = f" label={step_preview.resolved_label}" if step_preview.resolved_label else ""
+    line = f"{step_preview.step_order}. action={step_preview.action}{target}{label}"
+    detail_parts = []
+    if step_preview.automation_id:
+        detail_parts.append(f"automation_id={step_preview.automation_id}")
+    if step_preview.control_type:
+        detail_parts.append(f"control_type={step_preview.control_type}")
+    if step_preview.name_match:
+        detail_parts.append(f"name_match={step_preview.name_match}")
+    if step_preview.class_name:
+        detail_parts.append(f"class_name={step_preview.class_name}")
+    if step_preview.parent_target_key:
+        detail_parts.append(f"parent_key={step_preview.parent_target_key}")
+    if step_preview.value_summary:
+        detail_parts.append(step_preview.value_summary)
+    lines = [line]
+    if detail_parts:
+        lines.append(f"   preview: {'; '.join(detail_parts)}")
+    for warning in step_preview.warnings:
+        lines.append(f"   warning: {warning}")
+    return lines
 
 
 def _get_required_target(connection, target_id: str) -> UiTargetRecord:
@@ -769,6 +806,7 @@ class MacroEditorDialog(QDialog):
             default_profile = get_default_emr_target_profile(connection)
 
         self._default_profile_id = default_profile.id if default_profile is not None else None
+        self._profile_target_keys: list[str] = []
 
         self.name = QLineEdit(item.name if item else "")
         self.enabled = QCheckBox()
@@ -838,6 +876,7 @@ class MacroEditorDialog(QDialog):
                     "retries": step.retries,
                 }
             )
+        self._refresh_profile_target_keys()
 
     def values(self) -> dict:
         return {
@@ -925,13 +964,27 @@ class MacroEditorDialog(QDialog):
     def effective_profile_id(self) -> int | None:
         return self.current_profile_id() or self._default_profile_id
 
+    def available_target_keys(self) -> list[str]:
+        return list(self._profile_target_keys)
+
     def _default_profile_label(self, default_profile_name: str | None) -> str:
         if default_profile_name:
             return f"(Default profile) {default_profile_name}"
         return "(Default profile)"
 
     def _on_profile_changed(self) -> None:
-        pass
+        self._refresh_profile_target_keys()
+
+    def _refresh_profile_target_keys(self) -> None:
+        profile_id = self.effective_profile_id()
+        if profile_id is None:
+            self._profile_target_keys = []
+            return
+        initialize_database()
+        with connect() as connection:
+            self._profile_target_keys = [
+                target.target_key for target in list_emr_ui_targets(connection, profile_id)
+            ]
 
 
 class MacroStepDialog(QDialog):
@@ -955,6 +1008,7 @@ class MacroStepDialog(QDialog):
         self.action.addItems(sorted(ALLOWED_MACRO_ACTIONS))
         if step:
             self.action.setCurrentText(step["action"])
+        self.action.currentTextChanged.connect(self._update_target_field_state)
 
         self.target_id = QComboBox()
         self.target_id.setEditable(True)
@@ -991,6 +1045,7 @@ class MacroStepDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(buttons)
+        self._update_target_field_state(self.action.currentText())
 
     def values(self) -> dict:
         return {
@@ -1012,6 +1067,12 @@ class MacroStepDialog(QDialog):
             targets = list_emr_ui_targets(connection, self._profile_id)
         for target in targets:
             self.target_id.addItem(target.target_key)
+
+    def _update_target_field_state(self, action: str) -> None:
+        uses_target = action in TARGET_BASED_ACTIONS
+        self.target_id.setEnabled(uses_target)
+        if not uses_target:
+            self.target_id.setCurrentText("")
 
 
 EghisAssistTab = MacrosTab

@@ -121,6 +121,30 @@ class EmrUiTargetRecord:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class MacroDryRunStepPreview:
+    step_order: int
+    action: str
+    target_key: str | None
+    resolved_label: str | None
+    automation_id: str | None
+    control_type: str | None
+    name_match: str | None
+    class_name: str | None
+    parent_target_key: str | None
+    value_summary: str | None
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MacroDryRunPreview:
+    profile_name: str | None
+    profile_enabled: bool | None
+    profile_missing: bool
+    steps: tuple[MacroDryRunStepPreview, ...]
+    warnings: tuple[str, ...]
+
+
 SUPPORTED_ITEM_TYPES = {"clipboard", "randomized_clipboard", "macro", "workflow"}
 ALLOWED_MACRO_ACTIONS = {
     "focus_window",
@@ -1068,20 +1092,19 @@ def reorder_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[Ma
 
 def validate_macro_dry_run(connection: sqlite3.Connection, item_id: int) -> list[str]:
     errors: list[str] = []
-    item = get_item(connection, item_id)
-    profile = resolve_macro_emr_target_profile(connection, item)
-    for step in list_macro_steps(connection, item_id):
-        if not step.target_id:
-            continue
-        if profile is not None and get_emr_ui_target_by_key(
-            connection, profile.id, step.target_id
-        ) is not None:
-            continue
-        if get_ui_target(connection, step.target_id) is not None:
-            continue
+    preview = build_macro_dry_run_preview(connection, item_id)
+    if preview.profile_missing:
+        errors.append("No default EMR target profile is configured.")
+    elif preview.profile_enabled is False and preview.profile_name:
         errors.append(
-            f"Step {step.step_order}: target_id '{step.target_id}' is not registered."
+            f"EMR target profile '{preview.profile_name}' is disabled."
         )
+    for step in preview.steps:
+        for warning in step.warnings:
+            if warning.startswith("unresolved target_key"):
+                errors.append(
+                    f"Step {step.step_order}: target_id '{step.target_key}' is not registered."
+                )
     return errors
 
 
@@ -1096,6 +1119,38 @@ def resolve_macro_emr_target_profile(
         if profile is not None:
             return profile
     return get_default_emr_target_profile(connection)
+
+
+def build_macro_dry_run_preview(
+    connection: sqlite3.Connection,
+    item_id: int,
+) -> MacroDryRunPreview:
+    item = get_item(connection, item_id)
+    resolved_profile = resolve_macro_emr_target_profile(connection, item)
+    warnings: list[str] = []
+    profile_missing = False
+
+    if item is not None and item.emr_target_profile_id is None and resolved_profile is None:
+        profile_missing = True
+        warnings.append("No default EMR target profile is configured.")
+    elif item is not None and item.emr_target_profile_id is not None and resolved_profile is None:
+        profile_missing = True
+        warnings.append("Selected EMR target profile could not be resolved.")
+
+    if resolved_profile is not None and not resolved_profile.is_enabled:
+        warnings.append(f"EMR target profile '{resolved_profile.name}' is disabled.")
+
+    step_previews = tuple(
+        _build_macro_dry_run_step_preview(connection, resolved_profile, step)
+        for step in list_macro_steps(connection, item_id)
+    )
+    return MacroDryRunPreview(
+        profile_name=resolved_profile.name if resolved_profile is not None else None,
+        profile_enabled=resolved_profile.is_enabled if resolved_profile is not None else None,
+        profile_missing=profile_missing,
+        steps=step_previews,
+        warnings=tuple(warnings),
+    )
 
 
 def list_ui_targets(connection: sqlite3.Connection) -> list[UiTargetRecord]:
@@ -1326,6 +1381,58 @@ def _emr_ui_target_from_row(row: sqlite3.Row | tuple) -> EmrUiTargetRecord:
     )
 
 
+def _build_macro_dry_run_step_preview(
+    connection: sqlite3.Connection,
+    profile: EmrTargetProfileRecord | None,
+    step: MacroStepRecord,
+) -> MacroDryRunStepPreview:
+    resolved_target: EmrUiTargetRecord | None = None
+    legacy_target: UiTargetRecord | None = None
+    warnings: list[str] = []
+
+    if step.target_id:
+        if profile is not None:
+            resolved_target = get_emr_ui_target_by_key(connection, profile.id, step.target_id)
+        if resolved_target is None:
+            legacy_target = get_ui_target(connection, step.target_id)
+        if resolved_target is None and legacy_target is None:
+            warnings.append(f"unresolved target_key '{step.target_id}'")
+        elif resolved_target is None and legacy_target is not None:
+            warnings.append(
+                f"target_key '{step.target_id}' matched legacy UI target registry only"
+            )
+
+    return MacroDryRunStepPreview(
+        step_order=step.step_order,
+        action=step.action,
+        target_key=step.target_id,
+        resolved_label=(
+            resolved_target.label
+            if resolved_target is not None
+            else legacy_target.name if legacy_target is not None else None
+        ),
+        automation_id=(
+            resolved_target.automation_id
+            if resolved_target is not None
+            else legacy_target.automation_id if legacy_target is not None else None
+        ),
+        control_type=(
+            resolved_target.control_type
+            if resolved_target is not None
+            else legacy_target.control_type if legacy_target is not None else None
+        ),
+        name_match=resolved_target.name_match if resolved_target is not None else None,
+        class_name=(
+            resolved_target.class_name
+            if resolved_target is not None
+            else legacy_target.class_name if legacy_target is not None else None
+        ),
+        parent_target_key=resolved_target.parent_target_key if resolved_target is not None else None,
+        value_summary=_macro_step_value_summary(step),
+        warnings=tuple(warnings),
+    )
+
+
 def _get_macro_step_by_id(
     connection: sqlite3.Connection, step_id: int
 ) -> MacroStepRecord | None:
@@ -1347,6 +1454,16 @@ def _blank_to_none(value: str | None) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _macro_step_value_summary(step: MacroStepRecord) -> str | None:
+    if not step.value:
+        return None
+    if step.action == "preset_text":
+        return f"preset={step.value}"
+    if step.action in {"wait_ms", "delay_ms"}:
+        return f"duration_ms={step.value}"
+    return f"value={step.value}"
 
 
 def _validate_item_type(item_type: str) -> None:
