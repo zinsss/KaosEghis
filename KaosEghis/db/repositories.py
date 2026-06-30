@@ -87,6 +87,16 @@ class PacsAuditEventRecord:
 
 SUPPORTED_ITEM_TYPES = {"clipboard", "randomized_clipboard", "macro", "workflow"}
 ALLOWED_MACRO_ACTIONS = {
+    "focus_window",
+    "wait_window",
+    "wait_text_or_image",
+    "click",
+    "hotkey",
+    "type_text",
+    "paste_text",
+    "preset_text",
+    "delay_ms",
+    # Legacy actions kept for existing saved definitions and older dry-run tests.
     "check_process",
     "wait_for_target",
     "read_text_uia",

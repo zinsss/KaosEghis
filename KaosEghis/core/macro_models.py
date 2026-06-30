@@ -4,22 +4,20 @@ from typing import Any
 
 
 class MacroAction(str, Enum):
-    WAIT = "wait"
-    KEY = "key"
+    FOCUS_WINDOW = "focus_window"
+    WAIT_WINDOW = "wait_window"
+    WAIT_TEXT_OR_IMAGE = "wait_text_or_image"
+    CLICK = "click"
+    HOTKEY = "hotkey"
+    TYPE_TEXT = "type_text"
     PASTE_TEXT = "paste_text"
-    TYPE_TEXT_KEYBOARD = "type_text_keyboard"
-    TYPE_TEXT_CLIPBOARD = "type_text_clipboard"
-    SET_TEXT_UIA = "set_text_uia"
-    MOUSE_CLICK = "mouse_click"
-    WAIT_FOR_TARGET = "wait_for_target"
-    CHECK_PROCESS = "check_process"
-    ACTIVATE_WINDOW = "activate_window"
-    READ_TEXT_UIA = "read_text_uia"
+    PRESET_TEXT = "preset_text"
+    DELAY_MS = "delay_ms"
 
 
 @dataclass(frozen=True)
 class MacroStep:
-    action: MacroAction
+    action: MacroAction | str
     target_id: str | None = None
     value: str | None = None
     timeout_seconds: float = 5.0
@@ -31,5 +29,10 @@ class MacroStep:
 class MacroRunResult:
     success: bool
     message: str
-    completed_steps: int = 0
+    executed_steps: int = 0
+    failed_step: int | None = None
+
+    @property
+    def completed_steps(self) -> int:
+        return self.executed_steps
 
