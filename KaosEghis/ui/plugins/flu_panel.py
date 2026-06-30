@@ -19,6 +19,10 @@ from KaosEghis.core.weekly_age_reporting import (
     fetch_weekly_age_report,
     iso_week_range,
 )
+from KaosEghis.core.eghis_db import (
+    EghisDbQueryRejectedError,
+    EghisDbUnavailableError,
+)
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import get_settings
 
@@ -54,13 +58,12 @@ class FluPanel(QWidget):
 
         self.report_output = QPlainTextEdit()
         self.report_output.setReadOnly(True)
+        self.report_output.setPlainText("Not loaded yet.")
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
         layout.addLayout(controls)
         layout.addWidget(self.report_output)
-
-        self.load_report()
 
     def load_report(self) -> None:
         week_text = self.week_input.text().strip()
@@ -104,8 +107,15 @@ class FluPanel(QWidget):
                 start_week=week_number,
                 end_week=week_number,
             )
-        except WeeklyAgeReportingUnavailableError as exc:
-            self.report_output.setPlainText(str(exc))
+        except (
+            WeeklyAgeReportingUnavailableError,
+            EghisDbUnavailableError,
+            EghisDbQueryRejectedError,
+        ):
+            self.report_output.setPlainText("Flu report DB query failed.")
+            return
+        except Exception:
+            self.report_output.setPlainText("Flu report DB query failed.")
             return
 
         counts_by_age = {label: 0 for label in AGE_GROUP_ORDER}
