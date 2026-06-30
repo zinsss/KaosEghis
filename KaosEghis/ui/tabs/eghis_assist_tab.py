@@ -33,6 +33,7 @@ from KaosEghis.core.write_test import (
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     ALLOWED_MACRO_ACTIONS,
+    EmrUiTargetRecord,
     ItemRecord,
     MacroStepRecord,
     UiTargetRecord,
@@ -44,12 +45,17 @@ from KaosEghis.db.repositories import (
     delete_macro_steps_for_item,
     delete_ui_target,
     get_item,
+    get_default_emr_target_profile,
+    get_emr_target_profile,
     get_settings,
     get_ui_target,
+    list_emr_target_profiles,
+    list_emr_ui_targets,
     list_ui_targets,
     list_items,
     list_macro_steps,
     reorder_macro_steps,
+    resolve_macro_emr_target_profile,
     update_item,
     update_macro_step,
     update_ui_target,
@@ -170,8 +176,10 @@ class MacrosTab(QWidget):
         function_key_controls.addStretch()
 
         macros_title = QLabel("Macros")
-        self.macros_table = QTableWidget(0, 3)
-        self.macros_table.setHorizontalHeaderLabels(["id", "name", "enabled"])
+        self.macros_table = QTableWidget(0, 4)
+        self.macros_table.setHorizontalHeaderLabels(
+            ["id", "name", "EMR profile", "enabled"]
+        )
         self.macros_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.macros_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.macros_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -505,9 +513,13 @@ class MacrosTab(QWidget):
 
         self.macros_table.setRowCount(len(macros))
         for row_index, macro in enumerate(macros):
+            profile = resolve_macro_emr_target_profile(connection, macro)
             self.macros_table.setItem(row_index, 0, QTableWidgetItem(str(macro.id)))
             self.macros_table.setItem(row_index, 1, QTableWidgetItem(macro.name))
-            self.macros_table.setItem(row_index, 2, QTableWidgetItem(_yes_no(macro.is_enabled)))
+            self.macros_table.setItem(
+                row_index, 2, QTableWidgetItem(profile.name if profile is not None else "")
+            )
+            self.macros_table.setItem(row_index, 3, QTableWidgetItem(_yes_no(macro.is_enabled)))
         self.macros_table.resizeColumnsToContents()
 
     def add_macro(self) -> None:
@@ -520,7 +532,13 @@ class MacrosTab(QWidget):
             return
         initialize_database()
         with connect() as connection:
-            item = create_item(connection, values["name"], "macro", values["is_enabled"])
+            item = create_item(
+                connection,
+                values["name"],
+                "macro",
+                values["is_enabled"],
+                values["emr_target_profile_id"],
+            )
             for step in values["steps"]:
                 create_macro_step(connection, item.id, **step)
             reorder_macro_steps(connection, item.id)
@@ -543,7 +561,14 @@ class MacrosTab(QWidget):
         values = dialog.values()
         initialize_database()
         with connect() as connection:
-            update_item(connection, item_id, values["name"], "macro", values["is_enabled"])
+            update_item(
+                connection,
+                item_id,
+                values["name"],
+                "macro",
+                values["is_enabled"],
+                values["emr_target_profile_id"],
+            )
             delete_macro_steps_for_item(connection, item_id)
             for step in values["steps"]:
                 create_macro_step(connection, item_id, **step)
@@ -573,10 +598,14 @@ class MacrosTab(QWidget):
         initialize_database()
         with connect() as connection:
             item = _get_required_item(connection, item_id)
+            profile = resolve_macro_emr_target_profile(connection, item)
             steps = list_macro_steps(connection, item_id)
             errors = validate_macro_dry_run(connection, item_id)
 
         lines = [f"Dry run: {item.name}"]
+        lines.append(
+            f"Profile: {profile.name if profile is not None else '(No EMR profile)'}"
+        )
         for step in steps:
             lines.append(_dry_run_step_line(step))
         if errors:
@@ -734,10 +763,28 @@ class MacroEditorDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Macro")
+        initialize_database()
+        with connect() as connection:
+            self._profiles = list_emr_target_profiles(connection)
+            default_profile = get_default_emr_target_profile(connection)
+
+        self._default_profile_id = default_profile.id if default_profile is not None else None
 
         self.name = QLineEdit(item.name if item else "")
         self.enabled = QCheckBox()
         self.enabled.setChecked(item.is_enabled if item else True)
+        self.emr_profile = QComboBox()
+        self.emr_profile.addItem(
+            self._default_profile_label(default_profile.name if default_profile else None),
+            None,
+        )
+        for profile in self._profiles:
+            self.emr_profile.addItem(profile.name, profile.id)
+
+        profile_index = self.emr_profile.findData(item.emr_target_profile_id if item else None)
+        if profile_index >= 0:
+            self.emr_profile.setCurrentIndex(profile_index)
+        self.emr_profile.currentIndexChanged.connect(self._on_profile_changed)
 
         self.steps_table = QTableWidget(0, 6)
         self.steps_table.setHorizontalHeaderLabels(
@@ -765,6 +812,7 @@ class MacroEditorDialog(QDialog):
         form = QFormLayout()
         form.addRow("Macro name", self.name)
         form.addRow("Enabled", self.enabled)
+        form.addRow("EMR profile", self.emr_profile)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -795,11 +843,16 @@ class MacroEditorDialog(QDialog):
         return {
             "name": self.name.text().strip(),
             "is_enabled": self.enabled.isChecked(),
+            "emr_target_profile_id": self.current_profile_id(),
             "steps": self._steps(),
         }
 
     def add_step(self) -> None:
-        dialog = MacroStepDialog(self, next_order=self.steps_table.rowCount() + 1)
+        dialog = MacroStepDialog(
+            self,
+            next_order=self.steps_table.rowCount() + 1,
+            profile_id=self.effective_profile_id(),
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self._append_step(dialog.values())
@@ -808,7 +861,11 @@ class MacroEditorDialog(QDialog):
         row = self._selected_step_row()
         if row is None:
             return
-        dialog = MacroStepDialog(self, self._step_at_row(row))
+        dialog = MacroStepDialog(
+            self,
+            self._step_at_row(row),
+            profile_id=self.effective_profile_id(),
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self._set_step(row, dialog.values())
@@ -861,6 +918,21 @@ class MacroEditorDialog(QDialog):
         for row in range(self.steps_table.rowCount()):
             self.steps_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
 
+    def current_profile_id(self) -> int | None:
+        value = self.emr_profile.currentData()
+        return value if isinstance(value, int) else None
+
+    def effective_profile_id(self) -> int | None:
+        return self.current_profile_id() or self._default_profile_id
+
+    def _default_profile_label(self, default_profile_name: str | None) -> str:
+        if default_profile_name:
+            return f"(Default profile) {default_profile_name}"
+        return "(Default profile)"
+
+    def _on_profile_changed(self) -> None:
+        pass
+
 
 class MacroStepDialog(QDialog):
     def __init__(
@@ -868,9 +940,11 @@ class MacroStepDialog(QDialog):
         parent: QWidget,
         step: dict | None = None,
         next_order: int = 1,
+        profile_id: int | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Macro Step")
+        self._profile_id = profile_id
 
         self.step_order = QSpinBox()
         self.step_order.setMinimum(1)
@@ -882,7 +956,11 @@ class MacroStepDialog(QDialog):
         if step:
             self.action.setCurrentText(step["action"])
 
-        self.target_id = QLineEdit(step.get("target_id", "") if step else "")
+        self.target_id = QComboBox()
+        self.target_id.setEditable(True)
+        self._load_target_options()
+        if step and step.get("target_id", ""):
+            self.target_id.setCurrentText(step.get("target_id", ""))
         self.value = QLineEdit(step.get("value", "") if step else "")
 
         self.timeout_seconds = QDoubleSpinBox()
@@ -918,11 +996,22 @@ class MacroStepDialog(QDialog):
         return {
             "step_order": self.step_order.value(),
             "action": self.action.currentText(),
-            "target_id": self.target_id.text().strip(),
+            "target_id": self.target_id.currentText().strip(),
             "value": self.value.text().strip(),
             "timeout_seconds": self.timeout_seconds.value(),
             "retries": self.retries.value(),
         }
+
+    def _load_target_options(self) -> None:
+        self.target_id.clear()
+        self.target_id.addItem("")
+        if self._profile_id is None:
+            return
+        initialize_database()
+        with connect() as connection:
+            targets = list_emr_ui_targets(connection, self._profile_id)
+        for target in targets:
+            self.target_id.addItem(target.target_key)
 
 
 EghisAssistTab = MacrosTab

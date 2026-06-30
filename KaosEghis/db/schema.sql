@@ -9,8 +9,10 @@ CREATE TABLE IF NOT EXISTS items (
     name TEXT NOT NULL,
     item_type TEXT NOT NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
+    emr_target_profile_id INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (emr_target_profile_id) REFERENCES emr_target_profiles(id)
 );
 
 CREATE TABLE IF NOT EXISTS clipboard_variants (
@@ -95,3 +97,43 @@ CREATE TABLE IF NOT EXISTS pacs_audit_events (
     error_message TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS emr_target_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    process_name TEXT,
+    executable_path TEXT,
+    window_title_contains TEXT,
+    window_class TEXT,
+    root_automation_id TEXT,
+    main_window_automation_id TEXT,
+    login_window_automation_id TEXT,
+    patient_search_automation_id TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS emr_ui_targets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    target_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    description TEXT,
+    automation_id TEXT,
+    control_type TEXT,
+    class_name TEXT,
+    name_match TEXT,
+    parent_target_key TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (profile_id) REFERENCES emr_target_profiles(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_emr_target_profiles_name
+    ON emr_target_profiles(name);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_emr_ui_targets_profile_target_key
+    ON emr_ui_targets(profile_id, target_key);

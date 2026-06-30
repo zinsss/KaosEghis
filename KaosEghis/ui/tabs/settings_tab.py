@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from KaosEghis.db.database import connect, initialize_database
+from KaosEghis.db.database import connect, describe_database_path, initialize_database
 from KaosEghis.db.repositories import DEFAULT_SETTINGS, get_settings, set_settings
 from KaosEghis.core.kaospacs_client import check_kaospacs_health
 
@@ -49,6 +49,7 @@ class SettingsTab(QWidget):
         self.pacs_poll_interval_seconds.setMaximum(86400)
         self.general_status = QLabel()
         self.pacs_status = QLabel()
+        self.sqlite_path_label = QLabel()
         self.pacs_info = QLabel(
             "PACS settings control Eghis DB polling and KaosPACS API access. "
             "Sync remains manual unless auto-poll is enabled; auto-poll only polls "
@@ -107,6 +108,7 @@ class SettingsTab(QWidget):
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addLayout(buttons)
+        layout.addWidget(self.sqlite_path_label)
         layout.addWidget(self.general_status)
         layout.addSpacing(12)
         layout.addWidget(QLabel("PACS Settings"))
@@ -122,6 +124,9 @@ class SettingsTab(QWidget):
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
+        self.sqlite_path_label.setText(
+            f"Active SQLite path: {describe_database_path(self._db_path)}"
+        )
         self.process_name.setText(settings["eghis_process_name"])
         self.window_title.setText(settings["eghis_window_title_contains"])
         self.kaosgdd_url.setText(settings["kaosgdd_url"])

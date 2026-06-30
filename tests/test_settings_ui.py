@@ -154,3 +154,19 @@ def test_connection_string_not_displayed_in_status_labels(tmp_path) -> None:
 
     assert secret not in tab.general_status.text()
     assert secret not in tab.pacs_status.text()
+
+
+def test_active_sqlite_path_displayed_without_secret(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.settings_tab import SettingsTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    secret = "Host=x;Password=topsecret"
+    tab = SettingsTab(db_path=db_path)
+    tab.eghis_db_connection_string.setText(secret)
+    tab.load_settings()
+
+    assert "Active SQLite path:" in tab.sqlite_path_label.text()
+    assert str(db_path.resolve()) in tab.sqlite_path_label.text()
+    assert secret not in tab.sqlite_path_label.text()

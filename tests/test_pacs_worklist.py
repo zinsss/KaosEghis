@@ -290,7 +290,7 @@ def test_pacs_panel_poll_status_remains_visible_after_poll_now(
     monkeypatch.setattr(
         pacs_panel,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda _settings, _db_path: PollResult(inserted=0, updated=1, skipped=2),
+        lambda _settings, _db_path, selected_date=None: PollResult(inserted=0, updated=1, skipped=2),
     )
 
     db_path = Path(tmp_path / "KaosEghis.sqlite")
@@ -316,7 +316,7 @@ def test_pacs_panel_poll_now_handles_adapter_unavailable(
     monkeypatch.setattr(
         pacs_panel,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda _settings, _db_path: PollResult(
+        lambda _settings, _db_path, selected_date=None: PollResult(
             inserted=0,
             updated=0,
             skipped=0,

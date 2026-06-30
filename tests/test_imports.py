@@ -1372,7 +1372,7 @@ def test_macro_runner_blocks_real_execution_without_green_connector() -> None:
     result = MacroRunner().run([], dry_run=False, settings={"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
 
     assert result.success is False
-    assert result.message == "Macro execution blocked: Eghis not running"
+    assert result.message == "window not ready"
 
 
 def test_macro_runner_runs_wait_key_and_paste_text(monkeypatch) -> None:
@@ -1439,7 +1439,7 @@ def test_macro_runner_blocks_invalid_action(monkeypatch) -> None:
 
     assert result.success is False
     assert result.completed_steps == 0
-    assert result.message == "Unsupported macro action: unknown"
+    assert result.message == "unsupported action"
 
 
 def test_macro_runner_stops_on_first_failed_step(monkeypatch) -> None:
@@ -1466,7 +1466,7 @@ def test_macro_runner_stops_on_first_failed_step(monkeypatch) -> None:
 
     assert result.success is False
     assert result.completed_steps == 1
-    assert result.message == "key action failed: boom"
+    assert result.message == "input failed"
 
 
 def test_macro_runner_cancellation_during_wait_stops_execution(monkeypatch) -> None:

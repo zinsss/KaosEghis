@@ -37,6 +37,7 @@ class ItemRecord:
     name: str
     item_type: str
     is_enabled: bool
+    emr_target_profile_id: int | None
     created_at: str
     updated_at: str
 
@@ -85,8 +86,53 @@ class PacsAuditEventRecord:
     created_at: str
 
 
+@dataclass(frozen=True)
+class EmrTargetProfileRecord:
+    id: int
+    name: str
+    description: str | None
+    is_enabled: bool
+    is_default: bool
+    process_name: str | None
+    executable_path: str | None
+    window_title_contains: str | None
+    window_class: str | None
+    root_automation_id: str | None
+    main_window_automation_id: str | None
+    login_window_automation_id: str | None
+    patient_search_automation_id: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class EmrUiTargetRecord:
+    id: int
+    profile_id: int
+    target_key: str
+    label: str
+    description: str | None
+    automation_id: str | None
+    control_type: str | None
+    class_name: str | None
+    name_match: str | None
+    parent_target_key: str | None
+    created_at: str
+    updated_at: str
+
+
 SUPPORTED_ITEM_TYPES = {"clipboard", "randomized_clipboard", "macro", "workflow"}
 ALLOWED_MACRO_ACTIONS = {
+    "focus_window",
+    "wait_window",
+    "wait_text_or_image",
+    "click",
+    "hotkey",
+    "type_text",
+    "paste_text",
+    "preset_text",
+    "delay_ms",
+    # Legacy actions kept for existing saved definitions and older dry-run tests.
     "check_process",
     "wait_for_target",
     "read_text_uia",
@@ -139,7 +185,7 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
     if item_type is None:
         rows = connection.execute(
             """
-            SELECT id, name, item_type, is_enabled, created_at, updated_at
+            SELECT id, name, item_type, is_enabled, emr_target_profile_id, created_at, updated_at
             FROM items
             ORDER BY name
             """
@@ -147,7 +193,7 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
     else:
         rows = connection.execute(
             """
-            SELECT id, name, item_type, is_enabled, created_at, updated_at
+            SELECT id, name, item_type, is_enabled, emr_target_profile_id, created_at, updated_at
             FROM items
             WHERE item_type = ?
             ORDER BY name
@@ -160,7 +206,7 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
 def get_item(connection: sqlite3.Connection, item_id: int) -> ItemRecord | None:
     row = connection.execute(
         """
-        SELECT id, name, item_type, is_enabled, created_at, updated_at
+        SELECT id, name, item_type, is_enabled, emr_target_profile_id, created_at, updated_at
         FROM items
         WHERE id = ?
         """,
@@ -176,14 +222,15 @@ def create_item(
     name: str,
     item_type: str,
     is_enabled: bool = True,
+    emr_target_profile_id: int | None = None,
 ) -> ItemRecord:
     _validate_item_type(item_type)
     cursor = connection.execute(
         """
-        INSERT INTO items (name, item_type, is_enabled)
-        VALUES (?, ?, ?)
+        INSERT INTO items (name, item_type, is_enabled, emr_target_profile_id)
+        VALUES (?, ?, ?, ?)
         """,
-        (name.strip(), item_type, int(is_enabled)),
+        (name.strip(), item_type, int(is_enabled), emr_target_profile_id),
     )
     connection.commit()
     created = get_item(connection, cursor.lastrowid)
@@ -198,6 +245,7 @@ def update_item(
     name: str,
     item_type: str,
     is_enabled: bool,
+    emr_target_profile_id: int | None = None,
 ) -> ItemRecord | None:
     _validate_item_type(item_type)
     connection.execute(
@@ -206,10 +254,11 @@ def update_item(
         SET name = ?,
             item_type = ?,
             is_enabled = ?,
+            emr_target_profile_id = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (name.strip(), item_type, int(is_enabled), item_id),
+        (name.strip(), item_type, int(is_enabled), emr_target_profile_id, item_id),
     )
     connection.commit()
     return get_item(connection, item_id)
@@ -609,6 +658,403 @@ def clear_pacs_audit_events(connection: sqlite3.Connection) -> int:
     return cursor.rowcount
 
 
+def list_emr_target_profiles(
+    connection: sqlite3.Connection,
+) -> list[EmrTargetProfileRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, name, description, is_enabled, is_default, process_name,
+               executable_path, window_title_contains, window_class,
+               root_automation_id, main_window_automation_id,
+               login_window_automation_id, patient_search_automation_id,
+               created_at, updated_at
+        FROM emr_target_profiles
+        ORDER BY is_default DESC, is_enabled DESC, name
+        """
+    )
+    return [_emr_target_profile_from_row(row) for row in rows]
+
+
+def get_emr_target_profile(
+    connection: sqlite3.Connection, profile_id: int
+) -> EmrTargetProfileRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, name, description, is_enabled, is_default, process_name,
+               executable_path, window_title_contains, window_class,
+               root_automation_id, main_window_automation_id,
+               login_window_automation_id, patient_search_automation_id,
+               created_at, updated_at
+        FROM emr_target_profiles
+        WHERE id = ?
+        """,
+        (profile_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _emr_target_profile_from_row(row)
+
+
+def get_default_emr_target_profile(
+    connection: sqlite3.Connection,
+) -> EmrTargetProfileRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, name, description, is_enabled, is_default, process_name,
+               executable_path, window_title_contains, window_class,
+               root_automation_id, main_window_automation_id,
+               login_window_automation_id, patient_search_automation_id,
+               created_at, updated_at
+        FROM emr_target_profiles
+        WHERE is_default = 1
+        ORDER BY id
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        return None
+    return _emr_target_profile_from_row(row)
+
+
+def get_active_emr_target_profile(
+    connection: sqlite3.Connection,
+) -> EmrTargetProfileRecord | None:
+    profile = get_default_emr_target_profile(connection)
+    if profile is not None and profile.is_enabled:
+        return profile
+    row = connection.execute(
+        """
+        SELECT id, name, description, is_enabled, is_default, process_name,
+               executable_path, window_title_contains, window_class,
+               root_automation_id, main_window_automation_id,
+               login_window_automation_id, patient_search_automation_id,
+               created_at, updated_at
+        FROM emr_target_profiles
+        WHERE is_enabled = 1
+        ORDER BY id
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        return None
+    return _emr_target_profile_from_row(row)
+
+
+def create_emr_target_profile(
+    connection: sqlite3.Connection,
+    *,
+    name: str,
+    description: str | None = None,
+    is_enabled: bool = True,
+    is_default: bool = False,
+    process_name: str | None = None,
+    executable_path: str | None = None,
+    window_title_contains: str | None = None,
+    window_class: str | None = None,
+    root_automation_id: str | None = None,
+    main_window_automation_id: str | None = None,
+    login_window_automation_id: str | None = None,
+    patient_search_automation_id: str | None = None,
+) -> EmrTargetProfileRecord:
+    cursor = connection.execute(
+        """
+        INSERT INTO emr_target_profiles (
+            name,
+            description,
+            is_enabled,
+            is_default,
+            process_name,
+            executable_path,
+            window_title_contains,
+            window_class,
+            root_automation_id,
+            main_window_automation_id,
+            login_window_automation_id,
+            patient_search_automation_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            name.strip(),
+            _blank_to_none(description),
+            int(is_enabled),
+            int(is_default),
+            _blank_to_none(process_name),
+            _blank_to_none(executable_path),
+            _blank_to_none(window_title_contains),
+            _blank_to_none(window_class),
+            _blank_to_none(root_automation_id),
+            _blank_to_none(main_window_automation_id),
+            _blank_to_none(login_window_automation_id),
+            _blank_to_none(patient_search_automation_id),
+        ),
+    )
+    if is_default:
+        _set_default_profile_row(connection, cursor.lastrowid)
+    else:
+        _ensure_single_default_emr_profile(connection)
+    connection.commit()
+    created = get_emr_target_profile(connection, cursor.lastrowid)
+    if created is None:
+        raise RuntimeError("Failed to create EMR target profile.")
+    return created
+
+
+def update_emr_target_profile(
+    connection: sqlite3.Connection,
+    profile_id: int,
+    *,
+    name: str,
+    description: str | None = None,
+    is_enabled: bool = True,
+    is_default: bool = False,
+    process_name: str | None = None,
+    executable_path: str | None = None,
+    window_title_contains: str | None = None,
+    window_class: str | None = None,
+    root_automation_id: str | None = None,
+    main_window_automation_id: str | None = None,
+    login_window_automation_id: str | None = None,
+    patient_search_automation_id: str | None = None,
+) -> EmrTargetProfileRecord | None:
+    current = get_emr_target_profile(connection, profile_id)
+    if current is None:
+        return None
+    connection.execute(
+        """
+        UPDATE emr_target_profiles
+        SET name = ?,
+            description = ?,
+            is_enabled = ?,
+            is_default = ?,
+            process_name = ?,
+            executable_path = ?,
+            window_title_contains = ?,
+            window_class = ?,
+            root_automation_id = ?,
+            main_window_automation_id = ?,
+            login_window_automation_id = ?,
+            patient_search_automation_id = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            name.strip(),
+            _blank_to_none(description),
+            int(is_enabled),
+            int(is_default),
+            _blank_to_none(process_name),
+            _blank_to_none(executable_path),
+            _blank_to_none(window_title_contains),
+            _blank_to_none(window_class),
+            _blank_to_none(root_automation_id),
+            _blank_to_none(main_window_automation_id),
+            _blank_to_none(login_window_automation_id),
+            _blank_to_none(patient_search_automation_id),
+            profile_id,
+        ),
+    )
+    if is_default:
+        _set_default_profile_row(connection, profile_id)
+    elif current.is_default:
+        _set_default_profile_row(connection, profile_id)
+    else:
+        _ensure_single_default_emr_profile(connection)
+    connection.commit()
+    return get_emr_target_profile(connection, profile_id)
+
+
+def delete_emr_target_profile(connection: sqlite3.Connection, profile_id: int) -> bool:
+    current = get_emr_target_profile(connection, profile_id)
+    if current is None:
+        return False
+    if current.is_default:
+        replacement = connection.execute(
+            """
+            SELECT id
+            FROM emr_target_profiles
+            WHERE id != ? AND is_enabled = 1
+            ORDER BY id
+            LIMIT 1
+            """,
+            (profile_id,),
+        ).fetchone()
+        if replacement is None:
+            raise ValueError("Cannot delete the only enabled default EMR target profile.")
+        _set_default_profile_row(connection, replacement[0])
+    connection.execute("DELETE FROM emr_ui_targets WHERE profile_id = ?", (profile_id,))
+    cursor = connection.execute(
+        "DELETE FROM emr_target_profiles WHERE id = ?",
+        (profile_id,),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def set_default_emr_target_profile(
+    connection: sqlite3.Connection, profile_id: int
+) -> EmrTargetProfileRecord | None:
+    if get_emr_target_profile(connection, profile_id) is None:
+        return None
+    _set_default_profile_row(connection, profile_id)
+    connection.commit()
+    return get_emr_target_profile(connection, profile_id)
+
+
+def list_emr_ui_targets(
+    connection: sqlite3.Connection, profile_id: int
+) -> list[EmrUiTargetRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, profile_id, target_key, label, description, automation_id,
+               control_type, class_name, name_match, parent_target_key,
+               created_at, updated_at
+        FROM emr_ui_targets
+        WHERE profile_id = ?
+        ORDER BY target_key
+        """,
+        (profile_id,),
+    )
+    return [_emr_ui_target_from_row(row) for row in rows]
+
+
+def get_emr_ui_target_by_key(
+    connection: sqlite3.Connection,
+    profile_id: int,
+    target_key: str,
+) -> EmrUiTargetRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, profile_id, target_key, label, description, automation_id,
+               control_type, class_name, name_match, parent_target_key,
+               created_at, updated_at
+        FROM emr_ui_targets
+        WHERE profile_id = ? AND target_key = ?
+        """,
+        (profile_id, target_key),
+    ).fetchone()
+    if row is None:
+        return None
+    return _emr_ui_target_from_row(row)
+
+
+def get_emr_ui_target(
+    connection: sqlite3.Connection, ui_target_id: int
+) -> EmrUiTargetRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, profile_id, target_key, label, description, automation_id,
+               control_type, class_name, name_match, parent_target_key,
+               created_at, updated_at
+        FROM emr_ui_targets
+        WHERE id = ?
+        """,
+        (ui_target_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _emr_ui_target_from_row(row)
+
+
+def create_emr_ui_target(
+    connection: sqlite3.Connection,
+    *,
+    profile_id: int,
+    target_key: str,
+    label: str,
+    description: str | None = None,
+    automation_id: str | None = None,
+    control_type: str | None = None,
+    class_name: str | None = None,
+    name_match: str | None = None,
+    parent_target_key: str | None = None,
+) -> EmrUiTargetRecord:
+    cursor = connection.execute(
+        """
+        INSERT INTO emr_ui_targets (
+            profile_id,
+            target_key,
+            label,
+            description,
+            automation_id,
+            control_type,
+            class_name,
+            name_match,
+            parent_target_key
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            profile_id,
+            target_key.strip(),
+            label.strip(),
+            _blank_to_none(description),
+            _blank_to_none(automation_id),
+            _blank_to_none(control_type),
+            _blank_to_none(class_name),
+            _blank_to_none(name_match),
+            _blank_to_none(parent_target_key),
+        ),
+    )
+    connection.commit()
+    created = get_emr_ui_target(connection, cursor.lastrowid)
+    if created is None:
+        raise RuntimeError("Failed to create EMR UI target.")
+    return created
+
+
+def update_emr_ui_target(
+    connection: sqlite3.Connection,
+    ui_target_id: int,
+    *,
+    target_key: str,
+    label: str,
+    description: str | None = None,
+    automation_id: str | None = None,
+    control_type: str | None = None,
+    class_name: str | None = None,
+    name_match: str | None = None,
+    parent_target_key: str | None = None,
+) -> EmrUiTargetRecord | None:
+    connection.execute(
+        """
+        UPDATE emr_ui_targets
+        SET target_key = ?,
+            label = ?,
+            description = ?,
+            automation_id = ?,
+            control_type = ?,
+            class_name = ?,
+            name_match = ?,
+            parent_target_key = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            target_key.strip(),
+            label.strip(),
+            _blank_to_none(description),
+            _blank_to_none(automation_id),
+            _blank_to_none(control_type),
+            _blank_to_none(class_name),
+            _blank_to_none(name_match),
+            _blank_to_none(parent_target_key),
+            ui_target_id,
+        ),
+    )
+    connection.commit()
+    return get_emr_ui_target(connection, ui_target_id)
+
+
+def delete_emr_ui_target(connection: sqlite3.Connection, ui_target_id: int) -> bool:
+    cursor = connection.execute(
+        "DELETE FROM emr_ui_targets WHERE id = ?",
+        (ui_target_id,),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
 def reorder_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[MacroStepRecord]:
     steps = list_macro_steps(connection, item_id)
     for index, step in enumerate(steps, start=1):
@@ -622,12 +1068,34 @@ def reorder_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[Ma
 
 def validate_macro_dry_run(connection: sqlite3.Connection, item_id: int) -> list[str]:
     errors: list[str] = []
+    item = get_item(connection, item_id)
+    profile = resolve_macro_emr_target_profile(connection, item)
     for step in list_macro_steps(connection, item_id):
-        if step.target_id and get_ui_target(connection, step.target_id) is None:
-            errors.append(
-                f"Step {step.step_order}: target_id '{step.target_id}' is not registered."
-            )
+        if not step.target_id:
+            continue
+        if profile is not None and get_emr_ui_target_by_key(
+            connection, profile.id, step.target_id
+        ) is not None:
+            continue
+        if get_ui_target(connection, step.target_id) is not None:
+            continue
+        errors.append(
+            f"Step {step.step_order}: target_id '{step.target_id}' is not registered."
+        )
     return errors
+
+
+def resolve_macro_emr_target_profile(
+    connection: sqlite3.Connection,
+    item: ItemRecord | None,
+) -> EmrTargetProfileRecord | None:
+    if item is None:
+        return get_default_emr_target_profile(connection)
+    if item.emr_target_profile_id is not None:
+        profile = get_emr_target_profile(connection, item.emr_target_profile_id)
+        if profile is not None:
+            return profile
+    return get_default_emr_target_profile(connection)
 
 
 def list_ui_targets(connection: sqlite3.Connection) -> list[UiTargetRecord]:
@@ -762,8 +1230,9 @@ def _item_from_row(row: sqlite3.Row | tuple) -> ItemRecord:
         name=row[1],
         item_type=row[2],
         is_enabled=bool(row[3]),
-        created_at=row[4],
-        updated_at=row[5],
+        emr_target_profile_id=row[4],
+        created_at=row[5],
+        updated_at=row[6],
     )
 
 
@@ -818,6 +1287,45 @@ def _pacs_audit_event_from_row(
     )
 
 
+def _emr_target_profile_from_row(
+    row: sqlite3.Row | tuple,
+) -> EmrTargetProfileRecord:
+    return EmrTargetProfileRecord(
+        id=row[0],
+        name=row[1],
+        description=row[2],
+        is_enabled=bool(row[3]),
+        is_default=bool(row[4]),
+        process_name=row[5],
+        executable_path=row[6],
+        window_title_contains=row[7],
+        window_class=row[8],
+        root_automation_id=row[9],
+        main_window_automation_id=row[10],
+        login_window_automation_id=row[11],
+        patient_search_automation_id=row[12],
+        created_at=row[13],
+        updated_at=row[14],
+    )
+
+
+def _emr_ui_target_from_row(row: sqlite3.Row | tuple) -> EmrUiTargetRecord:
+    return EmrUiTargetRecord(
+        id=row[0],
+        profile_id=row[1],
+        target_key=row[2],
+        label=row[3],
+        description=row[4],
+        automation_id=row[5],
+        control_type=row[6],
+        class_name=row[7],
+        name_match=row[8],
+        parent_target_key=row[9],
+        created_at=row[10],
+        updated_at=row[11],
+    )
+
+
 def _get_macro_step_by_id(
     connection: sqlite3.Connection, step_id: int
 ) -> MacroStepRecord | None:
@@ -859,3 +1367,41 @@ def _validate_pacs_worklist_status(status: str) -> None:
 def _validate_pacs_audit_event_type(event_type: str) -> None:
     if event_type not in ALLOWED_PACS_AUDIT_EVENT_TYPES:
         raise ValueError(f"Unsupported PACS audit event type: {event_type}")
+
+
+def _set_default_profile_row(connection: sqlite3.Connection, profile_id: int) -> None:
+    connection.execute("UPDATE emr_target_profiles SET is_default = 0")
+    connection.execute(
+        """
+        UPDATE emr_target_profiles
+        SET is_default = 1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (profile_id,),
+    )
+
+
+def _ensure_single_default_emr_profile(connection: sqlite3.Connection) -> None:
+    default_rows = connection.execute(
+        "SELECT id FROM emr_target_profiles WHERE is_default = 1 ORDER BY id"
+    ).fetchall()
+    if default_rows:
+        keep_id = default_rows[0][0]
+        connection.execute(
+            "UPDATE emr_target_profiles SET is_default = 0 WHERE is_default = 1 AND id != ?",
+            (keep_id,),
+        )
+        return
+
+    first_enabled = connection.execute(
+        """
+        SELECT id
+        FROM emr_target_profiles
+        WHERE is_enabled = 1
+        ORDER BY id
+        LIMIT 1
+        """
+    ).fetchone()
+    if first_enabled is not None:
+        _set_default_profile_row(connection, first_enabled[0])

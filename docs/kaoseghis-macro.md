@@ -1,6 +1,6 @@
 # KaosEghis Macro
 
-Last updated: 2026-06-28
+Last updated: 2026-06-30
 
 ## Purpose
 
@@ -13,6 +13,8 @@ Today, the project supports:
 - dry-run rendering
 - guarded real runner skeleton
 - cancellation support
+- EMR target profile foundation for future target resolution
+- macro-to-EMR-profile binding
 
 It does not yet support broad real UI automation execution across the stored macro model.
 
@@ -27,6 +29,17 @@ Current macro-related tables:
 - `items`
 - `macro_steps`
 - `macro_runs`
+- `emr_target_profiles`
+- `emr_ui_targets`
+
+Macro items now also carry:
+
+- `emr_target_profile_id` nullable
+
+Meaning:
+
+- when set, the macro is configured against that EMR target profile
+- when null, the macro falls back to the default EMR target profile
 
 Supported item types:
 
@@ -45,6 +58,12 @@ Current step fields:
 - `value`
 - `timeout_seconds`
 - `retries`
+
+Current target binding behavior:
+
+- `target_id` remains the stored step field name
+- for profile-bound macros, the editor now offers `emr_ui_targets.target_key` values from the selected EMR profile
+- legacy `ui_targets` are still tolerated for compatibility during dry-run validation and current execution
 
 Allowed stored actions in the model:
 
@@ -68,7 +87,19 @@ Daily-use macro access:
 
 - [KaosEghis/ui/tabs/kaoseghis_tab.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/kaoseghis_tab.py)
 - shows macro list
-- supports dry run
+- supports dry run and manual run
+- shows the resolved EMR profile name for each macro
+
+EMR targeting foundation:
+
+- [KaosEghis/ui/tabs/emr_targets_page.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/emr_targets_page.py)
+- lives under `KaosEghis -> EMR`
+- stores profile-level process/window identity and a profile-scoped UI target library
+
+Editor behavior:
+
+- the macro editor exposes an EMR profile selector
+- the step editor exposes a target selector populated from the selected profile's EMR UI target keys
 
 Configuration/editing surfaces:
 
@@ -85,6 +116,11 @@ Current dry-run behavior:
 - reports blocked state when a UI target is missing
 
 Dry run remains the safe review path for stored macros.
+
+Dry run now also shows:
+
+- resolved EMR profile name
+- planned target keys as stored in each step
 
 ## Real Runner State
 
@@ -120,6 +156,7 @@ Current non-negotiables:
 - dry-run validation and rendering
 - guarded runner skeleton
 - cancellation handling
+- EMR target profile and EMR UI target local persistence
 
 ## Not Done
 
