@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -23,7 +24,6 @@ from KaosEghis.db.repositories import (
     delete_item,
     delete_macro_steps_for_item,
     get_item,
-    get_settings,
     list_items,
     list_macro_steps,
     reorder_macro_steps,
@@ -31,14 +31,16 @@ from KaosEghis.db.repositories import (
     validate_macro_dry_run,
 )
 from KaosEghis.ui.tabs.eghis_assist_tab import MacroEditorDialog
+from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
 from KaosEghis.ui.tabs.settings_tab import SettingsTab
 
 
 class KaosEghisTab(QWidget):
     TOP_PAGES = ["Macros", "Presets", "EMR", "Settings"]
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
+        self._db_path = db_path
 
         self.nav_buttons: dict[str, QPushButton] = {}
         self.top_nav_row = QHBoxLayout()
@@ -46,8 +48,8 @@ class KaosEghisTab(QWidget):
 
         self.macros_page = MacrosPage()
         self.presets_page = PresetsPage()
-        self.emr_page = EmrSummaryPage()
-        self.settings_page = SettingsTab()
+        self.emr_page = EmrTargetsPage(db_path)
+        self.settings_page = SettingsTab(db_path)
 
         for page in (
             self.macros_page,
@@ -305,54 +307,6 @@ class PresetsPage(QWidget):
         has_presets = bool(preset_items)
         self.empty_state.setVisible(not has_presets)
         self.presets_table.setVisible(has_presets)
-
-
-class EmrSummaryPage(QWidget):
-    def __init__(self) -> None:
-        super().__init__()
-
-        title = QLabel("EMR")
-        title.setObjectName("pageTitle")
-
-        self.process_name = QLabel()
-        self.window_title = QLabel()
-        self.credential_reference_name = QLabel()
-        self.saved_automation_ids = QLabel()
-
-        form = QFormLayout()
-        form.addRow("eghis_process_name", self.process_name)
-        form.addRow("eghis_window_title_contains", self.window_title)
-        form.addRow("credential_reference_name", self.credential_reference_name)
-        form.addRow("saved automation IDs", self.saved_automation_ids)
-
-        self.refresh_button = QPushButton("Refresh")
-        self.refresh_button.clicked.connect(self.refresh_view)
-
-        controls = QHBoxLayout()
-        controls.addWidget(self.refresh_button)
-        controls.addStretch()
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(title)
-        layout.addLayout(form)
-        layout.addLayout(controls)
-        layout.addStretch()
-
-        self.refresh_view()
-
-    def refresh_view(self) -> None:
-        initialize_database()
-        with connect() as connection:
-            settings = get_settings(connection)
-            macros = list_items(connection, "macro")
-
-        self.process_name.setText(settings.get("eghis_process_name", ""))
-        self.window_title.setText(settings.get("eghis_window_title_contains", ""))
-        self.credential_reference_name.setText(
-            settings.get("credential_reference_name", "")
-        )
-        macro_ids = ", ".join(str(macro.id) for macro in macros) or "None"
-        self.saved_automation_ids.setText(macro_ids)
 
 
 def _get_required_item(connection, item_id: int):

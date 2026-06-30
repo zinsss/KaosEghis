@@ -1,6 +1,6 @@
 # KaosEghis Macro
 
-Last updated: 2026-06-28
+Last updated: 2026-06-30
 
 ## Purpose
 
@@ -13,6 +13,7 @@ Today, the project supports:
 - dry-run rendering
 - guarded real runner skeleton
 - cancellation support
+- EMR target profile foundation for future target resolution
 
 It does not yet support broad real UI automation execution across the stored macro model.
 
@@ -27,6 +28,8 @@ Current macro-related tables:
 - `items`
 - `macro_steps`
 - `macro_runs`
+- `emr_target_profiles`
+- `emr_ui_targets`
 
 Supported item types:
 
@@ -68,7 +71,13 @@ Daily-use macro access:
 
 - [KaosEghis/ui/tabs/kaoseghis_tab.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/kaoseghis_tab.py)
 - shows macro list
-- supports dry run
+- supports dry run and manual run
+
+EMR targeting foundation:
+
+- [KaosEghis/ui/tabs/emr_targets_page.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/emr_targets_page.py)
+- lives under `KaosEghis -> EMR`
+- stores profile-level process/window identity and a profile-scoped UI target library
 
 Configuration/editing surfaces:
 
@@ -120,6 +129,7 @@ Current non-negotiables:
 - dry-run validation and rendering
 - guarded runner skeleton
 - cancellation handling
+- EMR target profile and EMR UI target local persistence
 
 ## Not Done
 

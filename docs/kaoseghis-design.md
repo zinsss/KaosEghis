@@ -1,6 +1,6 @@
 # KaosEghis Design
 
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 ## Purpose
 
@@ -29,9 +29,9 @@ Main window:
 - top-level tabs:
   - `KaosEghis`
   - `KaosGdd`
-  - `KaosClip`
-  - `Plugins`
-  - `Settings`
+  - `Vaccine`
+  - `PACS`
+  - `Flu-Report`
 
 ## Current Top-Level Information Architecture
 
@@ -39,10 +39,12 @@ Main window:
 
 Primary daily-use tab.
 
-- shows Eghis connector status
-- lists stored macro items for daily use
-- supports refresh and dry run
-- does not expose macro editing here
+- contains compact in-tab navigation:
+  - `Macros`
+  - `Presets`
+  - `EMR`
+  - `Settings`
+- `EMR` now hosts the EMR target profile foundation rather than a simple summary view
 
 ### `KaosGdd`
 
@@ -51,38 +53,31 @@ Embedded KaosGDD browser surface.
 - uses Qt WebEngine when available
 - falls back to a plain label when WebEngine is unavailable
 
-### `KaosClip`
+### `Vaccine`
 
-Temporary placeholder tab.
+Placeholder plugin tab.
 
-- currently still exists as a simple placeholder
-- no production clipboard organizer workflow yet
-- roadmap direction changed:
-  - KaosClip will be redesigned as part of the KaosEghis plugin surface
-  - it is no longer treated as a future standalone app
+- no active workflow yet
 
-### `Plugins`
+### `PACS`
 
-Operational plugin/workflow surface.
+Dedicated KaosEghis-pacs top-level surface.
 
-Current visible projects inside this tab:
+- local worklist
+- polling
+- sync
+- reconciliation
+- audit
 
-- `PACS Worklist`
-- `KaosEghis-flu`
+### `Flu-Report`
 
-Current `KaosEghis-flu` visible surface:
+Dedicated KaosEghis-flu report surface.
 
-- `Weekly - Influenza Report`
+- panel title: `Weekly - Influenza Report`
 
-### `Settings`
+Settings now lives under:
 
-Application configuration surface.
-
-- Eghis process/window settings
-- KaosGDD URL
-- credential reference name
-- Eghis PostgreSQL connection string
-- optional image-study query override
+- `KaosEghis -> Settings`
 
 ## Architectural Boundaries
 
@@ -110,6 +105,8 @@ Responsibilities:
 - schema migration
 - repository CRUD
 - local worklist/macro/settings persistence
+- EMR target profile persistence
+- EMR UI target library persistence
 
 ### UI
 
@@ -174,8 +171,9 @@ The design strategy is milestone-based:
 - Python package name is `KaosEghis`
 - main desktop UI is PySide6
 - SQLite is local and initialized on app startup
-- PACS and flu are plugin workflows, not separate executables inside this repo
-- KaosClip is being repositioned toward plugin integration rather than standalone scope
+- EMR target profiles are now a first-class local model for future macro resolution
+- PACS and flu are product/plugin workflows, not separate executables inside this repo
+- KaosClip remains a future plugin direction, not a standalone app
 
 ## Removed or Superseded Directions
 

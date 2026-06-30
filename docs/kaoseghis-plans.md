@@ -1,6 +1,6 @@
 # KaosEghis Plans
 
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 ## Current Working State
 
@@ -9,6 +9,7 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - local SQLite persistence
 - Eghis connector state
 - UI target registry
+- EMR target profiles
 - dry-run and partial real macro infrastructure
 - read-only PostgreSQL access
 - PACS local worklist
@@ -47,6 +48,7 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - Eghis process/window detection
 - clipboard MVP
 - UI target registry
+- EMR target profile foundation
 - macro model and dry run
 - read-only UIA target inspection
 - conditional wait engine
