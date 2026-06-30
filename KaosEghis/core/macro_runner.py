@@ -11,15 +11,29 @@ from KaosEghis.core.eghis_connector import (
     refresh_cached_eghis_state,
 )
 from KaosEghis.core.macro_models import MacroRunResult, MacroStep
-from KaosEghis.core.uia_inspector import resolve_target_element
+from KaosEghis.core.uia_inspector import _find_target_element, resolve_target_element
 from KaosEghis.db.database import connect, get_database_path
 from KaosEghis.db.repositories import (
+    EmrUiTargetRecord,
+    UiTargetRecord,
     build_macro_dry_run_preview,
+    get_emr_ui_target_by_key,
     get_item,
     get_settings,
+    get_ui_target,
     list_macro_steps,
     resolve_macro_emr_target_profile,
 )
+
+
+TARGET_BASED_RUNTIME_ACTIONS = {
+    "click",
+    "paste_text",
+    "preset_text",
+    "type_text",
+    "type_text_keyboard",
+    "type_text_clipboard",
+}
 
 
 class MacroRunner:
@@ -29,6 +43,7 @@ class MacroRunner:
         self._current_settings: dict[str, str] | None = None
         self._current_profile_name: str | None = None
         self._current_dry_run_preview = None
+        self._current_profile_id: int | None = None
 
     def cancel(self) -> None:
         self._cancel_requested = True
@@ -56,6 +71,7 @@ class MacroRunner:
             ]
             run_settings = settings or get_settings(connection)
         self._current_profile_name = profile.name if profile is not None else None
+        self._current_profile_id = profile.id if profile is not None else None
 
         if not dry_run and not item.is_enabled:
             return MacroRunResult(False, "Macro execution blocked: macro is disabled.", 0, None)
@@ -227,7 +243,7 @@ class MacroRunner:
 
     def _run_click(self, step: MacroStep, settings: dict[str, str]) -> MacroRunResult:
         if not step.target_id:
-            return MacroRunResult(False, "target not found", 0, None)
+            return MacroRunResult(False, "target not resolved", 0, None)
         target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
         if target is None:
             return MacroRunResult(False, resolve_message, 0, None)
@@ -250,6 +266,10 @@ class MacroRunner:
         return MacroRunResult(True, f"Sent hotkey: {key}", 1, None)
 
     def _run_type_text(self, step: MacroStep) -> MacroRunResult:
+        if step.target_id:
+            resolved = self._ensure_target_for_runtime_action(step)
+            if resolved is not None:
+                return resolved
         text = step.options.get("text", step.value)
         if not isinstance(text, str) or not text:
             return MacroRunResult(False, "unknown error", 0, None)
@@ -262,6 +282,10 @@ class MacroRunner:
         return MacroRunResult(True, "Typed text.", 1, None)
 
     def _run_paste_text(self, step: MacroStep) -> MacroRunResult:
+        if step.target_id:
+            resolved = self._ensure_target_for_runtime_action(step)
+            if resolved is not None:
+                return resolved
         text = step.options.get("text", step.value)
         if not isinstance(text, str) or not text:
             return MacroRunResult(False, "clipboard failed", 0, None)
@@ -356,30 +380,129 @@ class MacroRunner:
         self, settings: dict[str, str], target_id: str
     ) -> tuple[object | None, str]:
         with connect(self._db_path or get_database_path()) as connection:
-            target = connection.execute(
-                """
-                SELECT id, target_id, parent_target_id, parent_automation_id, automation_id,
-                       name, control_type, class_name, created_at
-                FROM ui_targets
-                WHERE target_id = ?
-                """,
-                (target_id,),
-            ).fetchone()
+            profile_id = self._current_profile_id
+            emr_target = (
+                get_emr_ui_target_by_key(connection, profile_id, target_id)
+                if profile_id is not None
+                else None
+            )
+            if emr_target is not None:
+                return self._resolve_emr_runtime_target(
+                    settings,
+                    connection,
+                    emr_target,
+                    set(),
+                )
+
+            target = get_ui_target(connection, target_id)
         if target is None:
-            return None, "target not found"
+            return None, "target not resolved"
 
-        from KaosEghis.db.repositories import _ui_target_from_row
-
-        element, _parent_found, message = resolve_target_element(
-            settings, _ui_target_from_row(target)
-        )
+        element, _parent_found, message = resolve_target_element(settings, target)
         if element is None:
             if "timed out" in message.casefold() or "timeout" in message.casefold():
                 return None, "timeout"
             if "window" in message.casefold():
                 return None, "window not ready"
-            return None, "target not found"
+            return None, "target not resolved"
         return element, "Target resolved."
+
+    def _resolve_emr_runtime_target(
+        self,
+        settings: dict[str, str],
+        connection,
+        target: EmrUiTargetRecord,
+        visited_target_keys: set[str],
+    ) -> tuple[object | None, str]:
+        if target.target_key in visited_target_keys:
+            return None, "target not resolved"
+
+        mapped_target = self._map_emr_target_to_ui_target(target)
+        parent_target_key = (target.parent_target_key or "").strip()
+        if not parent_target_key:
+            element, _parent_found, message = resolve_target_element(settings, mapped_target)
+            if element is None:
+                return self._map_target_resolution_failure(message)
+            return element, "Target resolved."
+
+        parent_emr_target = get_emr_ui_target_by_key(
+            connection, target.profile_id, parent_target_key
+        )
+        if parent_emr_target is not None:
+            parent_element, parent_message = self._resolve_emr_runtime_target(
+                settings,
+                connection,
+                parent_emr_target,
+                visited_target_keys | {target.target_key},
+            )
+            if parent_element is None:
+                return None, parent_message
+            try:
+                elements = parent_element.descendants()
+            except Exception:
+                return None, "target not resolved"
+            match, message = _find_target_element(
+                elements,
+                mapped_target,
+                scope_description=f"inside parent '{parent_target_key}'",
+            )
+            if match is None:
+                return self._map_target_resolution_failure(message)
+            return match, "Target resolved."
+
+        legacy_parent = get_ui_target(connection, parent_target_key)
+        if legacy_parent is not None:
+            scoped_target = UiTargetRecord(
+                id=mapped_target.id,
+                target_id=mapped_target.target_id,
+                parent_target_id=legacy_parent.target_id,
+                parent_automation_id=None,
+                automation_id=mapped_target.automation_id,
+                name=mapped_target.name,
+                control_type=mapped_target.control_type,
+                class_name=mapped_target.class_name,
+                created_at=mapped_target.created_at,
+            )
+            element, _parent_found, message = resolve_target_element(settings, scoped_target)
+            if element is None:
+                return self._map_target_resolution_failure(message)
+            return element, "Target resolved."
+
+        return None, "target not resolved"
+
+    def _ensure_target_for_runtime_action(self, step: MacroStep) -> MacroRunResult | None:
+        if self._action_name(step) not in TARGET_BASED_RUNTIME_ACTIONS:
+            return None
+        if not step.target_id:
+            return None
+        settings = self._require_settings()
+        element, message = self._resolve_runtime_target(settings, step.target_id)
+        if element is None:
+            return MacroRunResult(False, message, 0, None)
+        return None
+
+    @staticmethod
+    def _map_emr_target_to_ui_target(target: EmrUiTargetRecord) -> UiTargetRecord:
+        return UiTargetRecord(
+            id=target.id,
+            target_id=target.target_key,
+            parent_target_id=target.parent_target_key,
+            parent_automation_id=None,
+            automation_id=target.automation_id,
+            name=target.name_match,
+            control_type=target.control_type,
+            class_name=target.class_name,
+            created_at=target.created_at,
+        )
+
+    @staticmethod
+    def _map_target_resolution_failure(message: str) -> tuple[None, str]:
+        lowered = message.casefold()
+        if "timed out" in lowered or "timeout" in lowered:
+            return None, "timeout"
+        if "window" in lowered:
+            return None, "window not ready"
+        return None, "target not resolved"
 
     def _dry_run_step_line(self, step: MacroStep, index: int) -> str:
         action = self._action_name(step)
@@ -469,6 +592,7 @@ class MacroRunner:
         lowered = (message or "").strip().casefold()
         if lowered in {
             "target not found",
+            "target not resolved",
             "input failed",
             "clipboard failed",
             "window not ready",
@@ -479,7 +603,7 @@ class MacroRunner:
         }:
             return message
         if "target" in lowered:
-            return "target not found"
+            return "target not resolved"
         if "window" in lowered or "focus" in lowered:
             return "window not ready"
         if "timeout" in lowered or "timed out" in lowered:

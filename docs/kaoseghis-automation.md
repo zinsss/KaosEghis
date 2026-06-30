@@ -77,7 +77,7 @@ Current transition state:
 - macros can now be bound to an EMR target profile
 - dry run can report the resolved profile name
 - dry run can preview EMR UI target metadata and unresolved-target warnings
-- actual click/send/paste target resolution is intentionally not switched over yet
+- real macro execution now resolves profile-scoped EMR UI targets first, with legacy UI target fallback
 
 ### EMR Target Foundation
 
