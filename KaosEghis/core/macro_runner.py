@@ -237,6 +237,10 @@ class MacroRunner:
         return MacroRunResult(True, f"Sent hotkey: {key}", 1, None)
 
     def _run_type_text(self, step: MacroStep) -> MacroRunResult:
+        if step.target_id:
+            target_result = self._focus_runtime_target(step)
+            if target_result is not None:
+                return target_result
         text = step.options.get("text", step.value)
         if not isinstance(text, str) or not text:
             return MacroRunResult(False, "unknown error", 0, None)
@@ -249,6 +253,10 @@ class MacroRunner:
         return MacroRunResult(True, "Typed text.", 1, None)
 
     def _run_paste_text(self, step: MacroStep) -> MacroRunResult:
+        if step.target_id:
+            target_result = self._focus_runtime_target(step)
+            if target_result is not None:
+                return target_result
         text = step.options.get("text", step.value)
         if not isinstance(text, str) or not text:
             return MacroRunResult(False, "clipboard failed", 0, None)
@@ -367,6 +375,31 @@ class MacroRunner:
                 return None, "window not ready"
             return None, "target not found"
         return element, "Target resolved."
+
+    def _focus_runtime_target(self, step: MacroStep) -> MacroRunResult | None:
+        if not step.target_id:
+            return None
+        settings = self._require_settings()
+        target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+        focused, focus_message = self._focus_target_element(target)
+        if not focused:
+            return MacroRunResult(False, focus_message, 0, None)
+        return None
+
+    @staticmethod
+    def _focus_target_element(element: object) -> tuple[bool, str]:
+        try:
+            element.set_focus()
+            return True, "Target focused."
+        except Exception:
+            pass
+        try:
+            element.click_input()
+            return True, "Target clicked."
+        except Exception:
+            return False, "target not resolved"
 
     def _dry_run_step_line(self, step: MacroStep, index: int) -> str:
         action = self._action_name(step)
