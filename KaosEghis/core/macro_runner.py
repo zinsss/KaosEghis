@@ -14,6 +14,7 @@ from KaosEghis.core.macro_models import MacroRunResult, MacroStep
 from KaosEghis.core.uia_inspector import resolve_target_element
 from KaosEghis.db.database import connect, get_database_path
 from KaosEghis.db.repositories import (
+    build_macro_dry_run_preview,
     get_item,
     get_settings,
     list_macro_steps,
@@ -27,6 +28,7 @@ class MacroRunner:
         self._db_path = db_path
         self._current_settings: dict[str, str] | None = None
         self._current_profile_name: str | None = None
+        self._current_dry_run_preview = None
 
     def cancel(self) -> None:
         self._cancel_requested = True
@@ -46,6 +48,7 @@ class MacroRunner:
             if item is None:
                 return MacroRunResult(False, "Macro not found.", 0, None)
             profile = resolve_macro_emr_target_profile(connection, item)
+            self._current_dry_run_preview = build_macro_dry_run_preview(connection, item_id)
 
             steps = [
                 _db_macro_step_to_runtime_step(step)
@@ -123,13 +126,23 @@ class MacroRunner:
         return MacroRunResult(True, "Macro execution completed.", executed_steps, None)
 
     def _build_dry_run_result(self, steps: Sequence[MacroStep]) -> MacroRunResult:
+        preview = self._current_dry_run_preview
         profile_name = self._current_profile_name or "(No EMR profile)"
         lines = [
             f"Dry run only. Profile: {profile_name}",
             "Planned macro steps:",
         ]
-        for index, step in enumerate(steps, start=1):
-            lines.append(self._dry_run_step_line(step, index))
+        if preview is not None:
+            if preview.warnings:
+                for warning in preview.warnings:
+                    lines.append(f"Warning: {warning}")
+            for step in preview.steps:
+                lines.extend(self._dry_run_preview_lines(step))
+            if preview.warnings or any(step.warnings for step in preview.steps):
+                lines.append("Review warnings before real execution.")
+        else:
+            for index, step in enumerate(steps, start=1):
+                lines.append(self._dry_run_step_line(step, index))
         if not steps:
             lines.append("No steps defined.")
         lines.append("No actions executed.")
@@ -392,6 +405,54 @@ class MacroRunner:
             f"{display_order}. {action}{target}{value_text} "
             f"timeout={step.timeout_seconds} retries={step.retries}"
         )
+
+    def _dry_run_preview_lines(self, step_preview) -> list[str]:
+        target = (
+            f" target_key={step_preview.target_key}" if step_preview.target_key else ""
+        )
+        label = (
+            f" label={step_preview.resolved_label}" if step_preview.resolved_label else ""
+        )
+        action_line = self._dry_run_preview_action_line(step_preview)
+        line = (
+            action_line
+            if action_line is not None
+            else f"{step_preview.step_order}. action={step_preview.action}{target}{label}"
+        )
+        detail_parts = []
+        if step_preview.automation_id:
+            detail_parts.append(f"automation_id={step_preview.automation_id}")
+        if step_preview.control_type:
+            detail_parts.append(f"control_type={step_preview.control_type}")
+        if step_preview.name_match:
+            detail_parts.append(f"name_match={step_preview.name_match}")
+        if step_preview.class_name:
+            detail_parts.append(f"class_name={step_preview.class_name}")
+        if step_preview.parent_target_key:
+            detail_parts.append(f"parent_key={step_preview.parent_target_key}")
+        if step_preview.value_summary:
+            detail_parts.append(step_preview.value_summary)
+        lines = [line]
+        if detail_parts:
+            lines.append(f"   preview: {'; '.join(detail_parts)}")
+        for warning in step_preview.warnings:
+            lines.append(f"   warning: {warning}")
+        return lines
+
+    @staticmethod
+    def _dry_run_preview_action_line(step_preview) -> str | None:
+        if step_preview.action in {"delay_ms", "wait_ms"} and step_preview.value_summary:
+            duration = step_preview.value_summary.removeprefix("duration_ms=")
+            return f"{step_preview.step_order}. delay_ms value={duration} (dry run only)"
+        if step_preview.action == "wait_window":
+            return f"{step_preview.step_order}. action=wait_window"
+        if step_preview.action == "wait_text_or_image":
+            return (
+                f"{step_preview.step_order}. action=wait_text_or_image"
+                f"{' target_key=' + step_preview.target_key if step_preview.target_key else ''}"
+                " (placeholder, dry run only)"
+            )
+        return None
 
     @staticmethod
     def _action_name(step: MacroStep) -> str:
