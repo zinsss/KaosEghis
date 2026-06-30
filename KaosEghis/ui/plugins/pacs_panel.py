@@ -1,10 +1,12 @@
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from PySide6.QtCore import QTimer
+import re
+from PySide6.QtCore import QDate, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDateEdit,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -73,6 +75,7 @@ class PacsPanel(QWidget):
         self._visible_audit_events: list[PacsAuditEventRecord] = []
         self._active_filter = "all"
         self._poll_in_progress = False
+        self._selected_date = date.today()
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._handle_poll_timer_tick)
 
@@ -94,6 +97,32 @@ class PacsPanel(QWidget):
         polling_info_row.addWidget(self.last_poll_time_label)
         polling_info_row.addWidget(self.last_poll_result_label)
         polling_info_row.addStretch()
+
+        self.previous_day_button = QPushButton("Previous day")
+        self.previous_day_button.clicked.connect(lambda: self._shift_selected_date(-1))
+        self.next_day_button = QPushButton("Next day")
+        self.next_day_button.clicked.connect(lambda: self._shift_selected_date(1))
+        self.today_button = QPushButton("Today")
+        self.today_button.clicked.connect(self._select_today)
+        self.date_selector = QDateEdit()
+        self.date_selector.setCalendarPopup(True)
+        self.date_selector.setDisplayFormat("yyyy-MM-dd")
+        self.date_selector.setDate(
+            QDate(
+                self._selected_date.year,
+                self._selected_date.month,
+                self._selected_date.day,
+            )
+        )
+        self.date_selector.dateChanged.connect(self._on_date_changed)
+
+        date_row = QHBoxLayout()
+        date_row.addWidget(QLabel("Worklist date"))
+        date_row.addWidget(self.previous_day_button)
+        date_row.addWidget(self.date_selector)
+        date_row.addWidget(self.next_day_button)
+        date_row.addWidget(self.today_button)
+        date_row.addStretch()
 
         self.worklist_table = QTableWidget(0, len(self.WORKLIST_COLUMNS))
         self.worklist_table.setHorizontalHeaderLabels(self.WORKLIST_COLUMNS)
@@ -193,6 +222,7 @@ class PacsPanel(QWidget):
         layout.addWidget(title)
         layout.addLayout(status_row)
         layout.addLayout(polling_info_row)
+        layout.addLayout(date_row)
         layout.addLayout(polling_settings_row)
         layout.addWidget(self.worklist_table)
         layout.addLayout(self.filter_bar)
@@ -237,7 +267,12 @@ class PacsPanel(QWidget):
         status_filter = None if self._active_filter == "all" else self._active_filter
 
         with connect(self._db_path) as connection:
-            return list_pacs_worklist_items(connection, status_filter)
+            items = list_pacs_worklist_items(connection, status_filter)
+        return [
+            item
+            for item in items
+            if self._requested_at_matches_selected_date(item.requested_at)
+        ]
 
     def refresh_rows(self) -> None:
         items = self._load_visible_items()
@@ -538,7 +573,11 @@ class PacsPanel(QWidget):
             with connect(self._db_path) as connection:
                 settings = get_settings(connection)
 
-            result = poll_eghis_image_orders_into_local_worklist(settings, self._db_path)
+            result = poll_eghis_image_orders_into_local_worklist(
+                settings,
+                self._db_path,
+                selected_date=self._selected_date,
+            )
             self.refresh_rows()
             self.last_poll_time_label.setText(
                 f"Last poll time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
@@ -604,6 +643,31 @@ class PacsPanel(QWidget):
             f"auto_poll={'on' if auto_poll_enabled else 'off'}, "
             f"interval={interval_seconds}s, dry_run={'on' if dry_run_enabled else 'off'}"
         )
+
+    def _shift_selected_date(self, days: int) -> None:
+        self._set_selected_date(self._selected_date + timedelta(days=days))
+
+    def _select_today(self) -> None:
+        self._set_selected_date(date.today())
+
+    def _on_date_changed(self, selected: QDate) -> None:
+        self._selected_date = date(selected.year(), selected.month(), selected.day())
+        self.refresh_rows()
+
+    def _set_selected_date(self, selected: date) -> None:
+        self._selected_date = selected
+        self.date_selector.blockSignals(True)
+        self.date_selector.setDate(QDate(selected.year, selected.month, selected.day))
+        self.date_selector.blockSignals(False)
+        self.refresh_rows()
+
+    def _requested_at_matches_selected_date(self, requested_at: str | None) -> bool:
+        if requested_at is None:
+            return False
+        digits = re.sub(r"[^0-9]", "", requested_at)
+        if len(digits) < 8:
+            return False
+        return digits[:8] == self._selected_date.strftime("%Y%m%d")
 
     def clear_audit(self) -> None:
         confirmed = QMessageBox.question(

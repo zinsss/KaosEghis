@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
+import re
 from typing import Callable
 
 from KaosEghis.db.database import connect, get_database_path, initialize_database
-from KaosEghis.db.repositories import create_pacs_worklist_item
+from KaosEghis.db.repositories import (
+    create_pacs_audit_event,
+    create_pacs_worklist_item,
+    list_pacs_worklist_items,
+    update_pacs_worklist_status,
+)
 from KaosEghis.core.eghis_db import (
     EghisDbQueryRejectedError,
     EghisDbUnavailableError,
@@ -92,6 +99,7 @@ class PollResult:
     inserted: int
     updated: int
     skipped: int
+    removed_active: int = 0
     message: str | None = None
 
 
@@ -103,25 +111,32 @@ class QueryRejectedError(RuntimeError):
     """Raised when operator-configured SQL fails the read-only safety gate."""
 
 
-def poll_image_orders(settings: dict[str, str]) -> list[dict[str, str | None]]:
+def poll_image_orders(
+    settings: dict[str, str],
+    selected_date: date | str | None = None,
+) -> list[dict[str, str | None]]:
     connection_string = (settings.get("eghis_db_connection_string") or "").strip()
     if not connection_string:
         return []
 
-    return _poll_image_orders_from_db(settings)
+    return _poll_image_orders_from_db(settings, selected_date=selected_date)
 
 
 def poll_eghis_image_orders_into_local_worklist(
     settings: dict[str, str],
     db_path: Path | None = None,
     poller: Callable[[dict[str, str]], list[dict[str, str | None]]] | None = None,
+    selected_date: date | str | None = None,
 ) -> PollResult:
     if not (settings.get("eghis_db_connection_string") or "").strip():
         return PollResult(inserted=0, updated=0, skipped=0)
 
     initialize_database(db_path)
     try:
-        orders = (poller or poll_image_orders)(settings)
+        if poller is None:
+            orders = poll_image_orders(settings, selected_date=selected_date)
+        else:
+            orders = poller(settings)
     except QueryRejectedError:
         return PollResult(inserted=0, updated=0, skipped=0, message="query rejected")
     except PollingUnavailableError:
@@ -129,12 +144,17 @@ def poll_eghis_image_orders_into_local_worklist(
     inserted = 0
     updated = 0
     skipped = 0
-
-    if not orders:
-        return PollResult(inserted=0, updated=0, skipped=0)
+    removed_active = 0
 
     db_file = db_path or get_database_path()
     with connect(db_file) as connection:
+        polled_accessions = {
+            accession
+            for accession in (
+                _blank_to_none(order.get("accession_or_order_id")) for order in orders
+            )
+            if accession is not None
+        }
         for order in orders:
             accession_or_order_id = _blank_to_none(order.get("accession_or_order_id"))
             status = _blank_to_none(order.get("status")) or "active"
@@ -195,16 +215,47 @@ def poll_eghis_image_orders_into_local_worklist(
                 source=_blank_to_none(order.get("source")) or "eghis-poll",
             )
             inserted += 1
+
+        selected_ymd = _normalize_selected_ymd(selected_date)
+        if selected_ymd is not None:
+            for item in list_pacs_worklist_items(connection, "active"):
+                if not _requested_at_matches_ymd(item.requested_at, selected_ymd):
+                    continue
+                accession = _blank_to_none(item.accession_or_order_id)
+                if not accession or accession in polled_accessions:
+                    continue
+                if update_pacs_worklist_status(
+                    connection,
+                    item.id,
+                    "cancelled",
+                    "order removed from eGHIS MWL",
+                ):
+                    create_pacs_audit_event(
+                        connection,
+                        event_type="poll",
+                        worklist_item_id=item.id,
+                        status_before="active",
+                        status_after="cancelled",
+                        summary="active order removed from eGHIS MWL -> marked cancelled",
+                    )
+                    removed_active += 1
         connection.commit()
 
-    return PollResult(inserted=inserted, updated=updated, skipped=skipped)
+    return PollResult(
+        inserted=inserted,
+        updated=updated,
+        skipped=skipped,
+        removed_active=removed_active,
+    )
 
 
 def _poll_image_orders_from_db(
     settings: dict[str, str],
+    *,
+    selected_date: date | str | None = None,
 ) -> list[dict[str, str | None]]:
     connection_string = (settings.get("eghis_db_connection_string") or "").strip()
-    query = _resolve_image_study_query(settings)
+    query = _resolve_image_study_query(settings, selected_date=selected_date)
     if not connection_string or not query:
         return []
 
@@ -277,8 +328,63 @@ def _stringify(value: object | None) -> str | None:
     return _blank_to_none(str(value))
 
 
-def _resolve_image_study_query(settings: dict[str, str]) -> str:
+def _resolve_image_study_query(
+    settings: dict[str, str],
+    *,
+    selected_date: date | str | None = None,
+) -> str:
     configured = (settings.get("eghis_db_image_study_query") or "").strip()
     if configured:
         return configured
-    return _DEFAULT_IMAGE_ORDER_QUERY
+    return _build_default_image_order_query(selected_date)
+
+
+def _build_default_image_order_query(
+    selected_date: date | str | None = None,
+) -> str:
+    selected_ymd = _normalize_selected_ymd(selected_date)
+    if selected_ymd is None:
+        return _DEFAULT_IMAGE_ORDER_QUERY
+
+    anchor_date_sql = f"""
+  AND substring(
+      regexp_replace(
+          COALESCE(
+              m.scheduled_dttm,
+              m.imaging_request_dttm,
+              m.trigger_dttm,
+              m.replica_dttm,
+              ''
+          )::text,
+          '[^0-9]',
+          '',
+          'g'
+      )
+      FROM 1 FOR 8
+  ) = '{selected_ymd}'
+""".rstrip()
+    return _DEFAULT_IMAGE_ORDER_QUERY.replace(
+        "ORDER BY COALESCE(",
+        f"{anchor_date_sql}\nORDER BY COALESCE(",
+        1,
+    )
+
+
+def _normalize_selected_ymd(selected_date: date | str | None) -> str | None:
+    if selected_date is None:
+        return None
+    if isinstance(selected_date, date):
+        return selected_date.strftime("%Y%m%d")
+    digits = re.sub(r"[^0-9]", "", str(selected_date))
+    if len(digits) < 8:
+        return None
+    return digits[:8]
+
+
+def _requested_at_matches_ymd(requested_at: str | None, selected_ymd: str) -> bool:
+    if requested_at is None:
+        return False
+    digits = re.sub(r"[^0-9]", "", requested_at)
+    if len(digits) < 8:
+        return False
+    return digits[:8] == selected_ymd

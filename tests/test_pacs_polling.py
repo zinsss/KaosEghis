@@ -1,5 +1,6 @@
 import builtins
 import sys
+from datetime import date
 
 from KaosEghis.core.pacs_polling import (
     PollingUnavailableError,
@@ -100,6 +101,53 @@ def test_poll_image_orders_uses_default_postgres_query_when_query_blank(
     assert "CAST(o.ord_seq_no AS text) = split_part(m.eghis_key, '_', 3)" in executed_queries[0]
     assert "dc_yn != 'Y'" not in executed_queries[0]
     assert "COALESCE(o.dc_yn, 'N') = 'Y'" in executed_queries[0]
+
+
+def test_poll_image_orders_selected_date_is_applied_to_default_query(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core import pacs_polling
+
+    executed_queries: list[str] = []
+
+    class FakeCursor:
+        description = []
+
+        def execute(self, query: str) -> None:
+            executed_queries.append(query)
+
+        def fetchall(self) -> list[tuple]:
+            return []
+
+        def close(self) -> None:
+            return None
+
+    class FakeConnection:
+        def set_session(self, readonly: bool, autocommit: bool) -> None:
+            return None
+
+        def cursor(self) -> FakeCursor:
+            return FakeCursor()
+
+        def close(self) -> None:
+            return None
+
+    class FakePsycopg2Module:
+        def connect(self, connection_string: str):
+            return FakeConnection()
+
+    monkeypatch.setitem(sys.modules, "psycopg2", FakePsycopg2Module())
+
+    pacs_polling.poll_image_orders(
+        {
+            "eghis_db_connection_string": "postgresql://example",
+            "eghis_db_image_study_query": "",
+        },
+        selected_date=date(2026, 6, 30),
+    )
+
+    assert "20260630" in executed_queries[0]
+    assert "regexp_replace" in executed_queries[0]
 
 
 def test_poll_image_orders_rejects_write_sql() -> None:
@@ -220,7 +268,7 @@ def test_poll_service_adapter_unavailable_returns_safe_status(
     monkeypatch.setattr(
         pacs_polling,
         "poll_image_orders",
-        lambda _settings: (_ for _ in ()).throw(
+        lambda _settings, selected_date=None: (_ for _ in ()).throw(
             PollingUnavailableError("psycopg2 missing")
         ),
     )
@@ -243,6 +291,7 @@ def test_poll_service_inserts_realistic_order(tmp_path, monkeypatch) -> None:
 
     def fake_poll_image_orders(
         _settings: dict[str, str],
+        selected_date=None,
     ) -> list[dict[str, str | None]]:
         return [
             {
@@ -284,6 +333,7 @@ def test_poll_service_duplicate_order_updates_instead_of_insert(
 
     def fake_active_order(
         _settings: dict[str, str],
+        selected_date=None,
     ) -> list[dict[str, str | None]]:
         return [
             {
@@ -300,6 +350,7 @@ def test_poll_service_duplicate_order_updates_instead_of_insert(
 
     def fake_cancelled_order(
         _settings: dict[str, str],
+        selected_date=None,
     ) -> list[dict[str, str | None]]:
         return [
             {
@@ -345,6 +396,7 @@ def test_poll_service_skips_cancelled_order_without_existing_local_row(
 
     def fake_cancelled_order(
         _settings: dict[str, str],
+        selected_date=None,
     ) -> list[dict[str, str | None]]:
         return [
             {
@@ -381,6 +433,7 @@ def test_pacs_local_storage_does_not_include_sensitive_fields(tmp_path, monkeypa
 
     def fake_poll_image_orders(
         _settings: dict[str, str],
+        selected_date=None,
     ) -> list[dict[str, str | None]]:
         return [
             {
@@ -449,6 +502,7 @@ def test_poll_service_skips_rows_without_accession_or_order_id(
 
     def fake_poll_image_orders(
         _settings: dict[str, str],
+        selected_date=None,
     ) -> list[dict[str, str | None]]:
         return [
             {
@@ -475,3 +529,100 @@ def test_poll_service_skips_rows_without_accession_or_order_id(
     assert result.updated == 0
     assert result.skipped == 1
     assert rows == []
+
+
+def test_poll_service_missing_mwl_row_changes_active_to_cancelled_and_audits(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    from KaosEghis.core import pacs_polling
+    from KaosEghis.db.repositories import (
+        create_pacs_worklist_item,
+        list_pacs_audit_events,
+    )
+
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            study="Chest",
+            modality="CR",
+            requested_at="2026-06-30 09:30:00",
+            accession_or_order_id="ACC-REMOVE",
+            source="eghis-db",
+        )
+
+    monkeypatch.setattr(
+        pacs_polling,
+        "poll_image_orders",
+        lambda _settings, selected_date=None: [],
+    )
+    result = poll_eghis_image_orders_into_local_worklist(
+        {"eghis_db_connection_string": "postgresql://example"},
+        db_path=db_path,
+        selected_date=date(2026, 6, 30),
+    )
+
+    with connect(db_path) as connection:
+        rows = list_pacs_worklist_items(connection)
+        audit_rows = list_pacs_audit_events(connection)
+
+    assert result.removed_active == 1
+    assert len(rows) == 1
+    assert rows[0].status == "cancelled"
+    assert rows[0].error_message == "order removed from eGHIS MWL"
+    assert audit_rows[0].event_type == "poll"
+    assert audit_rows[0].summary == "active order removed from eGHIS MWL -> marked cancelled"
+    assert audit_rows[0].status_before == "active"
+    assert audit_rows[0].status_after == "cancelled"
+    assert "Alice" not in audit_rows[0].summary
+
+
+def test_poll_service_missing_mwl_row_preserves_done_and_cancelled(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    from KaosEghis.core import pacs_polling
+    from KaosEghis.db.repositories import create_pacs_worklist_item, list_pacs_audit_events
+
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="done",
+            study="Chest",
+            modality="CR",
+            requested_at="2026-06-30 09:30:00",
+            accession_or_order_id="ACC-DONE",
+            source="eghis-db",
+        )
+        create_pacs_worklist_item(
+            connection,
+            status="cancelled",
+            study="Chest",
+            modality="CR",
+            requested_at="2026-06-30 09:31:00",
+            accession_or_order_id="ACC-CANCELLED",
+            source="eghis-db",
+        )
+
+    monkeypatch.setattr(
+        pacs_polling,
+        "poll_image_orders",
+        lambda _settings, selected_date=None: [],
+    )
+    result = poll_eghis_image_orders_into_local_worklist(
+        {"eghis_db_connection_string": "postgresql://example"},
+        db_path=db_path,
+        selected_date="2026-06-30",
+    )
+
+    with connect(db_path) as connection:
+        rows = sorted(list_pacs_worklist_items(connection), key=lambda row: row.id)
+        audit_rows = list_pacs_audit_events(connection)
+
+    assert result.removed_active == 0
+    assert [row.status for row in rows] == ["done", "cancelled"]
+    assert audit_rows == []
