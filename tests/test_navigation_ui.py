@@ -88,6 +88,22 @@ def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate() -> None:
     ]
 
 
+def test_main_window_instantiates_without_valid_eghis_db(monkeypatch) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.flu_panel as flu_panel_module
+    from KaosEghis.ui.main_window import MainWindow
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("fetch_weekly_age_report should not be called during startup")
+
+    monkeypatch.setattr(flu_panel_module, "fetch_weekly_age_report", fail_if_called)
+
+    window = MainWindow()
+
+    assert window is not None
+
+
 def test_vaccine_tab_placeholder_text() -> None:
     _app()
 

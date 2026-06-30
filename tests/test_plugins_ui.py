@@ -1083,7 +1083,59 @@ def test_flu_panel_can_load_week_without_backend() -> None:
 
     labels = [label.text() for label in panel.findChildren(QLabel)]
     assert "Weekly - Influenza Report" in labels
-    assert "Total Visits(Practice) Count: 0" in panel.report_output.toPlainText()
+    assert panel.report_status.text() == "Eghis DB connection failed."
+    assert panel.report_output.toPlainText() == "Eghis DB connection failed."
+
+
+def test_flu_panel_instantiates_without_calling_fetch(monkeypatch) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.flu_panel as flu_panel_module
+
+    calls = {"fetch": 0}
+
+    def fake_fetch(*args, **kwargs):
+        calls["fetch"] += 1
+        return []
+
+    monkeypatch.setattr(flu_panel_module, "fetch_weekly_age_report", fake_fetch)
+
+    panel = flu_panel_module.FluPanel()
+
+    assert panel.report_status.text() == "Not loaded yet."
+    assert calls["fetch"] == 0
+
+
+def test_flu_panel_load_week_handles_db_connection_failure_without_raising(
+    monkeypatch, tmp_path
+) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.flu_panel as flu_panel_module
+    from KaosEghis.core.weekly_age_reporting import WeeklyAgeReportingUnavailableError
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "eghis_db_connection_string": "host=127.0.0.1 port=5432 dbname=postgres user=postgres password=",
+            },
+        )
+
+    def fail_fetch(*args, **kwargs):
+        raise WeeklyAgeReportingUnavailableError("password missing")
+
+    monkeypatch.setattr(flu_panel_module, "fetch_weekly_age_report", fail_fetch)
+
+    panel = flu_panel_module.FluPanel(db_path=db_path)
+    panel.load_report()
+
+    assert panel.report_status.text() == "Eghis DB connection failed."
+    assert panel.report_output.toPlainText() == "Eghis DB connection failed."
 
 
 def test_weekly_visits_panel_can_load_without_backend(tmp_path) -> None:

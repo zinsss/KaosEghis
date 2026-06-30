@@ -40,16 +40,20 @@ class FluPanel(QWidget):
         self.week_input.setMaxLength(2)
         self.week_input.setFixedWidth(48)
         self.date_range_label = QLabel()
+        self.report_status = QLabel("Not loaded yet.")
 
-        search_button = QPushButton("Search")
-        search_button.clicked.connect(self.load_report)
+        self.load_week_button = QPushButton("Load week")
+        self.load_week_button.clicked.connect(self.load_report)
+        self.generate_report_button = QPushButton("Generate report")
+        self.generate_report_button.clicked.connect(self.load_report)
 
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Week No."))
         controls.addWidget(self.week_input)
         controls.addWidget(QLabel(":"))
         controls.addWidget(self.date_range_label)
-        controls.addWidget(search_button)
+        controls.addWidget(self.load_week_button)
+        controls.addWidget(self.generate_report_button)
         controls.addStretch()
 
         self.report_output = QPlainTextEdit()
@@ -58,9 +62,8 @@ class FluPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(title)
         layout.addLayout(controls)
+        layout.addWidget(self.report_status)
         layout.addWidget(self.report_output)
-
-        self.load_report()
 
     def load_report(self) -> None:
         week_text = self.week_input.text().strip()
@@ -68,6 +71,7 @@ class FluPanel(QWidget):
             week_number = int(week_text)
         except ValueError:
             self.date_range_label.setText("Invalid week")
+            self.report_status.setText("Invalid week.")
             self.report_output.setPlainText("Enter a valid ISO week number.")
             return
 
@@ -75,6 +79,7 @@ class FluPanel(QWidget):
             start_ymd, end_ymd = iso_week_range(self._current_year, week_number)
         except ValueError as exc:
             self.date_range_label.setText("Invalid week")
+            self.report_status.setText("Invalid week.")
             self.report_output.setPlainText(str(exc))
             return
 
@@ -85,6 +90,7 @@ class FluPanel(QWidget):
             settings = get_settings(connection)
 
         if not (settings.get("eghis_db_connection_string") or "").strip():
+            self.report_status.setText("Eghis DB connection failed.")
             self.report_output.setPlainText(
                 _render_report(
                     year=self._current_year,
@@ -104,8 +110,13 @@ class FluPanel(QWidget):
                 start_week=week_number,
                 end_week=week_number,
             )
-        except WeeklyAgeReportingUnavailableError as exc:
-            self.report_output.setPlainText(str(exc))
+        except WeeklyAgeReportingUnavailableError:
+            self.report_status.setText("Eghis DB connection failed.")
+            self.report_output.setPlainText("Eghis DB connection failed.")
+            return
+        except Exception:
+            self.report_status.setText("Eghis DB connection failed.")
+            self.report_output.setPlainText("Eghis DB connection failed.")
             return
 
         counts_by_age = {label: 0 for label in AGE_GROUP_ORDER}
@@ -125,6 +136,7 @@ class FluPanel(QWidget):
                 counts_by_age=counts_by_age,
             )
         )
+        self.report_status.setText("Report loaded.")
 
 
 def _format_display_range(start_ymd: str, end_ymd: str) -> str:
