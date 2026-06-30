@@ -1,6 +1,6 @@
 # KaosEghis PACS
 
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 Project name: `KaosEghis-pacs`  
 Panel title: `PACS Worklist`
@@ -281,6 +281,20 @@ Current default query boundary:
 - `m.scheduled_proc_status = '100'`
 - `o.proc_dept_cd = 'XRAY'`
 - cancellation tracking through `o.dc_yn`
+
+## Diagnostics
+
+Read-only CLI diagnostic:
+
+- `python -m KaosEghis.tools.debug_pacs_poll`
+
+Diagnostic rules:
+
+- reads PACS settings from local KaosEghis SQLite
+- runs read-only aggregate queries against Eghis DB
+- prints only sanitized counts and filter diagnostics
+- does not print patient name, DOB, sex, resident ID, phone, address, diagnosis, EMR notes, or raw rows
+- helps confirm whether recent BMD-like rows are excluded by join failure, status filtering, or `proc_dept_cd = 'XRAY'`
 
 ## Completed
 

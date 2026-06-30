@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from KaosEghis.db.database import connect, initialize_database
+from KaosEghis.db.database import connect, describe_database_path, initialize_database
 from KaosEghis.db.repositories import (
     PacsAuditEventRecord,
     PacsWorklistItemRecord,
@@ -600,6 +600,7 @@ class PacsPanel(QWidget):
         dry_run_enabled = (settings.get("pacs_dry_run") or "").strip().lower() == "true"
         return (
             "Startup readiness: sqlite=ok, settings=ok, "
+            f"db={describe_database_path(self._db_path)}, "
             f"auto_poll={'on' if auto_poll_enabled else 'off'}, "
             f"interval={interval_seconds}s, dry_run={'on' if dry_run_enabled else 'off'}"
         )
