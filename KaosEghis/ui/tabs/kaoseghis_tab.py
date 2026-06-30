@@ -89,6 +89,8 @@ class KaosEghisTab(QWidget):
 
 
 class MacrosPage(QWidget):
+    SMOKE_TEST_MACRO_NAME = "Smoke Test - Notepad"
+
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
         self._db_path = db_path
@@ -115,6 +117,8 @@ class MacrosPage(QWidget):
         self.dry_run_button.clicked.connect(self.dry_run_macro)
         self.run_macro_button = QPushButton("Run selected macro")
         self.run_macro_button.clicked.connect(self.run_macro)
+        self.create_smoke_test_button = QPushButton("Create smoke test macro")
+        self.create_smoke_test_button.clicked.connect(self.create_smoke_test_macro)
         self.delete_macro_button = QPushButton("Delete selected macro")
         self.delete_macro_button.clicked.connect(self.delete_macro)
         self.refresh_button = QPushButton("Refresh")
@@ -125,6 +129,7 @@ class MacrosPage(QWidget):
         controls.addWidget(self.edit_macro_button)
         controls.addWidget(self.dry_run_button)
         controls.addWidget(self.run_macro_button)
+        controls.addWidget(self.create_smoke_test_button)
         controls.addWidget(self.delete_macro_button)
         controls.addWidget(self.refresh_button)
         controls.addStretch()
@@ -273,6 +278,45 @@ class MacrosPage(QWidget):
             deleted = delete_item(connection, item_id)
         self.refresh_view()
         self.log.setPlainText("Macro deleted." if deleted else "Macro not found.")
+
+    def create_smoke_test_macro(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            existing = next(
+                (
+                    item
+                    for item in list_items(connection, "macro")
+                    if item.name == self.SMOKE_TEST_MACRO_NAME
+                ),
+                None,
+            )
+            if existing is not None:
+                self.refresh_view()
+                self.log.setPlainText("Smoke test macro already exists.")
+                return
+
+            item = create_item(
+                connection,
+                self.SMOKE_TEST_MACRO_NAME,
+                "macro",
+                False,
+                None,
+            )
+            create_macro_step(connection, item.id, 1, "wait_window", value="Notepad")
+            create_macro_step(
+                connection,
+                item.id,
+                2,
+                "paste_text",
+                value="KaosEghis smoke test",
+            )
+            create_macro_step(connection, item.id, 3, "delay_ms", value="300")
+            reorder_macro_steps(connection, item.id)
+
+        self.refresh_view()
+        self.log.setPlainText(
+            "Smoke test macro created disabled. Enable it manually before any real run."
+        )
 
     def _selected_macro_id(self) -> int | None:
         selected = self.macros_table.selectedItems()

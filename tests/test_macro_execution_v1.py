@@ -216,6 +216,149 @@ def test_macros_page_has_dry_run_and_run_selected_macro_buttons() -> None:
 
     assert page.dry_run_button.text() == "Dry run"
     assert page.run_macro_button.text() == "Run selected macro"
+    assert page.create_smoke_test_button.text() == "Create smoke test macro"
+
+
+def test_smoke_test_macro_created_disabled(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_item, list_items, list_macro_steps
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = MacrosPage(db_path)
+    page.create_smoke_test_macro()
+
+    with connect(db_path) as connection:
+        smoke = next(
+            item
+            for item in list_items(connection, "macro")
+            if item.name == page.SMOKE_TEST_MACRO_NAME
+        )
+        steps = list_macro_steps(connection, smoke.id)
+
+    assert smoke.is_enabled is False
+    assert smoke.emr_target_profile_id is None
+    assert [step.action for step in steps] == ["wait_window", "paste_text", "delay_ms"]
+    assert steps[1].value == "KaosEghis smoke test"
+    assert steps[2].value == "300"
+
+
+def test_duplicate_smoke_test_creation_does_not_duplicate(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import list_items
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = MacrosPage(db_path)
+    page.create_smoke_test_macro()
+    page.create_smoke_test_macro()
+
+    with connect(db_path) as connection:
+        smoke_macros = [
+            item
+            for item in list_items(connection, "macro")
+            if item.name == page.SMOKE_TEST_MACRO_NAME
+        ]
+
+    assert len(smoke_macros) == 1
+
+
+def test_smoke_test_macro_dry_run_works_without_os_input(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = MacrosPage(db_path)
+    page.create_smoke_test_macro()
+    page.refresh_view()
+    page.macros_table.selectRow(0)
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda _text: (_ for _ in ()).throw(AssertionError("copy_text should not be called")),
+    )
+
+    page.dry_run_macro()
+
+    assert "Smoke Test - Notepad" in page.log.toPlainText()
+    assert "wait_window" in page.log.toPlainText()
+    assert "paste_text" in page.log.toPlainText()
+    assert "delay_ms" in page.log.toPlainText()
+
+
+def test_smoke_test_real_execution_blocked_while_disabled(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import list_items
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = MacrosPage(db_path)
+    page.create_smoke_test_macro()
+    with connect(db_path) as connection:
+        smoke = next(
+            item
+            for item in list_items(connection, "macro")
+            if item.name == page.SMOKE_TEST_MACRO_NAME
+        )
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: (_ for _ in ()).throw(AssertionError("connector should not run")),
+    )
+
+    result = MacroRunner(db_path).execute_macro(smoke.id, dry_run=False)
+
+    assert result.success is False
+    assert result.message == "Macro execution blocked: macro is disabled."
+
+
+def test_startup_does_not_execute_smoke_test_macro(monkeypatch, tmp_path) -> None:
+    _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+    import KaosEghis.ui.tabs.kaoseghis_tab as kaoseghis_tab
+    from KaosEghis.ui.main_window import MainWindow
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = MacrosPage(db_path)
+    page.create_smoke_test_macro()
+
+    calls = []
+    monkeypatch.setattr(
+        kaoseghis_tab.MacroRunner,
+        "execute_macro",
+        lambda self, item_id, dry_run=False, settings=None: calls.append((item_id, dry_run)),
+    )
+
+    window = MainWindow()
+
+    assert window is not None
+    assert calls == []
 
 
 def test_app_startup_does_not_execute_macro(monkeypatch, tmp_path) -> None:

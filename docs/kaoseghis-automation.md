@@ -78,6 +78,7 @@ Current transition state:
 - dry run can report the resolved profile name
 - dry run can preview EMR UI target metadata and unresolved-target warnings
 - real macro execution now resolves profile-scoped EMR UI targets first, with legacy UI target fallback
+- operators can create a disabled `Smoke Test - Notepad` macro template for manual runner validation before touching eGHIS
 
 ### EMR Target Foundation
 
@@ -101,6 +102,7 @@ Responsibilities:
 - read-only PostgreSQL reporting/polling
 - dry-run macro validation
 - explicit manual test actions initiated by the user
+- explicit manual creation of the disabled Notepad smoke-test macro
 
 ### Restricted
 

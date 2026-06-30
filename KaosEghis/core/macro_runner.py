@@ -42,6 +42,7 @@ class MacroRunner:
         self._db_path = db_path
         self._current_settings: dict[str, str] | None = None
         self._current_profile_name: str | None = None
+        self._current_macro_name: str | None = None
         self._current_dry_run_preview = None
         self._current_profile_id: int | None = None
 
@@ -63,6 +64,7 @@ class MacroRunner:
             if item is None:
                 return MacroRunResult(False, "Macro not found.", 0, None)
             profile = resolve_macro_emr_target_profile(connection, item)
+            self._current_macro_name = item.name
             self._current_dry_run_preview = build_macro_dry_run_preview(connection, item_id)
 
             steps = [
@@ -144,7 +146,9 @@ class MacroRunner:
     def _build_dry_run_result(self, steps: Sequence[MacroStep]) -> MacroRunResult:
         preview = self._current_dry_run_preview
         profile_name = self._current_profile_name or "(No EMR profile)"
+        macro_name = self._current_macro_name or "(Unnamed macro)"
         lines = [
+            f"Dry run: {macro_name}",
             f"Dry run only. Profile: {profile_name}",
             "Planned macro steps:",
         ]

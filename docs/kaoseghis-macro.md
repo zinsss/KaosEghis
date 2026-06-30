@@ -17,6 +17,7 @@ Today, the project supports:
 - macro-to-EMR-profile binding
 - dry-run EMR target preview
 - EMR profile target resolution in real macro execution
+- disabled smoke-test macro template creation for manual Notepad validation
 
 It does not yet support broad real UI automation execution across the stored macro model.
 
@@ -90,6 +91,7 @@ Daily-use macro access:
 - [KaosEghis/ui/tabs/kaoseghis_tab.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/kaoseghis_tab.py)
 - shows macro list
 - supports dry run and manual run
+- can create a disabled `Smoke Test - Notepad` helper macro once
 - shows the resolved EMR profile name for each macro
 
 EMR targeting foundation:
@@ -121,11 +123,20 @@ Dry run remains the safe review path for stored macros.
 
 Dry run now also shows:
 
+- macro name
 - resolved EMR profile name
 - planned target keys as stored in each step
 - resolved EMR UI target label when available
 - automation preview fields such as automation ID, control type, name match, and class name
 - warnings for unresolved target keys, disabled profiles, or missing default profile
+
+The smoke-test helper currently creates:
+
+1. `wait_window` with `Notepad`
+2. `paste_text` with `KaosEghis smoke test`
+3. `delay_ms` with `300`
+
+The helper is intentionally created disabled and never auto-runs.
 
 Real execution now resolves target definitions in this order:
 
@@ -171,6 +182,7 @@ Current non-negotiables:
 - guarded runner skeleton
 - cancellation handling
 - EMR target profile and EMR UI target local persistence
+- disabled Notepad smoke-test helper for operator validation
 
 ## Not Done
 
