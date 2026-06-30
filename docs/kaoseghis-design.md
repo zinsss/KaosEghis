@@ -172,6 +172,7 @@ The design strategy is milestone-based:
 - main desktop UI is PySide6
 - SQLite is local and initialized on app startup
 - EMR target profiles are now a first-class local model for future macro resolution
+- macros can now bind to a specific EMR target profile or fall back to the default profile
 - PACS and flu are product/plugin workflows, not separate executables inside this repo
 - KaosClip remains a future plugin direction, not a standalone app
 
