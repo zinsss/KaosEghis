@@ -1205,11 +1205,78 @@ def test_flu_panel_can_load_week_without_backend(tmp_path) -> None:
     from KaosEghis.ui.plugins.flu_panel import FluPanel
 
     panel = FluPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    assert panel.report_output.toPlainText() == "Not loaded yet."
     panel.load_report()
 
     labels = [label.text() for label in panel.findChildren(QLabel)]
     assert "Weekly - Influenza Report" in labels
     assert "Total Visits(Practice) Count: 0" in panel.report_output.toPlainText()
+
+
+def test_flu_panel_instantiates_without_calling_fetch(monkeypatch) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.flu_panel as flu_panel_module
+
+    calls = []
+    monkeypatch.setattr(
+        flu_panel_module,
+        "fetch_weekly_age_report",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    panel = flu_panel_module.FluPanel()
+
+    assert panel.report_output.toPlainText() == "Not loaded yet."
+    assert calls == []
+
+
+def test_flu_panel_load_handles_permission_denied_without_raising(
+    monkeypatch, tmp_path
+) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.flu_panel as flu_panel_module
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {"eghis_db_connection_string": "postgresql://masked"},
+        )
+
+    monkeypatch.setattr(
+        flu_panel_module,
+        "fetch_weekly_age_report",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("permission denied")),
+    )
+
+    panel = flu_panel_module.FluPanel(db_path=db_path)
+    panel.load_report()
+
+    assert panel.report_output.toPlainText() == "Flu report DB query failed."
+
+
+def test_main_window_starts_without_querying_flu_db(monkeypatch) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.flu_panel as flu_panel_module
+    from KaosEghis.ui.main_window import MainWindow
+
+    calls = []
+    monkeypatch.setattr(
+        flu_panel_module,
+        "fetch_weekly_age_report",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    window = MainWindow()
+
+    assert window is not None
+    assert calls == []
 
 
 def test_weekly_visits_panel_can_load_without_backend(tmp_path) -> None:
