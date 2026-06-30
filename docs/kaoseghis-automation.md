@@ -1,6 +1,6 @@
 # KaosEghis Automation
 
-Last updated: 2026-06-28
+Last updated: 2026-06-30
 
 ## Purpose
 
@@ -70,6 +70,21 @@ Responsibilities:
 - connector-gated run execution
 - cancellation
 - limited supported actions
+- future EMR profile-aware resolution boundary
+
+### EMR Target Foundation
+
+Modules:
+
+- [KaosEghis/ui/tabs/emr_targets_page.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/emr_targets_page.py)
+- [KaosEghis/db/repositories.py](/E:/Kaos/KaosEghis/KaosEghis/db/repositories.py)
+
+Responsibilities:
+
+- store named EMR target profiles
+- store per-profile UI target definitions
+- expose the active/default EMR profile for future macro runs
+- keep credentials and secrets out of the profile model
 
 ## Current Automation Safety Posture
 
@@ -122,6 +137,7 @@ The same safety stance applies to PostgreSQL access:
 - manual target write tests
 - real runner skeleton
 - read-only Eghis PostgreSQL adapter foundation
+- EMR target profile persistence for future macro targeting
 
 ## Removed or Avoided
 
