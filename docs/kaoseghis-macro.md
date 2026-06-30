@@ -16,6 +16,7 @@ Today, the project supports:
 - EMR target profile foundation for future target resolution
 - macro-to-EMR-profile binding
 - dry-run EMR target preview
+- EMR profile target resolution in real macro execution
 
 It does not yet support broad real UI automation execution across the stored macro model.
 
@@ -125,6 +126,15 @@ Dry run now also shows:
 - resolved EMR UI target label when available
 - automation preview fields such as automation ID, control type, name match, and class name
 - warnings for unresolved target keys, disabled profiles, or missing default profile
+
+Real execution now resolves target definitions in this order:
+
+1. the macro's active EMR target profile via `emr_ui_targets.target_key`
+2. legacy `ui_targets` only as a compatibility fallback
+
+If a target-based real step references a target that cannot be resolved, execution stops with:
+
+- `target not resolved`
 
 ## Real Runner State
 

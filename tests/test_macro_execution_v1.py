@@ -302,7 +302,151 @@ def test_target_resolution_failure_is_sanitized(monkeypatch, tmp_path) -> None:
     result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
 
     assert result.success is False
-    assert result.message == "target not found"
+    assert result.message == "target not resolved"
+
+
+def test_real_run_blocks_unresolved_target(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_emr_target_profile, create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Training EMR",
+            is_enabled=True,
+            is_default=False,
+        )
+        item = create_item(connection, "Click Macro", "macro", True, profile.id)
+        create_macro_step(connection, item.id, 1, "click", target_id="missing.target")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.executed_steps == 0
+    assert result.message == "target not resolved"
+
+
+def test_resolved_emr_target_reaches_target_resolver(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_emr_target_profile, create_emr_ui_target, create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Training EMR",
+            is_enabled=True,
+            is_default=False,
+        )
+        create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="patient.search",
+            label="Patient Search",
+            automation_id="SearchBox",
+            control_type="Edit",
+            class_name="WindowsForms10.Edit",
+            name_match="Patient Search",
+        )
+        item = create_item(connection, "Click Macro", "macro", True, profile.id)
+        create_macro_step(connection, item.id, 1, "click", target_id="patient.search")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def click_input(self) -> None:
+            return None
+
+    seen = {}
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+
+    def fake_resolve(_settings, target):
+        seen["target_id"] = target.target_id
+        seen["automation_id"] = target.automation_id
+        seen["control_type"] = target.control_type
+        seen["class_name"] = target.class_name
+        seen["name"] = target.name
+        return FakeElement(), None, "ok"
+
+    monkeypatch.setattr("KaosEghis.core.macro_runner.resolve_target_element", fake_resolve)
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert seen == {
+        "target_id": "patient.search",
+        "automation_id": "SearchBox",
+        "control_type": "Edit",
+        "class_name": "WindowsForms10.Edit",
+        "name": "Patient Search",
+    }
+
+
+def test_legacy_target_fallback_still_works(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_emr_target_profile, create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Training EMR",
+            is_enabled=True,
+            is_default=False,
+        )
+        create_ui_target(connection, target_id="legacy.button", automation_id="LegacyButton")
+        item = create_item(connection, "Click Macro", "macro", True, profile.id)
+        create_macro_step(connection, item.id, 1, "click", target_id="legacy.button")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def click_input(self) -> None:
+            return None
+
+    seen = {}
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, target: seen.setdefault("target_id", target.target_id) or (FakeElement(), None, "ok"),
+    )
+
+    def fake_resolve(_settings, target):
+        seen["target_id"] = target.target_id
+        return FakeElement(), None, "ok"
+
+    monkeypatch.setattr("KaosEghis.core.macro_runner.resolve_target_element", fake_resolve)
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert seen["target_id"] == "legacy.button"
 
 
 def test_hotkey_failure_is_sanitized(monkeypatch, tmp_path) -> None:
