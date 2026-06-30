@@ -66,6 +66,11 @@ class PacsPanel(QWidget):
         "Summary",
         "Error",
     ]
+    FILTER_BUTTON_SELECTED_STYLE = (
+        "background-color: #cba6f7; color: #1e1e2e; "
+        "border: 1px solid #cba6f7; font-weight: 700;"
+    )
+    FILTER_BUTTON_UNSELECTED_STYLE = ""
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -152,14 +157,15 @@ class PacsPanel(QWidget):
         )
         self.audit_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
 
-        self.filter_buttons = []
+        self.filter_buttons: dict[str, QPushButton] = {}
         for status in ("Active", "Done", "Cancelled", "Error", "All"):
             button = QPushButton(status)
+            button.setCheckable(True)
             button.clicked.connect(self._make_filter_handler(status.lower()))
-            self.filter_buttons.append(button)
+            self.filter_buttons[status.lower()] = button
 
         self.filter_bar = QHBoxLayout()
-        for button in self.filter_buttons:
+        for button in self.filter_buttons.values():
             self.filter_bar.addWidget(button)
         self.filter_bar.addStretch()
 
@@ -232,6 +238,7 @@ class PacsPanel(QWidget):
         layout.addWidget(footer)
 
         self._set_db_labels()
+        self._update_filter_button_states()
         self._load_polling_settings()
         self.refresh_rows()
         self.refresh_audit()
@@ -258,6 +265,7 @@ class PacsPanel(QWidget):
     def _make_filter_handler(self, status: str):
         def handler() -> None:
             self._active_filter = status
+            self._update_filter_button_states()
             self.refresh_rows()
 
         return handler
@@ -668,6 +676,17 @@ class PacsPanel(QWidget):
         if len(digits) < 8:
             return False
         return digits[:8] == self._selected_date.strftime("%Y%m%d")
+
+    def _update_filter_button_states(self) -> None:
+        for key, button in self.filter_buttons.items():
+            is_selected = key == self._active_filter
+            button.setChecked(is_selected)
+            button.setProperty("filterActive", is_selected)
+            button.setStyleSheet(
+                self.FILTER_BUTTON_SELECTED_STYLE
+                if is_selected
+                else self.FILTER_BUTTON_UNSELECTED_STYLE
+            )
 
     def clear_audit(self) -> None:
         confirmed = QMessageBox.question(

@@ -69,6 +69,9 @@ def test_pacs_panel_default_auto_poll_setting_is_false(tmp_path) -> None:
     assert panel.interval_spinbox.value() == 60
     assert panel._poll_timer.isActive() is False
     assert panel.date_selector.date().toPython() == panel._selected_date
+    assert panel.filter_buttons["all"].isChecked() is True
+    assert panel.filter_buttons["all"].property("filterActive") is True
+    assert panel.filter_buttons["active"].property("filterActive") is False
 
 
 def test_pacs_panel_previous_next_today_buttons_change_selected_date(tmp_path) -> None:
@@ -88,6 +91,23 @@ def test_pacs_panel_previous_next_today_buttons_change_selected_date(tmp_path) -
     panel.previous_day_button.click()
     panel.today_button.click()
     assert panel._selected_date == date.today()
+
+
+def test_pacs_panel_selected_filter_button_has_accent_state(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    panel = PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+
+    panel.filter_buttons["active"].click()
+
+    assert panel.filter_buttons["active"].isChecked() is True
+    assert panel.filter_buttons["active"].property("filterActive") is True
+    assert panel.filter_buttons["active"].styleSheet() == panel.FILTER_BUTTON_SELECTED_STYLE
+    assert panel.filter_buttons["all"].isChecked() is False
+    assert panel.filter_buttons["all"].property("filterActive") is False
+    assert panel.filter_buttons["all"].styleSheet() == panel.FILTER_BUTTON_UNSELECTED_STYLE
 
 
 def test_pacs_panel_invalid_interval_falls_back_to_60() -> None:
