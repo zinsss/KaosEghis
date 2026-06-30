@@ -1,9 +1,12 @@
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import PurePath
+import time
 
 
 CACHE_TTL_SECONDS = 10
+FOCUS_RETRY_ATTEMPTS = 5
+FOCUS_RETRY_DELAY_SECONDS = 0.1
 
 
 @dataclass(frozen=True)
@@ -181,8 +184,13 @@ def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
         return blocked
 
     if not state.is_active:
-        if not _focus_window_handle(state.window_handle):
-            blocked = replace(state, status="red", is_active=False, message="focus failed")
+        focus_succeeded, focus_reason = _focus_and_confirm_window(
+            state.window_handle,
+            state,
+            settings,
+        )
+        if not focus_succeeded:
+            blocked = replace(state, status="red", is_active=False, message=focus_reason)
             _CACHED_STATE = blocked
             return blocked
 
@@ -237,16 +245,22 @@ def _discover_process_info(process_name: str) -> dict[str, str | int] | None:
     except Exception:
         return None
 
+    best_match: dict[str, str | int] | None = None
+    best_score = -1
     for process in processes:
         process_info = getattr(process, "info", {})
-        matched_name = _match_process(process_info, tokens)
-        if matched_name:
-            return {
+        matched = _match_process_with_score(process_info, tokens)
+        if matched is None:
+            continue
+        matched_name, score = matched
+        if score > best_score:
+            best_score = score
+            best_match = {
                 "process_name": matched_name,
                 "pid": process_info.get("pid"),
                 "exe_path": process_info.get("exe"),
             }
-    return None
+    return best_match
 
 
 def _discover_window_info(title_fragment: str) -> dict[str, str | int | None] | None:
@@ -359,6 +373,16 @@ def _window_handle_is_valid(window_handle: int) -> bool:
 
 def _focus_window_handle(window_handle: int) -> bool:
     try:
+        import win32con
+        import win32gui
+
+        win32gui.ShowWindow(window_handle, win32con.SW_RESTORE)
+        win32gui.BringWindowToTop(window_handle)
+        win32gui.SetForegroundWindow(window_handle)
+        return True
+    except Exception:
+        pass
+    try:
         import pygetwindow
         window = pygetwindow.Win32Window(window_handle)
         window.activate()
@@ -371,6 +395,27 @@ def _focus_window_handle(window_handle: int) -> bool:
         return True
     except Exception:
         return False
+
+
+def _focus_and_confirm_window(
+    window_handle: int,
+    state: EghisConnectorState,
+    settings: dict[str, str],
+) -> tuple[bool, str]:
+    if not _focus_window_handle(window_handle):
+        return False, "focus failed"
+
+    for attempt in range(FOCUS_RETRY_ATTEMPTS):
+        foreground = _get_foreground_window_info()
+        if foreground is not None and foreground.get("window_handle") == window_handle:
+            return True, "Connected and active"
+        if _foreground_looks_like_modal(foreground, state, settings):
+            return False, "modal/popup detected"
+        if attempt < FOCUS_RETRY_ATTEMPTS - 1:
+            time.sleep(FOCUS_RETRY_DELAY_SECONDS)
+            _focus_window_handle(window_handle)
+
+    return False, "foreground mismatch"
 
 
 def _has_blocking_modal_dialog(state: EghisConnectorState, settings: dict[str, str]) -> bool:
@@ -410,7 +455,7 @@ def _process_identity_matches_state(state: EghisConnectorState, settings: dict[s
         "exe": state.exe_path or "",
         "cmdline": [state.exe_path] if state.exe_path else [],
     }
-    return _match_process(process_info, tokens) is not None
+    return _match_process_with_score(process_info, tokens) is not None
 
 
 def _pid_exists(pid: int) -> bool:
@@ -430,17 +475,31 @@ def _normalized_candidates(value: str) -> list[str]:
 
 
 def _match_process(process_info: dict, tokens: list[str]) -> str | None:
+    matched = _match_process_with_score(process_info, tokens)
+    return None if matched is None else matched[0]
+
+
+def _match_process_with_score(
+    process_info: dict, tokens: list[str]
+) -> tuple[str, int] | None:
     names = _process_identity_candidates(process_info)
+    best_match: tuple[str, int] | None = None
     for candidate in names:
         normalized = candidate.casefold()
         stem = PurePath(candidate).stem.casefold()
         for token in tokens:
             token_stem = PurePath(token).stem.casefold()
             if normalized == token or stem == token_stem:
-                return candidate
-            if token in normalized or token_stem in stem:
-                return candidate
-    return None
+                score = 3
+            elif normalized.endswith(token) or stem.endswith(token_stem):
+                score = 2
+            elif token in normalized or token_stem in stem:
+                score = 1
+            else:
+                continue
+            if best_match is None or score > best_match[1]:
+                best_match = (candidate, score)
+    return best_match
 
 
 def _process_identity_candidates(process_info: dict) -> list[str]:

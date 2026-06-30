@@ -10,6 +10,7 @@ DEFAULT_SETTINGS = {
     "credential_reference_name": "default",
     "eghis_db_connection_string": "",
     "eghis_db_image_study_query": "",
+    "eghis_db_weekly_age_report_query": "",
     "kaospacs_api_base_url": "http://127.0.0.1:8055",
     "kaospacs_api_timeout_seconds": "5",
     "pacs_auto_poll_enabled": "false",
