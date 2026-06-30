@@ -85,7 +85,7 @@ class MacroRunner:
         if state.status != "green":
             return MacroRunResult(
                 False,
-                "window not ready",
+                state.message or "window not ready",
                 0,
                 None,
             )
@@ -192,7 +192,7 @@ class MacroRunner:
     def _run_focus_window(self, settings: dict[str, str]) -> MacroRunResult:
         state = ensure_ready_for_macro(settings)
         if state.status != "green":
-            return MacroRunResult(False, "window not ready", 0, None)
+            return MacroRunResult(False, state.message or "window not ready", 0, None)
         return MacroRunResult(True, "Focused configured Eghis window.", 1, None)
 
     def _run_wait_window(

@@ -22,6 +22,7 @@ class SettingsTab(QWidget):
     PACS_DEFAULTS = {
         "eghis_db_connection_string": DEFAULT_SETTINGS["eghis_db_connection_string"],
         "eghis_db_image_study_query": DEFAULT_SETTINGS["eghis_db_image_study_query"],
+        "eghis_db_weekly_age_report_query": DEFAULT_SETTINGS["eghis_db_weekly_age_report_query"],
         "kaospacs_api_base_url": DEFAULT_SETTINGS["kaospacs_api_base_url"],
         "kaospacs_api_timeout_seconds": DEFAULT_SETTINGS["kaospacs_api_timeout_seconds"],
         "pacs_auto_poll_enabled": DEFAULT_SETTINGS["pacs_auto_poll_enabled"],
@@ -40,6 +41,7 @@ class SettingsTab(QWidget):
         self.eghis_db_connection_string = QLineEdit()
         self.eghis_db_connection_string.setEchoMode(QLineEdit.EchoMode.Password)
         self.eghis_db_image_study_query = QPlainTextEdit()
+        self.eghis_db_weekly_age_report_query = QPlainTextEdit()
         self.kaospacs_api_base_url = QLineEdit()
         self.kaospacs_api_timeout_seconds = QLineEdit()
         self.pacs_auto_poll_enabled = QCheckBox("Enable PACS auto poll")
@@ -87,6 +89,7 @@ class SettingsTab(QWidget):
         pacs_form = QFormLayout()
         pacs_form.addRow("Eghis DB connection string", connection_string_widget)
         pacs_form.addRow("Eghis image study query", self.eghis_db_image_study_query)
+        pacs_form.addRow("Flu weekly report query", self.eghis_db_weekly_age_report_query)
         pacs_form.addRow("KaosPACS API base URL", self.kaospacs_api_base_url)
         pacs_form.addRow("KaosPACS API timeout seconds", self.kaospacs_api_timeout_seconds)
         pacs_form.addRow(self.pacs_auto_poll_enabled)
@@ -137,6 +140,9 @@ class SettingsTab(QWidget):
         self.eghis_db_image_study_query.setPlainText(
             settings["eghis_db_image_study_query"]
         )
+        self.eghis_db_weekly_age_report_query.setPlainText(
+            settings["eghis_db_weekly_age_report_query"]
+        )
         self.kaospacs_api_base_url.setText(settings["kaospacs_api_base_url"])
         self.kaospacs_api_timeout_seconds.setText(
             settings["kaospacs_api_timeout_seconds"]
@@ -184,6 +190,9 @@ class SettingsTab(QWidget):
         self.eghis_db_image_study_query.setPlainText(
             self.PACS_DEFAULTS["eghis_db_image_study_query"]
         )
+        self.eghis_db_weekly_age_report_query.setPlainText(
+            self.PACS_DEFAULTS["eghis_db_weekly_age_report_query"]
+        )
         self.kaospacs_api_base_url.setText(self.PACS_DEFAULTS["kaospacs_api_base_url"])
         self.kaospacs_api_timeout_seconds.setText(
             self.PACS_DEFAULTS["kaospacs_api_timeout_seconds"]
@@ -229,6 +238,7 @@ class SettingsTab(QWidget):
         return {
             "eghis_db_connection_string": self.eghis_db_connection_string.text().strip(),
             "eghis_db_image_study_query": self.eghis_db_image_study_query.toPlainText().strip(),
+            "eghis_db_weekly_age_report_query": self.eghis_db_weekly_age_report_query.toPlainText().strip(),
             "kaospacs_api_base_url": self.kaospacs_api_base_url.text().strip(),
             "kaospacs_api_timeout_seconds": normalized_timeout,
             "pacs_auto_poll_enabled": "true" if self.pacs_auto_poll_enabled.isChecked() else "false",

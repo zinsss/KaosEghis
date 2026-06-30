@@ -32,6 +32,7 @@ def test_save_pacs_settings_persists_values(tmp_path) -> None:
     tab = SettingsTab(db_path=db_path)
     tab.eghis_db_connection_string.setText("Host=x;Password=secret")
     tab.eghis_db_image_study_query.setPlainText("SELECT 1")
+    tab.eghis_db_weekly_age_report_query.setPlainText("SELECT 2")
     tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
     tab.kaospacs_api_timeout_seconds.setText("5")
     tab.pacs_auto_poll_enabled.setChecked(True)
@@ -44,6 +45,7 @@ def test_save_pacs_settings_persists_values(tmp_path) -> None:
 
     assert settings["eghis_db_connection_string"] == "Host=x;Password=secret"
     assert settings["eghis_db_image_study_query"] == "SELECT 1"
+    assert settings["eghis_db_weekly_age_report_query"] == "SELECT 2"
     assert settings["kaospacs_api_base_url"] == "http://127.0.0.1:8055"
     assert settings["kaospacs_api_timeout_seconds"] == "5"
     assert settings["pacs_auto_poll_enabled"] == "true"
@@ -62,6 +64,7 @@ def test_reset_pacs_settings_restores_defaults(tmp_path) -> None:
     tab = SettingsTab(db_path=db_path)
     tab.eghis_db_connection_string.setText("Host=x;Password=secret")
     tab.eghis_db_image_study_query.setPlainText("SELECT 1")
+    tab.eghis_db_weekly_age_report_query.setPlainText("SELECT 2")
     tab.kaospacs_api_base_url.setText("https://example")
     tab.kaospacs_api_timeout_seconds.setText("9")
     tab.pacs_auto_poll_enabled.setChecked(True)
@@ -74,6 +77,7 @@ def test_reset_pacs_settings_restores_defaults(tmp_path) -> None:
 
     assert settings["eghis_db_connection_string"] == ""
     assert settings["eghis_db_image_study_query"] == ""
+    assert settings["eghis_db_weekly_age_report_query"] == ""
     assert settings["kaospacs_api_base_url"] == "http://127.0.0.1:8055"
     assert settings["kaospacs_api_timeout_seconds"] == "5"
     assert settings["pacs_auto_poll_enabled"] == "false"
