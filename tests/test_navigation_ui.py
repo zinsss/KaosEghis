@@ -10,8 +10,10 @@ def _app():
     return app if app is not None else QApplication([])
 
 
-def test_main_window_top_level_tabs_are_exact() -> None:
+def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
     _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
     from KaosEghis.ui.main_window import MainWindow
 
@@ -63,8 +65,10 @@ def test_kaoseghis_top_nav_pages_are_reachable() -> None:
     assert tab.stacked_widget.currentWidget() is tab.macros_page
 
 
-def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate() -> None:
+def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate(tmp_path, monkeypatch) -> None:
     _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
     from PySide6.QtWidgets import QLabel
 

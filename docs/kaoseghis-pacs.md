@@ -1,6 +1,6 @@
 # KaosEghis PACS
 
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 
 Project name: `KaosEghis-pacs`  
 Panel title: `PACS Worklist`
@@ -57,6 +57,8 @@ Architecture rules:
 - direction: Eghis DB -> local SQLite
 - write target: local `pacs_worklist_items`
 - read-only against Eghis DB
+- operator-selected date only
+- if a local active row for the selected date disappears from `public.mwl`, it is preserved locally and marked `cancelled`
 
 ### Sync
 
@@ -136,6 +138,8 @@ Audit rules:
 - do not store raw SQL result rows in audit
 - do not store raw KaosPACS payloads in audit
 - use aggregate summaries for poll, sync, and reconcile
+- allow sanitized non-PHI poll summaries such as:
+  - `active order removed from eGHIS MWL -> marked cancelled`
 - use sanitized error categories only:
   - `connection failed`
   - `timeout`
@@ -151,6 +155,9 @@ Visible panel module:
 
 Visible PACS actions:
 
+- `Previous day`
+- `Next day`
+- `Today`
 - `Refresh`
 - `Check KaosPACS`
 - `Poll now`
@@ -175,6 +182,13 @@ Current table columns:
 - `KaosPACS Status`
 - `Last Synced`
 - `Sync Error`
+
+Selected-date behavior:
+
+- PACS worklist view is scoped to the selected date
+- `Poll now` queries the selected date only
+- `Refresh` refreshes the local SQLite rows for the selected date only
+- selected date persists for the current UI session until the operator changes it
 
 Audit table columns:
 

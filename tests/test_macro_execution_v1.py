@@ -218,8 +218,10 @@ def test_macros_page_has_dry_run_and_run_selected_macro_buttons() -> None:
     assert page.run_macro_button.text() == "Run selected macro"
 
 
-def test_app_startup_does_not_execute_macro(monkeypatch) -> None:
+def test_app_startup_does_not_execute_macro(monkeypatch, tmp_path) -> None:
     _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
     import KaosEghis.ui.tabs.kaoseghis_tab as kaoseghis_tab
     from KaosEghis.ui.main_window import MainWindow

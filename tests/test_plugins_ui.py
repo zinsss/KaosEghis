@@ -1,4 +1,5 @@
 import os
+from datetime import date, timedelta
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -19,8 +20,10 @@ def test_plugin_ui_modules_import() -> None:
     import KaosEghis.ui.tabs.plugins_tab
 
 
-def test_plugins_tab_can_be_instantiated_without_backends() -> None:
+def test_plugins_tab_can_be_instantiated_without_backends(tmp_path, monkeypatch) -> None:
     _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
     from KaosEghis.ui.tabs.plugins_tab import PluginsTab
 
@@ -65,6 +68,46 @@ def test_pacs_panel_default_auto_poll_setting_is_false(tmp_path) -> None:
     assert panel.auto_poll_checkbox.isChecked() is False
     assert panel.interval_spinbox.value() == 60
     assert panel._poll_timer.isActive() is False
+    assert panel.date_selector.date().toPython() == panel._selected_date
+    assert panel.filter_buttons["all"].isChecked() is True
+    assert panel.filter_buttons["all"].property("filterActive") is True
+    assert panel.filter_buttons["active"].property("filterActive") is False
+
+
+def test_pacs_panel_previous_next_today_buttons_change_selected_date(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    panel = PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    original = panel._selected_date
+
+    panel.previous_day_button.click()
+    assert panel._selected_date == original - timedelta(days=1)
+
+    panel.next_day_button.click()
+    assert panel._selected_date == original
+
+    panel.previous_day_button.click()
+    panel.today_button.click()
+    assert panel._selected_date == date.today()
+
+
+def test_pacs_panel_selected_filter_button_has_accent_state(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    panel = PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+
+    panel.filter_buttons["active"].click()
+
+    assert panel.filter_buttons["active"].isChecked() is True
+    assert panel.filter_buttons["active"].property("filterActive") is True
+    assert panel.filter_buttons["active"].styleSheet() == panel.FILTER_BUTTON_SELECTED_STYLE
+    assert panel.filter_buttons["all"].isChecked() is False
+    assert panel.filter_buttons["all"].property("filterActive") is False
+    assert panel.filter_buttons["all"].styleSheet() == panel.FILTER_BUTTON_UNSELECTED_STYLE
 
 
 def test_pacs_panel_invalid_interval_falls_back_to_60() -> None:
@@ -159,7 +202,7 @@ def test_pacs_panel_startup_does_not_call_poll_sync_or_health(monkeypatch, tmp_p
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1),
+        lambda settings, db_path, selected_date=None: calls.__setitem__("poll", calls["poll"] + 1),
     )
     monkeypatch.setattr(
         pacs_panel_module,
@@ -222,7 +265,7 @@ def test_pacs_panel_refresh_stays_local_only(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1),
+        lambda settings, db_path, selected_date=None: calls.__setitem__("poll", calls["poll"] + 1),
     )
     monkeypatch.setattr(
         pacs_panel_module,
@@ -234,6 +277,42 @@ def test_pacs_panel_refresh_stays_local_only(monkeypatch, tmp_path) -> None:
     panel.refresh_button.click()
 
     assert calls == {"health": 0, "poll": 0, "sync": 0}
+
+
+def test_pacs_panel_refresh_shows_selected_date_only(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_pacs_worklist_item
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            study="Chest",
+            modality="CR",
+            requested_at="2026-06-30 09:30:00",
+            accession_or_order_id="ACC-1",
+        )
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Bob",
+            study="Spine",
+            modality="MR",
+            requested_at="2026-07-01 09:30:00",
+            accession_or_order_id="ACC-2",
+        )
+
+    panel = PacsPanel(db_path=db_path)
+    panel._set_selected_date(date(2026, 6, 30))
+
+    assert panel.worklist_table.rowCount() == 1
+    assert panel.worklist_table.item(0, 6).text() == "ACC-1"
 
 
 def test_pacs_panel_apply_settings_persists_values(tmp_path) -> None:
@@ -297,10 +376,12 @@ def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
         "check_kaospacs_health",
         lambda settings: calls.__setitem__("health", calls["health"] + 1) or True,
     )
+    selected_dates: list[date] = []
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1)
+        lambda settings, db_path, selected_date=None: calls.__setitem__("poll", calls["poll"] + 1)
+        or selected_dates.append(selected_date)
         or PollResult(inserted=1, updated=0, skipped=0),
     )
     monkeypatch.setattr(
@@ -310,9 +391,11 @@ def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
     )
 
     panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    panel._set_selected_date(date(2026, 6, 30))
     panel.poll_button.click()
 
     assert calls == {"health": 0, "poll": 1, "sync": 0}
+    assert selected_dates == [date(2026, 6, 30)]
     assert panel.polling_status.text() == "Polling status: inserted=1, updated=0, skipped=0"
     assert panel.last_poll_time_label.text() != "Last poll time: never"
     assert panel.last_poll_result_label.text() == "Last poll result: inserted=1, updated=0, skipped=0"
@@ -328,7 +411,7 @@ def test_pacs_panel_timer_tick_calls_poll_not_sync(monkeypatch, tmp_path) -> Non
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1)
+        lambda settings, db_path, selected_date=None: calls.__setitem__("poll", calls["poll"] + 1)
         or PollResult(inserted=0, updated=0, skipped=0),
     )
     monkeypatch.setattr(
@@ -353,7 +436,7 @@ def test_pacs_panel_reconcile_button_calls_reconcile_not_poll_or_sync(monkeypatc
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1),
+        lambda settings, db_path, selected_date=None: calls.__setitem__("poll", calls["poll"] + 1),
     )
     monkeypatch.setattr(
         pacs_panel_module,
@@ -386,7 +469,7 @@ def test_pacs_panel_overlapping_poll_is_skipped(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1),
+        lambda settings, db_path, selected_date=None: calls.__setitem__("poll", calls["poll"] + 1),
     )
 
     panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
@@ -422,7 +505,7 @@ def test_pacs_panel_saved_auto_poll_true_starts_timer_without_polling(
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1),
+        lambda settings, db_path, selected_date=None: calls.__setitem__("poll", calls["poll"] + 1),
     )
     monkeypatch.setattr(
         pacs_panel_module,
@@ -516,7 +599,7 @@ def test_pacs_panel_sync_to_kaospacs_requires_confirmation_and_shows_summary(
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda settings, db_path: calls.__setitem__("poll", calls["poll"] + 1),
+        lambda settings, db_path, selected_date=None: calls.__setitem__("poll", calls["poll"] + 1),
     )
     monkeypatch.setattr(
         pacs_panel_module,
@@ -675,6 +758,7 @@ def test_pacs_panel_edit_selected_updates_local_row(monkeypatch, tmp_path) -> No
     monkeypatch.setattr(pacs_panel_module, "PacsWorklistDialog", FakeDialog)
 
     panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel._set_selected_date(date(2026, 6, 28))
     panel.worklist_table.selectRow(0)
     panel.edit_selected()
 
@@ -749,6 +833,7 @@ def test_pacs_panel_edit_sent_row_preserves_kaospacs_status(monkeypatch, tmp_pat
     monkeypatch.setattr(pacs_panel_module, "PacsWorklistDialog", FakeDialog)
 
     panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel._set_selected_date(date(2026, 6, 28))
     panel.worklist_table.selectRow(0)
     panel.edit_selected()
 
@@ -791,9 +876,11 @@ def test_pacs_panel_cancel_selected_creates_audit_event(monkeypatch, tmp_path) -
             accession_or_order_id="ACC-100",
             study="Chest",
             modality="CR",
+            requested_at="2026-06-28 09:30:00",
         )
 
     panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel._set_selected_date(date(2026, 6, 28))
     panel.worklist_table.selectRow(0)
     panel.delete_selected()
 
@@ -816,7 +903,7 @@ def test_pacs_panel_poll_creates_aggregate_audit_only(monkeypatch, tmp_path) -> 
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda _settings, _db_path: PollResult(inserted=1, updated=2, skipped=3),
+        lambda _settings, _db_path, selected_date=None: PollResult(inserted=1, updated=2, skipped=3),
     )
 
     db_path = tmp_path / "KaosEghis.sqlite"
@@ -829,6 +916,45 @@ def test_pacs_panel_poll_creates_aggregate_audit_only(monkeypatch, tmp_path) -> 
     assert audit_rows[0].event_type == "poll"
     assert audit_rows[0].summary == "inserted=1, updated=2, skipped=3"
     assert "patient" not in audit_rows[0].summary.lower()
+
+
+def test_pacs_panel_removed_active_row_moves_from_active_to_cancelled(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_pacs_audit_event, create_pacs_worklist_item
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="cancelled",
+            study="Chest",
+            modality="CR",
+            requested_at="2026-06-30 09:30:00",
+            accession_or_order_id="ACC-1",
+            error_message="order removed from eGHIS MWL",
+        )
+        create_pacs_audit_event(
+            connection,
+            event_type="poll",
+            status_before="active",
+            status_after="cancelled",
+            summary="active order removed from eGHIS MWL -> marked cancelled",
+        )
+
+    panel = PacsPanel(db_path=db_path)
+    panel._set_selected_date(date(2026, 6, 30))
+    panel._active_filter = "active"
+    panel.refresh_rows()
+    assert panel.worklist_table.rowCount() == 0
+
+    panel._active_filter = "cancelled"
+    panel.refresh_rows()
+    assert panel.worklist_table.rowCount() == 1
+    assert panel.worklist_table.item(0, 0).text() == "cancelled"
 
 
 def test_pacs_panel_sync_creates_aggregate_audit_only(monkeypatch, tmp_path) -> None:
@@ -946,7 +1072,7 @@ def test_pacs_panel_poll_message_is_sanitized_before_storage(monkeypatch, tmp_pa
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
-        lambda _settings, _db_path: PollResult(
+        lambda _settings, _db_path, selected_date=None: PollResult(
             inserted=0,
             updated=0,
             skipped=0,
@@ -1071,14 +1197,14 @@ def test_pacs_panel_clear_audit_does_not_delete_worklist_items(monkeypatch, tmp_
     assert len(worklist_rows) == 1
 
 
-def test_flu_panel_can_load_week_without_backend() -> None:
+def test_flu_panel_can_load_week_without_backend(tmp_path) -> None:
     _app()
 
     from PySide6.QtWidgets import QLabel
 
     from KaosEghis.ui.plugins.flu_panel import FluPanel
 
-    panel = FluPanel()
+    panel = FluPanel(db_path=tmp_path / "KaosEghis.sqlite")
     panel.load_report()
 
     labels = [label.text() for label in panel.findChildren(QLabel)]
@@ -1110,8 +1236,10 @@ def test_weekly_visits_panel_label_contains_kaoseghis_flu(tmp_path) -> None:
     assert "KaosEghis-flu weekly practice-count report" in labels
 
 
-def test_plugins_tab_groups_weekly_panel_under_kaoseghis_flu() -> None:
+def test_plugins_tab_groups_weekly_panel_under_kaoseghis_flu(tmp_path, monkeypatch) -> None:
     _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
     from PySide6.QtWidgets import QLabel
 
