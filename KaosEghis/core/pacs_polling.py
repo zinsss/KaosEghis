@@ -148,13 +148,6 @@ def poll_eghis_image_orders_into_local_worklist(
 
     db_file = db_path or get_database_path()
     with connect(db_file) as connection:
-        polled_accessions = {
-            accession
-            for accession in (
-                _blank_to_none(order.get("accession_or_order_id")) for order in orders
-            )
-            if accession is not None
-        }
         for order in orders:
             accession_or_order_id = _blank_to_none(order.get("accession_or_order_id"))
             status = _blank_to_none(order.get("status")) or "active"
@@ -218,27 +211,42 @@ def poll_eghis_image_orders_into_local_worklist(
 
         selected_ymd = _normalize_selected_ymd(selected_date)
         if selected_ymd is not None:
-            for item in list_pacs_worklist_items(connection, "active"):
-                if not _requested_at_matches_ymd(item.requested_at, selected_ymd):
-                    continue
-                accession = _blank_to_none(item.accession_or_order_id)
-                if not accession or accession in polled_accessions:
-                    continue
-                if update_pacs_worklist_status(
-                    connection,
-                    item.id,
-                    "cancelled",
-                    "order removed from eGHIS MWL",
-                ):
-                    create_pacs_audit_event(
+            local_active_items = [
+                item
+                for item in list_pacs_worklist_items(connection, "active")
+                if _requested_at_matches_ymd(item.requested_at, selected_ymd)
+                and _is_eghis_polled_row(item.source)
+                and _blank_to_none(item.accession_or_order_id) is not None
+            ]
+            existing_mwl_ids = _fetch_existing_mwl_order_ids(
+                settings,
+                selected_ymd,
+                [
+                    item.accession_or_order_id
+                    for item in local_active_items
+                    if item.accession_or_order_id is not None
+                ],
+            )
+            if existing_mwl_ids is not None:
+                for item in local_active_items:
+                    accession = _blank_to_none(item.accession_or_order_id)
+                    if accession is None or accession in existing_mwl_ids:
+                        continue
+                    if update_pacs_worklist_status(
                         connection,
-                        event_type="poll",
-                        worklist_item_id=item.id,
-                        status_before="active",
-                        status_after="cancelled",
-                        summary="active order removed from eGHIS MWL -> marked cancelled",
-                    )
-                    removed_active += 1
+                        item.id,
+                        "cancelled",
+                        "order removed from eGHIS MWL",
+                    ):
+                        create_pacs_audit_event(
+                            connection,
+                            event_type="poll",
+                            worklist_item_id=item.id,
+                            status_before="active",
+                            status_after="cancelled",
+                            summary="active order removed from eGHIS MWL -> marked cancelled",
+                        )
+                        removed_active += 1
         connection.commit()
 
     return PollResult(
@@ -388,3 +396,72 @@ def _requested_at_matches_ymd(requested_at: str | None, selected_ymd: str) -> bo
     if len(digits) < 8:
         return False
     return digits[:8] == selected_ymd
+
+
+def _is_eghis_polled_row(source: str | None) -> bool:
+    normalized = (source or "").strip().lower()
+    return normalized in {"eghis-db", "eghis-poll"}
+
+
+def _fetch_existing_mwl_order_ids(
+    settings: dict[str, str],
+    selected_ymd: str,
+    accession_or_order_ids: list[str],
+) -> set[str] | None:
+    connection_string = (settings.get("eghis_db_connection_string") or "").strip()
+    if not connection_string:
+        return set()
+
+    normalized_ids = [
+        accession
+        for accession in (_blank_to_none(value) for value in accession_or_order_ids)
+        if accession is not None
+    ]
+    if not normalized_ids:
+        return set()
+
+    in_clause = ", ".join(_sql_quote(accession) for accession in normalized_ids)
+    query = f"""
+SELECT DISTINCT
+    COALESCE(NULLIF(m.accession_no, ''), m.eghis_key) AS accession_or_order_id
+FROM public.mwl AS m
+WHERE substring(
+        regexp_replace(
+            COALESCE(
+                m.scheduled_dttm,
+                m.imaging_request_dttm,
+                m.trigger_dttm,
+                m.replica_dttm,
+                ''
+            )::text,
+            '[^0-9]',
+            '',
+            'g'
+        )
+        FROM 1 FOR 8
+    ) = '{selected_ymd}'
+  AND COALESCE(NULLIF(m.accession_no, ''), m.eghis_key) IN ({in_clause})
+""".strip()
+
+    try:
+        column_names, rows = run_readonly_query(connection_string, query)
+    except (EghisDbQueryRejectedError, EghisDbUnavailableError):
+        return None
+
+    if not rows:
+        return set()
+    column_index = 0
+    if column_names:
+        for index, name in enumerate(column_names):
+            if str(name).lower() == "accession_or_order_id":
+                column_index = index
+                break
+    return {
+        value
+        for value in (_stringify(row[column_index]) for row in rows)
+        if value is not None
+    }
+
+
+def _sql_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"

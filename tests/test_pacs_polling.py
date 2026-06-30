@@ -150,6 +150,32 @@ def test_poll_image_orders_selected_date_is_applied_to_default_query(
     assert "regexp_replace" in executed_queries[0]
 
 
+def test_fetch_existing_mwl_order_ids_query_does_not_apply_active_filters(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core import pacs_polling
+
+    executed_queries: list[str] = []
+
+    monkeypatch.setattr(
+        pacs_polling,
+        "run_readonly_query",
+        lambda connection_string, query: executed_queries.append(query)
+        or (["accession_or_order_id"], []),
+    )
+
+    result = pacs_polling._fetch_existing_mwl_order_ids(
+        {"eghis_db_connection_string": "postgresql://example"},
+        "20260630",
+        ["ACC-1"],
+    )
+
+    assert result == set()
+    assert "proc_dept_cd = 'XRAY'" not in executed_queries[0]
+    assert "scheduled_proc_status = '100'" not in executed_queries[0]
+    assert "HC342" not in executed_queries[0]
+
+
 def test_poll_image_orders_rejects_write_sql() -> None:
     try:
         poll_image_orders(
@@ -559,6 +585,11 @@ def test_poll_service_missing_mwl_row_changes_active_to_cancelled_and_audits(
         "poll_image_orders",
         lambda _settings, selected_date=None: [],
     )
+    monkeypatch.setattr(
+        pacs_polling,
+        "_fetch_existing_mwl_order_ids",
+        lambda settings, selected_ymd, accession_or_order_ids: set(),
+    )
     result = poll_eghis_image_orders_into_local_worklist(
         {"eghis_db_connection_string": "postgresql://example"},
         db_path=db_path,
@@ -613,6 +644,11 @@ def test_poll_service_missing_mwl_row_preserves_done_and_cancelled(
         "poll_image_orders",
         lambda _settings, selected_date=None: [],
     )
+    monkeypatch.setattr(
+        pacs_polling,
+        "_fetch_existing_mwl_order_ids",
+        lambda settings, selected_ymd, accession_or_order_ids: set(),
+    )
     result = poll_eghis_image_orders_into_local_worklist(
         {"eghis_db_connection_string": "postgresql://example"},
         db_path=db_path,
@@ -625,4 +661,180 @@ def test_poll_service_missing_mwl_row_preserves_done_and_cancelled(
 
     assert result.removed_active == 0
     assert [row.status for row in rows] == ["done", "cancelled"]
+    assert audit_rows == []
+
+
+def test_active_row_present_in_mwl_but_excluded_by_active_order_filter_remains_active(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    from KaosEghis.core import pacs_polling
+
+    with connect(db_path) as connection:
+        create = connection.execute
+        from KaosEghis.db.repositories import create_pacs_worklist_item
+
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            study="BMD",
+            modality="BMD",
+            requested_at="2026-06-30 10:00:00",
+            accession_or_order_id="ACC-BMD",
+            source="eghis-db",
+        )
+
+    monkeypatch.setattr(
+        pacs_polling,
+        "poll_image_orders",
+        lambda _settings, selected_date=None: [],
+    )
+    monkeypatch.setattr(
+        pacs_polling,
+        "_fetch_existing_mwl_order_ids",
+        lambda settings, selected_ymd, accession_or_order_ids: {"ACC-BMD"},
+    )
+
+    result = poll_eghis_image_orders_into_local_worklist(
+        {"eghis_db_connection_string": "postgresql://example"},
+        db_path=db_path,
+        selected_date="2026-06-30",
+    )
+
+    with connect(db_path) as connection:
+        rows = list_pacs_worklist_items(connection)
+
+    assert result.removed_active == 0
+    assert rows[0].status == "active"
+
+
+def test_active_row_present_with_non_100_status_remains_active(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    from KaosEghis.core import pacs_polling
+    from KaosEghis.db.repositories import create_pacs_worklist_item
+
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            study="Chest",
+            modality="CR",
+            requested_at="2026-06-30 10:00:00",
+            accession_or_order_id="ACC-NON100",
+            source="eghis-db",
+        )
+
+    monkeypatch.setattr(
+        pacs_polling,
+        "poll_image_orders",
+        lambda _settings, selected_date=None: [],
+    )
+    monkeypatch.setattr(
+        pacs_polling,
+        "_fetch_existing_mwl_order_ids",
+        lambda settings, selected_ymd, accession_or_order_ids: {"ACC-NON100"},
+    )
+
+    result = poll_eghis_image_orders_into_local_worklist(
+        {"eghis_db_connection_string": "postgresql://example"},
+        db_path=db_path,
+        selected_date="2026-06-30",
+    )
+
+    with connect(db_path) as connection:
+        rows = list_pacs_worklist_items(connection)
+
+    assert result.removed_active == 0
+    assert rows[0].status == "active"
+
+
+def test_active_bmd_row_present_but_excluded_by_xray_filter_remains_active(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    from KaosEghis.core import pacs_polling
+    from KaosEghis.db.repositories import create_pacs_worklist_item
+
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            study="BMD",
+            modality="BMD",
+            requested_at="2026-06-30 10:00:00",
+            accession_or_order_id="ACC-BMD-XRAY",
+            source="eghis-db",
+        )
+
+    monkeypatch.setattr(
+        pacs_polling,
+        "poll_image_orders",
+        lambda _settings, selected_date=None: [],
+    )
+    monkeypatch.setattr(
+        pacs_polling,
+        "_fetch_existing_mwl_order_ids",
+        lambda settings, selected_ymd, accession_or_order_ids: {"ACC-BMD-XRAY"},
+    )
+
+    result = poll_eghis_image_orders_into_local_worklist(
+        {"eghis_db_connection_string": "postgresql://example"},
+        db_path=db_path,
+        selected_date="2026-06-30",
+    )
+
+    with connect(db_path) as connection:
+        rows = list_pacs_worklist_items(connection)
+
+    assert result.removed_active == 0
+    assert rows[0].status == "active"
+
+
+def test_db_unavailable_does_not_cancel_local_rows(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    from KaosEghis.core import pacs_polling
+    from KaosEghis.db.repositories import create_pacs_worklist_item, list_pacs_audit_events
+
+    with connect(db_path) as connection:
+        create_pacs_worklist_item(
+            connection,
+            status="active",
+            study="Chest",
+            modality="CR",
+            requested_at="2026-06-30 10:00:00",
+            accession_or_order_id="ACC-KEEP",
+            source="eghis-db",
+        )
+
+    monkeypatch.setattr(
+        pacs_polling,
+        "poll_image_orders",
+        lambda _settings, selected_date=None: [],
+    )
+    monkeypatch.setattr(
+        pacs_polling,
+        "_fetch_existing_mwl_order_ids",
+        lambda settings, selected_ymd, accession_or_order_ids: None,
+    )
+
+    result = poll_eghis_image_orders_into_local_worklist(
+        {"eghis_db_connection_string": "postgresql://example"},
+        db_path=db_path,
+        selected_date="2026-06-30",
+    )
+
+    with connect(db_path) as connection:
+        rows = list_pacs_worklist_items(connection)
+        audit_rows = list_pacs_audit_events(connection)
+
+    assert result.removed_active == 0
+    assert rows[0].status == "active"
     assert audit_rows == []
