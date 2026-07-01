@@ -15,8 +15,12 @@ from KaosEghis.core.macro_models import MacroRunResult, MacroStep
 from KaosEghis.core.uia_inspector import resolve_target_element
 from KaosEghis.db.database import connect, get_database_path
 from KaosEghis.db.repositories import (
+    EmrUiTargetRecord,
+    UiTargetRecord,
+    get_emr_ui_target_by_key,
     get_item,
     get_settings,
+    get_ui_target,
     list_macro_steps,
     resolve_macro_emr_target_profile,
 )
@@ -26,10 +30,7 @@ from KaosEghis.db.repositories import (
 class _RunMetrics:
     cache_hits: int = 0
     cache_misses: int = 0
-
-    @property
-    def resolved_targets(self) -> int:
-        return 0
+    resolved_targets: int = 0
 
 
 class MacroRunner:
@@ -190,10 +191,6 @@ class MacroRunner:
             return self._run_wait_window(step, self._require_settings())
         if action == "wait_text_or_image":
             return MacroRunResult(False, "unsupported action", 0, None)
-        if action == "read_text_uia":
-            return self._run_read_text_uia(step, self._require_settings())
-        if action == "set_text_uia":
-            return self._run_set_text_uia(step, self._require_settings())
         if action == "click":
             return self._run_click(step, self._require_settings())
         if action in {"hotkey", "key"}:
@@ -268,7 +265,7 @@ class MacroRunner:
         try:
             target.click_input()
         except Exception:
-            self._resolved_target_cache.pop(step.target_id, None)
+            self._clear_resolved_target_cache()
             target, resolve_message = self._resolve_runtime_target(
                 settings,
                 step.target_id,
@@ -364,43 +361,6 @@ class MacroRunner:
         )
         return self._run_paste_text(preset_step)
 
-    def _run_read_text_uia(
-        self,
-        step: MacroStep,
-        settings: dict[str, str],
-    ) -> MacroRunResult:
-        if not step.target_id:
-            return MacroRunResult(False, "target not found", 0, None)
-        target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
-        if target is None:
-            return MacroRunResult(False, resolve_message, 0, None)
-        text_value = self._read_text_from_target(target)
-        if text_value is None:
-            return MacroRunResult(False, "target not found", 0, None)
-        return MacroRunResult(True, "Read text.", 1, None)
-
-    def _run_set_text_uia(
-        self,
-        step: MacroStep,
-        settings: dict[str, str],
-    ) -> MacroRunResult:
-        if not step.target_id:
-            return MacroRunResult(False, "target not found", 0, None)
-        text = step.options.get("text", step.value)
-        if not isinstance(text, str) or not text:
-            return MacroRunResult(False, "unknown error", 0, None)
-        target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
-        if target is None:
-            return MacroRunResult(False, resolve_message, 0, None)
-        if self._try_set_value_pattern(target, text):
-            return MacroRunResult(True, "Set text with UIA value pattern.", 1, None)
-        try:
-            target.set_edit_text(text)
-            return MacroRunResult(True, "Set text with edit wrapper.", 1, None)
-        except Exception:
-            self._clear_resolved_target_cache()
-            return MacroRunResult(False, "input failed", 0, None)
-
     def _resolve_preset_text(self, reference: str) -> str | None:
         with connect(self._db_path or get_database_path()) as connection:
             row = None
@@ -453,27 +413,10 @@ class MacroRunner:
                 return self._resolved_target_cache[cache_key], "Target resolved."
         self._run_metrics.cache_misses += 1
         with connect(self._db_path or get_database_path()) as connection:
-            target = connection.execute(
-                """
-                SELECT id, target_id, parent_target_id, parent_automation_id, automation_id,
-                       name, control_type, class_name, created_at
-                FROM ui_targets
-                WHERE target_id = ?
-                """,
-                (target_id,),
-            ).fetchone()
-        if target is None:
+            target_record, cache_key = self._load_runtime_target_record(connection, target_id)
+        if target_record is None or cache_key is None:
             self._clear_resolved_target_cache()
             return None, "target not found"
-
-        from KaosEghis.db.repositories import _ui_target_from_row
-
-        target_record = _ui_target_from_row(target)
-        cache_key = (
-            self._current_profile_id,
-            target_record.target_id,
-            target_record.parent_target_id,
-        )
         if not force_refresh and cache_key in self._resolved_target_cache:
             self._resolved_target_aliases[target_id] = cache_key
             self._run_metrics.cache_hits += 1
@@ -490,6 +433,7 @@ class MacroRunner:
             return None, "target not found"
         self._resolved_target_cache[cache_key] = element
         self._resolved_target_aliases[target_id] = cache_key
+        self._run_metrics.resolved_targets = len(self._resolved_target_cache)
         return element, "Target resolved."
 
     def _focus_runtime_target(self, step: MacroStep) -> MacroRunResult | None:
@@ -573,7 +517,7 @@ class MacroRunner:
 
     def _metrics_text(self) -> str:
         return (
-            f"Resolved targets: {len(self._resolved_target_cache)} | "
+            f"Resolved targets: {self._run_metrics.resolved_targets} | "
             f"Cache hits: {self._run_metrics.cache_hits} | "
             f"Cache misses: {self._run_metrics.cache_misses}"
         )
@@ -594,46 +538,58 @@ class MacroRunner:
             return False
         return message in {"target not found", "window not ready", "timeout"}
 
-    @staticmethod
-    def _read_text_from_target(target: object) -> str | None:
-        for method_name in ("get_value", "window_text"):
-            try:
-                value = getattr(target, method_name)()
-            except Exception:
-                continue
-            if value:
-                return str(value)
-        try:
-            values = target.texts()
-        except Exception:
-            values = None
-        if isinstance(values, list):
-            text = "\n".join(str(item) for item in values if item)
-            if text:
-                return text
-        try:
-            iface_value = target.iface_value
-            value = iface_value.CurrentValue
-        except Exception:
-            return None
-        return str(value) if value else None
+    def _load_runtime_target_record(
+        self,
+        connection,
+        target_id: str,
+    ) -> tuple[UiTargetRecord | None, tuple[int | None, str, str | None] | None]:
+        if self._current_profile_id is not None:
+            emr_target = get_emr_ui_target_by_key(connection, self._current_profile_id, target_id)
+            if emr_target is not None:
+                runtime_target = self._runtime_target_from_emr_target(connection, emr_target)
+                cache_key = (
+                    emr_target.profile_id,
+                    emr_target.target_key,
+                    emr_target.parent_target_key,
+                )
+                return runtime_target, cache_key
 
-    @staticmethod
-    def _try_set_value_pattern(target: object, text: str) -> bool:
-        try:
-            iface_value = target.iface_value
-        except Exception:
-            return False
-        try:
-            if bool(getattr(iface_value, "CurrentIsReadOnly", False)):
-                return False
-        except Exception:
-            pass
-        try:
-            iface_value.SetValue(text)
-            return True
-        except Exception:
-            return False
+        legacy_target = get_ui_target(connection, target_id)
+        if legacy_target is None:
+            return None, None
+        cache_key = (
+            None,
+            legacy_target.target_id,
+            legacy_target.parent_target_id,
+        )
+        return legacy_target, cache_key
+
+    def _runtime_target_from_emr_target(
+        self,
+        connection,
+        emr_target: EmrUiTargetRecord,
+    ) -> UiTargetRecord:
+        parent_automation_id = None
+        parent_target_key = emr_target.parent_target_key
+        if parent_target_key:
+            parent_target = get_emr_ui_target_by_key(
+                connection,
+                emr_target.profile_id,
+                parent_target_key,
+            )
+            if parent_target is not None:
+                parent_automation_id = parent_target.automation_id
+        return UiTargetRecord(
+            id=emr_target.id,
+            target_id=emr_target.target_key,
+            parent_target_id=parent_target_key,
+            parent_automation_id=parent_automation_id,
+            automation_id=emr_target.automation_id,
+            name=emr_target.name_match,
+            control_type=emr_target.control_type,
+            class_name=emr_target.class_name,
+            created_at=emr_target.created_at,
+        )
 
     @staticmethod
     def _sanitize_failure_message(action: str, message: str) -> str:
