@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 DEFAULT_SETTINGS = {
     "eghis_process_name": "Eghis.exe",
+    "eghis_executable_path": "",
     "eghis_window_title_contains": "Eghis",
     "kaosgdd_url": "https://kaosgdd.net",
     "credential_reference_name": "default",
@@ -144,7 +145,16 @@ ALLOWED_MACRO_ACTIONS = {
     "wait_ms",
 }
 
-ALLOWED_PACS_WORKLIST_STATUS = {"active", "done", "cancelled", "error"}
+LEGACY_PACS_WORKLIST_STATUS_ALIASES = {
+    "done": "completed",
+}
+ALLOWED_PACS_WORKLIST_STATUS = {
+    "active",
+    "completed",
+    "expired",
+    "cancelled",
+    "error",
+}
 ALLOWED_PACS_AUDIT_EVENT_TYPES = {
     "poll",
     "manual_insert",
@@ -384,6 +394,7 @@ def create_pacs_worklist_item(
     source: str = "manual",
     error_message: str | None = None,
 ) -> PacsWorklistItemRecord:
+    status = _normalize_pacs_worklist_status(status)
     _validate_pacs_worklist_status(status)
     cursor = connection.execute(
         """
@@ -426,6 +437,7 @@ def list_pacs_worklist_items(
             """
         )
     else:
+        status = _normalize_pacs_worklist_status(status)
         _validate_pacs_worklist_status(status)
         rows = connection.execute(
             """
@@ -467,6 +479,7 @@ def update_pacs_worklist_status(
     status: str,
     error_message: str | None = None,
 ) -> bool:
+    status = _normalize_pacs_worklist_status(status)
     _validate_pacs_worklist_status(status)
     cursor = connection.execute(
         """
@@ -496,6 +509,7 @@ def update_pacs_worklist_item(
     source: str | None = None,
     error_message: str | None = None,
 ) -> PacsWorklistItemRecord | None:
+    status = _normalize_pacs_worklist_status(status)
     _validate_pacs_worklist_status(status)
     current = get_pacs_worklist_item(connection, item_id)
     if current is None:
@@ -1255,7 +1269,7 @@ def _pacs_worklist_item_from_row(
 ) -> PacsWorklistItemRecord:
     return PacsWorklistItemRecord(
         id=row[0],
-        status=row[1],
+        status=_normalize_pacs_worklist_status(row[1]),
         patient_name=row[2],
         chart_no=row[3],
         study=row[4],
@@ -1363,6 +1377,11 @@ def _validate_macro_action(action: str) -> None:
 def _validate_pacs_worklist_status(status: str) -> None:
     if status not in ALLOWED_PACS_WORKLIST_STATUS:
         raise ValueError(f"Unsupported PACS worklist status: {status}")
+
+
+def _normalize_pacs_worklist_status(status: str | None) -> str:
+    normalized = (status or "").strip().lower()
+    return LEGACY_PACS_WORKLIST_STATUS_ALIASES.get(normalized, normalized)
 
 
 def _validate_pacs_audit_event_type(event_type: str) -> None:

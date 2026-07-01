@@ -124,6 +124,92 @@ def _migrate_pacs_worklist(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE pacs_worklist_items ADD COLUMN kaospacs_mwl_error TEXT"
         )
+    if _pacs_worklist_status_schema_needs_rebuild(connection):
+        _rebuild_pacs_worklist_status_schema(connection)
+
+
+def _pacs_worklist_status_schema_needs_rebuild(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type='table' AND name='pacs_worklist_items'
+        """
+    ).fetchone()
+    if row is None or row[0] is None:
+        return False
+    sql = str(row[0]).lower()
+    return (
+        "status in ('active', 'completed', 'expired', 'cancelled', 'error')" not in sql
+        or "'done'" in sql
+    )
+
+
+def _rebuild_pacs_worklist_status_schema(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE pacs_worklist_items_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'expired', 'cancelled', 'error')),
+            patient_name TEXT,
+            chart_no TEXT,
+            study TEXT,
+            modality TEXT,
+            requested_at TEXT,
+            accession_or_order_id TEXT,
+            source TEXT NOT NULL DEFAULT 'manual',
+            error_message TEXT,
+            kaospacs_mwl_status TEXT NOT NULL DEFAULT 'not_sent',
+            kaospacs_mwl_last_synced_at TEXT,
+            kaospacs_mwl_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO pacs_worklist_items_new (
+            id,
+            status,
+            patient_name,
+            chart_no,
+            study,
+            modality,
+            requested_at,
+            accession_or_order_id,
+            source,
+            error_message,
+            kaospacs_mwl_status,
+            kaospacs_mwl_last_synced_at,
+            kaospacs_mwl_error,
+            created_at,
+            updated_at
+        )
+        SELECT
+            id,
+            CASE
+                WHEN lower(status) = 'done' THEN 'completed'
+                ELSE lower(status)
+            END,
+            patient_name,
+            chart_no,
+            study,
+            modality,
+            requested_at,
+            accession_or_order_id,
+            source,
+            error_message,
+            kaospacs_mwl_status,
+            kaospacs_mwl_last_synced_at,
+            kaospacs_mwl_error,
+            created_at,
+            updated_at
+        FROM pacs_worklist_items
+        """
+    )
+    connection.execute("DROP TABLE pacs_worklist_items")
+    connection.execute("ALTER TABLE pacs_worklist_items_new RENAME TO pacs_worklist_items")
 
 
 def _migrate_pacs_audit_events(connection: sqlite3.Connection) -> None:
@@ -240,14 +326,16 @@ def _seed_default_emr_target_profile(connection: sqlite3.Connection) -> None:
             is_enabled,
             is_default,
             process_name,
+            executable_path,
             window_title_contains
         )
-        VALUES (?, ?, 1, 1, ?, ?)
+        VALUES (?, ?, 1, 1, ?, ?, ?)
         """,
         (
             "eGHIS Production",
             "Seeded from current KaosEghis settings.",
             settings.get("eghis_process_name", "").strip() or None,
+            settings.get("eghis_executable_path", "").strip() or None,
             settings.get("eghis_window_title_contains", "").strip() or None,
         ),
     )

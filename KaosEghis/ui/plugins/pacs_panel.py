@@ -158,7 +158,7 @@ class PacsPanel(QWidget):
         self.audit_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
 
         self.filter_buttons: dict[str, QPushButton] = {}
-        for status in ("Active", "Done", "Cancelled", "Error", "All"):
+        for status in ("Active", "Completed", "Cancelled", "Expired", "Error", "All"):
             button = QPushButton(status)
             button.setCheckable(True)
             button.clicked.connect(self._make_filter_handler(status.lower()))
@@ -384,7 +384,7 @@ class PacsPanel(QWidget):
             return
         summary = (
             f"{'KaosPACS reconcile (DRY RUN): ' if result.dry_run else 'KaosPACS reconcile: '}"
-            f"done={result.done}, cancelled={result.cancelled}, "
+            f"completed={result.completed}, expired={result.expired}, "
             f"skipped={result.skipped}, errors={result.errors}"
         )
         self.polling_status.setText(summary)
@@ -392,7 +392,7 @@ class PacsPanel(QWidget):
             event_type="reconcile",
             summary=self._prefix_dry_run_summary(
                 result.dry_run,
-                f"done={result.done}, cancelled={result.cancelled}, "
+                f"completed={result.completed}, expired={result.expired}, "
                 f"skipped={result.skipped}, errors={result.errors}",
             ),
         )

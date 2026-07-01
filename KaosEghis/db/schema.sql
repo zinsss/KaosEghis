@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
 
 CREATE TABLE IF NOT EXISTS pacs_worklist_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    status TEXT NOT NULL CHECK (status IN ('active', 'done', 'cancelled', 'error')),
+    status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'expired', 'cancelled', 'error')),
     patient_name TEXT,
     chart_no TEXT,
     study TEXT,

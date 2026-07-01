@@ -88,10 +88,10 @@ def test_pacs_worklist_repository_crud(tmp_path) -> None:
         assert loaded is not None
         assert loaded.chart_no == "C001"
 
-        updated = update_pacs_worklist_status(connection, created.id, "done")
+        updated = update_pacs_worklist_status(connection, created.id, "completed")
         assert updated is True
         assert get_pacs_worklist_item(connection, created.id) is not None
-        assert get_pacs_worklist_item(connection, created.id).status == "done"
+        assert get_pacs_worklist_item(connection, created.id).status == "completed"
 
         assert delete_pacs_worklist_item(connection, created.id) is True
         assert get_pacs_worklist_item(connection, created.id) is None
@@ -123,7 +123,7 @@ def test_pacs_worklist_update_preserves_sync_state(tmp_path) -> None:
         updated = update_pacs_worklist_item(
             connection,
             created.id,
-            status="done",
+            status="completed",
             patient_name="Alice Updated",
             chart_no="C009",
             study="MR",
@@ -171,7 +171,7 @@ def test_pacs_audit_repository_create_list_filter_and_clear(tmp_path) -> None:
             event_type="sync",
             accession_or_order_id="ACC-2",
             status_before="active",
-            status_after="done",
+            status_after="completed",
             summary="sent=1, cancelled=0, errors=0, skipped=0",
         )
 
@@ -215,19 +215,72 @@ def test_pacs_worklist_list_filter(tmp_path) -> None:
 
     with connect(db_path) as connection:
         create_pacs_worklist_item(connection, status="active", patient_name="A")
-        create_pacs_worklist_item(connection, status="done", patient_name="B")
-        create_pacs_worklist_item(connection, status="cancelled", patient_name="C")
-        create_pacs_worklist_item(connection, status="error", patient_name="D")
+        create_pacs_worklist_item(connection, status="completed", patient_name="B")
+        create_pacs_worklist_item(connection, status="expired", patient_name="C")
+        create_pacs_worklist_item(connection, status="cancelled", patient_name="D")
+        create_pacs_worklist_item(connection, status="error", patient_name="E")
 
-        assert len(list_pacs_worklist_items(connection)) == 4
+        assert len(list_pacs_worklist_items(connection)) == 5
         assert [i.status for i in list_pacs_worklist_items(connection, "active")] == [
             "active",
         ]
-        assert [i.status for i in list_pacs_worklist_items(connection, "done")] == ["done"]
+        assert [i.status for i in list_pacs_worklist_items(connection, "completed")] == ["completed"]
+        assert [i.status for i in list_pacs_worklist_items(connection, "expired")] == ["expired"]
         assert [i.status for i in list_pacs_worklist_items(connection, "cancelled")] == [
             "cancelled"
         ]
         assert [i.status for i in list_pacs_worklist_items(connection, "error")] == ["error"]
+
+
+def test_database_migration_rebuilds_legacy_done_statuses(tmp_path) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    with connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE pacs_worklist_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                status TEXT NOT NULL CHECK (status IN ('active', 'done', 'cancelled', 'error')),
+                patient_name TEXT,
+                chart_no TEXT,
+                study TEXT,
+                modality TEXT,
+                requested_at TEXT,
+                accession_or_order_id TEXT,
+                source TEXT NOT NULL DEFAULT 'manual',
+                error_message TEXT,
+                kaospacs_mwl_status TEXT NOT NULL DEFAULT 'not_sent',
+                kaospacs_mwl_last_synced_at TEXT,
+                kaospacs_mwl_error TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO pacs_worklist_items
+                (status, patient_name, accession_or_order_id, study, modality)
+            VALUES ('done', 'Legacy', 'LEGACY-1', 'Chest', 'CR')
+            """
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT status FROM pacs_worklist_items WHERE accession_or_order_id = 'LEGACY-1'"
+        ).fetchone()
+        create_pacs_worklist_item(
+            connection,
+            status="expired",
+            accession_or_order_id="EXP-1",
+            study="Chest",
+            modality="CR",
+        )
+
+    assert row is not None
+    assert row[0] == "completed"
 
 
 def test_pacs_panel_instantiates_with_local_sqlite(tmp_path, monkeypatch) -> None:

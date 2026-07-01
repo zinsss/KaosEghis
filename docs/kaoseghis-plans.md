@@ -30,6 +30,8 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - local worklist persistence
 - cancellation tracking
 - local KaosPACS API bridge
+- business-state ownership stays in KaosEghis-pacs
+- imaging-state ownership stays in KaosPACS
 
 ### KaosEghis-flu
 
