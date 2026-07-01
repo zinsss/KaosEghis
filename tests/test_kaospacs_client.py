@@ -407,6 +407,53 @@ def test_reconcile_completed_kaospacs_row_marks_local_completed(tmp_path, monkey
     assert loaded.status == "completed"
 
 
+def test_reconcile_uses_gateway_imaging_worklist_when_configured(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    import KaosEghis.core.kaospacs_client as client
+
+    calls = {"gateway": 0, "api": 0}
+
+    with connect(db_path) as connection:
+        item = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            accession_or_order_id="ACC-GW-1",
+            study="Chest",
+            modality="CR",
+        )
+
+    monkeypatch.setattr(
+        client,
+        "get_imaging_worklist",
+        lambda settings: calls.__setitem__("gateway", calls["gateway"] + 1) or [
+            {"AccessionNumber": "ACC-GW-1", "state": "completed"}
+        ],
+    )
+    monkeypatch.setattr(
+        client,
+        "fetch_kaospacs_worklist",
+        lambda settings: calls.__setitem__("api", calls["api"] + 1) or {"entries": []},
+    )
+
+    result = reconcile_kaospacs_worklist_to_local(
+        {
+            "kaospacs_gateway_url": "http://pacs.example:8060",
+            "kaospacs_api_base_url": "http://pacs.example:8055",
+        },
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        loaded = get_pacs_worklist_item(connection, item.id)
+
+    assert calls == {"gateway": 1, "api": 0}
+    assert result.completed == 1
+    assert loaded is not None
+    assert loaded.status == "completed"
+
+
 def test_reconcile_expired_kaospacs_row_marks_local_expired(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
@@ -640,6 +687,50 @@ def test_reconcile_cancelled_kaospacs_row_does_not_infer_local_cancelled(
     assert result.skipped == 1
     assert loaded is not None
     assert loaded.status == "active"
+
+
+def test_reconcile_falls_back_to_api_worklist_without_gateway_url(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    import KaosEghis.core.kaospacs_client as client
+
+    calls = {"gateway": 0, "api": 0}
+
+    with connect(db_path) as connection:
+        item = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            accession_or_order_id="ACC-API-1",
+            study="Chest",
+            modality="CR",
+        )
+
+    monkeypatch.setattr(
+        client,
+        "get_imaging_worklist",
+        lambda settings: calls.__setitem__("gateway", calls["gateway"] + 1) or [],
+    )
+    monkeypatch.setattr(
+        client,
+        "fetch_kaospacs_worklist",
+        lambda settings: calls.__setitem__("api", calls["api"] + 1) or {
+            "entries": [{"AccessionNumber": "ACC-API-1", "CompletedAt": "2026-06-29T12:00:00Z"}]
+        },
+    )
+
+    result = reconcile_kaospacs_worklist_to_local(
+        {"kaospacs_api_base_url": "http://pacs.example:8055"},
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        loaded = get_pacs_worklist_item(connection, item.id)
+
+    assert calls == {"gateway": 0, "api": 1}
+    assert result.completed == 1
+    assert loaded is not None
+    assert loaded.status == "completed"
 
 
 def test_reconcile_active_false_does_not_infer_local_completed(

@@ -81,7 +81,9 @@ Status ownership:
 ### Reconcile
 
 - source: KaosPACS API
-- direction: KaosPACS API -> local SQLite status update
+- direction: KaosPACS Gateway imaging worklist -> local SQLite status update
+- preferred source: `GET /imaging/worklist`
+- fallback source: KaosPACS API `GET /worklist` when no Gateway URL is configured
 - completed returned by KaosPACS becomes local `completed`
 - expired returned by KaosPACS becomes local `expired`
 - KaosEghis-pacs never calculates expiry locally
