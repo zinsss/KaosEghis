@@ -141,6 +141,69 @@ def test_paste_text_focuses_resolved_target_before_paste(monkeypatch, tmp_path) 
     assert events[:2] == [("copy", "hello"), ("send", "^v")]
 
 
+def test_reuses_resolved_target_within_single_macro_run(monkeypatch, tmp_path) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="SymptomBox")
+        item = create_item(connection, "Cached Target Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "paste_text", target_id="sx", value="hello")
+        create_macro_step(connection, item.id, 2, "click", target_id="sx")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.focused = 0
+            self.clicked = 0
+
+        def set_focus(self) -> None:
+            self.focused += 1
+
+        def click_input(self) -> None:
+            self.clicked += 1
+
+    events = []
+    fake_element = FakeElement()
+    resolve_calls = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: resolve_calls.append(_target.target_id) or (fake_element, None, "Target resolved."),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda text: events.append(("copy", text)) or type("Snapshot", (), {"text": text})(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.restore_clipboard",
+        lambda snapshot: events.append(("restore", snapshot.text)),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda keys: events.append(("send", keys)))})(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert resolve_calls == ["sx"]
+    assert fake_element.focused == 1
+    assert fake_element.clicked == 1
+
+
 def test_macro_stops_on_failed_step(monkeypatch, tmp_path) -> None:
     from KaosEghis.core.macro_models import MacroRunResult
     from KaosEghis.core.macro_runner import MacroRunner
@@ -288,6 +351,177 @@ def test_delay_ms_is_represented_in_dry_run(tmp_path) -> None:
 
     assert result.success is True
     assert "delay_ms value=250 (dry run only)" in result.message
+    assert "Resolved targets: 0" in result.message
+    assert "Cache hits: 0" in result.message
+    assert "Cache misses: 0" in result.message
+
+
+def test_cache_clears_between_macro_runs(monkeypatch, tmp_path) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="SymptomBox")
+        item = create_item(connection, "Repeat Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "click", target_id="sx")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def click_input(self) -> None:
+            return None
+
+    resolve_calls = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: resolve_calls.append(_target.target_id) or (FakeElement(), None, "Target resolved."),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda _keys: None)})(),
+    )
+
+    runner = MacroRunner(db_path)
+    first = runner.execute_macro(item.id, dry_run=False)
+    second = runner.execute_macro(item.id, dry_run=False)
+
+    assert first.success is True
+    assert second.success is True
+    assert resolve_calls == ["sx", "sx"]
+
+
+def test_cache_clears_after_failed_target_resolution(monkeypatch, tmp_path) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="SymptomBox")
+        item = create_item(connection, "Retry Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "click", target_id="sx", retries=1)
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    attempts = []
+
+    def fake_resolve(_settings, _target):
+        attempts.append(_target.target_id)
+        return None, None, "window not available"
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        fake_resolve,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda _keys: None)})(),
+    )
+
+    runner = MacroRunner(db_path)
+    result = runner.execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.message == "window not ready"
+    assert attempts == ["sx", "sx"]
+    assert runner._resolved_target_cache == {}
+
+
+def test_ensure_ready_for_macro_called_once_per_run_when_possible(monkeypatch, tmp_path) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="SymptomBox")
+        item = create_item(connection, "Fast Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "paste_text", target_id="sx", value="hello")
+        create_macro_step(connection, item.id, 2, "click", target_id="sx")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def set_focus(self) -> None:
+            return None
+
+        def click_input(self) -> None:
+            return None
+
+    ready_calls = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: ready_calls.append("ready") or FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "Target resolved."),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda text: type("Snapshot", (), {"text": text})(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.restore_clipboard",
+        lambda _snapshot: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda _keys: None)})(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert ready_calls == ["ready"]
+
+
+def test_no_target_handles_saved_in_sqlite(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        worklist_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(macro_runs)")
+        }
+        ui_target_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(ui_targets)")
+        }
+
+    assert "resolved_handle" not in worklist_columns
+    assert "element_handle" not in worklist_columns
+    assert "resolved_handle" not in ui_target_columns
+    assert "element_handle" not in ui_target_columns
 
 
 def test_macros_page_has_dry_run_and_run_selected_macro_buttons() -> None:
