@@ -36,6 +36,12 @@ class KaosPacsReconcileResult:
     dry_run: bool = False
 
 
+class KaosPacsRequestError(RuntimeError):
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def check_kaospacs_health(settings: dict[str, str]) -> bool:
     payload = _request_json(settings, "GET", "/health")
     return bool(payload)
@@ -46,15 +52,31 @@ def fetch_kaospacs_worklist(settings: dict[str, str]) -> dict:
 
 
 def push_kaospacs_worklist(settings: dict[str, str], entries: list[dict]) -> dict:
-    return _request_json(settings, "POST", "/orders/upsert", {"entries": entries})
+    try:
+        return _request_json(settings, "POST", "/orders/upsert", {"entries": entries})
+    except RuntimeError as exc:
+        if not _is_http_not_found_error(exc):
+            raise
+    return _request_json(settings, "PUT", "/worklist", {"entries": entries})
 
 
 def cancel_kaospacs_order(settings: dict[str, str], accession_number: str) -> dict:
+    payload = {"AccessionNumber": accession_number}
+    try:
+        return _request_json(
+            settings,
+            "POST",
+            "/orders/cancel",
+            payload,
+        )
+    except RuntimeError as exc:
+        if not _is_http_not_found_error(exc):
+            raise
     return _request_json(
         settings,
         "POST",
-        "/orders/cancel",
-        {"AccessionNumber": accession_number},
+        "/worklist/cancel",
+        payload,
     )
 
 
@@ -82,7 +104,20 @@ def sync_local_worklist_to_kaospacs(
             skipped += 1
             continue
         if item.status == "active":
-            active_entries.append(_build_kaospacs_entry(item))
+            entry = _build_kaospacs_entry(item)
+            validation_error = _validate_kaospacs_entry(entry)
+            if validation_error is not None:
+                if not dry_run:
+                    with connect(db_file) as connection:
+                        update_pacs_worklist_sync_state(
+                            connection,
+                            item.id,
+                            kaospacs_mwl_status="error",
+                            kaospacs_mwl_error=validation_error,
+                        )
+                errors += 1
+                continue
+            active_entries.append(entry)
             active_items.append(item)
         elif item.status == "cancelled":
             # Business cancellation originates on the KaosEghis side. KaosPACS
@@ -367,8 +402,10 @@ def _request_json(
     try:
         with request.urlopen(http_request, timeout=timeout_seconds) as response:
             body = response.read().decode("utf-8")
-    except (error.HTTPError, error.URLError, TimeoutError, ValueError) as exc:
-        raise RuntimeError(str(exc)) from exc
+    except error.HTTPError as exc:
+        raise KaosPacsRequestError(str(exc), status_code=exc.code) from exc
+    except (error.URLError, TimeoutError, ValueError) as exc:
+        raise KaosPacsRequestError(str(exc), status_code=None) from exc
     if not body:
         return {}
     return json.loads(body)
@@ -380,3 +417,24 @@ def _utc_now_text() -> str:
 
 def _is_pacs_dry_run(settings: dict[str, str]) -> bool:
     return (settings.get("pacs_dry_run") or "").strip().lower() == "true"
+
+
+def _is_http_not_found_error(exc: RuntimeError) -> bool:
+    return isinstance(exc, KaosPacsRequestError) and exc.status_code == 404
+
+
+def _validate_kaospacs_entry(entry: dict[str, str]) -> str | None:
+    missing_fields = [
+        field
+        for field in (
+            "AccessionNumber",
+            "RequestedProcedureID",
+            "ScheduledProcedureStepID",
+            "ScheduledProcedureStepDescription",
+            "Modality",
+        )
+        if not _text(entry.get(field))
+    ]
+    if missing_fields:
+        return "missing required fields: " + ", ".join(missing_fields)
+    return None

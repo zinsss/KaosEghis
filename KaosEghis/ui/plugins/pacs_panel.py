@@ -160,6 +160,7 @@ class PacsPanel(QWidget):
         imaging_filter_row = QHBoxLayout()
         for key, label in (
             ("active", "Active"),
+            ("inactive", "Inactive"),
             ("completed", "Completed"),
             ("expired", "Expired"),
             ("cancelled", "Cancelled"),
