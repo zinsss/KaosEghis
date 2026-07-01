@@ -14,7 +14,7 @@ from KaosEghis.db.repositories import PacsWorklistItemRecord
 
 
 class PacsWorklistDialog(QDialog):
-    STATUS_VALUES = ["active", "done", "cancelled", "error"]
+    STATUS_VALUES = ["active", "cancelled", "error"]
 
     def __init__(
         self,
@@ -33,6 +33,8 @@ class PacsWorklistDialog(QDialog):
         self.status_combo = QComboBox()
         self.status_combo.addItems(self.STATUS_VALUES)
         default_status = item.status if item is not None else "active"
+        if default_status not in self.STATUS_VALUES:
+            self.status_combo.addItem(default_status)
         index = self.status_combo.findText(default_status)
         self.status_combo.setCurrentIndex(index if index >= 0 else 0)
 

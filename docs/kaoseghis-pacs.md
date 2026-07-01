@@ -51,6 +51,12 @@ Architecture rules:
 
 ## Runtime Boundaries
 
+Status ownership:
+
+- business state `active` / `cancelled` is owned by KaosEghis-pacs
+- imaging state `completed` / `expired` is owned by KaosPACS
+- local `error` remains an operator/runtime error state, not a business or imaging truth source
+
 ### Poll
 
 - source: Eghis DB
@@ -65,6 +71,8 @@ Architecture rules:
 - source: local SQLite
 - direction: local SQLite -> KaosPACS API
 - no direct Orthanc/MWL/DICOM write
+- create/update uses `POST /orders/upsert`
+- cancel/delete uses `POST /orders/cancel`
 - active rows only
 - cancelled previously-sent rows call the KaosPACS cancel endpoint
 
@@ -72,8 +80,25 @@ Architecture rules:
 
 - source: KaosPACS API
 - direction: KaosPACS API -> local SQLite status update
+- completed returned by KaosPACS becomes local `completed`
+- expired returned by KaosPACS becomes local `expired`
+- local `cancelled` is never overwritten by KaosPACS unless KaosEghis explicitly restores it in future business logic
 - never creates new local rows from KaosPACS
 - never deletes local rows
+- never infers local business cancellation from KaosPACS imaging state
+
+Local state transition model:
+
+```text
+eGHIS create/update -> Active
+eGHIS delete/cancel -> Cancelled
+KaosPACS Completed -> Completed
+KaosPACS Expired -> Expired
+```
+
+Only KaosEghis-pacs may produce `cancelled`.
+
+Only KaosPACS may produce `completed` and `expired`.
 
 ## Local Storage Model
 
@@ -182,6 +207,15 @@ Current table columns:
 - `KaosPACS Status`
 - `Last Synced`
 - `Sync Error`
+
+Current worklist filters:
+
+- `Active`
+- `Completed`
+- `Cancelled`
+- `Expired`
+- `Error`
+- `All`
 
 Selected-date behavior:
 
@@ -340,3 +374,4 @@ Update this document whenever:
 - startup validation changes
 - dry-run behavior changes
 - deployment guidance changes
+- status ownership rules change
