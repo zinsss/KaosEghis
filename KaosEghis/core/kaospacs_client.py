@@ -13,6 +13,7 @@ from KaosEghis.db.repositories import (
     list_pacs_worklist_items,
     update_pacs_worklist_sync_state,
 )
+from KaosEghis.core.kaospacs_gateway_client import get_imaging_worklist
 
 
 @dataclass(frozen=True)
@@ -169,7 +170,7 @@ def reconcile_kaospacs_worklist_to_local(
     errors = 0
 
     try:
-        payload = fetch_kaospacs_worklist(settings)
+        entries = fetch_kaospacs_reconcile_entries(settings)
     except RuntimeError as exc:
         return KaosPacsReconcileResult(
             completed=0,
@@ -177,17 +178,6 @@ def reconcile_kaospacs_worklist_to_local(
             skipped=0,
             errors=1,
             message=str(exc),
-            dry_run=_is_pacs_dry_run(settings),
-        )
-
-    entries = payload.get("entries", [])
-    if not isinstance(entries, list):
-        return KaosPacsReconcileResult(
-            completed=0,
-            expired=0,
-            skipped=0,
-            errors=1,
-            message="invalid worklist payload",
             dry_run=_is_pacs_dry_run(settings),
         )
 
@@ -248,6 +238,18 @@ def reconcile_kaospacs_worklist_to_local(
     )
 
 
+def fetch_kaospacs_reconcile_entries(settings: dict[str, str]) -> list[dict]:
+    gateway_url = (settings.get("kaospacs_gateway_url") or "").strip()
+    if gateway_url:
+        return get_imaging_worklist(settings)
+
+    payload = fetch_kaospacs_worklist(settings)
+    entries = payload.get("entries", [])
+    if not isinstance(entries, list):
+        raise RuntimeError("invalid worklist payload")
+    return [entry for entry in entries if isinstance(entry, dict)]
+
+
 def _build_kaospacs_entry(item: PacsWorklistItemRecord) -> dict[str, str]:
     accession_number = item.accession_or_order_id or ""
     requested_date, requested_time = _split_date_time(item.requested_at)
@@ -306,7 +308,7 @@ def _match_local_item(
 
 
 def _reconciliation_status(entry: dict) -> str | None:
-    status = _text(entry.get("Status")).lower()
+    status = _text(entry.get("state") or entry.get("Status")).lower()
     completed_at = _text(entry.get("CompletedAt"))
     expired_at = _text(entry.get("ExpiredAt"))
 
