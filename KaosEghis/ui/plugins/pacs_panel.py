@@ -1,23 +1,37 @@
+from __future__ import annotations
+
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import re
+
 from PySide6.QtCore import QDate, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDateEdit,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QSpinBox,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from KaosEghis.core.clipboard_service import copy_text
+from KaosEghis.core.kaospacs_client import (
+    check_kaospacs_health,
+    reconcile_kaospacs_worklist_to_local,
+    sync_local_worklist_to_kaospacs,
+)
+from KaosEghis.core.kaospacs_gateway_client import get_imaging_worklist
+from KaosEghis.core.pacs_polling import poll_eghis_image_orders_into_local_worklist
 from KaosEghis.db.database import connect, describe_database_path, initialize_database
 from KaosEghis.db.repositories import (
     PacsAuditEventRecord,
@@ -32,13 +46,6 @@ from KaosEghis.db.repositories import (
     update_pacs_worklist_item,
     update_pacs_worklist_status,
 )
-from KaosEghis.core.clipboard_service import copy_text
-from KaosEghis.core.kaospacs_client import (
-    check_kaospacs_health,
-    reconcile_kaospacs_worklist_to_local,
-    sync_local_worklist_to_kaospacs,
-)
-from KaosEghis.core.pacs_polling import poll_eghis_image_orders_into_local_worklist
 from KaosEghis.ui.plugins.pacs_worklist_dialog import PacsWorklistDialog
 
 
@@ -56,6 +63,23 @@ class PacsPanel(QWidget):
         "KaosPACS Status",
         "Last Synced",
         "Sync Error",
+    ]
+    IMAGING_COLUMNS = [
+        "state",
+        "AccessionNumber",
+        "PatientID",
+        "PatientName",
+        "PatientBirthDate",
+        "PatientSex",
+        "Modality",
+        "ScheduledStationAETitle",
+        "ScheduledAt",
+        "Description",
+        "CompletedAt",
+        "ExpiredAt",
+        "ExpireReason",
+        "CancelledAt",
+        "CancelReason",
     ]
     AUDIT_COLUMNS = [
         "Time",
@@ -78,14 +102,99 @@ class PacsPanel(QWidget):
         self._db_path = db_path
         self._visible_items: list[PacsWorklistItemRecord] = []
         self._visible_audit_events: list[PacsAuditEventRecord] = []
+        self._imaging_entries_all: list[dict] = []
+        self._visible_imaging_entries: list[dict] = []
         self._active_filter = "all"
+        self._imaging_filter = "active"
         self._poll_in_progress = False
         self._selected_date = date.today()
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._handle_poll_timer_tick)
 
+        self.page_stack = QStackedWidget()
+        self._page_names = ["imaging", "operator_mode", "settings"]
+        self.page_buttons: dict[str, QPushButton] = {}
+
         title = QLabel("PACS Worklist")
         title.setObjectName("pageTitle")
+
+        self._build_imaging_page()
+        self._build_operator_mode_page()
+        self._build_settings_page()
+
+        self.page_stack.addWidget(self.imaging_page)
+        self.page_stack.addWidget(self.operator_mode_page)
+        self.page_stack.addWidget(self.settings_page)
+
+        navigation_row = QHBoxLayout()
+        navigation_row.addWidget(self._make_page_button("Imaging Worklist", "imaging"))
+        navigation_row.addWidget(self._make_page_button("Operator Mode", "operator_mode"))
+        navigation_row.addWidget(self._make_page_button("Settings", "settings"))
+        navigation_row.addStretch()
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(title)
+        layout.addLayout(navigation_row)
+        layout.addWidget(self.page_stack)
+
+        self._set_db_labels()
+        self._load_polling_settings()
+        self._update_local_filter_button_states()
+        self._update_imaging_filter_button_states()
+        self._update_startup_readiness_status()
+        self._refresh_settings_diagnostics()
+        self._show_page("imaging")
+
+    def _build_imaging_page(self) -> None:
+        self.imaging_page = QWidget()
+        self.imaging_status_label = QLabel("Not loaded yet.")
+        self.imaging_search_input = QLineEdit()
+        self.imaging_search_input.setPlaceholderText(
+            "Search PatientName / PatientID / AccessionNumber / Modality"
+        )
+        self.imaging_search_input.textChanged.connect(self._refresh_imaging_table)
+        self.imaging_refresh_button = QPushButton("Refresh Imaging Worklist")
+        self.imaging_refresh_button.clicked.connect(self.refresh_imaging_worklist)
+
+        self.imaging_filter_buttons: dict[str, QPushButton] = {}
+        imaging_filter_row = QHBoxLayout()
+        for key, label in (
+            ("active", "Active"),
+            ("completed", "Completed"),
+            ("expired", "Expired"),
+            ("cancelled", "Cancelled"),
+            ("all", "All"),
+        ):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.clicked.connect(self._make_imaging_filter_handler(key))
+            self.imaging_filter_buttons[key] = button
+            imaging_filter_row.addWidget(button)
+        imaging_filter_row.addStretch()
+
+        imaging_controls = QHBoxLayout()
+        imaging_controls.addWidget(self.imaging_refresh_button)
+        imaging_controls.addWidget(self.imaging_search_input)
+
+        self.imaging_table = QTableWidget(0, len(self.IMAGING_COLUMNS))
+        self.imaging_table.setHorizontalHeaderLabels(self.IMAGING_COLUMNS)
+        self.imaging_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.imaging_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self.imaging_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+
+        layout = QVBoxLayout(self.imaging_page)
+        layout.addWidget(QLabel("KaosPACS Gateway Imaging Worklist"))
+        layout.addWidget(self.imaging_status_label)
+        layout.addLayout(imaging_controls)
+        layout.addLayout(imaging_filter_row)
+        layout.addWidget(self.imaging_table)
+
+    def _build_operator_mode_page(self) -> None:
+        self.operator_mode_page = QWidget()
+        self.local_orders_page = self.operator_mode_page
+
         self.eghis_db_status = QLabel("Eghis DB: not connected")
         self.pacs_server_status = QLabel("KaosPACS server: not checked")
         self.polling_status = QLabel("Polling status: stopped")
@@ -113,11 +222,7 @@ class PacsPanel(QWidget):
         self.date_selector.setCalendarPopup(True)
         self.date_selector.setDisplayFormat("yyyy-MM-dd")
         self.date_selector.setDate(
-            QDate(
-                self._selected_date.year,
-                self._selected_date.month,
-                self._selected_date.day,
-            )
+            QDate(self._selected_date.year, self._selected_date.month, self._selected_date.day)
         )
         self.date_selector.dateChanged.connect(self._on_date_changed)
 
@@ -128,46 +233,6 @@ class PacsPanel(QWidget):
         date_row.addWidget(self.next_day_button)
         date_row.addWidget(self.today_button)
         date_row.addStretch()
-
-        self.worklist_table = QTableWidget(0, len(self.WORKLIST_COLUMNS))
-        self.worklist_table.setHorizontalHeaderLabels(self.WORKLIST_COLUMNS)
-        self.worklist_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self.worklist_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.worklist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-
-        self.audit_filter_combo = QComboBox()
-        self.audit_filter_combo.addItems(
-            ["All", "poll", "manual_insert", "manual_edit", "cancel_selected", "sync", "reconcile", "error"]
-        )
-        self.audit_filter_combo.currentTextChanged.connect(self.refresh_audit)
-        self.refresh_audit_button = QPushButton("Refresh audit")
-        self.refresh_audit_button.clicked.connect(self.refresh_audit)
-        self.clear_audit_button = QPushButton("Clear audit")
-        self.clear_audit_button.clicked.connect(self.clear_audit)
-        self.copy_audit_button = QPushButton("Copy audit summary")
-        self.copy_audit_button.clicked.connect(self.copy_audit_summary)
-
-        self.audit_table = QTableWidget(0, len(self.AUDIT_COLUMNS))
-        self.audit_table.setHorizontalHeaderLabels(self.AUDIT_COLUMNS)
-        self.audit_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.audit_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self.audit_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-
-        self.filter_buttons: dict[str, QPushButton] = {}
-        for status in ("Active", "Completed", "Cancelled", "Expired", "Error", "All"):
-            button = QPushButton(status)
-            button.setCheckable(True)
-            button.clicked.connect(self._make_filter_handler(status.lower()))
-            self.filter_buttons[status.lower()] = button
-
-        self.filter_bar = QHBoxLayout()
-        for button in self.filter_buttons.values():
-            self.filter_bar.addWidget(button)
-        self.filter_bar.addStretch()
 
         self.auto_poll_checkbox = QCheckBox("Auto poll")
         self.interval_spinbox = QSpinBox()
@@ -184,23 +249,41 @@ class PacsPanel(QWidget):
         polling_settings_row.addWidget(self.apply_polling_settings_button)
         polling_settings_row.addStretch()
 
-        audit_controls_row = QHBoxLayout()
-        audit_controls_row.addWidget(QLabel("PACS audit"))
-        audit_controls_row.addWidget(self.audit_filter_combo)
-        audit_controls_row.addWidget(self.refresh_audit_button)
-        audit_controls_row.addWidget(self.clear_audit_button)
-        audit_controls_row.addWidget(self.copy_audit_button)
-        audit_controls_row.addStretch()
+        self.worklist_table = QTableWidget(0, len(self.WORKLIST_COLUMNS))
+        self.worklist_table.setHorizontalHeaderLabels(self.WORKLIST_COLUMNS)
+        self.worklist_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self.worklist_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.worklist_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
-        self.refresh_button = QPushButton("Refresh")
+        self.filter_buttons: dict[str, QPushButton] = {}
+        filter_bar = QHBoxLayout()
+        for key, label in (
+            ("active", "Active"),
+            ("completed", "Completed"),
+            ("cancelled", "Cancelled"),
+            ("expired", "Expired"),
+            ("error", "Error"),
+            ("all", "All"),
+        ):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.clicked.connect(self._make_filter_handler(key))
+            self.filter_buttons[key] = button
+            filter_bar.addWidget(button)
+        filter_bar.addStretch()
+        self.filter_bar = filter_bar
+
+        self.refresh_button = QPushButton("Load from KaosEghis")
         self.refresh_button.clicked.connect(self.refresh_rows)
         self.check_kaospacs_button = QPushButton("Check KaosPACS")
         self.check_kaospacs_button.clicked.connect(self.check_kaospacs_connection)
-        self.poll_button = QPushButton("Poll now")
+        self.poll_button = QPushButton("Load from eGHIS")
         self.poll_button.clicked.connect(self.poll_now)
         self.sync_button = QPushButton("Sync to KaosPACS")
         self.sync_button.clicked.connect(self.sync_to_kaospacs)
-        self.reconcile_button = QPushButton("Reconcile from KaosPACS")
+        self.reconcile_button = QPushButton("Sync from KaosPACS")
         self.reconcile_button.clicked.connect(self.reconcile_from_kaospacs)
         self.manual_insert_button = QPushButton("Manual insert")
         self.manual_insert_button.clicked.connect(self.manual_insert_row)
@@ -224,8 +307,36 @@ class PacsPanel(QWidget):
             "Local PACS worklist. Poll from Eghis DB and sync to KaosPACS are manual only."
         )
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(title)
+        self.audit_filter_combo = QComboBox()
+        self.audit_filter_combo.addItems(
+            ["All", "poll", "manual_insert", "manual_edit", "cancel_selected", "sync", "reconcile", "error"]
+        )
+        self.audit_filter_combo.currentTextChanged.connect(self.refresh_audit)
+        self.refresh_audit_button = QPushButton("Refresh log")
+        self.refresh_audit_button.clicked.connect(self.refresh_audit)
+        self.clear_audit_button = QPushButton("Clear log")
+        self.clear_audit_button.clicked.connect(self.clear_audit)
+        self.copy_audit_button = QPushButton("Copy log summary")
+        self.copy_audit_button.clicked.connect(self.copy_audit_summary)
+
+        self.audit_table = QTableWidget(0, len(self.AUDIT_COLUMNS))
+        self.audit_table.setHorizontalHeaderLabels(self.AUDIT_COLUMNS)
+        self.audit_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.audit_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self.audit_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("PACS Log"))
+        controls.addWidget(self.audit_filter_combo)
+        controls.addWidget(self.refresh_audit_button)
+        controls.addWidget(self.clear_audit_button)
+        controls.addWidget(self.copy_audit_button)
+        controls.addStretch()
+
+        layout = QVBoxLayout(self.operator_mode_page)
+        layout.addWidget(QLabel("Operator Mode / Local Orders"))
         layout.addLayout(status_row)
         layout.addLayout(polling_info_row)
         layout.addLayout(date_row)
@@ -233,16 +344,58 @@ class PacsPanel(QWidget):
         layout.addWidget(self.worklist_table)
         layout.addLayout(self.filter_bar)
         layout.addLayout(action_row)
-        layout.addLayout(audit_controls_row)
-        layout.addWidget(self.audit_table)
         layout.addWidget(footer)
+        layout.addSpacing(12)
+        layout.addLayout(controls)
+        layout.addWidget(self.audit_table)
 
-        self._set_db_labels()
-        self._update_filter_button_states()
-        self._load_polling_settings()
-        self.refresh_rows()
-        self.refresh_audit()
-        self._update_startup_readiness_status()
+    def _build_settings_page(self) -> None:
+        self.settings_page = QWidget()
+        self.diagnostics_sqlite_label = QLabel()
+        self.diagnostics_api_base_url_label = QLabel()
+        self.diagnostics_gateway_url_label = QLabel()
+        self.diagnostics_dry_run_label = QLabel()
+        self.diagnostics_command_note_label = QLabel(
+            "Diagnostics: pacs poll helper is available via KaosEghis tools when needed."
+        )
+
+        form = QFormLayout()
+        form.addRow("Active SQLite path", self.diagnostics_sqlite_label)
+        form.addRow("KaosPACS API base URL", self.diagnostics_api_base_url_label)
+        form.addRow("KaosPACS Gateway URL", self.diagnostics_gateway_url_label)
+        form.addRow("Dry-run status", self.diagnostics_dry_run_label)
+
+        layout = QVBoxLayout(self.settings_page)
+        layout.addWidget(QLabel("Settings / Diagnostics"))
+        layout.addLayout(form)
+        layout.addWidget(self.diagnostics_command_note_label)
+        layout.addStretch()
+
+    def _make_page_button(self, label: str, page_name: str) -> QPushButton:
+        button = QPushButton(label)
+        button.setCheckable(True)
+        button.clicked.connect(lambda: self._show_page(page_name))
+        self.page_buttons[page_name] = button
+        return button
+
+    def _show_page(self, page_name: str) -> None:
+        index = self._page_names.index(page_name)
+        self.page_stack.setCurrentIndex(index)
+        for key, button in self.page_buttons.items():
+            selected = key == page_name
+            button.setChecked(selected)
+            button.setProperty("pageActive", selected)
+            button.setStyleSheet(
+                self.FILTER_BUTTON_SELECTED_STYLE if selected else self.FILTER_BUTTON_UNSELECTED_STYLE
+            )
+
+        if page_name == "imaging":
+            return
+        if page_name == "operator_mode":
+            self.refresh_rows()
+            self.refresh_audit()
+        elif page_name == "settings":
+            self._refresh_settings_diagnostics()
 
     def _set_db_labels(self) -> None:
         self.eghis_db_status.setText("Eghis DB: local sqlite")
@@ -257,15 +410,121 @@ class PacsPanel(QWidget):
             healthy = check_kaospacs_health(settings)
         except RuntimeError:
             healthy = False
-        if healthy:
-            self.pacs_server_status.setText("KaosPACS server: healthy")
-        else:
-            self.pacs_server_status.setText("KaosPACS server: unavailable")
+        self.pacs_server_status.setText(
+            "KaosPACS server: healthy" if healthy else "KaosPACS server: unavailable"
+        )
+
+    def refresh_imaging_worklist(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+        try:
+            entries = get_imaging_worklist(settings)
+        except RuntimeError:
+            self._imaging_entries_all = []
+            self._visible_imaging_entries = []
+            self.imaging_table.setRowCount(0)
+            self.imaging_status_label.setText("KaosPACS Gateway unavailable")
+            return
+
+        self._imaging_entries_all = entries
+        self.imaging_status_label.setText(
+            f"KaosPACS Gateway imaging rows: {len(entries)}"
+        )
+        self._refresh_imaging_table()
+
+    def _refresh_imaging_table(self) -> None:
+        search_value = self.imaging_search_input.text().strip().lower()
+        visible = []
+        for entry in self._imaging_entries_all:
+            state = self._imaging_entry_state(entry)
+            if self._imaging_filter != "all" and state != self._imaging_filter:
+                continue
+            if search_value and not self._matches_imaging_search(entry, search_value):
+                continue
+            visible.append(entry)
+
+        self._visible_imaging_entries = visible
+        self.imaging_table.setRowCount(len(visible))
+        for row_index, entry in enumerate(visible):
+            values = [
+                self._imaging_entry_state(entry),
+                self._entry_text(entry, "AccessionNumber"),
+                self._entry_text(entry, "PatientID"),
+                self._entry_text(entry, "PatientName"),
+                self._entry_text(entry, "PatientBirthDate"),
+                self._entry_text(entry, "PatientSex"),
+                self._entry_text(entry, "Modality"),
+                self._entry_text(entry, "ScheduledStationAETitle"),
+                self._entry_text(entry, "ScheduledAt"),
+                self._imaging_description(entry),
+                self._entry_text(entry, "CompletedAt"),
+                self._entry_text(entry, "ExpiredAt"),
+                self._entry_text(entry, "ExpireReason"),
+                self._entry_text(entry, "CancelledAt"),
+                self._entry_text(entry, "CancelReason"),
+            ]
+            for col_index, value in enumerate(values):
+                self.imaging_table.setItem(row_index, col_index, QTableWidgetItem(value))
+        self.imaging_table.resizeColumnsToContents()
+
+    def _make_imaging_filter_handler(self, state: str):
+        def handler() -> None:
+            self._imaging_filter = state
+            self._update_imaging_filter_button_states()
+            self._refresh_imaging_table()
+
+        return handler
+
+    def _update_imaging_filter_button_states(self) -> None:
+        for key, button in self.imaging_filter_buttons.items():
+            is_selected = key == self._imaging_filter
+            button.setChecked(is_selected)
+            button.setProperty("filterActive", is_selected)
+            button.setStyleSheet(
+                self.FILTER_BUTTON_SELECTED_STYLE
+                if is_selected
+                else self.FILTER_BUTTON_UNSELECTED_STYLE
+            )
+
+    def _matches_imaging_search(self, entry: dict, search_value: str) -> bool:
+        fields = [
+            self._entry_text(entry, "PatientName"),
+            self._entry_text(entry, "PatientID"),
+            self._entry_text(entry, "AccessionNumber"),
+            self._entry_text(entry, "Modality"),
+        ]
+        return any(search_value in value.lower() for value in fields if value)
+
+    def _entry_text(self, entry: dict, key: str) -> str:
+        value = entry.get(key)
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    def _imaging_description(self, entry: dict) -> str:
+        return (
+            self._entry_text(entry, "Description")
+            or self._entry_text(entry, "ScheduledProcedureStepDescription")
+            or self._entry_text(entry, "RequestedProcedureDescription")
+        )
+
+    def _imaging_entry_state(self, entry: dict) -> str:
+        state = self._entry_text(entry, "state").lower()
+        if state:
+            return state
+        if self._entry_text(entry, "CancelledAt"):
+            return "cancelled"
+        if self._entry_text(entry, "ExpiredAt"):
+            return "expired"
+        if self._entry_text(entry, "CompletedAt"):
+            return "completed"
+        return "active"
 
     def _make_filter_handler(self, status: str):
         def handler() -> None:
             self._active_filter = status
-            self._update_filter_button_states()
+            self._update_local_filter_button_states()
             self.refresh_rows()
 
         return handler
@@ -301,7 +560,6 @@ class PacsPanel(QWidget):
             ]
             for col_index, value in enumerate(row):
                 self.worklist_table.setItem(row_index, col_index, QTableWidgetItem(value))
-
         self.worklist_table.resizeColumnsToContents()
 
     def refresh_audit(self) -> None:
@@ -504,6 +762,7 @@ class PacsPanel(QWidget):
         self.polling_status.setText(
             f"Polling settings applied: enabled={enabled_value}, interval={interval_seconds}s"
         )
+        self._refresh_settings_diagnostics()
 
     def _build_sync_summary(self, items: list[PacsWorklistItemRecord]) -> dict[str, int]:
         return {
@@ -568,10 +827,7 @@ class PacsPanel(QWidget):
         if self._poll_in_progress:
             self.last_poll_result_label.setText("Last poll result: skipped overlap")
             self.polling_status.setText("Polling status: skipped overlap")
-            self._log_audit_aggregate(
-                event_type="poll",
-                summary="skipped overlap",
-            )
+            self._log_audit_aggregate(event_type="poll", summary="skipped overlap")
             self.refresh_audit()
             return
 
@@ -593,10 +849,7 @@ class PacsPanel(QWidget):
             if result.message is not None:
                 self.last_poll_result_label.setText(f"Last poll result: {result.message}")
                 self.polling_status.setText(f"Polling status: {result.message}")
-                self._log_audit_aggregate(
-                    event_type="poll",
-                    summary=result.message,
-                )
+                self._log_audit_aggregate(event_type="poll", summary=result.message)
                 self.refresh_audit()
                 return
             summary = (
@@ -604,10 +857,7 @@ class PacsPanel(QWidget):
             )
             self.last_poll_result_label.setText(f"Last poll result: {summary}")
             self.polling_status.setText(f"Polling status: {summary}")
-            self._log_audit_aggregate(
-                event_type="poll",
-                summary=summary,
-            )
+            self._log_audit_aggregate(event_type="poll", summary=summary)
             self.refresh_audit()
         finally:
             self._poll_in_progress = False
@@ -627,8 +877,7 @@ class PacsPanel(QWidget):
         return interval
 
     def _update_startup_readiness_status(self) -> None:
-        readiness = self._build_startup_readiness()
-        self.polling_status.setText(readiness)
+        self.polling_status.setText(self._build_startup_readiness())
 
     def _build_startup_readiness(self) -> str:
         try:
@@ -650,6 +899,17 @@ class PacsPanel(QWidget):
             f"db={describe_database_path(self._db_path)}, "
             f"auto_poll={'on' if auto_poll_enabled else 'off'}, "
             f"interval={interval_seconds}s, dry_run={'on' if dry_run_enabled else 'off'}"
+        )
+
+    def _refresh_settings_diagnostics(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+        self.diagnostics_sqlite_label.setText(describe_database_path(self._db_path))
+        self.diagnostics_api_base_url_label.setText(settings.get("kaospacs_api_base_url", ""))
+        self.diagnostics_gateway_url_label.setText(settings.get("kaospacs_gateway_url", ""))
+        self.diagnostics_dry_run_label.setText(
+            "on" if (settings.get("pacs_dry_run") or "").strip().lower() == "true" else "off"
         )
 
     def _shift_selected_date(self, days: int) -> None:
@@ -677,7 +937,7 @@ class PacsPanel(QWidget):
             return False
         return digits[:8] == self._selected_date.strftime("%Y%m%d")
 
-    def _update_filter_button_states(self) -> None:
+    def _update_local_filter_button_states(self) -> None:
         for key, button in self.filter_buttons.items():
             is_selected = key == self._active_filter
             button.setChecked(is_selected)
@@ -691,8 +951,8 @@ class PacsPanel(QWidget):
     def clear_audit(self) -> None:
         confirmed = QMessageBox.question(
             self,
-            "Clear PACS Audit",
-            "Clear local PACS audit events?",
+            "Clear PACS Log",
+            "Clear local PACS log events?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

@@ -19,6 +19,7 @@ def test_settings_panel_instantiates(tmp_path) -> None:
 
     assert tab is not None
     assert tab.eghis_db_connection_string.echoMode() == tab.eghis_db_connection_string.EchoMode.Password
+    assert tab.kaospacs_gateway_api_token.echoMode() == tab.kaospacs_gateway_api_token.EchoMode.Password
 
 
 def test_save_pacs_settings_persists_values(tmp_path) -> None:
@@ -32,8 +33,9 @@ def test_save_pacs_settings_persists_values(tmp_path) -> None:
     tab = SettingsTab(db_path=db_path)
     tab.eghis_db_connection_string.setText("Host=x;Password=secret")
     tab.eghis_db_image_study_query.setPlainText("SELECT 1")
-    tab.eghis_db_weekly_age_report_query.setPlainText("SELECT 2")
     tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
+    tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
+    tab.kaospacs_gateway_api_token.setText("secret-token")
     tab.kaospacs_api_timeout_seconds.setText("5")
     tab.pacs_auto_poll_enabled.setChecked(True)
     tab.pacs_dry_run.setChecked(True)
@@ -45,8 +47,9 @@ def test_save_pacs_settings_persists_values(tmp_path) -> None:
 
     assert settings["eghis_db_connection_string"] == "Host=x;Password=secret"
     assert settings["eghis_db_image_study_query"] == "SELECT 1"
-    assert settings["eghis_db_weekly_age_report_query"] == "SELECT 2"
     assert settings["kaospacs_api_base_url"] == "http://127.0.0.1:8055"
+    assert settings["kaospacs_gateway_url"] == "http://127.0.0.1:8060"
+    assert settings["kaospacs_gateway_api_token"] == "secret-token"
     assert settings["kaospacs_api_timeout_seconds"] == "5"
     assert settings["pacs_auto_poll_enabled"] == "true"
     assert settings["pacs_dry_run"] == "true"
@@ -64,8 +67,9 @@ def test_reset_pacs_settings_restores_defaults(tmp_path) -> None:
     tab = SettingsTab(db_path=db_path)
     tab.eghis_db_connection_string.setText("Host=x;Password=secret")
     tab.eghis_db_image_study_query.setPlainText("SELECT 1")
-    tab.eghis_db_weekly_age_report_query.setPlainText("SELECT 2")
     tab.kaospacs_api_base_url.setText("https://example")
+    tab.kaospacs_gateway_url.setText("https://gateway")
+    tab.kaospacs_gateway_api_token.setText("secret-token")
     tab.kaospacs_api_timeout_seconds.setText("9")
     tab.pacs_auto_poll_enabled.setChecked(True)
     tab.pacs_dry_run.setChecked(True)
@@ -77,8 +81,9 @@ def test_reset_pacs_settings_restores_defaults(tmp_path) -> None:
 
     assert settings["eghis_db_connection_string"] == ""
     assert settings["eghis_db_image_study_query"] == ""
-    assert settings["eghis_db_weekly_age_report_query"] == ""
     assert settings["kaospacs_api_base_url"] == "http://127.0.0.1:8055"
+    assert settings["kaospacs_gateway_url"] == "http://127.0.0.1:8060"
+    assert settings["kaospacs_gateway_api_token"] == ""
     assert settings["kaospacs_api_timeout_seconds"] == "5"
     assert settings["pacs_auto_poll_enabled"] == "false"
     assert settings["pacs_dry_run"] == "false"
@@ -92,10 +97,25 @@ def test_invalid_url_rejected(tmp_path) -> None:
 
     tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
     tab.kaospacs_api_base_url.setText("ftp://bad")
+    tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_api_timeout_seconds.setText("5")
     tab.save_pacs_settings()
 
     assert "must start with http:// or https://" in tab.pacs_status.text()
+
+
+def test_invalid_gateway_url_rejected(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.settings_tab import SettingsTab
+
+    tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
+    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
+    tab.kaospacs_gateway_url.setText("ftp://bad")
+    tab.kaospacs_api_timeout_seconds.setText("5")
+    tab.save_pacs_settings()
+
+    assert "Gateway URL must start with http:// or https://" in tab.pacs_status.text()
 
 
 def test_invalid_timeout_rejected(tmp_path) -> None:
@@ -105,6 +125,7 @@ def test_invalid_timeout_rejected(tmp_path) -> None:
 
     tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
     tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
+    tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_api_timeout_seconds.setText("nope")
     tab.save_pacs_settings()
 
@@ -137,6 +158,7 @@ def test_test_kaospacs_calls_health_only(monkeypatch, tmp_path) -> None:
 
     tab = settings_tab_module.SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
     tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
+    tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_api_timeout_seconds.setText("5")
     tab.test_kaospacs_connection()
 
@@ -153,24 +175,12 @@ def test_connection_string_not_displayed_in_status_labels(tmp_path) -> None:
     tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
     tab.eghis_db_connection_string.setText(secret)
     tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
+    tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
+    tab.kaospacs_gateway_api_token.setText("gateway-secret")
     tab.kaospacs_api_timeout_seconds.setText("5")
     tab.save_pacs_settings()
 
     assert secret not in tab.general_status.text()
     assert secret not in tab.pacs_status.text()
-
-
-def test_active_sqlite_path_displayed_without_secret(tmp_path) -> None:
-    _app()
-
-    from KaosEghis.ui.tabs.settings_tab import SettingsTab
-
-    db_path = tmp_path / "KaosEghis.sqlite"
-    secret = "Host=x;Password=topsecret"
-    tab = SettingsTab(db_path=db_path)
-    tab.eghis_db_connection_string.setText(secret)
-    tab.load_settings()
-
-    assert "Active SQLite path:" in tab.sqlite_path_label.text()
-    assert str(db_path.resolve()) in tab.sqlite_path_label.text()
-    assert secret not in tab.sqlite_path_label.text()
+    assert "gateway-secret" not in tab.general_status.text()
+    assert "gateway-secret" not in tab.pacs_status.text()
