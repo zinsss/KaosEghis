@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 import random
 import time
@@ -21,15 +22,30 @@ from KaosEghis.db.repositories import (
 )
 
 
+@dataclass
+class _RunMetrics:
+    cache_hits: int = 0
+    cache_misses: int = 0
+
+    @property
+    def resolved_targets(self) -> int:
+        return 0
+
+
 class MacroRunner:
     def __init__(self, db_path: Path | None = None) -> None:
         self._cancel_requested = False
         self._db_path = db_path
         self._current_settings: dict[str, str] | None = None
         self._current_profile_name: str | None = None
+        self._current_profile_id: int | None = None
+        self._resolved_target_cache: dict[tuple[int | None, str, str | None], object] = {}
+        self._resolved_target_aliases: dict[str, tuple[int | None, str, str | None]] = {}
+        self._run_metrics = _RunMetrics()
 
     def cancel(self) -> None:
         self._cancel_requested = True
+        self._clear_resolved_target_cache()
 
     def reset_cancel(self) -> None:
         self._cancel_requested = False
@@ -53,6 +69,7 @@ class MacroRunner:
             ]
             run_settings = settings or get_settings(connection)
         self._current_profile_name = profile.name if profile is not None else None
+        self._current_profile_id = profile.id if profile is not None else None
 
         if not dry_run and not item.is_enabled:
             return MacroRunResult(False, "Macro execution blocked: macro is disabled.", 0, None)
@@ -70,10 +87,12 @@ class MacroRunner:
         settings: dict[str, str] | None = None,
     ) -> MacroRunResult:
         self.reset_cancel()
+        self._start_run_state()
 
         if dry_run:
             return self._build_dry_run_result(steps)
         if settings is None:
+            self._clear_resolved_target_cache()
             return MacroRunResult(
                 False,
                 "window not ready",
@@ -83,6 +102,7 @@ class MacroRunner:
 
         state = ensure_ready_for_macro(settings)
         if state.status != "green":
+            self._clear_resolved_target_cache()
             return MacroRunResult(
                 False,
                 state.message or "window not ready",
@@ -94,11 +114,12 @@ class MacroRunner:
         self._current_settings = settings
         for step in steps:
             if self._cancel_requested:
+                self._clear_resolved_target_cache()
                 return MacroRunResult(
                     False, "Macro execution canceled.", executed_steps, executed_steps + 1
                 )
 
-            result = self._execute_step(step)
+            result = self._execute_step_with_retries(step)
             if not result.success:
                 failed_step = step.options.get("step_order")
                 if not isinstance(failed_step, int):
@@ -116,11 +137,17 @@ class MacroRunner:
 
             executed_steps += 1
             if self._cancel_requested:
+                self._clear_resolved_target_cache()
                 return MacroRunResult(
                     False, "Macro execution canceled.", executed_steps, executed_steps + 1
                 )
 
-        return MacroRunResult(True, "Macro execution completed.", executed_steps, None)
+        return MacroRunResult(
+            True,
+            self._with_run_metrics("Macro execution completed."),
+            executed_steps,
+            None,
+        )
 
     def _build_dry_run_result(self, steps: Sequence[MacroStep]) -> MacroRunResult:
         profile_name = self._current_profile_name or "(No EMR profile)"
@@ -132,6 +159,7 @@ class MacroRunner:
             lines.append(self._dry_run_step_line(step, index))
         if not steps:
             lines.append("No steps defined.")
+        lines.append(self._metrics_text())
         lines.append("No actions executed.")
         return MacroRunResult(
             True,
@@ -139,6 +167,18 @@ class MacroRunner:
             len(steps),
             None,
         )
+
+    def _execute_step_with_retries(self, step: MacroStep) -> MacroRunResult:
+        attempts = max(int(step.retries or 0), 0) + 1
+        last_result = MacroRunResult(False, "unknown error", 0, None)
+        for attempt in range(attempts):
+            last_result = self._execute_step(step)
+            if last_result.success:
+                return last_result
+            if not self._should_retry_step(step, last_result.message, attempt, attempts):
+                return last_result
+            self._clear_resolved_target_cache()
+        return last_result
 
     def _execute_step(self, step: MacroStep) -> MacroRunResult:
         action = self._action_name(step)
@@ -150,6 +190,10 @@ class MacroRunner:
             return self._run_wait_window(step, self._require_settings())
         if action == "wait_text_or_image":
             return MacroRunResult(False, "unsupported action", 0, None)
+        if action == "read_text_uia":
+            return self._run_read_text_uia(step, self._require_settings())
+        if action == "set_text_uia":
+            return self._run_set_text_uia(step, self._require_settings())
         if action == "click":
             return self._run_click(step, self._require_settings())
         if action in {"hotkey", "key"}:
@@ -192,6 +236,7 @@ class MacroRunner:
     def _run_focus_window(self, settings: dict[str, str]) -> MacroRunResult:
         state = ensure_ready_for_macro(settings)
         if state.status != "green":
+            self._clear_resolved_target_cache()
             return MacroRunResult(False, state.message or "window not ready", 0, None)
         return MacroRunResult(True, "Focused configured Eghis window.", 1, None)
 
@@ -207,8 +252,10 @@ class MacroRunner:
             if state.window_found:
                 return MacroRunResult(True, "Window found.", 1, None)
             if self._cancel_requested:
+                self._clear_resolved_target_cache()
                 return MacroRunResult(False, "Macro execution canceled.", 0, None)
             if time.monotonic() >= deadline:
+                self._clear_resolved_target_cache()
                 return MacroRunResult(False, "timeout", 0, None)
             time.sleep(0.05)
 
@@ -221,7 +268,19 @@ class MacroRunner:
         try:
             target.click_input()
         except Exception:
-            return MacroRunResult(False, "input failed", 0, None)
+            self._resolved_target_cache.pop(step.target_id, None)
+            target, resolve_message = self._resolve_runtime_target(
+                settings,
+                step.target_id,
+                force_refresh=True,
+            )
+            if target is None:
+                return MacroRunResult(False, resolve_message, 0, None)
+            try:
+                target.click_input()
+            except Exception:
+                self._clear_resolved_target_cache()
+                return MacroRunResult(False, "input failed", 0, None)
         return MacroRunResult(True, f"Clicked target '{step.target_id}'.", 1, None)
 
     def _run_hotkey(self, step: MacroStep) -> MacroRunResult:
@@ -285,7 +344,7 @@ class MacroRunner:
     def _run_preset_text(
         self,
         step: MacroStep,
-        settings: dict[str, str],
+        _settings: dict[str, str],
     ) -> MacroRunResult:
         reference = step.options.get("preset", step.value)
         if not isinstance(reference, str) or not reference.strip():
@@ -304,6 +363,43 @@ class MacroRunner:
             options={"text": text},
         )
         return self._run_paste_text(preset_step)
+
+    def _run_read_text_uia(
+        self,
+        step: MacroStep,
+        settings: dict[str, str],
+    ) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+        text_value = self._read_text_from_target(target)
+        if text_value is None:
+            return MacroRunResult(False, "target not found", 0, None)
+        return MacroRunResult(True, "Read text.", 1, None)
+
+    def _run_set_text_uia(
+        self,
+        step: MacroStep,
+        settings: dict[str, str],
+    ) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        text = step.options.get("text", step.value)
+        if not isinstance(text, str) or not text:
+            return MacroRunResult(False, "unknown error", 0, None)
+        target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+        if self._try_set_value_pattern(target, text):
+            return MacroRunResult(True, "Set text with UIA value pattern.", 1, None)
+        try:
+            target.set_edit_text(text)
+            return MacroRunResult(True, "Set text with edit wrapper.", 1, None)
+        except Exception:
+            self._clear_resolved_target_cache()
+            return MacroRunResult(False, "input failed", 0, None)
 
     def _resolve_preset_text(self, reference: str) -> str | None:
         with connect(self._db_path or get_database_path()) as connection:
@@ -348,8 +444,14 @@ class MacroRunner:
             return variants[0]
 
     def _resolve_runtime_target(
-        self, settings: dict[str, str], target_id: str
+        self, settings: dict[str, str], target_id: str, force_refresh: bool = False
     ) -> tuple[object | None, str]:
+        if not force_refresh:
+            cache_key = self._resolved_target_aliases.get(target_id)
+            if cache_key is not None and cache_key in self._resolved_target_cache:
+                self._run_metrics.cache_hits += 1
+                return self._resolved_target_cache[cache_key], "Target resolved."
+        self._run_metrics.cache_misses += 1
         with connect(self._db_path or get_database_path()) as connection:
             target = connection.execute(
                 """
@@ -361,19 +463,33 @@ class MacroRunner:
                 (target_id,),
             ).fetchone()
         if target is None:
+            self._clear_resolved_target_cache()
             return None, "target not found"
 
         from KaosEghis.db.repositories import _ui_target_from_row
 
+        target_record = _ui_target_from_row(target)
+        cache_key = (
+            self._current_profile_id,
+            target_record.target_id,
+            target_record.parent_target_id,
+        )
+        if not force_refresh and cache_key in self._resolved_target_cache:
+            self._resolved_target_aliases[target_id] = cache_key
+            self._run_metrics.cache_hits += 1
+            return self._resolved_target_cache[cache_key], "Target resolved."
         element, _parent_found, message = resolve_target_element(
-            settings, _ui_target_from_row(target)
+            settings, target_record
         )
         if element is None:
+            self._clear_resolved_target_cache()
             if "timed out" in message.casefold() or "timeout" in message.casefold():
                 return None, "timeout"
             if "window" in message.casefold():
                 return None, "window not ready"
             return None, "target not found"
+        self._resolved_target_cache[cache_key] = element
+        self._resolved_target_aliases[target_id] = cache_key
         return element, "Target resolved."
 
     def _focus_runtime_target(self, step: MacroStep) -> MacroRunResult | None:
@@ -385,7 +501,18 @@ class MacroRunner:
             return MacroRunResult(False, resolve_message, 0, None)
         focused, focus_message = self._focus_target_element(target)
         if not focused:
-            return MacroRunResult(False, focus_message, 0, None)
+            self._clear_resolved_target_cache()
+            target, resolve_message = self._resolve_runtime_target(
+                settings,
+                step.target_id,
+                force_refresh=True,
+            )
+            if target is None:
+                return MacroRunResult(False, resolve_message, 0, None)
+            focused, focus_message = self._focus_target_element(target)
+            if not focused:
+                self._clear_resolved_target_cache()
+                return MacroRunResult(False, focus_message, 0, None)
         return None
 
     @staticmethod
@@ -435,6 +562,78 @@ class MacroRunner:
         if self._current_settings is None:
             raise RuntimeError("Macro execution blocked: Eghis connector settings are required.")
         return self._current_settings
+
+    def _start_run_state(self) -> None:
+        self._clear_resolved_target_cache()
+        self._run_metrics = _RunMetrics()
+
+    def _clear_resolved_target_cache(self) -> None:
+        self._resolved_target_cache.clear()
+        self._resolved_target_aliases.clear()
+
+    def _metrics_text(self) -> str:
+        return (
+            f"Resolved targets: {len(self._resolved_target_cache)} | "
+            f"Cache hits: {self._run_metrics.cache_hits} | "
+            f"Cache misses: {self._run_metrics.cache_misses}"
+        )
+
+    def _with_run_metrics(self, base_message: str) -> str:
+        return f"{base_message}\n{self._metrics_text()}"
+
+    @staticmethod
+    def _should_retry_step(
+        step: MacroStep,
+        message: str,
+        attempt_index: int,
+        attempts: int,
+    ) -> bool:
+        if attempt_index + 1 >= attempts:
+            return False
+        if not step.target_id:
+            return False
+        return message in {"target not found", "window not ready", "timeout"}
+
+    @staticmethod
+    def _read_text_from_target(target: object) -> str | None:
+        for method_name in ("get_value", "window_text"):
+            try:
+                value = getattr(target, method_name)()
+            except Exception:
+                continue
+            if value:
+                return str(value)
+        try:
+            values = target.texts()
+        except Exception:
+            values = None
+        if isinstance(values, list):
+            text = "\n".join(str(item) for item in values if item)
+            if text:
+                return text
+        try:
+            iface_value = target.iface_value
+            value = iface_value.CurrentValue
+        except Exception:
+            return None
+        return str(value) if value else None
+
+    @staticmethod
+    def _try_set_value_pattern(target: object, text: str) -> bool:
+        try:
+            iface_value = target.iface_value
+        except Exception:
+            return False
+        try:
+            if bool(getattr(iface_value, "CurrentIsReadOnly", False)):
+                return False
+        except Exception:
+            pass
+        try:
+            iface_value.SetValue(text)
+            return True
+        except Exception:
+            return False
 
     @staticmethod
     def _sanitize_failure_message(action: str, message: str) -> str:
