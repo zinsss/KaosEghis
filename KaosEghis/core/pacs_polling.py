@@ -52,6 +52,20 @@ _CANONICAL_ALIASES = {
         "처방번호",
     ],
 }
+_STUDY_SQL = """
+COALESCE(
+    NULLIF(BTRIM(COALESCE(m.scheduled_proc_desc::text, '')), ''),
+    NULLIF(BTRIM(COALESCE(m.requested_proc_desc::text, '')), '')
+)
+""".strip()
+_REQUESTED_AT_SQL = """
+COALESCE(
+    NULLIF(BTRIM(COALESCE(m.scheduled_dttm::text, '')), ''),
+    NULLIF(BTRIM(COALESCE(m.imaging_request_dttm::text, '')), ''),
+    NULLIF(BTRIM(COALESCE(m.trigger_dttm::text, '')), ''),
+    NULLIF(BTRIM(COALESCE(m.replica_dttm::text, '')), '')
+)
+""".strip()
 _DEFAULT_IMAGE_ORDER_QUERY = """
 SELECT
     CASE
@@ -60,18 +74,13 @@ SELECT
     END AS status,
     m.patient_name AS patient_name,
     m.patient_id AS patient_id,
-    COALESCE(m.scheduled_proc_desc, m.requested_proc_desc) AS study,
+    {study_sql} AS study,
     CASE
         WHEN m.scheduled_modality = 'BMD' OR o.ord_cd = 'HC342' THEN 'BMD'
         WHEN m.scheduled_modality = 'DR' THEN 'CR'
         ELSE m.scheduled_modality
     END AS modality,
-    COALESCE(
-        m.scheduled_dttm,
-        m.imaging_request_dttm,
-        m.trigger_dttm,
-        m.replica_dttm
-    ) AS requested_at,
+    {requested_at_sql} AS requested_at,
     COALESCE(NULLIF(m.accession_no, ''), m.eghis_key) AS accession_or_order_id,
     m.eghis_key,
     o.dc_yn
@@ -85,13 +94,11 @@ WHERE o.proc_dept_cd = 'XRAY'
       m.scheduled_proc_status = '100'
       OR COALESCE(o.dc_yn, 'N') = 'Y'
   )
-ORDER BY COALESCE(
-    m.scheduled_dttm,
-    m.imaging_request_dttm,
-    m.trigger_dttm,
-    m.replica_dttm
-) DESC
-""".strip()
+ORDER BY {requested_at_sql} DESC
+""".strip().format(
+    study_sql=_STUDY_SQL,
+    requested_at_sql=_REQUESTED_AT_SQL,
+)
 
 
 @dataclass(frozen=True)
@@ -358,12 +365,9 @@ def _build_default_image_order_query(
   AND substring(
       regexp_replace(
           COALESCE(
-              m.scheduled_dttm,
-              m.imaging_request_dttm,
-              m.trigger_dttm,
-              m.replica_dttm,
+              {_REQUESTED_AT_SQL},
               ''
-          )::text,
+          ),
           '[^0-9]',
           '',
           'g'
@@ -428,12 +432,9 @@ FROM public.mwl AS m
 WHERE substring(
         regexp_replace(
             COALESCE(
-                m.scheduled_dttm,
-                m.imaging_request_dttm,
-                m.trigger_dttm,
-                m.replica_dttm,
+                {_REQUESTED_AT_SQL},
                 ''
-            )::text,
+            ),
             '[^0-9]',
             '',
             'g'
