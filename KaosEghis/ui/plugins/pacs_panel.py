@@ -160,6 +160,7 @@ class PacsPanel(QWidget):
         imaging_filter_row = QHBoxLayout()
         for key, label in (
             ("active", "Active"),
+            ("inactive", "Inactive"),
             ("completed", "Completed"),
             ("expired", "Expired"),
             ("cancelled", "Cancelled"),
@@ -512,8 +513,6 @@ class PacsPanel(QWidget):
     def _imaging_entry_state(self, entry: dict) -> str:
         state = self._entry_text(entry, "state").lower()
         if state:
-            if state == "inactive":
-                return "active"
             return state
         if self._entry_text(entry, "CancelledAt"):
             return "cancelled"

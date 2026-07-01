@@ -3,6 +3,7 @@ from urllib import error
 
 from KaosEghis.core.kaospacs_client import (
     _build_kaospacs_entry,
+    KaosPacsRequestError,
     cancel_kaospacs_order,
     check_kaospacs_health,
     reconcile_kaospacs_worklist_to_local,
@@ -143,6 +144,54 @@ def test_push_kaospacs_worklist_falls_back_to_legacy_put_worklist_on_404(monkeyp
     ]
 
 
+def test_push_kaospacs_worklist_does_not_fall_back_on_500(monkeypatch) -> None:
+    import KaosEghis.core.kaospacs_client as client
+
+    calls = []
+
+    def fake_urlopen(req, timeout=0):
+        calls.append(req.full_url)
+        raise error.HTTPError(req.full_url, 500, "Server Error", hdrs=None, fp=None)
+
+    monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
+
+    try:
+        push_kaospacs_worklist(
+            {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+            [{"AccessionNumber": "ACC-1"}],
+        )
+    except KaosPacsRequestError as exc:
+        assert exc.status_code == 500
+    else:
+        raise AssertionError("Expected KaosPacsRequestError")
+
+    assert calls == ["http://127.0.0.1:8055/orders/upsert"]
+
+
+def test_push_kaospacs_worklist_does_not_fall_back_on_network_error(monkeypatch) -> None:
+    import KaosEghis.core.kaospacs_client as client
+
+    calls = []
+
+    def fake_urlopen(req, timeout=0):
+        calls.append(req.full_url)
+        raise error.URLError("down")
+
+    monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
+
+    try:
+        push_kaospacs_worklist(
+            {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+            [{"AccessionNumber": "ACC-1"}],
+        )
+    except KaosPacsRequestError as exc:
+        assert exc.status_code is None
+    else:
+        raise AssertionError("Expected KaosPacsRequestError")
+
+    assert calls == ["http://127.0.0.1:8055/orders/upsert"]
+
+
 def test_push_kaospacs_worklist_matches_kaospacs_contract(monkeypatch) -> None:
     import KaosEghis.core.kaospacs_client as client
 
@@ -191,6 +240,30 @@ def test_cancel_kaospacs_order_falls_back_to_legacy_worklist_cancel_on_404(monke
         ("POST", "http://127.0.0.1:8055/orders/cancel", {"AccessionNumber": "ACC-1"}),
         ("POST", "http://127.0.0.1:8055/worklist/cancel", {"AccessionNumber": "ACC-1"}),
     ]
+
+
+def test_cancel_kaospacs_order_does_not_fall_back_on_500(monkeypatch) -> None:
+    import KaosEghis.core.kaospacs_client as client
+
+    calls = []
+
+    def fake_urlopen(req, timeout=0):
+        calls.append(req.full_url)
+        raise error.HTTPError(req.full_url, 500, "Server Error", hdrs=None, fp=None)
+
+    monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
+
+    try:
+        cancel_kaospacs_order(
+            {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+            "ACC-1",
+        )
+    except KaosPacsRequestError as exc:
+        assert exc.status_code == 500
+    else:
+        raise AssertionError("Expected KaosPacsRequestError")
+
+    assert calls == ["http://127.0.0.1:8055/orders/cancel"]
 
 
 def test_successful_sync_marks_sent(tmp_path, monkeypatch) -> None:

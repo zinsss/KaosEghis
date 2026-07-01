@@ -36,6 +36,12 @@ class KaosPacsReconcileResult:
     dry_run: bool = False
 
 
+class KaosPacsRequestError(RuntimeError):
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def check_kaospacs_health(settings: dict[str, str]) -> bool:
     payload = _request_json(settings, "GET", "/health")
     return bool(payload)
@@ -396,8 +402,10 @@ def _request_json(
     try:
         with request.urlopen(http_request, timeout=timeout_seconds) as response:
             body = response.read().decode("utf-8")
-    except (error.HTTPError, error.URLError, TimeoutError, ValueError) as exc:
-        raise RuntimeError(str(exc)) from exc
+    except error.HTTPError as exc:
+        raise KaosPacsRequestError(str(exc), status_code=exc.code) from exc
+    except (error.URLError, TimeoutError, ValueError) as exc:
+        raise KaosPacsRequestError(str(exc), status_code=None) from exc
     if not body:
         return {}
     return json.loads(body)
@@ -412,8 +420,7 @@ def _is_pacs_dry_run(settings: dict[str, str]) -> bool:
 
 
 def _is_http_not_found_error(exc: RuntimeError) -> bool:
-    message = str(exc).lower()
-    return "404" in message or "not found" in message
+    return isinstance(exc, KaosPacsRequestError) and exc.status_code == 404
 
 
 def _validate_kaospacs_entry(entry: dict[str, str]) -> str | None:

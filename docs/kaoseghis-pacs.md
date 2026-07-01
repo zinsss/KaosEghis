@@ -74,6 +74,7 @@ Status ownership:
 - preferred create/update endpoint: `POST /orders/upsert`
 - preferred cancel/delete endpoint: `POST /orders/cancel`
 - compatibility fallback for older KaosPACS servers:
+  - only on HTTP `404 Not Found`
   - create/update -> `PUT /worklist`
   - cancel/delete -> `POST /worklist/cancel`
 - requests are sent as `application/json; charset=utf-8`
@@ -83,10 +84,11 @@ Status ownership:
 
 ### Reconcile
 
-- source: KaosPACS API
+- source: KaosPACS Gateway imaging worklist when Gateway URL is configured
 - direction: KaosPACS Gateway imaging worklist -> local SQLite status update
 - preferred source: `GET /imaging/worklist`
-- fallback source: KaosPACS API `GET /worklist` when no Gateway URL is configured
+- if Gateway URL is configured and Gateway is unavailable, reconcile reports `KaosPACS Gateway unavailable`
+- fallback source: KaosPACS API `GET /worklist` only when Gateway URL is explicitly blank
 - completed returned by KaosPACS becomes local `completed`
 - expired returned by KaosPACS becomes local `expired`
 - KaosEghis-pacs never calculates expiry locally
@@ -94,6 +96,8 @@ Status ownership:
 - never creates new local rows from KaosPACS
 - never deletes local rows
 - never infers local business cancellation from KaosPACS imaging state
+
+Gateway imaging states are shown as-is in the imaging view filters. `inactive` is not treated as `active` unless KaosPACS defines that compatibility explicitly in future.
 
 Local state transition model:
 

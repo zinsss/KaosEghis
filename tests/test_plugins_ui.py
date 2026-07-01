@@ -43,6 +43,7 @@ def test_pacs_panel_default_page_is_imaging_worklist(monkeypatch, tmp_path) -> N
     assert panel.page_stack.currentWidget() is panel.imaging_page
     assert panel.page_buttons["imaging"].isChecked() is True
     assert panel.imaging_filter_buttons["active"].isChecked() is True
+    assert "inactive" in panel.imaging_filter_buttons
     assert panel.imaging_status_label.text() == "Not loaded yet."
 
 
@@ -125,6 +126,14 @@ def test_imaging_worklist_korean_text_and_filters(monkeypatch, tmp_path) -> None
 
     rows = [
         {
+            "state": "inactive",
+            "AccessionNumber": "ACC-0",
+            "PatientID": "P-0",
+            "PatientName": "Dormant",
+            "Modality": "CT",
+            "Description": "Inactive row",
+        },
+        {
             "state": "active",
             "AccessionNumber": "ACC-1",
             "PatientID": "P-1",
@@ -174,6 +183,10 @@ def test_imaging_worklist_korean_text_and_filters(monkeypatch, tmp_path) -> None
     assert panel.imaging_table.rowCount() == 1
     assert panel.imaging_table.item(0, 1).text() == "ACC-2"
 
+    panel.imaging_filter_buttons["inactive"].click()
+    assert panel.imaging_table.rowCount() == 1
+    assert panel.imaging_table.item(0, 1).text() == "ACC-0"
+
     panel.imaging_filter_buttons["expired"].click()
     assert panel.imaging_table.rowCount() == 1
     assert panel.imaging_table.item(0, 1).text() == "ACC-3"
@@ -183,7 +196,7 @@ def test_imaging_worklist_korean_text_and_filters(monkeypatch, tmp_path) -> None
     assert panel.imaging_table.item(0, 1).text() == "ACC-4"
 
     panel.imaging_filter_buttons["all"].click()
-    assert panel.imaging_table.rowCount() == 4
+    assert panel.imaging_table.rowCount() == 5
 
 
 def test_imaging_worklist_search_filters_rows(monkeypatch, tmp_path) -> None:
@@ -239,7 +252,7 @@ def test_gateway_unavailable_shows_safe_error(monkeypatch, tmp_path) -> None:
     assert panel.imaging_table.rowCount() == 0
 
 
-def test_inactive_imaging_rows_are_shown_under_active_filter(monkeypatch, tmp_path) -> None:
+def test_inactive_imaging_rows_are_not_shown_under_active_filter(monkeypatch, tmp_path) -> None:
     _app()
 
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
@@ -263,8 +276,10 @@ def test_inactive_imaging_rows_are_shown_under_active_filter(monkeypatch, tmp_pa
     panel.refresh_imaging_worklist()
 
     assert panel.imaging_filter_buttons["active"].isChecked() is True
+    assert panel.imaging_table.rowCount() == 0
+    panel.imaging_filter_buttons["inactive"].click()
     assert panel.imaging_table.rowCount() == 1
-    assert panel.imaging_table.item(0, 0).text() == "active"
+    assert panel.imaging_table.item(0, 0).text() == "inactive"
     assert panel.imaging_table.item(0, 1).text() == "ACC-INACTIVE"
 
 
