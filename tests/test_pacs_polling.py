@@ -611,7 +611,7 @@ def test_poll_service_missing_mwl_row_changes_active_to_cancelled_and_audits(
     assert "Alice" not in audit_rows[0].summary
 
 
-def test_poll_service_missing_mwl_row_preserves_done_and_cancelled(
+def test_poll_service_missing_mwl_row_preserves_completed_and_cancelled(
     tmp_path, monkeypatch
 ) -> None:
     db_path = tmp_path / "KaosEghis.sqlite"
@@ -622,11 +622,11 @@ def test_poll_service_missing_mwl_row_preserves_done_and_cancelled(
     with connect(db_path) as connection:
         create_pacs_worklist_item(
             connection,
-            status="done",
+            status="completed",
             study="Chest",
             modality="CR",
             requested_at="2026-06-30 09:30:00",
-            accession_or_order_id="ACC-DONE",
+            accession_or_order_id="ACC-COMPLETED",
             source="eghis-db",
         )
         create_pacs_worklist_item(
@@ -660,7 +660,7 @@ def test_poll_service_missing_mwl_row_preserves_done_and_cancelled(
         audit_rows = list_pacs_audit_events(connection)
 
     assert result.removed_active == 0
-    assert [row.status for row in rows] == ["done", "cancelled"]
+    assert [row.status for row in rows] == ["completed", "cancelled"]
     assert audit_rows == []
 
 

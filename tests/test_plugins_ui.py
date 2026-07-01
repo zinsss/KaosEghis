@@ -134,6 +134,33 @@ def test_pacs_worklist_dialog_instantiates() -> None:
     assert dialog.status_combo.currentText() == "active"
 
 
+def test_pacs_worklist_dialog_manual_statuses_exclude_imaging_owned_states() -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_worklist_dialog import PacsWorklistDialog
+
+    dialog = PacsWorklistDialog()
+    values = [dialog.status_combo.itemText(index) for index in range(dialog.status_combo.count())]
+
+    assert "active" in values
+    assert "cancelled" in values
+    assert "error" in values
+    assert "completed" not in values
+    assert "expired" not in values
+
+
+def test_pacs_panel_filter_buttons_include_completed_and_expired(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.pacs_panel import PacsPanel
+
+    panel = PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+
+    assert "completed" in panel.filter_buttons
+    assert "expired" in panel.filter_buttons
+    assert "done" not in panel.filter_buttons
+
+
 def test_pacs_worklist_dialog_validation_rejects_missing_accession() -> None:
     _app()
 
@@ -447,7 +474,7 @@ def test_pacs_panel_reconcile_button_calls_reconcile_not_poll_or_sync(monkeypatc
         pacs_panel_module,
         "reconcile_kaospacs_worklist_to_local",
         lambda settings, db_path: calls.__setitem__("reconcile", calls["reconcile"] + 1)
-        or KaosPacsReconcileResult(done=1, cancelled=2, skipped=3, errors=0),
+        or KaosPacsReconcileResult(completed=1, expired=2, skipped=3, errors=0),
     )
 
     panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
@@ -456,7 +483,7 @@ def test_pacs_panel_reconcile_button_calls_reconcile_not_poll_or_sync(monkeypatc
     assert calls == {"poll": 0, "sync": 0, "reconcile": 1}
     assert (
         panel.polling_status.text()
-        == "KaosPACS reconcile: done=1, cancelled=2, skipped=3, errors=0"
+        == "KaosPACS reconcile: completed=1, expired=2, skipped=3, errors=0"
     )
 
 
@@ -740,7 +767,7 @@ def test_pacs_panel_edit_selected_updates_local_row(monkeypatch, tmp_path) -> No
         "modality": "MR",
         "requested_at": "2026-06-29 10:00",
         "accession_or_order_id": "ACC-902",
-        "status": "done",
+        "status": "active",
     }
 
     class FakeDialog:
@@ -771,7 +798,7 @@ def test_pacs_panel_edit_selected_updates_local_row(monkeypatch, tmp_path) -> No
     assert updated.chart_no == "C002"
     assert updated.study == "Spine"
     assert updated.modality == "MR"
-    assert updated.status == "done"
+    assert updated.status == "active"
     assert audit_rows[0].event_type == "manual_edit"
     assert "Bob" not in audit_rows[0].summary
 
@@ -1014,7 +1041,9 @@ def test_pacs_panel_reconcile_creates_aggregate_audit_only(monkeypatch, tmp_path
     monkeypatch.setattr(
         pacs_panel_module,
         "reconcile_kaospacs_worklist_to_local",
-        lambda settings, db_path: KaosPacsReconcileResult(done=1, cancelled=2, skipped=3, errors=0),
+        lambda settings, db_path: KaosPacsReconcileResult(
+            completed=1, expired=2, skipped=3, errors=0
+        ),
     )
 
     db_path = tmp_path / "KaosEghis.sqlite"
@@ -1025,7 +1054,7 @@ def test_pacs_panel_reconcile_creates_aggregate_audit_only(monkeypatch, tmp_path
         audit_rows = list_pacs_audit_events(connection)
 
     assert audit_rows[0].event_type == "reconcile"
-    assert audit_rows[0].summary == "done=1, cancelled=2, skipped=3, errors=0"
+    assert audit_rows[0].summary == "completed=1, expired=2, skipped=3, errors=0"
 
 
 def test_pacs_panel_audit_error_is_sanitized_before_storage(monkeypatch, tmp_path) -> None:
@@ -1040,8 +1069,8 @@ def test_pacs_panel_audit_error_is_sanitized_before_storage(monkeypatch, tmp_pat
         pacs_panel_module,
         "reconcile_kaospacs_worklist_to_local",
         lambda settings, db_path: KaosPacsReconcileResult(
-            done=0,
-            cancelled=0,
+            completed=0,
+            expired=0,
             skipped=0,
             errors=1,
             message="Connection refused for patient Alice during payload parse failure",
@@ -1210,7 +1239,7 @@ def test_flu_panel_can_load_week_without_backend(tmp_path) -> None:
 
     labels = [label.text() for label in panel.findChildren(QLabel)]
     assert "Weekly - Influenza Report" in labels
-    assert "Total Visits(Practice) Count: 0" in panel.report_output.toPlainText()
+    assert panel.report_output.toPlainText() == "Eghis DB not configured."
 
 
 def test_flu_panel_instantiates_without_calling_fetch(monkeypatch) -> None:
