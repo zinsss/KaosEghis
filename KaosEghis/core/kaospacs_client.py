@@ -27,8 +27,8 @@ class KaosPacsSyncResult:
 
 @dataclass(frozen=True)
 class KaosPacsReconcileResult:
-    done: int
-    cancelled: int
+    completed: int
+    expired: int
     skipped: int
     errors: int
     message: str | None = None
@@ -45,25 +45,14 @@ def fetch_kaospacs_worklist(settings: dict[str, str]) -> dict:
 
 
 def push_kaospacs_worklist(settings: dict[str, str], entries: list[dict]) -> dict:
-    # KaosPACS PUT /worklist expects the same JSON file shape it serves:
-    # {"entries": [...]}
-    return _request_json(settings, "PUT", "/worklist", {"entries": entries})
-
-
-def complete_kaospacs_order(settings: dict[str, str], accession_number: str) -> dict:
-    return _request_json(
-        settings,
-        "POST",
-        "/worklist/complete",
-        {"AccessionNumber": accession_number},
-    )
+    return _request_json(settings, "POST", "/orders/upsert", {"entries": entries})
 
 
 def cancel_kaospacs_order(settings: dict[str, str], accession_number: str) -> dict:
     return _request_json(
         settings,
         "POST",
-        "/worklist/cancel",
+        "/orders/cancel",
         {"AccessionNumber": accession_number},
     )
 
@@ -95,6 +84,9 @@ def sync_local_worklist_to_kaospacs(
             active_entries.append(_build_kaospacs_entry(item))
             active_items.append(item)
         elif item.status == "cancelled":
+            # Business cancellation originates on the KaosEghis side. KaosPACS
+            # receives that truth through the explicit cancel endpoint and must
+            # not infer it from downstream imaging lifecycle state.
             if item.kaospacs_mwl_status == "sent":
                 cancelled_items.append(item)
             else:
@@ -171,8 +163,8 @@ def reconcile_kaospacs_worklist_to_local(
 ) -> KaosPacsReconcileResult:
     initialize_database(db_path)
     db_file = db_path or get_database_path()
-    done = 0
-    cancelled = 0
+    completed = 0
+    expired = 0
     skipped = 0
     errors = 0
 
@@ -180,8 +172,8 @@ def reconcile_kaospacs_worklist_to_local(
         payload = fetch_kaospacs_worklist(settings)
     except RuntimeError as exc:
         return KaosPacsReconcileResult(
-            done=0,
-            cancelled=0,
+            completed=0,
+            expired=0,
             skipped=0,
             errors=1,
             message=str(exc),
@@ -191,8 +183,8 @@ def reconcile_kaospacs_worklist_to_local(
     entries = payload.get("entries", [])
     if not isinstance(entries, list):
         return KaosPacsReconcileResult(
-            done=0,
-            cancelled=0,
+            completed=0,
+            expired=0,
             skipped=0,
             errors=1,
             message="invalid worklist payload",
@@ -214,27 +206,32 @@ def reconcile_kaospacs_worklist_to_local(
                 skipped += 1
                 continue
 
-            if local_item.status in {"done", "cancelled"}:
+            # Architectural ownership:
+            # - KaosEghis-PACS owns business cancellation.
+            # - KaosPACS owns imaging completion and expiry.
+            # Reconciliation therefore accepts only Completed/Expired from KaosPACS
+            # and never infers local Cancelled from remote imaging state.
+            if local_item.status in {"completed", "expired", "cancelled"}:
                 skipped += 1
                 continue
 
             remote_status = _reconciliation_status(entry)
-            if remote_status == "done":
-                if local_item.status != "done":
+            if remote_status == "completed":
+                if local_item.status != "completed":
                     if dry_run:
-                        done += 1
-                    elif _update_local_status_for_reconciliation(connection, local_item.id, "done"):
-                        done += 1
+                        completed += 1
+                    elif _update_local_status_for_reconciliation(connection, local_item.id, "completed"):
+                        completed += 1
                     else:
                         errors += 1
                 else:
                     skipped += 1
-            elif remote_status == "cancelled":
-                if local_item.status != "cancelled":
+            elif remote_status == "expired":
+                if local_item.status != "expired":
                     if dry_run:
-                        cancelled += 1
-                    elif _update_local_status_for_reconciliation(connection, local_item.id, "cancelled"):
-                        cancelled += 1
+                        expired += 1
+                    elif _update_local_status_for_reconciliation(connection, local_item.id, "expired"):
+                        expired += 1
                     else:
                         errors += 1
                 else:
@@ -243,8 +240,8 @@ def reconcile_kaospacs_worklist_to_local(
                 skipped += 1
 
     return KaosPacsReconcileResult(
-        done=done,
-        cancelled=cancelled,
+        completed=completed,
+        expired=expired,
         skipped=skipped,
         errors=errors,
         dry_run=dry_run,
@@ -309,17 +306,16 @@ def _match_local_item(
 
 
 def _reconciliation_status(entry: dict) -> str | None:
-    active = entry.get("Active")
-    cancelled_at = _text(entry.get("CancelledAt"))
+    status = _text(entry.get("Status")).lower()
     completed_at = _text(entry.get("CompletedAt"))
-    cancel_reason = _text(entry.get("CancelReason"))
+    expired_at = _text(entry.get("ExpiredAt"))
 
-    if cancelled_at or cancel_reason:
-        return "cancelled"
+    if status == "expired" or expired_at:
+        return "expired"
+    if status == "completed":
+        return "completed"
     if completed_at:
-        return "done"
-    if active is False:
-        return "done"
+        return "completed"
     return None
 
 
@@ -356,10 +352,10 @@ def _request_json(
     base_url = (settings.get("kaospacs_api_base_url") or "http://127.0.0.1:8055").strip().rstrip("/")
     timeout_seconds = float(settings.get("kaospacs_api_timeout_seconds") or "5")
     data = None
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json; charset=utf-8"}
     if payload is not None:
-        data = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json; charset=utf-8"
     http_request = request.Request(
         f"{base_url}{path}",
         data=data,

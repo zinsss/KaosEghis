@@ -27,16 +27,18 @@ def find_matching_processes(process_name: str) -> list[str]:
     except ImportError:
         return []
 
-    matches: list[str] = []
+    matches: list[tuple[int, str]] = []
     try:
         processes = psutil.process_iter(["name", "exe", "cmdline"])
         for process in processes:
-            matched_name = _match_process(process.info, tokens)
-            if matched_name:
-                matches.append(matched_name)
+            matched = _match_process_with_score(process.info, tokens)
+            if matched is not None:
+                matched_name, score = matched
+                matches.append((score, matched_name))
     except (psutil.AccessDenied, psutil.NoSuchProcess):
         return []
-    return _unique_preserving_order(matches)
+    ordered = [name for _score, name in sorted(matches, key=lambda item: item[0], reverse=True)]
+    return _unique_preserving_order(ordered)
 
 
 def find_window_by_title_contains(title_fragment: str) -> bool:
@@ -127,17 +129,31 @@ def activate_eghis_window() -> SafetyResult:
 
 
 def _match_process(process_info: dict, tokens: list[str]) -> str | None:
+    matched = _match_process_with_score(process_info, tokens)
+    return None if matched is None else matched[0]
+
+
+def _match_process_with_score(
+    process_info: dict, tokens: list[str]
+) -> tuple[str, int] | None:
     names = _process_identity_candidates(process_info)
+    best_match: tuple[str, int] | None = None
     for candidate in names:
         normalized = candidate.casefold()
         stem = PurePath(candidate).stem.casefold()
         for token in tokens:
             token_stem = PurePath(token).stem.casefold()
             if normalized == token or stem == token_stem:
-                return candidate
-            if token in normalized or token_stem in stem:
-                return candidate
-    return None
+                score = 3
+            elif normalized.endswith(token) or stem.endswith(token_stem):
+                score = 2
+            elif token in normalized or token_stem in stem:
+                score = 1
+            else:
+                continue
+            if best_match is None or score > best_match[1]:
+                best_match = (candidate, score)
+    return best_match
 
 
 def _process_identity_candidates(process_info: dict) -> list[str]:

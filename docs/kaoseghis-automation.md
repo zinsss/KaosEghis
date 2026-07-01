@@ -1,6 +1,6 @@
 # KaosEghis Automation
 
-Last updated: 2026-06-28
+Last updated: 2026-07-01
 
 ## Purpose
 
@@ -35,12 +35,20 @@ Modules:
 
 - [KaosEghis/core/uia_inspector.py](/E:/Kaos/KaosEghis/KaosEghis/core/uia_inspector.py)
 - [KaosEghis/core/wait_engine.py](/E:/Kaos/KaosEghis/KaosEghis/core/wait_engine.py)
+- [KaosEghis/tools/debug_macro_resolution.py](/E:/Kaos/KaosEghis/KaosEghis/tools/debug_macro_resolution.py)
 
 Responsibilities:
 
 - locate UI targets
 - inspect enabled/visible/text state
 - wait on conditions without changing UI state
+- expose a local timing helper for target-resolution troubleshooting
+
+Current lookup preference:
+
+1. direct scoped `child_window(...)` lookup when exact criteria are available
+2. parent-scoped direct lookup when `parent_target_id` or `parent_automation_id` is configured
+3. descendant scan fallback only when direct lookup does not resolve uniquely
 
 ### Manual Explicit Write Tests
 
@@ -70,6 +78,31 @@ Responsibilities:
 - connector-gated run execution
 - cancellation
 - limited supported actions
+- future EMR profile-aware resolution boundary
+- per-run target caching so repeated steps can reuse the same resolved control
+- one readiness check per run unless a step explicitly re-checks focus/window state
+- cache invalidation on cancellation, readiness failure, and target-resolution failure
+- dry-run/operator summary reporting for resolved target count and cache hit/miss counts
+
+Current transition state:
+
+- macros can now be bound to an EMR target profile
+- dry run can report the resolved profile name
+- actual click/send/paste target resolution is intentionally not switched over yet
+
+### EMR Target Foundation
+
+Modules:
+
+- [KaosEghis/ui/tabs/emr_targets_page.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/emr_targets_page.py)
+- [KaosEghis/db/repositories.py](/E:/Kaos/KaosEghis/KaosEghis/db/repositories.py)
+
+Responsibilities:
+
+- store named EMR target profiles
+- store per-profile UI target definitions
+- expose the active/default EMR profile for future macro runs
+- keep credentials and secrets out of the profile model
 
 ## Current Automation Safety Posture
 
@@ -122,6 +155,7 @@ The same safety stance applies to PostgreSQL access:
 - manual target write tests
 - real runner skeleton
 - read-only Eghis PostgreSQL adapter foundation
+- EMR target profile persistence for future macro targeting
 
 ## Removed or Avoided
 

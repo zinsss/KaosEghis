@@ -1,6 +1,6 @@
 # KaosEghis PACS
 
-Last updated: 2026-06-29
+Last updated: 2026-07-01
 
 Project name: `KaosEghis-pacs`  
 Panel title: `PACS Worklist`
@@ -51,18 +51,30 @@ Architecture rules:
 
 ## Runtime Boundaries
 
+Status ownership:
+
+- business state `active` / `cancelled` is owned by KaosEghis-pacs
+- imaging state `completed` / `expired` is owned by KaosPACS
+- local `error` remains an operator/runtime error state, not a business or imaging truth source
+
 ### Poll
 
 - source: Eghis DB
 - direction: Eghis DB -> local SQLite
 - write target: local `pacs_worklist_items`
 - read-only against Eghis DB
+- operator-selected date only
+- if a local active row for the selected date disappears from `public.mwl`, it is preserved locally and marked `cancelled`
 
 ### Sync
 
 - source: local SQLite
 - direction: local SQLite -> KaosPACS API
 - no direct Orthanc/MWL/DICOM write
+- create/update uses `POST /orders/upsert`
+- cancel/delete uses `POST /orders/cancel`
+- requests are sent as `application/json; charset=utf-8`
+- payload JSON is encoded as UTF-8 without forcing ASCII escapes
 - active rows only
 - cancelled previously-sent rows call the KaosPACS cancel endpoint
 
@@ -70,8 +82,26 @@ Architecture rules:
 
 - source: KaosPACS API
 - direction: KaosPACS API -> local SQLite status update
+- completed returned by KaosPACS becomes local `completed`
+- expired returned by KaosPACS becomes local `expired`
+- KaosEghis-pacs never calculates expiry locally
+- local `cancelled` is never overwritten by KaosPACS unless KaosEghis explicitly restores it in future business logic
 - never creates new local rows from KaosPACS
 - never deletes local rows
+- never infers local business cancellation from KaosPACS imaging state
+
+Local state transition model:
+
+```text
+eGHIS create/update -> Active
+eGHIS delete/cancel -> Cancelled
+KaosPACS Completed -> Completed
+KaosPACS Expired -> Expired
+```
+
+Only KaosEghis-pacs may produce `cancelled`.
+
+Only KaosPACS may produce `completed` and `expired`.
 
 ## Local Storage Model
 
@@ -136,6 +166,8 @@ Audit rules:
 - do not store raw SQL result rows in audit
 - do not store raw KaosPACS payloads in audit
 - use aggregate summaries for poll, sync, and reconcile
+- allow sanitized non-PHI poll summaries such as:
+  - `active order removed from eGHIS MWL -> marked cancelled`
 - use sanitized error categories only:
   - `connection failed`
   - `timeout`
@@ -151,6 +183,9 @@ Visible panel module:
 
 Visible PACS actions:
 
+- `Previous day`
+- `Next day`
+- `Today`
 - `Refresh`
 - `Check KaosPACS`
 - `Poll now`
@@ -175,6 +210,22 @@ Current table columns:
 - `KaosPACS Status`
 - `Last Synced`
 - `Sync Error`
+
+Current worklist filters:
+
+- `Active`
+- `Completed`
+- `Cancelled`
+- `Expired`
+- `Error`
+- `All`
+
+Selected-date behavior:
+
+- PACS worklist view is scoped to the selected date
+- `Poll now` queries the selected date only
+- `Refresh` refreshes the local SQLite rows for the selected date only
+- selected date persists for the current UI session until the operator changes it
 
 Audit table columns:
 
@@ -282,6 +333,20 @@ Current default query boundary:
 - `o.proc_dept_cd = 'XRAY'`
 - cancellation tracking through `o.dc_yn`
 
+## Diagnostics
+
+Read-only CLI diagnostic:
+
+- `python -m KaosEghis.tools.debug_pacs_poll`
+
+Diagnostic rules:
+
+- reads PACS settings from local KaosEghis SQLite
+- runs read-only aggregate queries against Eghis DB
+- prints only sanitized counts and filter diagnostics
+- does not print patient name, DOB, sex, resident ID, phone, address, diagnosis, EMR notes, or raw rows
+- helps confirm whether recent BMD-like rows are excluded by join failure, status filtering, or `proc_dept_cd = 'XRAY'`
+
 ## Completed
 
 - Plugins UI
@@ -312,3 +377,4 @@ Update this document whenever:
 - startup validation changes
 - dry-run behavior changes
 - deployment guidance changes
+- status ownership rules change

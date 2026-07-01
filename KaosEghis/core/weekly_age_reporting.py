@@ -115,7 +115,14 @@ def fetch_weekly_age_report(
 
     resolved_end_week = start_week if end_week is None else end_week
     start_ymd, end_ymd = expand_week_range(year, start_week, resolved_end_week)
-    query = build_weekly_age_report_query(start_ymd, end_ymd)
+    query = _resolve_weekly_age_report_query(
+        settings=settings,
+        year=year,
+        start_week=start_week,
+        end_week=resolved_end_week,
+        start_ymd=start_ymd,
+        end_ymd=end_ymd,
+    )
 
     try:
         column_names, rows = run_readonly_query(connection_string, query)
@@ -123,6 +130,27 @@ def fetch_weekly_age_report(
         raise WeeklyAgeReportingUnavailableError(str(exc)) from exc
 
     return [_map_weekly_age_row(column_names, row) for row in rows]
+
+
+def _resolve_weekly_age_report_query(
+    *,
+    settings: dict[str, str],
+    year: int,
+    start_week: int,
+    end_week: int,
+    start_ymd: str,
+    end_ymd: str,
+) -> str:
+    configured = (settings.get("eghis_db_weekly_age_report_query") or "").strip()
+    if not configured:
+        return build_weekly_age_report_query(start_ymd, end_ymd)
+    return (
+        configured.replace("{year}", str(year))
+        .replace("{start_week}", str(start_week))
+        .replace("{end_week}", str(end_week))
+        .replace("{start_ymd}", start_ymd)
+        .replace("{end_ymd}", end_ymd)
+    )
 
 
 def _map_weekly_age_row(
