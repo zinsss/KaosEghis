@@ -46,6 +46,22 @@ def test_pacs_panel_default_page_is_imaging_worklist(monkeypatch, tmp_path) -> N
     assert panel.imaging_status_label.text() == "Not loaded yet."
 
 
+def test_pacs_panel_navigation_buttons_are_exact(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    assert list(panel.page_buttons.keys()) == ["imaging", "operator_mode", "settings"]
+    assert [button.text() for button in panel.page_buttons.values()] == [
+        "Imaging Worklist",
+        "Operator Mode",
+        "Settings",
+    ]
+
+
 def test_pacs_panel_internal_navigation_switches_pages(monkeypatch, tmp_path) -> None:
     _app()
 
@@ -54,11 +70,8 @@ def test_pacs_panel_internal_navigation_switches_pages(monkeypatch, tmp_path) ->
     monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
 
     panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
-    panel.page_buttons["local_orders"].click()
-    assert panel.page_stack.currentWidget() is panel.local_orders_page
-
-    panel.page_buttons["log"].click()
-    assert panel.page_stack.currentWidget() is panel.log_page
+    panel.page_buttons["operator_mode"].click()
+    assert panel.page_stack.currentWidget() is panel.operator_mode_page
 
     panel.page_buttons["settings"].click()
     assert panel.page_stack.currentWidget() is panel.settings_page
@@ -244,36 +257,47 @@ def test_pacs_panel_does_not_call_gateway_on_init(monkeypatch, tmp_path) -> None
     assert panel.imaging_status_label.text() == "Not loaded yet."
 
 
-def test_local_orders_page_contains_existing_controls(monkeypatch, tmp_path) -> None:
+def test_operator_mode_contains_local_orders_controls(monkeypatch, tmp_path) -> None:
     _app()
 
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
 
     monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
     panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
-    panel.page_buttons["local_orders"].click()
+    panel.page_buttons["operator_mode"].click()
 
-    assert panel.refresh_button.text() == "Refresh"
-    assert panel.poll_button.text() == "Poll now"
+    assert panel.refresh_button.text() == "Load from KaosEghis"
+    assert panel.poll_button.text() == "Load from eGHIS"
     assert panel.sync_button.text() == "Sync to KaosPACS"
-    assert panel.reconcile_button.text() == "Reconcile from KaosPACS"
+    assert panel.reconcile_button.text() == "Sync from KaosPACS"
     assert panel.manual_insert_button.text() == "Manual insert"
     assert panel.edit_button.text() == "Edit selected"
     assert panel.delete_button.text() == "Delete / Cancel selected"
 
-
-def test_log_page_is_renamed(monkeypatch, tmp_path) -> None:
+def test_operator_mode_contains_pacs_log_controls(monkeypatch, tmp_path) -> None:
     _app()
 
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
 
     monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
     panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
-    panel.page_buttons["log"].click()
+    panel.page_buttons["operator_mode"].click()
 
     assert panel.refresh_audit_button.text() == "Refresh log"
     assert panel.clear_audit_button.text() == "Clear log"
     assert panel.copy_audit_button.text() == "Copy log summary"
+
+
+def test_pacs_panel_has_no_separate_log_page(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+
+    assert "log" not in panel.page_buttons
+    assert panel.page_stack.count() == 3
 
 
 def test_settings_diagnostics_hide_gateway_token(monkeypatch, tmp_path) -> None:
@@ -453,7 +477,7 @@ def test_pacs_panel_refresh_stays_local_only(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
 
     panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
-    panel.page_buttons["local_orders"].click()
+    panel.page_buttons["operator_mode"].click()
     panel.refresh_button.click()
 
     assert calls == {"health": 0, "poll": 0, "sync": 0}
@@ -469,7 +493,7 @@ def test_pacs_panel_apply_settings_persists_values(monkeypatch, tmp_path) -> Non
     db_path = tmp_path / "KaosEghis.sqlite"
     monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
     panel = pacs_panel_module.PacsPanel(db_path=db_path)
-    panel.page_buttons["local_orders"].click()
+    panel.page_buttons["operator_mode"].click()
     panel.auto_poll_checkbox.setChecked(True)
     panel.interval_spinbox.setValue(45)
     panel.apply_polling_settings()
@@ -507,14 +531,14 @@ def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
 
     panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
-    panel.page_buttons["local_orders"].click()
+    panel.page_buttons["operator_mode"].click()
     panel.poll_button.click()
 
     assert calls == {"health": 0, "poll": 1, "sync": 0}
     assert panel.polling_status.text() == "Polling status: inserted=1, updated=0, skipped=0"
 
 
-def test_local_orders_page_loads_local_rows_when_opened(monkeypatch, tmp_path) -> None:
+def test_operator_mode_loads_local_rows_when_opened(monkeypatch, tmp_path) -> None:
     _app()
 
     from KaosEghis.db.database import connect, initialize_database
@@ -538,6 +562,6 @@ def test_local_orders_page_loads_local_rows_when_opened(monkeypatch, tmp_path) -
     panel = pacs_panel_module.PacsPanel(db_path=db_path)
 
     assert panel.worklist_table.rowCount() == 0
-    panel.page_buttons["local_orders"].click()
+    panel.page_buttons["operator_mode"].click()
     assert panel.worklist_table.rowCount() == 1
     assert panel.worklist_table.item(0, 6).text() == "ACC-1"

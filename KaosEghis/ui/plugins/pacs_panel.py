@@ -112,26 +112,23 @@ class PacsPanel(QWidget):
         self._poll_timer.timeout.connect(self._handle_poll_timer_tick)
 
         self.page_stack = QStackedWidget()
-        self._page_names = ["imaging", "local_orders", "log", "settings"]
+        self._page_names = ["imaging", "operator_mode", "settings"]
         self.page_buttons: dict[str, QPushButton] = {}
 
         title = QLabel("PACS Worklist")
         title.setObjectName("pageTitle")
 
         self._build_imaging_page()
-        self._build_local_orders_page()
-        self._build_log_page()
+        self._build_operator_mode_page()
         self._build_settings_page()
 
         self.page_stack.addWidget(self.imaging_page)
-        self.page_stack.addWidget(self.local_orders_page)
-        self.page_stack.addWidget(self.log_page)
+        self.page_stack.addWidget(self.operator_mode_page)
         self.page_stack.addWidget(self.settings_page)
 
         navigation_row = QHBoxLayout()
         navigation_row.addWidget(self._make_page_button("Imaging Worklist", "imaging"))
-        navigation_row.addWidget(self._make_page_button("Local Orders", "local_orders"))
-        navigation_row.addWidget(self._make_page_button("Log", "log"))
+        navigation_row.addWidget(self._make_page_button("Operator Mode", "operator_mode"))
         navigation_row.addWidget(self._make_page_button("Settings", "settings"))
         navigation_row.addStretch()
 
@@ -194,8 +191,9 @@ class PacsPanel(QWidget):
         layout.addLayout(imaging_filter_row)
         layout.addWidget(self.imaging_table)
 
-    def _build_local_orders_page(self) -> None:
-        self.local_orders_page = QWidget()
+    def _build_operator_mode_page(self) -> None:
+        self.operator_mode_page = QWidget()
+        self.local_orders_page = self.operator_mode_page
 
         self.eghis_db_status = QLabel("Eghis DB: not connected")
         self.pacs_server_status = QLabel("KaosPACS server: not checked")
@@ -277,15 +275,15 @@ class PacsPanel(QWidget):
         filter_bar.addStretch()
         self.filter_bar = filter_bar
 
-        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button = QPushButton("Load from KaosEghis")
         self.refresh_button.clicked.connect(self.refresh_rows)
         self.check_kaospacs_button = QPushButton("Check KaosPACS")
         self.check_kaospacs_button.clicked.connect(self.check_kaospacs_connection)
-        self.poll_button = QPushButton("Poll now")
+        self.poll_button = QPushButton("Load from eGHIS")
         self.poll_button.clicked.connect(self.poll_now)
         self.sync_button = QPushButton("Sync to KaosPACS")
         self.sync_button.clicked.connect(self.sync_to_kaospacs)
-        self.reconcile_button = QPushButton("Reconcile from KaosPACS")
+        self.reconcile_button = QPushButton("Sync from KaosPACS")
         self.reconcile_button.clicked.connect(self.reconcile_from_kaospacs)
         self.manual_insert_button = QPushButton("Manual insert")
         self.manual_insert_button.clicked.connect(self.manual_insert_row)
@@ -308,20 +306,6 @@ class PacsPanel(QWidget):
         footer = QLabel(
             "Local PACS worklist. Poll from Eghis DB and sync to KaosPACS are manual only."
         )
-
-        layout = QVBoxLayout(self.local_orders_page)
-        layout.addWidget(QLabel("Local Orders"))
-        layout.addLayout(status_row)
-        layout.addLayout(polling_info_row)
-        layout.addLayout(date_row)
-        layout.addLayout(polling_settings_row)
-        layout.addWidget(self.worklist_table)
-        layout.addLayout(self.filter_bar)
-        layout.addLayout(action_row)
-        layout.addWidget(footer)
-
-    def _build_log_page(self) -> None:
-        self.log_page = QWidget()
 
         self.audit_filter_combo = QComboBox()
         self.audit_filter_combo.addItems(
@@ -351,7 +335,17 @@ class PacsPanel(QWidget):
         controls.addWidget(self.copy_audit_button)
         controls.addStretch()
 
-        layout = QVBoxLayout(self.log_page)
+        layout = QVBoxLayout(self.operator_mode_page)
+        layout.addWidget(QLabel("Operator Mode / Local Orders"))
+        layout.addLayout(status_row)
+        layout.addLayout(polling_info_row)
+        layout.addLayout(date_row)
+        layout.addLayout(polling_settings_row)
+        layout.addWidget(self.worklist_table)
+        layout.addLayout(self.filter_bar)
+        layout.addLayout(action_row)
+        layout.addWidget(footer)
+        layout.addSpacing(12)
         layout.addLayout(controls)
         layout.addWidget(self.audit_table)
 
@@ -397,9 +391,8 @@ class PacsPanel(QWidget):
 
         if page_name == "imaging":
             return
-        if page_name == "local_orders":
+        if page_name == "operator_mode":
             self.refresh_rows()
-        elif page_name == "log":
             self.refresh_audit()
         elif page_name == "settings":
             self._refresh_settings_diagnostics()
