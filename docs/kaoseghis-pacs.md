@@ -73,6 +73,8 @@ Status ownership:
 - no direct Orthanc/MWL/DICOM write
 - create/update uses `POST /orders/upsert`
 - cancel/delete uses `POST /orders/cancel`
+- requests are sent as `application/json; charset=utf-8`
+- payload JSON is encoded as UTF-8 without forcing ASCII escapes
 - active rows only
 - cancelled previously-sent rows call the KaosPACS cancel endpoint
 
@@ -82,6 +84,7 @@ Status ownership:
 - direction: KaosPACS API -> local SQLite status update
 - completed returned by KaosPACS becomes local `completed`
 - expired returned by KaosPACS becomes local `expired`
+- KaosEghis-pacs never calculates expiry locally
 - local `cancelled` is never overwritten by KaosPACS unless KaosEghis explicitly restores it in future business logic
 - never creates new local rows from KaosPACS
 - never deletes local rows

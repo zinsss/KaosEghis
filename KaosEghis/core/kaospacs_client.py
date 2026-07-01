@@ -352,10 +352,10 @@ def _request_json(
     base_url = (settings.get("kaospacs_api_base_url") or "http://127.0.0.1:8055").strip().rstrip("/")
     timeout_seconds = float(settings.get("kaospacs_api_timeout_seconds") or "5")
     data = None
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json; charset=utf-8"}
     if payload is not None:
-        data = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json; charset=utf-8"
     http_request = request.Request(
         f"{base_url}{path}",
         data=data,
