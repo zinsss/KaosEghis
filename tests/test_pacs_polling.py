@@ -6,6 +6,7 @@ from KaosEghis.core.pacs_polling import (
     PollingUnavailableError,
     QueryRejectedError,
     _DEFAULT_IMAGE_ORDER_QUERY,
+    _build_default_image_order_query,
     _map_db_row_to_order,
     poll_eghis_image_orders_into_local_worklist,
     poll_image_orders,
@@ -148,6 +149,17 @@ def test_poll_image_orders_selected_date_is_applied_to_default_query(
 
     assert "20260630" in executed_queries[0]
     assert "regexp_replace" in executed_queries[0]
+
+
+def test_default_query_treats_blank_strings_as_missing_values() -> None:
+    query = _build_default_image_order_query(date(2026, 7, 1))
+
+    assert "NULLIF(BTRIM(COALESCE(m.scheduled_dttm::text, '')), '')" in query
+    assert "NULLIF(BTRIM(COALESCE(m.imaging_request_dttm::text, '')), '')" in query
+    assert "NULLIF(BTRIM(COALESCE(m.trigger_dttm::text, '')), '')" in query
+    assert "NULLIF(BTRIM(COALESCE(m.replica_dttm::text, '')), '')" in query
+    assert "NULLIF(BTRIM(COALESCE(m.scheduled_proc_desc::text, '')), '')" in query
+    assert "NULLIF(BTRIM(COALESCE(m.requested_proc_desc::text, '')), '')" in query
 
 
 def test_fetch_existing_mwl_order_ids_query_does_not_apply_active_filters(
