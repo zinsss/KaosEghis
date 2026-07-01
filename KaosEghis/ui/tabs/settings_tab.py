@@ -24,6 +24,8 @@ class SettingsTab(QWidget):
         "eghis_db_image_study_query": DEFAULT_SETTINGS["eghis_db_image_study_query"],
         "eghis_db_weekly_age_report_query": DEFAULT_SETTINGS["eghis_db_weekly_age_report_query"],
         "kaospacs_api_base_url": DEFAULT_SETTINGS["kaospacs_api_base_url"],
+        "kaospacs_gateway_url": DEFAULT_SETTINGS["kaospacs_gateway_url"],
+        "kaospacs_gateway_api_token": DEFAULT_SETTINGS["kaospacs_gateway_api_token"],
         "kaospacs_api_timeout_seconds": DEFAULT_SETTINGS["kaospacs_api_timeout_seconds"],
         "pacs_auto_poll_enabled": DEFAULT_SETTINGS["pacs_auto_poll_enabled"],
         "pacs_poll_interval_seconds": DEFAULT_SETTINGS["pacs_poll_interval_seconds"],
@@ -43,6 +45,9 @@ class SettingsTab(QWidget):
         self.eghis_db_image_study_query = QPlainTextEdit()
         self.eghis_db_weekly_age_report_query = QPlainTextEdit()
         self.kaospacs_api_base_url = QLineEdit()
+        self.kaospacs_gateway_url = QLineEdit()
+        self.kaospacs_gateway_api_token = QLineEdit()
+        self.kaospacs_gateway_api_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.kaospacs_api_timeout_seconds = QLineEdit()
         self.pacs_auto_poll_enabled = QCheckBox("Enable PACS auto poll")
         self.pacs_dry_run = QCheckBox("Enable PACS dry run")
@@ -53,7 +58,8 @@ class SettingsTab(QWidget):
         self.pacs_status = QLabel()
         self.sqlite_path_label = QLabel()
         self.pacs_info = QLabel(
-            "PACS settings control Eghis DB polling and KaosPACS API access. "
+            "PACS settings control Eghis DB polling, KaosPACS API access, and "
+            "KaosPACS Gateway imaging worklist access. "
             "Sync remains manual unless auto-poll is enabled; auto-poll only polls "
             "Eghis into local SQLite and never syncs to KaosPACS. "
             "PACS dry run keeps polling live but simulates sync and reconcile."
@@ -91,6 +97,8 @@ class SettingsTab(QWidget):
         pacs_form.addRow("Eghis image study query", self.eghis_db_image_study_query)
         pacs_form.addRow("Flu weekly report query", self.eghis_db_weekly_age_report_query)
         pacs_form.addRow("KaosPACS API base URL", self.kaospacs_api_base_url)
+        pacs_form.addRow("KaosPACS Gateway URL", self.kaospacs_gateway_url)
+        pacs_form.addRow("KaosPACS Gateway API token", self.kaospacs_gateway_api_token)
         pacs_form.addRow("KaosPACS API timeout seconds", self.kaospacs_api_timeout_seconds)
         pacs_form.addRow(self.pacs_auto_poll_enabled)
         pacs_form.addRow(self.pacs_dry_run)
@@ -144,6 +152,8 @@ class SettingsTab(QWidget):
             settings["eghis_db_weekly_age_report_query"]
         )
         self.kaospacs_api_base_url.setText(settings["kaospacs_api_base_url"])
+        self.kaospacs_gateway_url.setText(settings["kaospacs_gateway_url"])
+        self.kaospacs_gateway_api_token.setText(settings["kaospacs_gateway_api_token"])
         self.kaospacs_api_timeout_seconds.setText(
             settings["kaospacs_api_timeout_seconds"]
         )
@@ -194,6 +204,8 @@ class SettingsTab(QWidget):
             self.PACS_DEFAULTS["eghis_db_weekly_age_report_query"]
         )
         self.kaospacs_api_base_url.setText(self.PACS_DEFAULTS["kaospacs_api_base_url"])
+        self.kaospacs_gateway_url.setText(self.PACS_DEFAULTS["kaospacs_gateway_url"])
+        self.kaospacs_gateway_api_token.setText(self.PACS_DEFAULTS["kaospacs_gateway_api_token"])
         self.kaospacs_api_timeout_seconds.setText(
             self.PACS_DEFAULTS["kaospacs_api_timeout_seconds"]
         )
@@ -240,6 +252,8 @@ class SettingsTab(QWidget):
             "eghis_db_image_study_query": self.eghis_db_image_study_query.toPlainText().strip(),
             "eghis_db_weekly_age_report_query": self.eghis_db_weekly_age_report_query.toPlainText().strip(),
             "kaospacs_api_base_url": self.kaospacs_api_base_url.text().strip(),
+            "kaospacs_gateway_url": self.kaospacs_gateway_url.text().strip(),
+            "kaospacs_gateway_api_token": self.kaospacs_gateway_api_token.text().strip(),
             "kaospacs_api_timeout_seconds": normalized_timeout,
             "pacs_auto_poll_enabled": "true" if self.pacs_auto_poll_enabled.isChecked() else "false",
             "pacs_dry_run": "true" if self.pacs_dry_run.isChecked() else "false",
@@ -254,6 +268,12 @@ class SettingsTab(QWidget):
             base_url.startswith("http://") or base_url.startswith("https://")
         ):
             return "KaosPACS API base URL must start with http:// or https://."
+
+        gateway_url = self.kaospacs_gateway_url.text().strip()
+        if not gateway_url or not (
+            gateway_url.startswith("http://") or gateway_url.startswith("https://")
+        ):
+            return "KaosPACS Gateway URL must start with http:// or https://."
 
         timeout_text = self.kaospacs_api_timeout_seconds.text().strip()
         try:

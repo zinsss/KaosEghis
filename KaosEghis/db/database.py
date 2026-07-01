@@ -26,7 +26,8 @@ def get_database_path() -> Path:
 
 
 def describe_database_path(path: Path | None = None) -> str:
-    return str((path or get_database_path()).resolve())
+    db_path = path or get_database_path()
+    return str(db_path.resolve())
 
 
 @contextmanager
