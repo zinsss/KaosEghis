@@ -204,6 +204,94 @@ def test_reuses_resolved_target_within_single_macro_run(monkeypatch, tmp_path) -
     assert fake_element.clicked == 1
 
 
+def test_emr_profile_target_resolution_still_works_with_cache_enabled(
+    monkeypatch, tmp_path
+) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_emr_target_profile,
+        create_emr_ui_target,
+        create_item,
+        create_macro_step,
+        create_ui_target,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Training EMR",
+            is_enabled=True,
+            is_default=False,
+        )
+        create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="symptom.text",
+            label="Symptom Text",
+            automation_id="ProfileSymptomBox",
+            control_type="Edit",
+            class_name="ProfileClass",
+        )
+        create_ui_target(
+            connection,
+            target_id="symptom.text",
+            automation_id="LegacySymptomBox",
+            control_type="Edit",
+            class_name="LegacyClass",
+        )
+        item = create_item(connection, "Profile Cache Macro", "macro", True, profile.id)
+        create_macro_step(connection, item.id, 1, "paste_text", target_id="symptom.text", value="hello")
+        create_macro_step(connection, item.id, 2, "click", target_id="symptom.text")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def set_focus(self) -> None:
+            return None
+
+        def click_input(self) -> None:
+            return None
+
+    resolved_automation_ids = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: resolved_automation_ids.append(_target.automation_id)
+        or (FakeElement(), None, "Target resolved."),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda text: type("Snapshot", (), {"text": text})(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.restore_clipboard",
+        lambda _snapshot: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda _keys: None)})(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert resolved_automation_ids == ["ProfileSymptomBox"]
+    assert "Resolved targets: 1" in result.message
+    assert "Cache hits: 1" in result.message
+    assert "Cache misses: 1" in result.message
+
+
 def test_macro_stops_on_failed_step(monkeypatch, tmp_path) -> None:
     from KaosEghis.core.macro_models import MacroRunResult
     from KaosEghis.core.macro_runner import MacroRunner
