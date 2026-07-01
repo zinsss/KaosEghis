@@ -239,6 +239,35 @@ def test_gateway_unavailable_shows_safe_error(monkeypatch, tmp_path) -> None:
     assert panel.imaging_table.rowCount() == 0
 
 
+def test_inactive_imaging_rows_are_shown_under_active_filter(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "get_imaging_worklist",
+        lambda settings: [
+            {
+                "state": "inactive",
+                "AccessionNumber": "ACC-INACTIVE",
+                "PatientID": "P-1",
+                "PatientName": "홍길동",
+                "Modality": "BMD",
+                "Description": "골밀도 검사",
+            }
+        ],
+    )
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    panel.refresh_imaging_worklist()
+
+    assert panel.imaging_filter_buttons["active"].isChecked() is True
+    assert panel.imaging_table.rowCount() == 1
+    assert panel.imaging_table.item(0, 0).text() == "active"
+    assert panel.imaging_table.item(0, 1).text() == "ACC-INACTIVE"
+
+
 def test_pacs_panel_does_not_call_gateway_on_init(monkeypatch, tmp_path) -> None:
     _app()
 

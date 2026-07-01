@@ -71,8 +71,11 @@ Status ownership:
 - source: local SQLite
 - direction: local SQLite -> KaosPACS API
 - no direct Orthanc/MWL/DICOM write
-- create/update uses `POST /orders/upsert`
-- cancel/delete uses `POST /orders/cancel`
+- preferred create/update endpoint: `POST /orders/upsert`
+- preferred cancel/delete endpoint: `POST /orders/cancel`
+- compatibility fallback for older KaosPACS servers:
+  - create/update -> `PUT /worklist`
+  - cancel/delete -> `POST /worklist/cancel`
 - requests are sent as `application/json; charset=utf-8`
 - payload JSON is encoded as UTF-8 without forcing ASCII escapes
 - active rows only

@@ -512,6 +512,8 @@ class PacsPanel(QWidget):
     def _imaging_entry_state(self, entry: dict) -> str:
         state = self._entry_text(entry, "state").lower()
         if state:
+            if state == "inactive":
+                return "active"
             return state
         if self._entry_text(entry, "CancelledAt"):
             return "cancelled"

@@ -118,6 +118,31 @@ def test_push_kaospacs_worklist_sends_entries(monkeypatch) -> None:
     assert captured["body"] == {"entries": [{"AccessionNumber": "ACC-1"}]}
 
 
+def test_push_kaospacs_worklist_falls_back_to_legacy_put_worklist_on_404(monkeypatch) -> None:
+    import KaosEghis.core.kaospacs_client as client
+
+    calls = []
+
+    def fake_urlopen(req, timeout=0):
+        calls.append((req.get_method(), req.full_url, json.loads(req.data.decode("utf-8"))))
+        if req.full_url.endswith("/orders/upsert"):
+            raise error.HTTPError(req.full_url, 404, "Not Found", hdrs=None, fp=None)
+        return _FakeResponse({"entries": []})
+
+    monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
+
+    response = push_kaospacs_worklist(
+        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        [{"AccessionNumber": "ACC-1"}],
+    )
+
+    assert response == {"entries": []}
+    assert calls == [
+        ("POST", "http://127.0.0.1:8055/orders/upsert", {"entries": [{"AccessionNumber": "ACC-1"}]}),
+        ("PUT", "http://127.0.0.1:8055/worklist", {"entries": [{"AccessionNumber": "ACC-1"}]}),
+    ]
+
+
 def test_push_kaospacs_worklist_matches_kaospacs_contract(monkeypatch) -> None:
     import KaosEghis.core.kaospacs_client as client
 
@@ -139,6 +164,32 @@ def test_push_kaospacs_worklist_matches_kaospacs_contract(monkeypatch) -> None:
     assert captured["body"]["entries"] == [
         {"AccessionNumber": "ACC-1"},
         {"AccessionNumber": "ACC-2"},
+    ]
+
+
+def test_cancel_kaospacs_order_falls_back_to_legacy_worklist_cancel_on_404(monkeypatch) -> None:
+    import KaosEghis.core.kaospacs_client as client
+
+    calls = []
+
+    def fake_urlopen(req, timeout=0):
+        body = json.loads(req.data.decode("utf-8"))
+        calls.append((req.get_method(), req.full_url, body))
+        if req.full_url.endswith("/orders/cancel"):
+            raise error.HTTPError(req.full_url, 404, "Not Found", hdrs=None, fp=None)
+        return _FakeResponse({"ok": True})
+
+    monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
+
+    response = cancel_kaospacs_order(
+        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        "ACC-1",
+    )
+
+    assert response == {"ok": True}
+    assert calls == [
+        ("POST", "http://127.0.0.1:8055/orders/cancel", {"AccessionNumber": "ACC-1"}),
+        ("POST", "http://127.0.0.1:8055/worklist/cancel", {"AccessionNumber": "ACC-1"}),
     ]
 
 
@@ -213,6 +264,63 @@ def test_failed_sync_marks_error(tmp_path, monkeypatch) -> None:
     assert loaded is not None
     assert loaded.kaospacs_mwl_status == "error"
     assert loaded.kaospacs_mwl_error == "api failure"
+
+
+def test_sync_skips_invalid_local_rows_and_still_sends_valid_entries(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    import KaosEghis.core.kaospacs_client as client
+
+    captured = {}
+
+    with connect(db_path) as connection:
+        valid_item = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Alice",
+            chart_no="C001",
+            study="Chest",
+            modality="CR",
+            requested_at="2026-06-28T09:30:00",
+            accession_or_order_id="ACC-VALID",
+            source="eghis-db",
+        )
+        invalid_item = create_pacs_worklist_item(
+            connection,
+            status="active",
+            patient_name="Bob",
+            chart_no="C002",
+            study="",
+            modality="CR",
+            requested_at="2026-06-28T09:30:00",
+            accession_or_order_id="ACC-INVALID",
+            source="eghis-db",
+        )
+
+    def fake_push(settings, entries):
+        captured["entries"] = entries
+        return {"ok": True}
+
+    monkeypatch.setattr(client, "push_kaospacs_worklist", fake_push)
+    monkeypatch.setattr(client, "cancel_kaospacs_order", lambda settings, accession_number: {"ok": True})
+
+    result = sync_local_worklist_to_kaospacs(
+        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        db_path=db_path,
+    )
+
+    with connect(db_path) as connection:
+        loaded_valid = get_pacs_worklist_item(connection, valid_item.id)
+        loaded_invalid = get_pacs_worklist_item(connection, invalid_item.id)
+
+    assert result.sent == 1
+    assert result.errors == 1
+    assert captured["entries"] == [client._build_kaospacs_entry(valid_item)]
+    assert loaded_valid is not None
+    assert loaded_invalid is not None
+    assert loaded_valid.kaospacs_mwl_status == "sent"
+    assert loaded_invalid.kaospacs_mwl_status == "error"
+    assert loaded_invalid.kaospacs_mwl_error == "missing required fields: ScheduledProcedureStepDescription"
 
 
 def test_cancelled_previously_sent_row_calls_cancel(tmp_path, monkeypatch) -> None:
