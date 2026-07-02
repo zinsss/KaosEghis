@@ -105,6 +105,7 @@ class PacsPanel(QWidget):
         self._visible_audit_events: list[PacsAuditEventRecord] = []
         self._imaging_entries_all: list[dict] = []
         self._visible_imaging_entries: list[dict] = []
+        self._imaging_loaded_once = False
         self._active_filter = "all"
         self._imaging_filter = "active"
         self._poll_in_progress = False
@@ -155,7 +156,7 @@ class PacsPanel(QWidget):
         )
         self.imaging_search_input.textChanged.connect(self._refresh_imaging_table)
         self.imaging_refresh_button = QPushButton("Refresh Imaging Worklist")
-        self.imaging_refresh_button.clicked.connect(self.refresh_imaging_worklist)
+        self.imaging_refresh_button.clicked.connect(self.refresh_imaging_worklist_manually)
 
         self.imaging_filter_buttons: dict[str, QPushButton] = {}
         imaging_filter_row = QHBoxLayout()
@@ -415,6 +416,10 @@ class PacsPanel(QWidget):
         self.pacs_server_status.setText(
             "KaosPACS server: healthy" if healthy else "KaosPACS server: unavailable"
         )
+
+    def refresh_imaging_worklist_manually(self) -> None:
+        self._imaging_loaded_once = True
+        self.refresh_imaging_worklist()
 
     def refresh_imaging_worklist(self) -> None:
         initialize_database(self._db_path)
@@ -826,7 +831,7 @@ class PacsPanel(QWidget):
             self._poll_timer.stop()
 
     def _handle_poll_timer_tick(self) -> None:
-        self._run_poll(refresh_imaging=True)
+        self._run_poll(refresh_imaging=self._imaging_loaded_once)
 
     def _run_poll(self, *, refresh_imaging: bool = False) -> None:
         if self._poll_in_progress:
