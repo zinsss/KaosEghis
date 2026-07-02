@@ -69,8 +69,10 @@ Status ownership:
 ### Sync
 
 - source: local SQLite
-- direction: local SQLite -> KaosPACS API
+- direction: local SQLite -> KaosPACS Gateway API
 - no direct Orthanc/MWL/DICOM write
+- production path: `KaosEghis -> Gateway :8060 -> MWL internal API :8055`
+- KaosEghis must not target MWL internal API `:8055` directly in production
 - preferred create/update endpoint: `POST /orders/upsert`
 - preferred cancel/delete endpoint: `POST /orders/cancel`
 - compatibility fallback for older KaosPACS servers:
@@ -78,6 +80,7 @@ Status ownership:
   - create/update -> `PUT /worklist`
   - cancel/delete -> `POST /worklist/cancel`
 - requests are sent as `application/json; charset=utf-8`
+- requests send `Authorization: Bearer <kaospacs_gateway_api_token>` when a token is configured
 - payload JSON is encoded as UTF-8 without forcing ASCII escapes
 - active rows only
 - cancelled previously-sent rows call the KaosPACS cancel endpoint
@@ -121,6 +124,8 @@ Local worklist table:
 Allowed local worklist fields:
 
 - `patient_name`
+- `patient_birth_date`
+- `patient_sex`
 - `chart_no`
 - `study`
 - `modality`
@@ -154,8 +159,6 @@ Allowed local audit fields:
 KaosEghis-pacs does not permanently store:
 
 - resident registration number
-- DOB
-- sex
 - phone
 - address
 - diagnosis
@@ -164,7 +167,7 @@ KaosEghis-pacs does not permanently store:
 - raw SQL result rows
 - raw KaosPACS payloads
 
-KaosEghis-pacs stores only the minimum local worklist data needed to bridge Eghis image-study orders. It does not store resident ID, DOB, sex, phone number, address, diagnosis, EMR notes, insurance details, or raw Eghis DB rows.
+KaosEghis-pacs stores only the minimum local worklist data needed to bridge Eghis image-study orders into KaosPACS and MWL. That local worklist now includes patient name, DOB, and sex because MWL consumers need them. It does not store resident ID, phone number, address, diagnosis, EMR notes, insurance details, or raw Eghis DB rows.
 
 Audit logs intentionally exclude sensitive patient information.
 
@@ -253,6 +256,8 @@ Editable PACS settings in the Settings tab:
 - `eghis_db_connection_string`
 - `eghis_db_image_study_query`
 - `kaospacs_api_base_url`
+- `kaospacs_gateway_url`
+- `kaospacs_gateway_api_token`
 - `kaospacs_api_timeout_seconds`
 - `pacs_auto_poll_enabled`
 - `pacs_poll_interval_seconds`
@@ -261,6 +266,8 @@ Editable PACS settings in the Settings tab:
 Rules:
 
 - connection string is hidden by default
+- gateway API token is hidden by default
+- production `kaospacs_api_base_url` should point to Gateway `:8060`, not MWL internal API `:8055`
 - poll interval minimum is `15` seconds
 - auto poll is off by default
 - dry run is off by default

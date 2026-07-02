@@ -12,7 +12,7 @@ DEFAULT_SETTINGS = {
     "eghis_db_connection_string": "",
     "eghis_db_image_study_query": "",
     "eghis_db_weekly_age_report_query": "",
-    "kaospacs_api_base_url": "http://127.0.0.1:8055",
+    "kaospacs_api_base_url": "http://127.0.0.1:8060",
     "kaospacs_gateway_url": "http://127.0.0.1:8060",
     "kaospacs_gateway_api_token": "",
     "kaospacs_api_timeout_seconds": "5",
@@ -63,6 +63,8 @@ class PacsWorklistItemRecord:
     id: int
     status: str
     patient_name: str | None
+    patient_birth_date: str | None
+    patient_sex: str | None
     chart_no: str | None
     study: str | None
     modality: str | None
@@ -388,6 +390,8 @@ def create_pacs_worklist_item(
     *,
     status: str,
     patient_name: str | None = None,
+    patient_birth_date: str | None = None,
+    patient_sex: str | None = None,
     chart_no: str | None = None,
     study: str | None = None,
     modality: str | None = None,
@@ -401,12 +405,14 @@ def create_pacs_worklist_item(
     cursor = connection.execute(
         """
         INSERT INTO pacs_worklist_items
-            (status, patient_name, chart_no, study, modality, requested_at, accession_or_order_id, source, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (status, patient_name, patient_birth_date, patient_sex, chart_no, study, modality, requested_at, accession_or_order_id, source, error_message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             status,
             _blank_to_none(patient_name),
+            _blank_to_none(patient_birth_date),
+            _blank_to_none(patient_sex),
             _blank_to_none(chart_no),
             _blank_to_none(study),
             _blank_to_none(modality),
@@ -430,7 +436,7 @@ def list_pacs_worklist_items(
     if status is None:
         rows = connection.execute(
             """
-            SELECT id, status, patient_name, chart_no, study, modality, requested_at,
+            SELECT id, status, patient_name, patient_birth_date, patient_sex, chart_no, study, modality, requested_at,
                    accession_or_order_id, source, error_message,
                    kaospacs_mwl_status, kaospacs_mwl_last_synced_at, kaospacs_mwl_error,
                    created_at, updated_at
@@ -443,7 +449,7 @@ def list_pacs_worklist_items(
         _validate_pacs_worklist_status(status)
         rows = connection.execute(
             """
-            SELECT id, status, patient_name, chart_no, study, modality, requested_at,
+            SELECT id, status, patient_name, patient_birth_date, patient_sex, chart_no, study, modality, requested_at,
                    accession_or_order_id, source, error_message,
                    kaospacs_mwl_status, kaospacs_mwl_last_synced_at, kaospacs_mwl_error,
                    created_at, updated_at
@@ -461,7 +467,7 @@ def get_pacs_worklist_item(
 ) -> PacsWorklistItemRecord | None:
     row = connection.execute(
         """
-        SELECT id, status, patient_name, chart_no, study, modality, requested_at,
+        SELECT id, status, patient_name, patient_birth_date, patient_sex, chart_no, study, modality, requested_at,
                accession_or_order_id, source, error_message,
                kaospacs_mwl_status, kaospacs_mwl_last_synced_at, kaospacs_mwl_error,
                created_at, updated_at
@@ -503,6 +509,8 @@ def update_pacs_worklist_item(
     *,
     status: str,
     patient_name: str | None = None,
+    patient_birth_date: str | None = None,
+    patient_sex: str | None = None,
     chart_no: str | None = None,
     study: str | None = None,
     modality: str | None = None,
@@ -522,6 +530,8 @@ def update_pacs_worklist_item(
         UPDATE pacs_worklist_items
         SET status = ?,
             patient_name = ?,
+            patient_birth_date = ?,
+            patient_sex = ?,
             chart_no = ?,
             study = ?,
             modality = ?,
@@ -535,6 +545,8 @@ def update_pacs_worklist_item(
         (
             status,
             _blank_to_none(patient_name),
+            _blank_to_none(patient_birth_date),
+            _blank_to_none(patient_sex),
             _blank_to_none(chart_no),
             _blank_to_none(study),
             _blank_to_none(modality),
@@ -1273,18 +1285,20 @@ def _pacs_worklist_item_from_row(
         id=row[0],
         status=_normalize_pacs_worklist_status(row[1]),
         patient_name=row[2],
-        chart_no=row[3],
-        study=row[4],
-        modality=row[5],
-        requested_at=row[6],
-        accession_or_order_id=row[7],
-        source=row[8],
-        error_message=row[9],
-        kaospacs_mwl_status=row[10],
-        kaospacs_mwl_last_synced_at=row[11],
-        kaospacs_mwl_error=row[12],
-        created_at=row[13],
-        updated_at=row[14],
+        patient_birth_date=row[3],
+        patient_sex=row[4],
+        chart_no=row[5],
+        study=row[6],
+        modality=row[7],
+        requested_at=row[8],
+        accession_or_order_id=row[9],
+        source=row[10],
+        error_message=row[11],
+        kaospacs_mwl_status=row[12],
+        kaospacs_mwl_last_synced_at=row[13],
+        kaospacs_mwl_error=row[14],
+        created_at=row[15],
+        updated_at=row[16],
     )
 
 

@@ -82,6 +82,8 @@ def test_poll_image_orders_uses_default_postgres_query_when_query_blank(
         {
             "status": "active",
             "patient_name": "Lee",
+            "patient_birth_date": None,
+            "patient_sex": None,
             "chart_no": "C100",
             "study": "MRI Brain",
             "modality": "MR",
@@ -265,6 +267,8 @@ def test_map_db_row_aliases_to_canonical_order_and_ignores_extra_fields() -> Non
     assert order == {
         "status": "cancelled",
         "patient_name": "Kim",
+        "patient_birth_date": "1990-01-01",
+        "patient_sex": None,
         "chart_no": "C001",
         "study": "Chest CT",
         "modality": "CT",
@@ -464,7 +468,7 @@ def test_poll_service_skips_cancelled_order_without_existing_local_row(
     assert rows == []
 
 
-def test_pacs_local_storage_does_not_include_sensitive_fields(tmp_path, monkeypatch) -> None:
+def test_pacs_local_storage_includes_birth_date_and_sex_only(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
     from KaosEghis.core import pacs_polling
@@ -506,7 +510,7 @@ def test_pacs_local_storage_does_not_include_sensitive_fields(tmp_path, monkeypa
         }
         row = connection.execute(
             """
-            SELECT patient_name, chart_no, study, modality, requested_at,
+            SELECT patient_name, patient_birth_date, patient_sex, chart_no, study, modality, requested_at,
                    accession_or_order_id, status, source, error_message
             FROM pacs_worklist_items
             WHERE accession_or_order_id = ?
@@ -515,11 +519,13 @@ def test_pacs_local_storage_does_not_include_sensitive_fields(tmp_path, monkeypa
         ).fetchone()
 
     assert result.inserted == 1
-    assert "patient_birth_date" not in columns
-    assert "patient_sex" not in columns
+    assert "patient_birth_date" in columns
+    assert "patient_sex" in columns
     assert "resident_id" not in columns
     assert row == (
         "Alice",
+        "1990-01-01",
+        "F",
         "C001",
         "Chest",
         "CR",

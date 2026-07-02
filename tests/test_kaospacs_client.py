@@ -11,7 +11,7 @@ from KaosEghis.core.kaospacs_client import (
     sync_local_worklist_to_kaospacs,
 )
 from KaosEghis.db.database import connect, initialize_database
-from KaosEghis.db.repositories import create_pacs_worklist_item, get_pacs_worklist_item
+from KaosEghis.db.repositories import PacsWorklistItemRecord, create_pacs_worklist_item, get_pacs_worklist_item
 
 
 class _FakeResponse:
@@ -28,6 +28,38 @@ class _FakeResponse:
         return None
 
 
+def _sample_item(
+    accession: str = "ACC-1",
+    *,
+    patient_name: str = "Alice",
+    patient_birth_date: str = "19900101",
+    patient_sex: str = "F",
+    chart_no: str = "C001",
+    study: str = "Chest",
+    modality: str = "CR",
+    requested_at: str = "2026-06-28T09:30:00",
+) -> PacsWorklistItemRecord:
+    return PacsWorklistItemRecord(
+        id=1,
+        status="active",
+        patient_name=patient_name,
+        patient_birth_date=patient_birth_date,
+        patient_sex=patient_sex,
+        chart_no=chart_no,
+        study=study,
+        modality=modality,
+        requested_at=requested_at,
+        accession_or_order_id=accession,
+        source="eghis-db",
+        error_message=None,
+        kaospacs_mwl_status="not_sent",
+        kaospacs_mwl_last_synced_at=None,
+        kaospacs_mwl_error=None,
+        created_at="now",
+        updated_at="now",
+    )
+
+
 def test_kaospacs_health_success(monkeypatch) -> None:
     import KaosEghis.core.kaospacs_client as client
 
@@ -37,7 +69,7 @@ def test_kaospacs_health_success(monkeypatch) -> None:
         lambda req, timeout=0: _FakeResponse({"status": "ok"}),
     )
 
-    assert check_kaospacs_health({"kaospacs_api_base_url": "http://127.0.0.1:8055"}) is True
+    assert check_kaospacs_health({"kaospacs_api_base_url": "http://127.0.0.1:8060"}) is True
 
 
 def test_kaospacs_health_failure(monkeypatch) -> None:
@@ -50,7 +82,7 @@ def test_kaospacs_health_failure(monkeypatch) -> None:
     )
 
     try:
-        check_kaospacs_health({"kaospacs_api_base_url": "http://127.0.0.1:8055"})
+        check_kaospacs_health({"kaospacs_api_base_url": "http://127.0.0.1:8060"})
     except RuntimeError as exc:
         message = str(exc)
     else:
@@ -60,35 +92,20 @@ def test_kaospacs_health_failure(monkeypatch) -> None:
 
 
 def test_active_rows_become_worklist_payload_and_exclude_sensitive_fields() -> None:
-    from KaosEghis.db.repositories import PacsWorklistItemRecord
-
-    item = PacsWorklistItemRecord(
-        id=1,
-        status="active",
-        patient_name="Alice",
-        chart_no="C001",
-        study="Chest",
-        modality="CR",
-        requested_at="2026-06-28T09:30:00",
-        accession_or_order_id="ACC-1",
-        source="eghis-db",
-        error_message=None,
-        kaospacs_mwl_status="not_sent",
-        kaospacs_mwl_last_synced_at=None,
-        kaospacs_mwl_error=None,
-        created_at="now",
-        updated_at="now",
-    )
+    item = _sample_item()
 
     payload = _build_kaospacs_entry(item)
 
     assert payload["PatientName"] == "Alice"
-    assert payload["PatientID"] == "C001"
+    assert payload["ChartNo"] == "C001"
+    assert payload["PatientBirthDate"] == "19900101"
+    assert payload["PatientSex"] == "F"
     assert payload["AccessionNumber"] == "ACC-1"
-    assert payload["RequestedProcedureDescription"] == "Chest"
+    assert payload["StudyType"] == "CR"
+    assert payload["Description"] == "Chest"
+    assert payload["StationAET"] == "INNOVISION"
+    assert payload["ScheduledAt"] == "2026-06-28T09:30:00"
     assert payload["Modality"] == "CR"
-    assert "patient_birth_date" not in payload
-    assert "patient_sex" not in payload
     assert "resident_id" not in payload
     assert "phone" not in payload
     assert "address" not in payload
@@ -104,19 +121,36 @@ def test_push_kaospacs_worklist_sends_entries(monkeypatch) -> None:
     def fake_urlopen(req, timeout=0):
         captured["url"] = req.full_url
         captured["method"] = req.get_method()
+        captured["headers"] = dict(req.header_items())
         captured["body"] = json.loads(req.data.decode("utf-8"))
         return _FakeResponse({"ok": True})
 
     monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
 
     push_kaospacs_worklist(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
-        [{"AccessionNumber": "ACC-1"}],
+        {
+            "kaospacs_api_base_url": "http://127.0.0.1:8060",
+            "kaospacs_gateway_api_token": "token-123",
+        },
+        [_sample_item()],
     )
 
     assert captured["url"].endswith("/orders/upsert")
     assert captured["method"] == "POST"
-    assert captured["body"] == {"entries": [{"AccessionNumber": "ACC-1"}]}
+    assert captured["headers"]["Authorization"] == "Bearer token-123"
+    assert captured["body"] == {
+        "ChartNo": "C001",
+        "PatientName": "Alice",
+        "PatientBirthDate": "19900101",
+        "PatientSex": "F",
+        "AccessionNumber": "ACC-1",
+        "StudyType": "CR",
+        "Modality": "CR",
+        "StationAET": "INNOVISION",
+        "ScheduledAt": "2026-06-28T09:30:00",
+        "Description": "Chest",
+        "PatientID": "C001",
+    }
 
 
 def test_push_kaospacs_worklist_falls_back_to_legacy_put_worklist_on_404(monkeypatch) -> None:
@@ -133,14 +167,52 @@ def test_push_kaospacs_worklist_falls_back_to_legacy_put_worklist_on_404(monkeyp
     monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
 
     response = push_kaospacs_worklist(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
-        [{"AccessionNumber": "ACC-1"}],
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
+        [_sample_item()],
     )
 
     assert response == {"entries": []}
     assert calls == [
-        ("POST", "http://127.0.0.1:8055/orders/upsert", {"entries": [{"AccessionNumber": "ACC-1"}]}),
-        ("PUT", "http://127.0.0.1:8055/worklist", {"entries": [{"AccessionNumber": "ACC-1"}]}),
+        (
+            "POST",
+            "http://127.0.0.1:8060/orders/upsert",
+            {
+                "ChartNo": "C001",
+                "PatientName": "Alice",
+                "PatientBirthDate": "19900101",
+                "PatientSex": "F",
+                "AccessionNumber": "ACC-1",
+                "StudyType": "CR",
+                "Modality": "CR",
+                "StationAET": "INNOVISION",
+                "ScheduledAt": "2026-06-28T09:30:00",
+                "Description": "Chest",
+                "PatientID": "C001",
+            },
+        ),
+        (
+            "PUT",
+            "http://127.0.0.1:8060/worklist",
+            {
+                "entries": [
+                    {
+                        "PatientName": "Alice",
+                        "PatientBirthDate": "19900101",
+                        "PatientSex": "F",
+                        "PatientID": "C001",
+                        "AccessionNumber": "ACC-1",
+                        "RequestedProcedureID": "ACC-1",
+                        "ScheduledProcedureStepID": "ACC-1",
+                        "RequestedProcedureDescription": "Chest",
+                        "ScheduledProcedureStepDescription": "Chest",
+                        "Modality": "CR",
+                        "ScheduledStationAETitle": "INNOVISION",
+                        "ScheduledProcedureStepStartDate": "20260628",
+                        "ScheduledProcedureStepStartTime": "093000",
+                    }
+                ]
+            },
+        ),
     ]
 
 
@@ -157,15 +229,15 @@ def test_push_kaospacs_worklist_does_not_fall_back_on_500(monkeypatch) -> None:
 
     try:
         push_kaospacs_worklist(
-            {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
-            [{"AccessionNumber": "ACC-1"}],
+            {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
+            [_sample_item()],
         )
     except KaosPacsRequestError as exc:
         assert exc.status_code == 500
     else:
         raise AssertionError("Expected KaosPacsRequestError")
 
-    assert calls == ["http://127.0.0.1:8055/orders/upsert"]
+    assert calls == ["http://127.0.0.1:8060/orders/upsert"]
 
 
 def test_push_kaospacs_worklist_does_not_fall_back_on_network_error(monkeypatch) -> None:
@@ -181,15 +253,15 @@ def test_push_kaospacs_worklist_does_not_fall_back_on_network_error(monkeypatch)
 
     try:
         push_kaospacs_worklist(
-            {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
-            [{"AccessionNumber": "ACC-1"}],
+            {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
+            [_sample_item()],
         )
     except KaosPacsRequestError as exc:
         assert exc.status_code is None
     else:
         raise AssertionError("Expected KaosPacsRequestError")
 
-    assert calls == ["http://127.0.0.1:8055/orders/upsert"]
+    assert calls == ["http://127.0.0.1:8060/orders/upsert"]
 
 
 def test_push_kaospacs_worklist_matches_kaospacs_contract(monkeypatch) -> None:
@@ -204,16 +276,40 @@ def test_push_kaospacs_worklist_matches_kaospacs_contract(monkeypatch) -> None:
     monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
 
     push_kaospacs_worklist(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
-        [{"AccessionNumber": "ACC-1"}, {"AccessionNumber": "ACC-2"}],
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
+        [
+            _sample_item("ACC-1"),
+            _sample_item("ACC-2", patient_name="Bob", chart_no="C002", study="Spine", modality="MR", requested_at="2026-06-28T10:00:00"),
+        ],
     )
 
     assert isinstance(captured["body"], dict)
-    assert list(captured["body"].keys()) == ["entries"]
-    assert captured["body"]["entries"] == [
-        {"AccessionNumber": "ACC-1"},
-        {"AccessionNumber": "ACC-2"},
+    assert list(captured["body"].keys()) == [
+        "ChartNo",
+        "PatientName",
+        "PatientBirthDate",
+        "PatientSex",
+        "AccessionNumber",
+        "StudyType",
+        "Modality",
+        "StationAET",
+        "ScheduledAt",
+        "Description",
+        "PatientID",
     ]
+    assert captured["body"] == {
+        "ChartNo": "C002",
+        "PatientName": "Bob",
+        "PatientBirthDate": "19900101",
+        "PatientSex": "F",
+        "AccessionNumber": "ACC-2",
+        "StudyType": "MR",
+        "Modality": "MR",
+        "StationAET": "INNOVISION",
+        "ScheduledAt": "2026-06-28T10:00:00",
+        "Description": "Spine",
+        "PatientID": "C002",
+    }
 
 
 def test_cancel_kaospacs_order_falls_back_to_legacy_worklist_cancel_on_404(monkeypatch) -> None:
@@ -231,14 +327,14 @@ def test_cancel_kaospacs_order_falls_back_to_legacy_worklist_cancel_on_404(monke
     monkeypatch.setattr(client.request, "urlopen", fake_urlopen)
 
     response = cancel_kaospacs_order(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         "ACC-1",
     )
 
     assert response == {"ok": True}
     assert calls == [
-        ("POST", "http://127.0.0.1:8055/orders/cancel", {"AccessionNumber": "ACC-1"}),
-        ("POST", "http://127.0.0.1:8055/worklist/cancel", {"AccessionNumber": "ACC-1"}),
+        ("POST", "http://127.0.0.1:8060/orders/cancel", {"AccessionNumber": "ACC-1"}),
+        ("POST", "http://127.0.0.1:8060/worklist/cancel", {"AccessionNumber": "ACC-1"}),
     ]
 
 
@@ -255,7 +351,7 @@ def test_cancel_kaospacs_order_does_not_fall_back_on_500(monkeypatch) -> None:
 
     try:
         cancel_kaospacs_order(
-            {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+            {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
             "ACC-1",
         )
     except KaosPacsRequestError as exc:
@@ -263,7 +359,7 @@ def test_cancel_kaospacs_order_does_not_fall_back_on_500(monkeypatch) -> None:
     else:
         raise AssertionError("Expected KaosPacsRequestError")
 
-    assert calls == ["http://127.0.0.1:8055/orders/cancel"]
+    assert calls == ["http://127.0.0.1:8060/orders/cancel"]
 
 
 def test_successful_sync_marks_sent(tmp_path, monkeypatch) -> None:
@@ -288,7 +384,7 @@ def test_successful_sync_marks_sent(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(client, "cancel_kaospacs_order", lambda settings, accession_number: {"ok": True})
 
     result = sync_local_worklist_to_kaospacs(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -326,7 +422,7 @@ def test_failed_sync_marks_error(tmp_path, monkeypatch) -> None:
     )
 
     result = sync_local_worklist_to_kaospacs(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -378,7 +474,7 @@ def test_sync_skips_invalid_local_rows_and_still_sends_valid_entries(tmp_path, m
     monkeypatch.setattr(client, "cancel_kaospacs_order", lambda settings, accession_number: {"ok": True})
 
     result = sync_local_worklist_to_kaospacs(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -388,12 +484,12 @@ def test_sync_skips_invalid_local_rows_and_still_sends_valid_entries(tmp_path, m
 
     assert result.sent == 1
     assert result.errors == 1
-    assert captured["entries"] == [client._build_kaospacs_entry(valid_item)]
+    assert captured["entries"] == [valid_item]
     assert loaded_valid is not None
     assert loaded_invalid is not None
     assert loaded_valid.kaospacs_mwl_status == "sent"
     assert loaded_invalid.kaospacs_mwl_status == "error"
-    assert loaded_invalid.kaospacs_mwl_error == "missing required fields: ScheduledProcedureStepDescription"
+    assert loaded_invalid.kaospacs_mwl_error == "missing required fields: Description"
 
 
 def test_cancelled_previously_sent_row_calls_cancel(tmp_path, monkeypatch) -> None:
@@ -429,7 +525,7 @@ def test_cancelled_previously_sent_row_calls_cancel(tmp_path, monkeypatch) -> No
     )
 
     result = sync_local_worklist_to_kaospacs(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -474,7 +570,7 @@ def test_cancelled_never_sent_row_is_not_sent(tmp_path, monkeypatch) -> None:
     )
 
     result = sync_local_worklist_to_kaospacs(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -501,17 +597,21 @@ def test_dry_run_sync_makes_no_api_changes(tmp_path, monkeypatch) -> None:
             connection,
             status="active",
             patient_name="Alice",
+            chart_no="C001",
             accession_or_order_id="ACC-DRY-1",
             study="Chest",
             modality="CR",
+            requested_at="2026-06-28T09:30:00",
         )
         cancelled_item = create_pacs_worklist_item(
             connection,
             status="cancelled",
             patient_name="Bob",
+            chart_no="C002",
             accession_or_order_id="ACC-DRY-2",
             study="Spine",
             modality="MR",
+            requested_at="2026-06-28T10:00:00",
         )
         update_pacs_worklist_sync_state(
             connection,
@@ -533,7 +633,7 @@ def test_dry_run_sync_makes_no_api_changes(tmp_path, monkeypatch) -> None:
 
     result = sync_local_worklist_to_kaospacs(
         {
-            "kaospacs_api_base_url": "http://127.0.0.1:8055",
+            "kaospacs_api_base_url": "http://127.0.0.1:8060",
             "pacs_dry_run": "true",
         },
         db_path=db_path,
@@ -575,7 +675,7 @@ def test_reconcile_completed_kaospacs_row_marks_local_completed(tmp_path, monkey
     )
 
     result = reconcile_kaospacs_worklist_to_local(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -621,7 +721,7 @@ def test_reconcile_uses_gateway_imaging_worklist_when_configured(tmp_path, monke
     result = reconcile_kaospacs_worklist_to_local(
         {
             "kaospacs_gateway_url": "http://pacs.example:8060",
-            "kaospacs_api_base_url": "http://pacs.example:8055",
+            "kaospacs_api_base_url": "http://pacs.example:8060",
         },
         db_path=db_path,
     )
@@ -657,7 +757,7 @@ def test_reconcile_expired_kaospacs_row_marks_local_expired(tmp_path, monkeypatc
     )
 
     result = reconcile_kaospacs_worklist_to_local(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -682,7 +782,7 @@ def test_reconcile_unmatched_kaospacs_row_is_skipped(tmp_path, monkeypatch) -> N
     )
 
     result = reconcile_kaospacs_worklist_to_local(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -730,7 +830,7 @@ def test_reconcile_local_completed_or_cancelled_is_not_reverted(tmp_path, monkey
     )
 
     result = reconcile_kaospacs_worklist_to_local(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -762,7 +862,7 @@ def test_reconcile_does_not_create_new_local_rows_from_kaospacs(tmp_path, monkey
     )
 
     result = reconcile_kaospacs_worklist_to_local(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -809,7 +909,7 @@ def test_dry_run_reconcile_makes_no_status_changes(tmp_path, monkeypatch) -> Non
 
     result = reconcile_kaospacs_worklist_to_local(
         {
-            "kaospacs_api_base_url": "http://127.0.0.1:8055",
+            "kaospacs_api_base_url": "http://127.0.0.1:8060",
             "pacs_dry_run": "true",
         },
         db_path=db_path,
@@ -856,7 +956,7 @@ def test_reconcile_cancelled_kaospacs_row_does_not_infer_local_cancelled(
     )
 
     result = reconcile_kaospacs_worklist_to_local(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 
@@ -901,7 +1001,7 @@ def test_reconcile_falls_back_to_api_worklist_without_gateway_url(tmp_path, monk
     )
 
     result = reconcile_kaospacs_worklist_to_local(
-        {"kaospacs_api_base_url": "http://pacs.example:8055"},
+        {"kaospacs_api_base_url": "http://pacs.example:8060"},
         db_path=db_path,
     )
 
@@ -942,7 +1042,7 @@ def test_reconcile_active_false_does_not_infer_local_completed(
     )
 
     result = reconcile_kaospacs_worklist_to_local(
-        {"kaospacs_api_base_url": "http://127.0.0.1:8055"},
+        {"kaospacs_api_base_url": "http://127.0.0.1:8060"},
         db_path=db_path,
     )
 

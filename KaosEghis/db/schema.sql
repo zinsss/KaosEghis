@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS pacs_worklist_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'expired', 'cancelled', 'error')),
     patient_name TEXT,
+    patient_birth_date TEXT,
+    patient_sex TEXT,
     chart_no TEXT,
     study TEXT,
     modality TEXT,

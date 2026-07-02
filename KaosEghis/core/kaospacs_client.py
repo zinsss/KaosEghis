@@ -51,13 +51,11 @@ def fetch_kaospacs_worklist(settings: dict[str, str]) -> dict:
     return _request_json(settings, "GET", "/worklist")
 
 
-def push_kaospacs_worklist(settings: dict[str, str], entries: list[dict]) -> dict:
-    try:
-        return _request_json(settings, "POST", "/orders/upsert", {"entries": entries})
-    except RuntimeError as exc:
-        if not _is_http_not_found_error(exc):
-            raise
-    return _request_json(settings, "PUT", "/worklist", {"entries": entries})
+def push_kaospacs_worklist(settings: dict[str, str], items: list[PacsWorklistItemRecord]) -> dict:
+    last_response: dict = {}
+    for item in items:
+        last_response = _push_kaospacs_item(settings, item)
+    return last_response
 
 
 def cancel_kaospacs_order(settings: dict[str, str], accession_number: str) -> dict:
@@ -94,7 +92,6 @@ def sync_local_worklist_to_kaospacs(
     with connect(db_file) as connection:
         items = list_pacs_worklist_items(connection)
 
-    active_entries: list[dict] = []
     active_items: list[PacsWorklistItemRecord] = []
     cancelled_items: list[PacsWorklistItemRecord] = []
     dry_run = _is_pacs_dry_run(settings)
@@ -117,7 +114,6 @@ def sync_local_worklist_to_kaospacs(
                         )
                 errors += 1
                 continue
-            active_entries.append(entry)
             active_items.append(item)
         elif item.status == "cancelled":
             # Business cancellation originates on the KaosEghis side. KaosPACS
@@ -137,30 +133,28 @@ def sync_local_worklist_to_kaospacs(
             dry_run=True,
         )
 
-    if active_entries:
+    for item in active_items:
         try:
-            push_kaospacs_worklist(settings, active_entries)
+            push_kaospacs_worklist(settings, [item])
             synced_at = _utc_now_text()
             with connect(db_file) as connection:
-                for item in active_items:
-                    update_pacs_worklist_sync_state(
-                        connection,
-                        item.id,
-                        kaospacs_mwl_status="sent",
-                        kaospacs_mwl_last_synced_at=synced_at,
-                        kaospacs_mwl_error=None,
-                    )
-            sent = len(active_items)
+                update_pacs_worklist_sync_state(
+                    connection,
+                    item.id,
+                    kaospacs_mwl_status="sent",
+                    kaospacs_mwl_last_synced_at=synced_at,
+                    kaospacs_mwl_error=None,
+                )
+            sent += 1
         except RuntimeError as exc:
             with connect(db_file) as connection:
-                for item in active_items:
-                    update_pacs_worklist_sync_state(
-                        connection,
-                        item.id,
-                        kaospacs_mwl_status="error",
-                        kaospacs_mwl_error=str(exc),
-                    )
-            errors += len(active_items)
+                update_pacs_worklist_sync_state(
+                    connection,
+                    item.id,
+                    kaospacs_mwl_status="error",
+                    kaospacs_mwl_error=str(exc),
+                )
+            errors += 1
 
     for item in cancelled_items:
         try:
@@ -287,10 +281,42 @@ def fetch_kaospacs_reconcile_entries(settings: dict[str, str]) -> list[dict]:
 
 def _build_kaospacs_entry(item: PacsWorklistItemRecord) -> dict[str, str]:
     accession_number = item.accession_or_order_id or ""
+    scheduled_at = _normalize_gateway_scheduled_at(item.requested_at)
+    modality = item.modality or ""
+    return {
+        "ChartNo": item.chart_no or "",
+        "PatientName": item.patient_name or "",
+        "PatientBirthDate": _normalize_patient_birth_date(item.patient_birth_date),
+        "PatientSex": _normalize_patient_sex(item.patient_sex),
+        "AccessionNumber": accession_number,
+        "StudyType": modality,
+        "Modality": modality,
+        "StationAET": _scheduled_station_ae_title(modality),
+        "ScheduledAt": scheduled_at,
+        "Description": item.study or "",
+        "PatientID": item.chart_no or "",
+    }
+
+
+def _push_kaospacs_item(settings: dict[str, str], item: PacsWorklistItemRecord) -> dict:
+    gateway_entry = _build_kaospacs_entry(item)
+    try:
+        return _request_json(settings, "POST", "/orders/upsert", gateway_entry)
+    except RuntimeError as exc:
+        if not _is_http_not_found_error(exc):
+            raise
+    legacy_entry = _build_legacy_worklist_entry(item)
+    return _request_json(settings, "PUT", "/worklist", {"entries": [legacy_entry]})
+
+
+def _build_legacy_worklist_entry(item: PacsWorklistItemRecord) -> dict[str, str]:
+    accession_number = item.accession_or_order_id or ""
     requested_date, requested_time = _split_date_time(item.requested_at)
     modality = item.modality or ""
     return {
         "PatientName": item.patient_name or "",
+        "PatientBirthDate": _normalize_patient_birth_date(item.patient_birth_date),
+        "PatientSex": _normalize_patient_sex(item.patient_sex),
         "PatientID": item.chart_no or "",
         "AccessionNumber": accession_number,
         "RequestedProcedureID": accession_number,
@@ -308,6 +334,36 @@ def _scheduled_station_ae_title(modality: str) -> str:
     if modality == "BMD":
         return "BMD"
     return "INNOVISION"
+
+
+def _normalize_gateway_scheduled_at(value: str | None) -> str:
+    if not value:
+        return ""
+    normalized = value.strip().replace(" ", "T")
+    if len(normalized) == 14 and normalized.isdigit():
+        return (
+            f"{normalized[0:4]}-{normalized[4:6]}-{normalized[6:8]}"
+            f"T{normalized[8:10]}:{normalized[10:12]}:{normalized[12:14]}"
+        )
+    return normalized
+
+
+def _normalize_patient_birth_date(value: str | None) -> str:
+    if not value:
+        return ""
+    normalized = value.strip().replace("-", "")
+    if len(normalized) >= 8 and normalized[:8].isdigit():
+        return normalized[:8]
+    return normalized
+
+
+def _normalize_patient_sex(value: str | None) -> str:
+    if not value:
+        return ""
+    normalized = value.strip().upper()
+    if normalized in {"M", "F", "O"}:
+        return normalized
+    return normalized[:1]
 
 
 def _split_date_time(value: str | None) -> tuple[str, str]:
@@ -386,10 +442,13 @@ def _request_json(
     path: str,
     payload: dict | None = None,
 ) -> dict:
-    base_url = (settings.get("kaospacs_api_base_url") or "http://127.0.0.1:8055").strip().rstrip("/")
+    base_url = (settings.get("kaospacs_api_base_url") or "http://127.0.0.1:8060").strip().rstrip("/")
     timeout_seconds = float(settings.get("kaospacs_api_timeout_seconds") or "5")
     data = None
     headers = {"Accept": "application/json; charset=utf-8"}
+    token = (settings.get("kaospacs_gateway_api_token") or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json; charset=utf-8"
@@ -427,11 +486,14 @@ def _validate_kaospacs_entry(entry: dict[str, str]) -> str | None:
     missing_fields = [
         field
         for field in (
+            "ChartNo",
+            "PatientName",
             "AccessionNumber",
-            "RequestedProcedureID",
-            "ScheduledProcedureStepID",
-            "ScheduledProcedureStepDescription",
+            "StudyType",
             "Modality",
+            "StationAET",
+            "ScheduledAt",
+            "Description",
         )
         if not _text(entry.get(field))
     ]

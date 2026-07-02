@@ -27,6 +27,8 @@ def test_database_migration_creates_pacs_worklist_table(tmp_path) -> None:
 
     assert "status" in columns
     assert "patient_name" in columns
+    assert "patient_birth_date" in columns
+    assert "patient_sex" in columns
     assert "chart_no" in columns
     assert "study" in columns
     assert "modality" in columns
@@ -68,6 +70,8 @@ def test_pacs_worklist_repository_crud(tmp_path) -> None:
             connection,
             status="active",
             patient_name="Alice",
+            patient_birth_date="19900101",
+            patient_sex="F",
             chart_no="C001",
             study="CT",
             modality="CT",
@@ -78,6 +82,8 @@ def test_pacs_worklist_repository_crud(tmp_path) -> None:
         assert created.id > 0
         assert created.status == "active"
         assert created.patient_name == "Alice"
+        assert created.patient_birth_date == "19900101"
+        assert created.patient_sex == "F"
         assert created.kaospacs_mwl_status == "not_sent"
 
         listed = list_pacs_worklist_items(connection)
@@ -86,6 +92,8 @@ def test_pacs_worklist_repository_crud(tmp_path) -> None:
 
         loaded = get_pacs_worklist_item(connection, created.id)
         assert loaded is not None
+        assert loaded.patient_birth_date == "19900101"
+        assert loaded.patient_sex == "F"
         assert loaded.chart_no == "C001"
 
         updated = update_pacs_worklist_status(connection, created.id, "completed")
@@ -106,6 +114,8 @@ def test_pacs_worklist_update_preserves_sync_state(tmp_path) -> None:
             connection,
             status="active",
             patient_name="Alice",
+            patient_birth_date="19900101",
+            patient_sex="F",
             chart_no="C001",
             study="CT",
             modality="CT",
@@ -125,6 +135,8 @@ def test_pacs_worklist_update_preserves_sync_state(tmp_path) -> None:
             created.id,
             status="completed",
             patient_name="Alice Updated",
+            patient_birth_date="19920202",
+            patient_sex="F",
             chart_no="C009",
             study="MR",
             modality="MR",
@@ -135,6 +147,8 @@ def test_pacs_worklist_update_preserves_sync_state(tmp_path) -> None:
 
     assert updated is not None
     assert updated.patient_name == "Alice Updated"
+    assert updated.patient_birth_date == "19920202"
+    assert updated.patient_sex == "F"
     assert updated.kaospacs_mwl_status == "sent"
     assert updated.kaospacs_mwl_last_synced_at == "2026-06-28T12:00:00+00:00"
 

@@ -33,7 +33,7 @@ def test_save_pacs_settings_persists_values(tmp_path) -> None:
     tab = SettingsTab(db_path=db_path)
     tab.eghis_db_connection_string.setText("Host=x;Password=secret")
     tab.eghis_db_image_study_query.setPlainText("SELECT 1")
-    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
+    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_gateway_api_token.setText("secret-token")
     tab.kaospacs_api_timeout_seconds.setText("5")
@@ -47,7 +47,7 @@ def test_save_pacs_settings_persists_values(tmp_path) -> None:
 
     assert settings["eghis_db_connection_string"] == "Host=x;Password=secret"
     assert settings["eghis_db_image_study_query"] == "SELECT 1"
-    assert settings["kaospacs_api_base_url"] == "http://127.0.0.1:8055"
+    assert settings["kaospacs_api_base_url"] == "http://127.0.0.1:8060"
     assert settings["kaospacs_gateway_url"] == "http://127.0.0.1:8060"
     assert settings["kaospacs_gateway_api_token"] == "secret-token"
     assert settings["kaospacs_api_timeout_seconds"] == "5"
@@ -67,7 +67,7 @@ def test_reset_pacs_settings_restores_defaults(tmp_path) -> None:
     tab = SettingsTab(db_path=db_path)
     tab.eghis_db_connection_string.setText("Host=x;Password=secret")
     tab.eghis_db_image_study_query.setPlainText("SELECT 1")
-    tab.kaospacs_api_base_url.setText("https://example")
+    tab.kaospacs_api_base_url.setText("https://gateway-api.example")
     tab.kaospacs_gateway_url.setText("https://gateway")
     tab.kaospacs_gateway_api_token.setText("secret-token")
     tab.kaospacs_api_timeout_seconds.setText("9")
@@ -81,7 +81,7 @@ def test_reset_pacs_settings_restores_defaults(tmp_path) -> None:
 
     assert settings["eghis_db_connection_string"] == ""
     assert settings["eghis_db_image_study_query"] == ""
-    assert settings["kaospacs_api_base_url"] == "http://127.0.0.1:8055"
+    assert settings["kaospacs_api_base_url"] == "http://127.0.0.1:8060"
     assert settings["kaospacs_gateway_url"] == "http://127.0.0.1:8060"
     assert settings["kaospacs_gateway_api_token"] == ""
     assert settings["kaospacs_api_timeout_seconds"] == "5"
@@ -110,7 +110,7 @@ def test_invalid_gateway_url_rejected(tmp_path) -> None:
     from KaosEghis.ui.tabs.settings_tab import SettingsTab
 
     tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
-    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
+    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_gateway_url.setText("ftp://bad")
     tab.kaospacs_api_timeout_seconds.setText("5")
     tab.save_pacs_settings()
@@ -124,7 +124,7 @@ def test_invalid_timeout_rejected(tmp_path) -> None:
     from KaosEghis.ui.tabs.settings_tab import SettingsTab
 
     tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
-    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
+    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_api_timeout_seconds.setText("nope")
     tab.save_pacs_settings()
@@ -157,7 +157,7 @@ def test_test_kaospacs_calls_health_only(monkeypatch, tmp_path) -> None:
     )
 
     tab = settings_tab_module.SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
-    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
+    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_api_timeout_seconds.setText("5")
     tab.test_kaospacs_connection()
@@ -174,7 +174,7 @@ def test_connection_string_not_displayed_in_status_labels(tmp_path) -> None:
     secret = "Host=x;Password=topsecret"
     tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
     tab.eghis_db_connection_string.setText(secret)
-    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8055")
+    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_gateway_api_token.setText("gateway-secret")
     tab.kaospacs_api_timeout_seconds.setText("5")
