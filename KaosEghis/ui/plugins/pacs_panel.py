@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 import re
 
-from PySide6.QtCore import QDate, QTimer
+from PySide6.QtCore import QDate, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -25,6 +25,11 @@ from PySide6.QtWidgets import (
 )
 
 from KaosEghis.core.clipboard_service import copy_text
+from KaosEghis.core.eghis_db import (
+    EghisDbQueryRejectedError,
+    EghisDbUnavailableError,
+    run_readonly_query,
+)
 from KaosEghis.core.kaospacs_client import (
     check_kaospacs_health,
     reconcile_kaospacs_worklist_to_local,
@@ -50,8 +55,10 @@ from KaosEghis.ui.plugins.pacs_worklist_dialog import PacsWorklistDialog
 
 
 class PacsPanel(QWidget):
+    health_state_changed = Signal(bool, str)
     DEFAULT_POLL_INTERVAL_SECONDS = 60
     MIN_POLL_INTERVAL_SECONDS = 15
+    IMAGING_REFRESH_DELAY_MS = 350
     WORKLIST_COLUMNS = [
         "Status",
         "Patient",
@@ -104,6 +111,9 @@ class PacsPanel(QWidget):
         self._visible_audit_events: list[PacsAuditEventRecord] = []
         self._imaging_entries_all: list[dict] = []
         self._visible_imaging_entries: list[dict] = []
+        self._kaospacs_available = False
+        self._eghis_db_available = False
+        self._health_reason = "PACS health unknown"
         self._active_filter = "all"
         self._imaging_filter = "active"
         self._poll_in_progress = False
@@ -142,6 +152,7 @@ class PacsPanel(QWidget):
         self._update_local_filter_button_states()
         self._update_imaging_filter_button_states()
         self._update_startup_readiness_status()
+        self._refresh_startup_connection_statuses()
         self._refresh_settings_diagnostics()
         self._show_page("imaging")
 
@@ -399,21 +410,52 @@ class PacsPanel(QWidget):
             self._refresh_settings_diagnostics()
 
     def _set_db_labels(self) -> None:
-        self.eghis_db_status.setText("Eghis DB: local sqlite")
+        self.eghis_db_status.setText("Eghis DB: checking...")
         initialize_database(self._db_path)
-        self.pacs_server_status.setText("KaosPACS server: not checked")
+        self.pacs_server_status.setText("KaosPACS server: checking...")
 
-    def _refresh_kaospacs_status(self) -> None:
+    def _refresh_startup_connection_statuses(self) -> None:
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
+
+        self._refresh_kaospacs_status(settings)
+        self._refresh_eghis_db_status(settings)
+
+    def _refresh_kaospacs_status(self, settings: dict[str, str] | None = None) -> None:
+        if settings is None:
+            initialize_database(self._db_path)
+            with connect(self._db_path) as connection:
+                settings = get_settings(connection)
         try:
             healthy = check_kaospacs_health(settings)
         except RuntimeError:
             healthy = False
+        self._kaospacs_available = healthy
         self.pacs_server_status.setText(
             "KaosPACS server: healthy" if healthy else "KaosPACS server: unavailable"
         )
+        self._emit_health_state()
+
+    def _refresh_eghis_db_status(self, settings: dict[str, str]) -> None:
+        connection_string = (settings.get("eghis_db_connection_string") or "").strip()
+        if not connection_string:
+            self._eghis_db_available = False
+            self.eghis_db_status.setText("Eghis DB: not configured")
+            self._emit_health_state()
+            return
+
+        try:
+            run_readonly_query(connection_string, "SELECT 1")
+        except (EghisDbUnavailableError, EghisDbQueryRejectedError, RuntimeError):
+            self._eghis_db_available = False
+            self.eghis_db_status.setText("Eghis DB: unavailable")
+            self._emit_health_state()
+            return
+
+        self._eghis_db_available = True
+        self.eghis_db_status.setText("Eghis DB: healthy")
+        self._emit_health_state()
 
     def refresh_imaging_worklist(self) -> None:
         initialize_database(self._db_path)
@@ -587,10 +629,10 @@ class PacsPanel(QWidget):
         self.audit_table.resizeColumnsToContents()
 
     def check_kaospacs_connection(self) -> None:
-        self._refresh_kaospacs_status()
+        self._refresh_startup_connection_statuses()
 
     def poll_now(self) -> None:
-        self._run_poll()
+        self._run_poll(refresh_imaging=True)
 
     def sync_to_kaospacs(self) -> None:
         initialize_database(self._db_path)
@@ -623,6 +665,7 @@ class PacsPanel(QWidget):
             ),
         )
         self.refresh_audit()
+        self._schedule_imaging_refresh()
 
     def reconcile_from_kaospacs(self) -> None:
         initialize_database(self._db_path)
@@ -640,6 +683,7 @@ class PacsPanel(QWidget):
                 dry_run=result.dry_run,
             )
             self.refresh_audit()
+            self._schedule_imaging_refresh()
             return
         summary = (
             f"{'KaosPACS reconcile (DRY RUN): ' if result.dry_run else 'KaosPACS reconcile: '}"
@@ -656,6 +700,7 @@ class PacsPanel(QWidget):
             ),
         )
         self.refresh_audit()
+        self._schedule_imaging_refresh()
 
     def manual_insert_row(self) -> None:
         dialog = PacsWorklistDialog(self)
@@ -822,9 +867,9 @@ class PacsPanel(QWidget):
             self._poll_timer.stop()
 
     def _handle_poll_timer_tick(self) -> None:
-        self._run_poll()
+        self._run_poll(refresh_imaging=True, is_auto_poll=True)
 
-    def _run_poll(self) -> None:
+    def _run_poll(self, *, refresh_imaging: bool = False, is_auto_poll: bool = False) -> None:
         if self._poll_in_progress:
             self.last_poll_result_label.setText("Last poll result: skipped overlap")
             self.polling_status.setText("Polling status: skipped overlap")
@@ -837,6 +882,16 @@ class PacsPanel(QWidget):
             initialize_database(self._db_path)
             with connect(self._db_path) as connection:
                 settings = get_settings(connection)
+
+            self._refresh_kaospacs_status(settings)
+            self._refresh_eghis_db_status(settings)
+            if is_auto_poll and (not self._kaospacs_available or not self._eghis_db_available):
+                self._poll_timer.stop()
+                self.polling_status.setText(f"Auto poll stopped: {self._health_reason}")
+                self.last_poll_result_label.setText(
+                    f"Last poll result: auto poll stopped - {self._health_reason}"
+                )
+                return
 
             result = poll_eghis_image_orders_into_local_worklist(
                 settings,
@@ -860,8 +915,34 @@ class PacsPanel(QWidget):
             self.polling_status.setText(f"Polling status: {summary}")
             self._log_audit_aggregate(event_type="poll", summary=summary)
             self.refresh_audit()
+            if refresh_imaging:
+                self._schedule_imaging_refresh()
         finally:
             self._poll_in_progress = False
+
+    def _schedule_imaging_refresh(self) -> None:
+        self.imaging_status_label.setText(
+            f"Waiting {self.IMAGING_REFRESH_DELAY_MS} ms before imaging refresh..."
+        )
+        QTimer.singleShot(self.IMAGING_REFRESH_DELAY_MS, self.refresh_imaging_worklist)
+
+    @property
+    def is_healthy(self) -> bool:
+        return self._kaospacs_available and self._eghis_db_available
+
+    @property
+    def health_reason(self) -> str:
+        return self._health_reason
+
+    def _emit_health_state(self) -> None:
+        if not self._kaospacs_available:
+            reason = "KaosPACS unavailable"
+        elif not self._eghis_db_available:
+            reason = "Eghis DB unavailable"
+        else:
+            reason = "PACS healthy"
+        self._health_reason = reason
+        self.health_state_changed.emit(self.is_healthy, reason)
 
     @classmethod
     def _parse_auto_poll_enabled(cls, value: str | None) -> bool:

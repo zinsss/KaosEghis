@@ -15,6 +15,11 @@ def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    monkeypatch.setattr(pacs_panel_module, "check_kaospacs_health", lambda settings: True)
+    monkeypatch.setattr(pacs_panel_module, "run_readonly_query", lambda *_args, **_kwargs: (["?column?"], [(1,)]))
+
     from KaosEghis.ui.main_window import MainWindow
 
     window = MainWindow()
@@ -26,8 +31,27 @@ def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
         "PACS",
         "Flu-Report",
     ]
-    assert 520 <= window.width() <= 680
-    assert 760 <= window.height() <= 900
+    assert window.width() == 1280
+    assert window.height() == 900
+
+
+def test_main_window_marks_pacs_tab_red_when_unhealthy(tmp_path, monkeypatch) -> None:
+    _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    monkeypatch.setattr(pacs_panel_module, "check_kaospacs_health", lambda settings: False)
+    monkeypatch.setattr(pacs_panel_module, "run_readonly_query", lambda *_args, **_kwargs: (["?column?"], [(1,)]))
+
+    from KaosEghis.ui.main_window import MainWindow
+
+    window = MainWindow()
+
+    pacs_index = [window.tabs.tabText(index) for index in range(window.tabs.count())].index("PACS")
+    assert window.tabs.tabBar().tabTextColor(pacs_index).name().lower() == "#f38ba8"
+    assert "KaosPACS unavailable" in window.tabs.tabBar().tabToolTip(pacs_index)
 
 
 def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
