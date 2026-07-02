@@ -582,6 +582,99 @@ def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
     assert panel.polling_status.text() == "Polling status: inserted=1, updated=0, skipped=0"
 
 
+def test_pacs_panel_manual_poll_schedules_deferred_imaging_refresh(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.pacs_polling import PollResult
+
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda settings, db_path, selected_date=None: PollResult(inserted=1, updated=0, skipped=0),
+    )
+    monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    scheduled = []
+    monkeypatch.setattr(panel, "_schedule_imaging_refresh", lambda: scheduled.append(True))
+
+    panel.poll_now()
+
+    assert scheduled == [True]
+
+
+def test_pacs_panel_auto_poll_schedules_deferred_imaging_refresh(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.pacs_polling import PollResult
+
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda settings, db_path, selected_date=None: PollResult(inserted=1, updated=0, skipped=0),
+    )
+    monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    scheduled = []
+    monkeypatch.setattr(panel, "_schedule_imaging_refresh", lambda: scheduled.append(True))
+
+    panel._handle_poll_timer_tick()
+
+    assert scheduled == [True]
+
+
+def test_pacs_panel_sync_schedules_deferred_imaging_refresh(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.kaospacs_client import KaosPacsSyncResult
+
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "sync_local_worklist_to_kaospacs",
+        lambda settings, db_path: KaosPacsSyncResult(sent=1, cancelled=0, errors=0, skipped=0),
+    )
+    monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    scheduled = []
+    monkeypatch.setattr(panel, "_schedule_imaging_refresh", lambda: scheduled.append(True))
+
+    panel.sync_to_kaospacs()
+
+    assert scheduled == [True]
+
+
+def test_pacs_panel_reconcile_schedules_deferred_imaging_refresh(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.kaospacs_client import KaosPacsReconcileResult
+
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "reconcile_kaospacs_worklist_to_local",
+        lambda settings, db_path: KaosPacsReconcileResult(
+            completed=1,
+            expired=0,
+            skipped=0,
+            errors=0,
+        ),
+    )
+    monkeypatch.setattr(pacs_panel_module, "get_imaging_worklist", lambda settings: [])
+
+    panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
+    scheduled = []
+    monkeypatch.setattr(panel, "_schedule_imaging_refresh", lambda: scheduled.append(True))
+
+    panel.reconcile_from_kaospacs()
+
+    assert scheduled == [True]
+
+
 def test_operator_mode_loads_local_rows_when_opened(monkeypatch, tmp_path) -> None:
     _app()
 

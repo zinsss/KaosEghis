@@ -52,6 +52,7 @@ from KaosEghis.ui.plugins.pacs_worklist_dialog import PacsWorklistDialog
 class PacsPanel(QWidget):
     DEFAULT_POLL_INTERVAL_SECONDS = 60
     MIN_POLL_INTERVAL_SECONDS = 15
+    IMAGING_REFRESH_DELAY_MS = 350
     WORKLIST_COLUMNS = [
         "Status",
         "Patient",
@@ -590,7 +591,7 @@ class PacsPanel(QWidget):
         self._refresh_kaospacs_status()
 
     def poll_now(self) -> None:
-        self._run_poll()
+        self._run_poll(refresh_imaging=True)
 
     def sync_to_kaospacs(self) -> None:
         initialize_database(self._db_path)
@@ -623,6 +624,7 @@ class PacsPanel(QWidget):
             ),
         )
         self.refresh_audit()
+        self._schedule_imaging_refresh()
 
     def reconcile_from_kaospacs(self) -> None:
         initialize_database(self._db_path)
@@ -640,6 +642,7 @@ class PacsPanel(QWidget):
                 dry_run=result.dry_run,
             )
             self.refresh_audit()
+            self._schedule_imaging_refresh()
             return
         summary = (
             f"{'KaosPACS reconcile (DRY RUN): ' if result.dry_run else 'KaosPACS reconcile: '}"
@@ -656,6 +659,7 @@ class PacsPanel(QWidget):
             ),
         )
         self.refresh_audit()
+        self._schedule_imaging_refresh()
 
     def manual_insert_row(self) -> None:
         dialog = PacsWorklistDialog(self)
@@ -822,9 +826,9 @@ class PacsPanel(QWidget):
             self._poll_timer.stop()
 
     def _handle_poll_timer_tick(self) -> None:
-        self._run_poll()
+        self._run_poll(refresh_imaging=True)
 
-    def _run_poll(self) -> None:
+    def _run_poll(self, *, refresh_imaging: bool = False) -> None:
         if self._poll_in_progress:
             self.last_poll_result_label.setText("Last poll result: skipped overlap")
             self.polling_status.setText("Polling status: skipped overlap")
@@ -860,8 +864,16 @@ class PacsPanel(QWidget):
             self.polling_status.setText(f"Polling status: {summary}")
             self._log_audit_aggregate(event_type="poll", summary=summary)
             self.refresh_audit()
+            if refresh_imaging:
+                self._schedule_imaging_refresh()
         finally:
             self._poll_in_progress = False
+
+    def _schedule_imaging_refresh(self) -> None:
+        self.imaging_status_label.setText(
+            f"Waiting {self.IMAGING_REFRESH_DELAY_MS} ms before imaging refresh..."
+        )
+        QTimer.singleShot(self.IMAGING_REFRESH_DELAY_MS, self.refresh_imaging_worklist)
 
     @classmethod
     def _parse_auto_poll_enabled(cls, value: str | None) -> bool:
