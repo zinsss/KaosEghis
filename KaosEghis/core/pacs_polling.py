@@ -23,6 +23,22 @@ from KaosEghis.core.eghis_db import (
 
 _CANONICAL_ALIASES = {
     "patient_name": ["patient_name", "PatientName", "PATIENT_NAME", "pname", "수진자명"],
+    "patient_birth_date": [
+        "patient_birth_date",
+        "PatientBirthDate",
+        "PATIENT_BIRTH_DATE",
+        "birth_date",
+        "dob",
+        "생년월일",
+    ],
+    "patient_sex": [
+        "patient_sex",
+        "PatientSex",
+        "PATIENT_SEX",
+        "sex",
+        "gender",
+        "성별",
+    ],
     "chart_no": [
         "chart_no",
         "ChartNo",
@@ -73,6 +89,11 @@ SELECT
         ELSE 'active'
     END AS status,
     m.patient_name AS patient_name,
+    COALESCE(
+        NULLIF(BTRIM(COALESCE(m.patient_birth_date::text, '')), ''),
+        NULLIF(BTRIM(COALESCE(m.patient_birth_dttm::text, '')), '')
+    ) AS patient_birth_date,
+    m.patient_sex AS patient_sex,
     m.patient_id AS patient_id,
     {study_sql} AS study,
     CASE
@@ -177,6 +198,8 @@ def poll_eghis_image_orders_into_local_worklist(
                     UPDATE pacs_worklist_items
                     SET status = ?,
                         patient_name = ?,
+                        patient_birth_date = ?,
+                        patient_sex = ?,
                         chart_no = ?,
                         study = ?,
                         modality = ?,
@@ -188,6 +211,8 @@ def poll_eghis_image_orders_into_local_worklist(
                     (
                         status,
                         _blank_to_none(order.get("patient_name")),
+                        _blank_to_none(order.get("patient_birth_date")),
+                        _blank_to_none(order.get("patient_sex")),
                         _blank_to_none(order.get("chart_no")),
                         _blank_to_none(order.get("study")),
                         _blank_to_none(order.get("modality")),
@@ -207,6 +232,8 @@ def poll_eghis_image_orders_into_local_worklist(
                 connection,
                 status=status,
                 patient_name=order.get("patient_name"),
+                patient_birth_date=order.get("patient_birth_date"),
+                patient_sex=order.get("patient_sex"),
                 chart_no=order.get("chart_no"),
                 study=order.get("study"),
                 modality=order.get("modality"),
@@ -293,6 +320,8 @@ def _map_db_row_to_order(
     order: dict[str, str | None] = {
         "status": "active",
         "patient_name": None,
+        "patient_birth_date": None,
+        "patient_sex": None,
         "chart_no": None,
         "study": None,
         "modality": None,
@@ -301,12 +330,14 @@ def _map_db_row_to_order(
         "source": "eghis-db",
     }
 
-    # Store only the minimum local worklist fields. Ignore any extra DB columns so
-    # resident ID, DOB, sex, phone, address, diagnosis, EMR notes, and raw rows do
-    # not enter KaosEghis local SQLite through this adapter.
+    # Store only the fields required for worklist bridging. Ignore extra DB columns so
+    # resident ID, phone, address, diagnosis, EMR notes, and raw rows do not enter
+    # KaosEghis local SQLite through this adapter.
     order["status"] = _stringify(_lookup_alias(row_map, ["status"])) or "active"
     for key in (
         "patient_name",
+        "patient_birth_date",
+        "patient_sex",
         "chart_no",
         "study",
         "modality",

@@ -101,6 +101,14 @@ def _migrate_pacs_worklist(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE pacs_worklist_items ADD COLUMN error_message TEXT"
         )
+    if "patient_birth_date" not in columns:
+        connection.execute(
+            "ALTER TABLE pacs_worklist_items ADD COLUMN patient_birth_date TEXT"
+        )
+    if "patient_sex" not in columns:
+        connection.execute(
+            "ALTER TABLE pacs_worklist_items ADD COLUMN patient_sex TEXT"
+        )
     if "source" not in columns:
         connection.execute(
             "ALTER TABLE pacs_worklist_items ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"
@@ -153,6 +161,8 @@ def _rebuild_pacs_worklist_status_schema(connection: sqlite3.Connection) -> None
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'expired', 'cancelled', 'error')),
             patient_name TEXT,
+            patient_birth_date TEXT,
+            patient_sex TEXT,
             chart_no TEXT,
             study TEXT,
             modality TEXT,
@@ -174,6 +184,8 @@ def _rebuild_pacs_worklist_status_schema(connection: sqlite3.Connection) -> None
             id,
             status,
             patient_name,
+            patient_birth_date,
+            patient_sex,
             chart_no,
             study,
             modality,
@@ -194,6 +206,8 @@ def _rebuild_pacs_worklist_status_schema(connection: sqlite3.Connection) -> None
                 ELSE lower(status)
             END,
             patient_name,
+            patient_birth_date,
+            patient_sex,
             chart_no,
             study,
             modality,
