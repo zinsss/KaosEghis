@@ -155,19 +155,28 @@ class EmrTargetsPage(QWidget):
 
         self.status_label = QLabel("Not loaded yet.")
 
+        left_column = QVBoxLayout()
+        left_column.addWidget(QLabel("Profiles"))
+        left_column.addWidget(self.profile_list)
+        left_column.addLayout(profile_controls)
+        left_column.addLayout(detail_form)
+        left_column.addLayout(detail_controls)
+        left_column.addWidget(self.connection_status_label)
+        left_column.addWidget(self.status_label)
+        left_column.addStretch()
+
+        right_column = QVBoxLayout()
+        right_column.addWidget(QLabel("UI targets"))
+        right_column.addWidget(self.ui_targets_table)
+        right_column.addLayout(target_controls)
+
+        content_layout = QHBoxLayout()
+        content_layout.addLayout(left_column, 2)
+        content_layout.addLayout(right_column, 3)
+
         layout = QVBoxLayout(self)
         layout.addWidget(title)
-        layout.addWidget(QLabel("Profiles"))
-        layout.addWidget(self.profile_list)
-        layout.addLayout(profile_controls)
-        layout.addLayout(detail_form)
-        layout.addLayout(detail_controls)
-        layout.addWidget(self.connection_status_label)
-        layout.addWidget(QLabel("UI targets"))
-        layout.addWidget(self.ui_targets_table)
-        layout.addLayout(target_controls)
-        layout.addWidget(self.status_label)
-        layout.addStretch()
+        layout.addLayout(content_layout)
 
         self.refresh_view()
 
