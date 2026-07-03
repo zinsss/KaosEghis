@@ -1183,7 +1183,7 @@ def test_discover_eghis_returns_yellow_when_found_but_not_active(monkeypatch) ->
 
     assert state.status == "yellow"
     assert state.window_owner_pid == 12
-    assert state.message == "Eghis found but not active"
+    assert state.message == "Connected - will focus on run"
 
 
 def test_discover_eghis_returns_green_when_found_and_active(monkeypatch) -> None:

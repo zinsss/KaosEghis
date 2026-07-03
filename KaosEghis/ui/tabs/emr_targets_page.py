@@ -553,6 +553,7 @@ class EmrTargetsPage(QWidget):
             self.connection_toggle.setText("Connect application")
             self._set_toggle_checked(False)
             return
+        mismatch = False
         if settings is not None:
             configured_process = (settings.get("eghis_process_name") or "").strip()
             cached_process = (state.process_name or "").strip()
@@ -566,14 +567,19 @@ class EmrTargetsPage(QWidget):
                     and Path(configured_path).name.casefold() != Path(cached_path).name.casefold()
                 )
             )
-            if mismatch:
-                self.connection_status_label.setText(
-                    "Application connection: cached app does not match this preset."
-                )
-                self.connection_toggle.setText("Connect application")
-                self._set_toggle_checked(False)
-                return
-        self.connection_status_label.setText(f"Application connection: {state.message}")
+        if mismatch:
+            self.connection_status_label.setText(
+                "Application connection: cached app does not match this preset."
+            )
+            self.connection_toggle.setText("Connect application")
+            self._set_toggle_checked(False)
+            return
+        if state.status == "yellow":
+            self.connection_status_label.setText(
+                "Application connection: connected. The app will be focused when a macro runs."
+            )
+        else:
+            self.connection_status_label.setText(f"Application connection: {state.message}")
         self.connection_toggle.setText(
             "Disconnect application" if state.status in {"green", "yellow"} else "Connect application"
         )

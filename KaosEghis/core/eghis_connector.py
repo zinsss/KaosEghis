@@ -101,7 +101,7 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_owner_pid=window_owner_pid,
             is_active=False,
             last_seen_at=last_seen_at,
-            message="Eghis found but not active",
+            message="Connected - will focus on run",
         )
     if process_running:
         return EghisConnectorState(

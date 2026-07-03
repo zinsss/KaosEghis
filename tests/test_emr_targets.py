@@ -269,3 +269,33 @@ def test_emr_targets_page_connection_toggle_updates_status(
 
     assert page.connection_toggle.isChecked() is True
     assert "Connected and active" in page.connection_status_label.text()
+
+
+def test_emr_targets_page_shows_connected_message_for_inactive_cached_app(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+    class FakeState:
+        status = "yellow"
+        pid = 1234
+        exe_path = "C:\\eghis\\eghisEmr\\eGhis.exe"
+        process_name = "eGhis.exe"
+        message = "Connected - will focus on run"
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.get_cached_eghis_state",
+        lambda: FakeState(),
+    )
+
+    page = EmrTargetsPage(db_path)
+    page.refresh_view()
+
+    assert page.connection_toggle.isChecked() is True
+    assert "will be focused when a macro runs" in page.connection_status_label.text()
