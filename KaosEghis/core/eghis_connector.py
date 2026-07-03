@@ -28,6 +28,23 @@ class EghisConnectorState:
 _CACHED_STATE: EghisConnectorState | None = None
 
 
+def build_connector_settings(
+    base_settings: dict[str, str],
+    *,
+    process_name: str | None = None,
+    window_title_contains: str | None = None,
+    executable_path: str | None = None,
+) -> dict[str, str]:
+    settings = dict(base_settings)
+    if process_name is not None:
+        settings["eghis_process_name"] = process_name
+    if window_title_contains is not None:
+        settings["eghis_window_title_contains"] = window_title_contains
+    if executable_path is not None:
+        settings["eghis_executable_path"] = executable_path
+    return settings
+
+
 def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
     configured_process_name = settings.get("eghis_process_name", "")
     configured_window_title = settings.get("eghis_window_title_contains", "")
@@ -136,10 +153,100 @@ def get_cached_eghis_state() -> EghisConnectorState | None:
     return _CACHED_STATE
 
 
+def clear_cached_eghis_state() -> None:
+    global _CACHED_STATE
+    _CACHED_STATE = None
+
+
 def refresh_cached_eghis_state(settings: dict[str, str]) -> EghisConnectorState:
     global _CACHED_STATE
     _CACHED_STATE = discover_eghis(settings)
     return _CACHED_STATE
+
+
+def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorState:
+    global _CACHED_STATE
+    state = get_cached_eghis_state()
+    if state is None:
+        return _manual_reconnect_required(
+            None,
+            "Application not connected. Connect manually and retry.",
+        )
+    if _is_state_stale(state):
+        blocked = _manual_reconnect_required(
+            state,
+            "Application connection stale. Reconnect manually and retry.",
+        )
+        _CACHED_STATE = blocked
+        return blocked
+    if not state.process_running or state.pid is None or not _pid_exists(state.pid):
+        blocked = _manual_reconnect_required(
+            state,
+            "Application not running. Reconnect manually and retry.",
+        )
+        _CACHED_STATE = blocked
+        return blocked
+    if not _process_identity_matches_state(state, settings):
+        blocked = _manual_reconnect_required(
+            state,
+            "Connected application does not match preset. Reconnect manually and retry.",
+        )
+        _CACHED_STATE = blocked
+        return blocked
+    if state.window_handle is None or not _window_handle_is_valid(state.window_handle):
+        blocked = _manual_reconnect_required(
+            state,
+            "Application connection stale. Reconnect manually and retry.",
+        )
+        _CACHED_STATE = blocked
+        return blocked
+    owner_pid = _get_window_owner_pid(state.window_handle)
+    if owner_pid is None or owner_pid != state.pid:
+        blocked = _manual_reconnect_required(
+            replace(state, window_owner_pid=owner_pid),
+            "Application connection stale. Reconnect manually and retry.",
+        )
+        _CACHED_STATE = blocked
+        return blocked
+    if _has_blocking_modal_dialog(state, settings):
+        blocked = _manual_reconnect_required(
+            state,
+            "Application not focusable. Reconnect manually and retry.",
+        )
+        _CACHED_STATE = blocked
+        return blocked
+    if not state.is_active:
+        focus_succeeded, _focus_reason = _focus_and_confirm_window(
+            state.window_handle,
+            state,
+            settings,
+        )
+        if not focus_succeeded:
+            blocked = _manual_reconnect_required(
+                state,
+                "Application not focusable. Reconnect manually and retry.",
+            )
+            _CACHED_STATE = blocked
+            return blocked
+    foreground = _get_foreground_window_info()
+    if foreground is None or foreground.get("window_handle") != state.window_handle:
+        blocked = _manual_reconnect_required(
+            state,
+            "Application not focusable. Reconnect manually and retry.",
+        )
+        _CACHED_STATE = blocked
+        return blocked
+
+    ready = replace(
+        state,
+        status="green",
+        is_active=True,
+        window_owner_pid=owner_pid,
+        last_seen_at=_timestamp_now(),
+        message="Connected and active",
+    )
+    _CACHED_STATE = ready
+    return ready
 
 
 def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
@@ -450,12 +557,45 @@ def _process_identity_matches_state(state: EghisConnectorState, settings: dict[s
     tokens = _normalized_candidates(configured)
     if not tokens:
         return False
+    configured_executable_path = (settings.get("eghis_executable_path") or "").strip()
+    if configured_executable_path and not _executable_path_matches(
+        state.exe_path, configured_executable_path
+    ):
+        return False
     process_info = {
         "name": state.process_name or "",
         "exe": state.exe_path or "",
         "cmdline": [state.exe_path] if state.exe_path else [],
     }
     return _match_process_with_score(process_info, tokens) is not None
+
+
+def _manual_reconnect_required(
+    state: EghisConnectorState | None,
+    message: str,
+) -> EghisConnectorState:
+    if state is None:
+        return EghisConnectorState(
+            status="red",
+            process_running=False,
+            process_name=None,
+            pid=None,
+            exe_path=None,
+            window_found=False,
+            window_title=None,
+            window_handle=None,
+            window_owner_pid=None,
+            is_active=False,
+            last_seen_at=None,
+            message=message,
+        )
+    return replace(state, status="red", is_active=False, message=message)
+
+
+def _executable_path_matches(actual: str | None, configured: str) -> bool:
+    if not actual:
+        return False
+    return PurePath(actual).as_posix().casefold() == PurePath(configured).as_posix().casefold()
 
 
 def _pid_exists(pid: int) -> bool:

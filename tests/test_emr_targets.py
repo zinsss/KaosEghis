@@ -233,3 +233,39 @@ def test_emr_targets_page_instantiates_and_shows_default_profile(tmp_path, monke
     assert page.profile_list.count() >= 1
     assert page.name_input.text() == "eGHIS Production"
     assert page.default_status_label.text() == "[default]"
+
+
+def test_emr_targets_page_connection_toggle_updates_status(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+
+    from KaosEghis.core.eghis_connector import clear_cached_eghis_state
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+    class FakeState:
+        status = "green"
+        pid = 1234
+        exe_path = "C:\\Mcc\\Clinic\\eGhis.exe"
+        process_name = "eGhis.exe"
+        message = "Connected and active"
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    clear_cached_eghis_state()
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.refresh_cached_eghis_state",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.get_cached_eghis_state",
+        lambda: FakeState(),
+    )
+
+    page = EmrTargetsPage(db_path)
+    page.connection_toggle.click()
+
+    assert page.connection_toggle.isChecked() is True
+    assert "Connected and active" in page.connection_status_label.text()

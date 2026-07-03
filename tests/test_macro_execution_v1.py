@@ -47,7 +47,7 @@ def test_disabled_macro_cannot_run_real_execution(monkeypatch, tmp_path) -> None
         item = create_item(connection, "Disabled Macro", "macro", False)
 
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: (_ for _ in ()).throw(AssertionError("connector should not run")),
     )
 
@@ -74,7 +74,7 @@ def test_paste_text_with_target_requires_resolved_target(monkeypatch, tmp_path) 
         message = "Connected and active"
 
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
 
@@ -113,7 +113,7 @@ def test_paste_text_focuses_resolved_target_before_paste(monkeypatch, tmp_path) 
     events = []
     fake_element = FakeElement()
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
@@ -175,7 +175,7 @@ def test_reuses_resolved_target_within_single_macro_run(monkeypatch, tmp_path) -
     fake_element = FakeElement()
     resolve_calls = []
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
@@ -261,7 +261,7 @@ def test_emr_profile_target_resolution_still_works_with_cache_enabled(
 
     resolved_automation_ids = []
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
@@ -310,7 +310,7 @@ def test_macro_stops_on_failed_step(monkeypatch, tmp_path) -> None:
         message = "Connected and active"
 
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
 
@@ -346,7 +346,7 @@ def test_preset_text_resolves_clipboard_item(monkeypatch, tmp_path) -> None:
 
     calls = []
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
@@ -397,7 +397,7 @@ def test_randomized_preset_selects_one_option(monkeypatch, tmp_path) -> None:
 
     copied = []
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
@@ -468,7 +468,7 @@ def test_cache_clears_between_macro_runs(monkeypatch, tmp_path) -> None:
 
     resolve_calls = []
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
@@ -515,7 +515,7 @@ def test_cache_clears_after_failed_target_resolution(monkeypatch, tmp_path) -> N
         return None, None, "window not available"
 
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
@@ -537,7 +537,7 @@ def test_cache_clears_after_failed_target_resolution(monkeypatch, tmp_path) -> N
     assert runner._resolved_target_cache == {}
 
 
-def test_ensure_ready_for_macro_called_once_per_run_when_possible(monkeypatch, tmp_path) -> None:
+def test_cached_connection_check_called_once_per_run_when_possible(monkeypatch, tmp_path) -> None:
     import sys
 
     from KaosEghis.core.macro_runner import MacroRunner
@@ -565,7 +565,7 @@ def test_ensure_ready_for_macro_called_once_per_run_when_possible(monkeypatch, t
 
     ready_calls = []
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: ready_calls.append("ready") or FakeState(),
     )
     monkeypatch.setattr(
@@ -623,6 +623,106 @@ def test_macros_page_has_dry_run_and_run_selected_macro_buttons() -> None:
     assert page.run_macro_button.text() == "Run selected macro"
 
 
+def test_new_macro_editor_seeds_focus_window_step(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QWidget
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.eghis_assist_tab import MacroEditorDialog
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    initialize_database(tmp_path / "KaosEghis.sqlite")
+
+    parent = QWidget()
+    dialog = MacroEditorDialog(parent)
+
+    assert dialog.steps_table.rowCount() == 1
+    assert dialog.steps_table.item(0, 1).text() == "focus_window"
+
+
+def test_new_macro_step_dialog_defaults_to_focus_window(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QWidget
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.eghis_assist_tab import MacroStepDialog
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    initialize_database(tmp_path / "KaosEghis.sqlite")
+
+    parent = QWidget()
+    dialog = MacroStepDialog(parent)
+
+    assert dialog.action.currentText() == "focus_window"
+
+
+def test_macro_runner_requires_manual_connection_before_real_run(tmp_path) -> None:
+    from KaosEghis.core.eghis_connector import clear_cached_eghis_state
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    clear_cached_eghis_state()
+    with connect(db_path) as connection:
+        item = create_item(connection, "Reconnect Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "focus_window")
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.executed_steps == 0
+    assert result.message == "Application not connected. Connect manually and retry."
+
+
+def test_macro_runner_uses_selected_profile_for_connection_settings(
+    monkeypatch, tmp_path
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_emr_target_profile, create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Notepad",
+            is_enabled=True,
+            is_default=False,
+            process_name="notepad.exe",
+            executable_path="C:\\Windows\\System32\\notepad.exe",
+            window_title_contains="Notepad",
+        )
+        item = create_item(connection, "Profile Macro", "macro", True, profile.id)
+        create_macro_step(connection, item.id, 1, "focus_window")
+
+    captured_settings: dict[str, str] = {}
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    def fake_ready(settings):
+        captured_settings.update(settings)
+        return FakeState()
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        fake_ready,
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert captured_settings["eghis_process_name"] == "notepad.exe"
+    assert captured_settings["eghis_window_title_contains"] == "Notepad"
+    assert captured_settings["eghis_executable_path"] == "C:\\Windows\\System32\\notepad.exe"
+
+
 def test_app_startup_does_not_execute_macro(monkeypatch, tmp_path) -> None:
     _app()
 
@@ -665,7 +765,7 @@ def test_click_failure_is_sanitized(monkeypatch, tmp_path) -> None:
             raise RuntimeError("low-level click failure")
 
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
@@ -696,7 +796,7 @@ def test_target_resolution_failure_is_sanitized(monkeypatch, tmp_path) -> None:
         message = "Connected and active"
 
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
@@ -728,7 +828,7 @@ def test_hotkey_failure_is_sanitized(monkeypatch, tmp_path) -> None:
         message = "Connected and active"
 
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setitem(
@@ -759,7 +859,7 @@ def test_clipboard_failures_are_sanitized(monkeypatch, tmp_path) -> None:
         message = "Connected and active"
 
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
