@@ -32,11 +32,11 @@ def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
         "Flu-Report",
     ]
     assert window.width() == 1280
-    assert window.height() == 880
+    assert window.height() == 875
     assert window.minimumWidth() == 1280
     assert window.maximumWidth() == 1280
-    assert window.minimumHeight() == 880
-    assert window.maximumHeight() == 880
+    assert window.minimumHeight() == 875
+    assert window.maximumHeight() == 875
 
 
 def test_main_window_marks_pacs_tab_red_when_unhealthy(tmp_path, monkeypatch) -> None:
