@@ -80,6 +80,14 @@ def _migrate_items(connection: sqlite3.Connection) -> None:
     }
     if "emr_target_profile_id" not in columns:
         connection.execute("ALTER TABLE items ADD COLUMN emr_target_profile_id INTEGER")
+    if "launcher_category" not in columns:
+        connection.execute(
+            "ALTER TABLE items ADD COLUMN launcher_category TEXT NOT NULL DEFAULT 'Eghis'"
+        )
+    if "launcher_order" not in columns:
+        connection.execute(
+            "ALTER TABLE items ADD COLUMN launcher_order INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def _migrate_pacs_worklist(connection: sqlite3.Connection) -> None:

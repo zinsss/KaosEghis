@@ -222,3 +222,41 @@ def test_macro_execution_behavior_unchanged_with_bound_profile(monkeypatch, tmp_
 
     assert result.success is True
     assert calls == ["^a"]
+
+
+def test_launcher_positions_persist(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, list_launcher_items, set_launcher_positions
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        first = create_item(connection, "Macro A", "macro", True)
+        second = create_item(connection, "Macro B", "macro", True)
+        set_launcher_positions(
+            connection,
+            [
+                (second.id, "Medical Documents", 0),
+                (first.id, "Eghis", 1),
+            ],
+        )
+        items = list_launcher_items(connection)
+
+    assert [(item.id, item.launcher_category, item.launcher_order) for item in items] == [
+        (first.id, "Eghis", 1),
+        (second.id, "Medical Documents", 0),
+    ]
+
+
+def test_launcher_page_shows_three_macro_columns(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    initialize_database(tmp_path / "KaosEghis.sqlite")
+
+    page = LauncherPage(tmp_path / "KaosEghis.sqlite")
+
+    assert list(page._lists.keys()) == ["Eghis", "Medical Documents", "ETC"]

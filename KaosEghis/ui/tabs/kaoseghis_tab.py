@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QListWidget,
+    QListWidgetItem,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -25,9 +28,11 @@ from KaosEghis.db.repositories import (
     delete_macro_steps_for_item,
     get_item,
     list_items,
+    list_launcher_items,
     list_macro_steps,
     resolve_macro_emr_target_profile,
     reorder_macro_steps,
+    set_launcher_positions,
     update_item,
     validate_macro_dry_run,
 )
@@ -37,7 +42,7 @@ from KaosEghis.ui.tabs.settings_tab import SettingsTab
 
 
 class KaosEghisTab(QWidget):
-    TOP_PAGES = ["Macros", "Presets", "EMR", "Settings"]
+    TOP_PAGES = ["Macros", "Launcher", "EMR", "Settings"]
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -48,13 +53,13 @@ class KaosEghisTab(QWidget):
         self.stacked_widget = QStackedWidget()
 
         self.macros_page = MacrosPage(db_path)
-        self.presets_page = PresetsPage()
+        self.launcher_page = LauncherPage(db_path)
         self.emr_page = EmrTargetsPage(db_path)
         self.settings_page = SettingsTab(db_path)
 
         for page in (
             self.macros_page,
-            self.presets_page,
+            self.launcher_page,
             self.emr_page,
             self.settings_page,
         ):
@@ -337,6 +342,132 @@ class PresetsPage(QWidget):
         has_presets = bool(preset_items)
         self.empty_state.setVisible(not has_presets)
         self.presets_table.setVisible(has_presets)
+
+
+class MacroLauncherList(QListWidget):
+    orderChanged = Signal()
+    macroDoubleClicked = Signal(int)
+
+    def __init__(self, category: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.category = category
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.itemDoubleClicked.connect(self._emit_macro_double_clicked)
+
+    def dropEvent(self, event) -> None:
+        super().dropEvent(event)
+        self.orderChanged.emit()
+
+    def _emit_macro_double_clicked(self, item: QListWidgetItem) -> None:
+        macro_id = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(macro_id, int):
+            self.macroDoubleClicked.emit(macro_id)
+
+
+class LauncherPage(QWidget):
+    COLUMNS = ("Eghis", "Medical Documents", "ETC")
+
+    def __init__(self, db_path: Path | None = None) -> None:
+        super().__init__()
+        self._db_path = db_path
+        self._lists: dict[str, MacroLauncherList] = {}
+        self._saving_positions = False
+
+        title = QLabel("Saved Macros")
+        title.setObjectName("pageTitle")
+
+        subtitle = QLabel("Double-click to run. Drag and drop to change column and order.")
+        subtitle.setObjectName("macroSummary")
+
+        columns_layout = QHBoxLayout()
+        for category in self.COLUMNS:
+            column_layout = QVBoxLayout()
+            column_layout.addWidget(QLabel(category))
+            launcher_list = MacroLauncherList(category, self)
+            launcher_list.orderChanged.connect(self.save_positions)
+            launcher_list.macroDoubleClicked.connect(self.run_macro)
+            self._lists[category] = launcher_list
+            column_layout.addWidget(launcher_list)
+            columns_layout.addLayout(column_layout, 1)
+
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.refresh_view)
+
+        controls = QHBoxLayout()
+        controls.addWidget(self.refresh_button)
+        controls.addStretch()
+
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setPlaceholderText("Macro launcher status will appear here.")
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        layout.addLayout(columns_layout)
+        layout.addLayout(controls)
+        layout.addWidget(self.log)
+
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            items = list_launcher_items(connection)
+
+        for launcher_list in self._lists.values():
+            launcher_list.clear()
+
+        for item in items:
+            category = item.launcher_category if item.launcher_category in self._lists else "ETC"
+            list_widget = self._lists[category]
+            entry = QListWidgetItem(item.name)
+            entry.setData(Qt.ItemDataRole.UserRole, item.id)
+            entry.setToolTip(f"Macro ID: {item.id}")
+            if not item.is_enabled:
+                entry.setFlags(entry.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                entry.setText(f"{item.name} [disabled]")
+            list_widget.addItem(entry)
+
+    def save_positions(self) -> None:
+        if self._saving_positions:
+            return
+        self._saving_positions = True
+        try:
+            placements: list[tuple[int, str, int]] = []
+            for category in self.COLUMNS:
+                launcher_list = self._lists[category]
+                for launcher_order in range(launcher_list.count()):
+                    item = launcher_list.item(launcher_order)
+                    macro_id = item.data(Qt.ItemDataRole.UserRole)
+                    if isinstance(macro_id, int):
+                        placements.append((macro_id, category, launcher_order))
+            initialize_database(self._db_path)
+            with connect(self._db_path) as connection:
+                set_launcher_positions(connection, placements)
+        finally:
+            self._saving_positions = False
+
+    def run_macro(self, item_id: int) -> None:
+        result = MacroRunner(self._db_path).execute_macro(item_id, dry_run=False)
+        if not result.success and "reconnect manually and retry" in (result.message or "").casefold():
+            QMessageBox.warning(
+                self,
+                "Application reconnection required",
+                result.message,
+            )
+        lines = [
+            f"success: {_yes_no(result.success)}",
+            f"executed_steps: {result.executed_steps}",
+            f"failed_step: {result.failed_step or ''}",
+            f"message: {result.message}",
+        ]
+        self.log.setPlainText("\n".join(lines))
 
 
 def _get_required_item(connection, item_id: int):

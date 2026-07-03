@@ -67,7 +67,7 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
 
     tab = KaosEghisTab()
 
-    assert list(tab.nav_buttons.keys()) == ["Macros", "Presets", "EMR", "Settings"]
+    assert list(tab.nav_buttons.keys()) == ["Macros", "Launcher", "EMR", "Settings"]
     assert isinstance(tab.stacked_widget, QStackedWidget)
     assert tab.stacked_widget.currentWidget() is tab.macros_page
     assert tab.nav_buttons["Macros"].isChecked() is True
@@ -80,8 +80,8 @@ def test_kaoseghis_top_nav_pages_are_reachable() -> None:
 
     tab = KaosEghisTab()
 
-    tab.nav_buttons["Presets"].click()
-    assert tab.stacked_widget.currentWidget() is tab.presets_page
+    tab.nav_buttons["Launcher"].click()
+    assert tab.stacked_widget.currentWidget() is tab.launcher_page
 
     tab.nav_buttons["EMR"].click()
     assert tab.stacked_widget.currentWidget() is tab.emr_page
