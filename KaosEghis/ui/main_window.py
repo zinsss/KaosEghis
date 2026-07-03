@@ -15,7 +15,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("KaosEghis")
-        self.resize(1280, 900)
+        self.setFixedSize(1280, 890)
 
         tabs = QTabWidget()
         self.tabs = tabs
