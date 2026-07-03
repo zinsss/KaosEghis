@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -24,6 +25,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from KaosEghis.core.inspector_import import (
+    InspectorAncestor,
+    derive_ancestor_key,
+    derive_target_key,
+    list_meaningful_ancestors,
+    parse_ancestor_hints,
+    parse_inspector_text,
+    serialize_ancestor_hints,
+)
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     EmrUiTargetRecord,
@@ -34,6 +44,7 @@ from KaosEghis.db.repositories import (
     get_default_emr_target_profile,
     get_emr_target_profile,
     get_emr_ui_target,
+    get_emr_ui_target_by_key,
     list_emr_target_profiles,
     list_emr_ui_targets,
     set_default_emr_target_profile,
@@ -142,6 +153,8 @@ class EmrTargetsPage(QWidget):
 
         self.add_target_button = QPushButton("Add target")
         self.add_target_button.clicked.connect(self.add_ui_target)
+        self.import_target_button = QPushButton("Import inspector text")
+        self.import_target_button.clicked.connect(self.import_ui_target)
         self.edit_target_button = QPushButton("Edit target")
         self.edit_target_button.clicked.connect(self.edit_ui_target)
         self.delete_target_button = QPushButton("Delete target")
@@ -149,6 +162,7 @@ class EmrTargetsPage(QWidget):
 
         target_controls = QHBoxLayout()
         target_controls.addWidget(self.add_target_button)
+        target_controls.addWidget(self.import_target_button)
         target_controls.addWidget(self.edit_target_button)
         target_controls.addWidget(self.delete_target_button)
         target_controls.addStretch()
@@ -270,6 +284,7 @@ class EmrTargetsPage(QWidget):
                     class_name=target.class_name,
                     name_match=target.name_match,
                     parent_target_key=target.parent_target_key,
+                    ancestor_hint_path=target.ancestor_hint_path,
                 )
         self._current_profile_id = duplicate.id
         self.refresh_view()
@@ -380,6 +395,36 @@ class EmrTargetsPage(QWidget):
             return
         self._load_profile(self._current_profile_id)
         self.status_label.setText("UI target added.")
+
+    def import_ui_target(self) -> None:
+        if self._current_profile_id is None:
+            self.status_label.setText("Select a profile before importing UI targets.")
+            return
+        dialog = InspectorImportDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        values = dialog.values()
+        initialize_database(self._db_path)
+        try:
+            with connect(self._db_path) as connection:
+                self._upsert_emr_ui_target(
+                    connection,
+                    self._current_profile_id,
+                    target_key=values["target_key"],
+                    label=values["label"],
+                    description=values["description"],
+                    automation_id=values["automation_id"],
+                    control_type=values["control_type"],
+                    class_name=values["class_name"],
+                    name_match=values["name_match"],
+                    parent_target_key=None,
+                    ancestor_hint_path=values["ancestor_hint_path"],
+                )
+        except sqlite3.IntegrityError:
+            self.status_label.setText("Imported target key must be unique within the profile.")
+            return
+        self._load_profile(self._current_profile_id)
+        self.status_label.setText("Inspector target imported.")
 
     def edit_ui_target(self) -> None:
         ui_target_id = self._selected_ui_target_id()
@@ -638,6 +683,51 @@ class EmrTargetsPage(QWidget):
                 return candidate
             index += 1
 
+    def _upsert_emr_ui_target(
+        self,
+        connection: sqlite3.Connection,
+        profile_id: int,
+        *,
+        target_key: str,
+        label: str,
+        description: str,
+        automation_id: str,
+        control_type: str,
+        class_name: str,
+        name_match: str,
+        parent_target_key: str | None,
+        ancestor_hint_path: str | None = None,
+    ) -> None:
+        existing = get_emr_ui_target_by_key(connection, profile_id, target_key)
+        if existing is None:
+            create_emr_ui_target(
+                connection,
+                profile_id=profile_id,
+                target_key=target_key,
+                label=label,
+                description=description,
+                automation_id=automation_id,
+                control_type=control_type,
+                class_name=class_name,
+                name_match=name_match,
+                parent_target_key=parent_target_key,
+                ancestor_hint_path=ancestor_hint_path,
+            )
+            return
+        update_emr_ui_target(
+            connection,
+            existing.id,
+            target_key=target_key,
+            label=label,
+            description=description,
+            automation_id=automation_id,
+            control_type=control_type,
+            class_name=class_name,
+            name_match=name_match,
+            parent_target_key=parent_target_key,
+            ancestor_hint_path=ancestor_hint_path,
+        )
+
 
 class EmrUiTargetDialog(QDialog):
     def __init__(
@@ -656,6 +746,10 @@ class EmrUiTargetDialog(QDialog):
         self.class_name_input = QLineEdit()
         self.name_match_input = QLineEdit()
         self.parent_target_key_input = QLineEdit()
+        self.ancestor_hints_input = QPlainTextEdit()
+        self.ancestor_hints_input.setPlaceholderText(
+            "Optional ancestor hints, one per line as Name|ControlType"
+        )
 
         form = QFormLayout(self)
         form.addRow("Key", self.target_key_input)
@@ -666,6 +760,7 @@ class EmrUiTargetDialog(QDialog):
         form.addRow("Class name", self.class_name_input)
         form.addRow("Name match", self.name_match_input)
         form.addRow("Parent key", self.parent_target_key_input)
+        form.addRow("Ancestor hints", self.ancestor_hints_input)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -684,6 +779,9 @@ class EmrUiTargetDialog(QDialog):
             self.class_name_input.setText(target.class_name or "")
             self.name_match_input.setText(target.name_match or "")
             self.parent_target_key_input.setText(target.parent_target_key or "")
+            self.ancestor_hints_input.setPlainText(
+                self._format_ancestor_hints(target.ancestor_hint_path)
+            )
 
     def accept(self) -> None:
         if not self.target_key_input.text().strip():
@@ -704,4 +802,111 @@ class EmrUiTargetDialog(QDialog):
             "class_name": self.class_name_input.text().strip(),
             "name_match": self.name_match_input.text().strip(),
             "parent_target_key": self.parent_target_key_input.text().strip(),
+            "ancestor_hint_path": self._ancestor_hints_value(),
         }
+
+    def _ancestor_hints_value(self) -> str:
+        hints = parse_ancestor_hints(self.ancestor_hints_input.toPlainText())
+        return serialize_ancestor_hints(hints) if hints else ""
+
+    @staticmethod
+    def _format_ancestor_hints(value: str | None) -> str:
+        hints = parse_ancestor_hints(value)
+        return "\n".join(
+            hint.name if not hint.control_type else f"{hint.name}|{hint.control_type}"
+            for hint in hints
+        )
+
+
+class InspectorImportDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Import Inspector Text")
+        self._parsed_ancestors: list[InspectorAncestor] = []
+
+        self.raw_text_input = QPlainTextEdit()
+        self.raw_text_input.setPlaceholderText("Paste inspect.exe output here.")
+
+        self.target_key_input = QLineEdit()
+        self.label_input = QLineEdit()
+        self.description_input = QPlainTextEdit()
+        self.automation_id_input = QLineEdit()
+        self.control_type_input = QLineEdit()
+        self.class_name_input = QLineEdit()
+        self.name_match_input = QLineEdit()
+        self.ancestor_hint_combo = QComboBox()
+        self.ancestor_hint_combo.addItem("No ancestor hints", -1)
+
+        parse_button = QPushButton("Parse")
+        parse_button.clicked.connect(self.parse_text)
+
+        form = QFormLayout()
+        form.addRow("Inspector text", self.raw_text_input)
+        form.addRow("", parse_button)
+        form.addRow("Target key", self.target_key_input)
+        form.addRow("Label", self.label_input)
+        form.addRow("Description", self.description_input)
+        form.addRow("Automation ID", self.automation_id_input)
+        form.addRow("Control type", self.control_type_input)
+        form.addRow("Class name", self.class_name_input)
+        form.addRow("Name match", self.name_match_input)
+        form.addRow("Use ancestor hints from", self.ancestor_hint_combo)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+        self.resize(640, 720)
+
+    def parse_text(self) -> None:
+        parsed = parse_inspector_text(self.raw_text_input.toPlainText())
+        self._parsed_ancestors = list_meaningful_ancestors(parsed)
+        self.target_key_input.setText(derive_target_key(parsed.name))
+        self.label_input.setText(parsed.name or "")
+        self.description_input.setPlainText("Imported from inspector text.")
+        self.automation_id_input.setText(parsed.automation_id or "")
+        self.control_type_input.setText(parsed.control_type or "")
+        self.class_name_input.setText(parsed.class_name or "")
+        self.name_match_input.setText(parsed.name or "")
+        self.ancestor_hint_combo.clear()
+        self.ancestor_hint_combo.addItem("No ancestor hints", -1)
+        for index, ancestor in enumerate(self._parsed_ancestors):
+            display = ancestor.name
+            if ancestor.control_type:
+                display = f"{display} ({ancestor.control_type})"
+            self.ancestor_hint_combo.addItem(display, index)
+
+    def accept(self) -> None:
+        if not self.raw_text_input.toPlainText().strip():
+            QMessageBox.warning(self, "Validation", "Paste inspector text first.")
+            return
+        if not self.target_key_input.text().strip():
+            QMessageBox.warning(self, "Validation", "Target key is required.")
+            return
+        if not self.label_input.text().strip():
+            QMessageBox.warning(self, "Validation", "Label is required.")
+            return
+        super().accept()
+
+    def values(self) -> dict[str, object]:
+        return {
+            "target_key": self.target_key_input.text().strip(),
+            "label": self.label_input.text().strip(),
+            "description": self.description_input.toPlainText().strip(),
+            "automation_id": self.automation_id_input.text().strip(),
+            "control_type": self.control_type_input.text().strip(),
+            "class_name": self.class_name_input.text().strip(),
+            "name_match": self.name_match_input.text().strip(),
+            "ancestor_hint_path": self._selected_ancestor_hint_path(),
+        }
+
+    def _selected_ancestor_hint_path(self) -> str:
+        start_index = int(self.ancestor_hint_combo.currentData())
+        if start_index < 0 or start_index >= len(self._parsed_ancestors):
+            return ""
+        return serialize_ancestor_hints(self._parsed_ancestors[start_index:])

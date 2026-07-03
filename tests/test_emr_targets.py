@@ -196,6 +196,7 @@ def test_emr_ui_target_crud(tmp_path) -> None:
             automation_id="SearchBox",
             control_type="Edit",
             parent_target_key="main.window",
+            ancestor_hint_path='[{"name":"진료실","control_type":"Window"}]',
         )
         updated = update_emr_ui_target(
             connection,
@@ -206,6 +207,7 @@ def test_emr_ui_target_crud(tmp_path) -> None:
             control_type="Edit",
             class_name="WindowsForms10.Edit",
             parent_target_key="main.window",
+            ancestor_hint_path='[{"name":"Tools","control_type":"ToolBar"}]',
         )
         listed = list_emr_ui_targets(connection, profile.id)
         deleted = delete_emr_ui_target(connection, target.id)
@@ -214,8 +216,41 @@ def test_emr_ui_target_crud(tmp_path) -> None:
     assert updated is not None
     assert updated.label == "Patient Search Updated"
     assert listed[0].automation_id == "SearchBoxUpdated"
+    assert listed[0].ancestor_hint_path == '[{"name":"Tools","control_type":"ToolBar"}]'
     assert deleted is True
     assert after_delete == []
+
+
+def test_emr_ui_target_migration_adds_ancestor_hint_path(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE emr_target_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE emr_ui_targets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                target_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                parent_target_key TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(emr_ui_targets)")
+        }
+
+    assert "ancestor_hint_path" in columns
 
 
 def test_emr_targets_page_instantiates_and_shows_default_profile(tmp_path, monkeypatch) -> None:

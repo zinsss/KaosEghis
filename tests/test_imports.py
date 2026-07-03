@@ -7,6 +7,7 @@ def test_core_modules_import() -> None:
     import KaosEghis.core.eghis_connector
     import KaosEghis.core.emr_detector
     import KaosEghis.core.eghis_key_paste_test
+    import KaosEghis.core.inspector_import
     import KaosEghis.core.macro_models
     import KaosEghis.core.macro_runner
     import KaosEghis.core.paste_test
@@ -2049,6 +2050,53 @@ def test_inspect_target_readonly_uses_parent_target_id(monkeypatch, tmp_path) ->
     assert parent.descendants_calls == 1
 
 
+def test_inspect_target_readonly_uses_ancestor_hint_path_without_parent_key(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core.inspector_import import serialize_ancestor_hints, InspectorAncestor
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    pacs_button = _FakeElement("ignored", name="PACS", control_type="Button")
+    tools = _FakeElement("toolsBar", name="Tools", control_type="ToolBar", children=[pacs_button])
+    dock = _FakeElement(
+        "dockGroup",
+        name="standaloneBarDockControl1",
+        control_type="Group",
+        children=[tools],
+    )
+    clinic = _FakeElement("clinicPane", name="진료실", control_type="Window", children=[dock])
+    unrelated = _FakeElement("ignored2", name="PACS", control_type="Button")
+    window = _FakeWindow("Eghis", [clinic, unrelated])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "pacs",
+        None,
+        None,
+        None,
+        "PACS",
+        "Button",
+        None,
+        "now",
+        ancestor_hint_path=serialize_ancestor_hints(
+            [
+                InspectorAncestor("진료실", "Window", "창"),
+                InspectorAncestor("standaloneBarDockControl1", "Group", "그룹"),
+                InspectorAncestor("Tools", "ToolBar", "도구 모음"),
+            ]
+        ),
+    )
+
+    result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
+
+    assert result.found is True
+    assert result.found_name == "PACS"
+    assert window.descendants_calls == 0
+    assert tools.descendants_calls == 1
+
+
 class _FakeElementInfo:
     def __init__(
         self,
@@ -2083,6 +2131,9 @@ class _FakeElement:
 
     def descendants(self) -> list:
         self.descendants_calls += 1
+        return self._children
+
+    def children(self) -> list:
         return self._children
 
     def is_enabled(self) -> bool:

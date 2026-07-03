@@ -1,6 +1,6 @@
 # KaosEghis Design
 
-Last updated: 2026-06-30
+Last updated: 2026-07-03
 
 ## Purpose
 
@@ -172,6 +172,7 @@ The design strategy is milestone-based:
 - main desktop UI is PySide6
 - SQLite is local and initialized on app startup
 - EMR target profiles are now a first-class local model for future macro resolution
+- EMR UI targets can remain standalone while carrying optional ancestor hint paths from `inspect.exe`
 - macros can now bind to a specific EMR target profile or fall back to the default profile
 - PACS and flu are product/plugin workflows, not separate executables inside this repo
 - KaosClip remains a future plugin direction, not a standalone app
@@ -189,4 +190,5 @@ This document should be updated whenever:
 - a top-level tab changes
 - a plugin is added, removed, renamed, or regrouped
 - a workflow moves between tabs
+- the EMR target resolution model changes
 - KaosClip integration direction changes again

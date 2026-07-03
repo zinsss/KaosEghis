@@ -597,6 +597,7 @@ class MacroRunner:
             control_type=emr_target.control_type,
             class_name=emr_target.class_name,
             created_at=emr_target.created_at,
+            ancestor_hint_path=emr_target.ancestor_hint_path,
         )
 
     @staticmethod

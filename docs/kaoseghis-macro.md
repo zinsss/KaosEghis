@@ -1,6 +1,6 @@
 # KaosEghis Macro
 
-Last updated: 2026-06-30
+Last updated: 2026-07-03
 
 ## Purpose
 
@@ -95,6 +95,8 @@ EMR targeting foundation:
 - [KaosEghis/ui/tabs/emr_targets_page.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/emr_targets_page.py)
 - lives under `KaosEghis -> EMR`
 - stores profile-level process/window identity and a profile-scoped UI target library
+- EMR UI targets may now include optional ancestor hint paths imported from `inspect.exe`
+- those hints narrow lookup without forcing every target into a saved parent-child chain
 
 Editor behavior:
 

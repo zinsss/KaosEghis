@@ -321,6 +321,7 @@ def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:
         "class_name",
         "name_match",
         "parent_target_key",
+        "ancestor_hint_path",
     ):
         if name not in columns:
             connection.execute(f"ALTER TABLE emr_ui_targets ADD COLUMN {name} TEXT")

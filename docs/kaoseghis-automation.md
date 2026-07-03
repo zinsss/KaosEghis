@@ -1,6 +1,6 @@
 # KaosEghis Automation
 
-Last updated: 2026-07-01
+Last updated: 2026-07-03
 
 ## Purpose
 
@@ -48,7 +48,25 @@ Current lookup preference:
 
 1. direct scoped `child_window(...)` lookup when exact criteria are available
 2. parent-scoped direct lookup when `parent_target_id` or `parent_automation_id` is configured
-3. descendant scan fallback only when direct lookup does not resolve uniquely
+3. ancestor-hint scoped lookup for EMR targets when imported inspect.exe ancestry is available
+4. descendant scan fallback only when direct lookup does not resolve uniquely
+
+### EMR Target Hints
+
+EMR UI targets now support two different scoping tools:
+
+- `parent_target_key`:
+  a hard structural dependency between targets
+- `ancestor_hint_path`:
+  an optional resolution hint path imported from `inspect.exe`
+
+Important distinction:
+
+- a target can exist independently with no parent target at all
+- ancestor hints are used to narrow the search path for speed and accuracy
+- ancestor hints do not require the target to be modeled as a child of another saved target
+
+This means an operator can paste a full ancestor chain from `inspect.exe`, start the hint path from a useful container such as `진료실`, and still keep the actual target itself as a standalone EMR UI target.
 
 ### Manual Explicit Write Tests
 

@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS emr_ui_targets (
     class_name TEXT,
     name_match TEXT,
     parent_target_key TEXT,
+    ancestor_hint_path TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (profile_id) REFERENCES emr_target_profiles(id)

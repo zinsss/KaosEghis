@@ -33,6 +33,7 @@ class UiTargetRecord:
     control_type: str | None
     class_name: str | None
     created_at: str
+    ancestor_hint_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,7 @@ class EmrUiTargetRecord:
     class_name: str | None
     name_match: str | None
     parent_target_key: str | None
+    ancestor_hint_path: str | None
     created_at: str
     updated_at: str
 
@@ -1018,6 +1020,7 @@ def list_emr_ui_targets(
         """
         SELECT id, profile_id, target_key, label, description, automation_id,
                control_type, class_name, name_match, parent_target_key,
+               ancestor_hint_path,
                created_at, updated_at
         FROM emr_ui_targets
         WHERE profile_id = ?
@@ -1037,6 +1040,7 @@ def get_emr_ui_target_by_key(
         """
         SELECT id, profile_id, target_key, label, description, automation_id,
                control_type, class_name, name_match, parent_target_key,
+               ancestor_hint_path,
                created_at, updated_at
         FROM emr_ui_targets
         WHERE profile_id = ? AND target_key = ?
@@ -1055,6 +1059,7 @@ def get_emr_ui_target(
         """
         SELECT id, profile_id, target_key, label, description, automation_id,
                control_type, class_name, name_match, parent_target_key,
+               ancestor_hint_path,
                created_at, updated_at
         FROM emr_ui_targets
         WHERE id = ?
@@ -1078,6 +1083,7 @@ def create_emr_ui_target(
     class_name: str | None = None,
     name_match: str | None = None,
     parent_target_key: str | None = None,
+    ancestor_hint_path: str | None = None,
 ) -> EmrUiTargetRecord:
     cursor = connection.execute(
         """
@@ -1090,9 +1096,10 @@ def create_emr_ui_target(
             control_type,
             class_name,
             name_match,
-            parent_target_key
+            parent_target_key,
+            ancestor_hint_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             profile_id,
@@ -1104,6 +1111,7 @@ def create_emr_ui_target(
             _blank_to_none(class_name),
             _blank_to_none(name_match),
             _blank_to_none(parent_target_key),
+            _blank_to_none(ancestor_hint_path),
         ),
     )
     connection.commit()
@@ -1125,6 +1133,7 @@ def update_emr_ui_target(
     class_name: str | None = None,
     name_match: str | None = None,
     parent_target_key: str | None = None,
+    ancestor_hint_path: str | None = None,
 ) -> EmrUiTargetRecord | None:
     connection.execute(
         """
@@ -1137,6 +1146,7 @@ def update_emr_ui_target(
             class_name = ?,
             name_match = ?,
             parent_target_key = ?,
+            ancestor_hint_path = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
@@ -1149,6 +1159,7 @@ def update_emr_ui_target(
             _blank_to_none(class_name),
             _blank_to_none(name_match),
             _blank_to_none(parent_target_key),
+            _blank_to_none(ancestor_hint_path),
             ui_target_id,
         ),
     )
@@ -1435,8 +1446,9 @@ def _emr_ui_target_from_row(row: sqlite3.Row | tuple) -> EmrUiTargetRecord:
         class_name=row[7],
         name_match=row[8],
         parent_target_key=row[9],
-        created_at=row[10],
-        updated_at=row[11],
+        ancestor_hint_path=row[10],
+        created_at=row[11],
+        updated_at=row[12],
     )
 
 

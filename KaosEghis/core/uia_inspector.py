@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
+from KaosEghis.core.inspector_import import InspectorAncestor, parse_ancestor_hints
 from KaosEghis.db.database import connect
 from KaosEghis.db.repositories import UiTargetRecord, get_ui_target
 
@@ -179,6 +180,26 @@ def _resolve_target_element(
             return None, True, message
         return match, True, "Target found."
 
+    ancestor_hints = parse_ancestor_hints(_clean(target.ancestor_hint_path))
+    if ancestor_hints:
+        hinted_scope, _message = _find_ancestor_hint_scope(window, ancestor_hints)
+        if hinted_scope is not None:
+            try:
+                elements = hinted_scope.descendants()
+            except Exception as error:
+                return (
+                    None,
+                    None,
+                    f"Unable to inspect children under ancestor hint scope: {error}",
+                )
+            match, message = _find_target_element(
+                elements,
+                target,
+                scope_description=_describe_ancestor_hints(ancestor_hints),
+            )
+            if match is not None:
+                return match, None, "Target found."
+
     try:
         elements = window.descendants()
     except Exception as error:
@@ -274,6 +295,78 @@ def _single_match(
             f"UI target '{target.target_id}' matched {len(matches)} elements by {description}.",
         )
     return matches[0], "Target found."
+
+
+def _find_ancestor_hint_scope(
+    window: Any,
+    ancestor_hints: list[InspectorAncestor],
+) -> tuple[Any | None, str]:
+    scope = window
+    for hint in ancestor_hints:
+        hint_match = _find_ancestor_hint_match(scope, hint)
+        if hint_match is None:
+            return None, f"Ancestor hint '{hint.name}' could not be resolved."
+        scope = hint_match
+    return scope, "Ancestor hint scope found."
+
+
+def _find_ancestor_hint_match(scope: Any, hint: InspectorAncestor) -> Any | None:
+    direct_children = _element_children(scope)
+    direct_matches = _matching_ancestor_elements(direct_children, hint)
+    if len(direct_matches) == 1:
+        return direct_matches[0]
+    if len(direct_matches) > 1:
+        return direct_matches[0]
+
+    descendants = _element_descendants(scope)
+    descendant_matches = _matching_ancestor_elements(descendants, hint)
+    if len(descendant_matches) == 1:
+        return descendant_matches[0]
+    if len(descendant_matches) > 1:
+        return descendant_matches[0]
+    return None
+
+
+def _matching_ancestor_elements(elements: list[Any], hint: InspectorAncestor) -> list[Any]:
+    expected_name = _clean(hint.name)
+    expected_control_type = _clean(hint.control_type)
+    matches: list[Any] = []
+    for element in elements:
+        if expected_name and _element_name(element) != expected_name:
+            continue
+        if expected_control_type and _element_control_type(element) != expected_control_type:
+            continue
+        matches.append(element)
+    return matches
+
+
+def _element_children(scope: Any) -> list[Any]:
+    children = getattr(scope, "children", None)
+    if callable(children):
+        try:
+            return list(children())
+        except Exception:
+            return []
+    raw_children = getattr(scope, "_children", None)
+    if isinstance(raw_children, list):
+        return list(raw_children)
+    return []
+
+
+def _element_descendants(scope: Any) -> list[Any]:
+    descendants = getattr(scope, "descendants", None)
+    if callable(descendants):
+        return list(descendants())
+    return []
+
+
+def _describe_ancestor_hints(ancestor_hints: list[InspectorAncestor]) -> str:
+    chain = " > ".join(
+        hint.name if not hint.control_type else f"{hint.name} ({hint.control_type})"
+        for hint in ancestor_hints
+        if _clean(hint.name)
+    )
+    return f"inside ancestor hint path '{chain}'" if chain else "inside ancestor hint path"
 
 
 def _window_title(window: Any) -> str:
