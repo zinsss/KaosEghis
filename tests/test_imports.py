@@ -1462,7 +1462,7 @@ def test_rediscovery_with_window_owner_pid_mismatch_blocks(monkeypatch) -> None:
     assert state.status == "red"
     assert state.message == "window process mismatch"
 
-def test_macro_runner_blocks_real_execution_without_green_connector() -> None:
+def test_macro_runner_blocks_real_execution_without_green_connector(monkeypatch) -> None:
     from KaosEghis.core.macro_runner import MacroRunner
     import KaosEghis.core.macro_runner as macro_runner
 
@@ -1470,7 +1470,11 @@ def test_macro_runner_blocks_real_execution_without_green_connector() -> None:
         status = "red"
         message = "Eghis not running"
 
-    macro_runner.ensure_ready_for_macro = lambda _settings: FakeState()
+    monkeypatch.setattr(
+        macro_runner,
+        "ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
     result = MacroRunner().run([], dry_run=False, settings={"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
 
     assert result.success is False
@@ -1498,7 +1502,7 @@ def test_macro_runner_runs_wait_key_and_paste_text(monkeypatch) -> None:
         events.append(("sleep", seconds))
         clock[0] += seconds
 
-    monkeypatch.setattr(macro_runner, "ensure_ready_for_macro", lambda _settings: FakeState())
+    monkeypatch.setattr(macro_runner, "ensure_cached_connection_ready", lambda _settings: FakeState())
     monkeypatch.setattr(macro_runner.time, "monotonic", fake_monotonic)
     monkeypatch.setattr(macro_runner.time, "sleep", fake_sleep)
     monkeypatch.setattr(macro_runner, "copy_text", lambda text: events.append(("copy", text)) or SimpleNamespace(text=text))
@@ -1515,7 +1519,7 @@ def test_macro_runner_runs_wait_key_and_paste_text(monkeypatch) -> None:
     result = runner.run(steps, dry_run=False, settings={"eghis_process_name": "Eghis.exe", "eghis_window_title_contains": "Eghis"})
 
     assert result.success is True
-    assert result.completed_steps == 3
+    assert result.executed_steps == 3
     enter_index = events.index(("send", "{ENTER}"))
     wait_events = [seconds for kind, seconds in events[:enter_index] if kind == "sleep"]
     assert wait_events
@@ -1532,7 +1536,7 @@ def test_macro_runner_blocks_invalid_action(monkeypatch) -> None:
         status = "green"
         message = "Connected and active"
 
-    monkeypatch.setattr(macro_runner, "ensure_ready_for_macro", lambda _settings: FakeState())
+    monkeypatch.setattr(macro_runner, "ensure_cached_connection_ready", lambda _settings: FakeState())
     result = macro_runner.MacroRunner().run(
         [MacroStep(action="unknown", options={})],
         dry_run=False,
@@ -1540,7 +1544,7 @@ def test_macro_runner_blocks_invalid_action(monkeypatch) -> None:
     )
 
     assert result.success is False
-    assert result.completed_steps == 0
+    assert result.executed_steps == 0
     assert result.message == "unsupported action"
 
 
@@ -1552,7 +1556,7 @@ def test_macro_runner_stops_on_first_failed_step(monkeypatch) -> None:
         status = "green"
         message = "Connected and active"
 
-    monkeypatch.setattr(macro_runner, "ensure_ready_for_macro", lambda _settings: FakeState())
+    monkeypatch.setattr(macro_runner, "ensure_cached_connection_ready", lambda _settings: FakeState())
     runner = macro_runner.MacroRunner()
     monkeypatch.setattr(
         runner,
@@ -1567,7 +1571,7 @@ def test_macro_runner_stops_on_first_failed_step(monkeypatch) -> None:
     )
 
     assert result.success is False
-    assert result.completed_steps == 1
+    assert result.executed_steps == 1
     assert result.message == "input failed"
 
 
@@ -1579,7 +1583,7 @@ def test_macro_runner_cancellation_during_wait_stops_execution(monkeypatch) -> N
         status = "green"
         message = "Connected and active"
 
-    monkeypatch.setattr(macro_runner, "ensure_ready_for_macro", lambda _settings: FakeState())
+    monkeypatch.setattr(macro_runner, "ensure_cached_connection_ready", lambda _settings: FakeState())
     runner = macro_runner.MacroRunner()
     clock = [0.0]
     sleeps = []
@@ -1602,7 +1606,7 @@ def test_macro_runner_cancellation_during_wait_stops_execution(monkeypatch) -> N
     )
 
     assert result.success is False
-    assert result.completed_steps == 0
+    assert result.executed_steps == 0
     assert result.message == "Macro execution canceled."
     assert sleeps
     assert max(sleeps) <= 0.05
@@ -1617,7 +1621,7 @@ def test_macro_runner_resets_cancellation_state_between_runs(monkeypatch) -> Non
         status = "green"
         message = "Connected and active"
 
-    monkeypatch.setattr(macro_runner, "ensure_ready_for_macro", lambda _settings: FakeState())
+    monkeypatch.setattr(macro_runner, "ensure_cached_connection_ready", lambda _settings: FakeState())
     runner = macro_runner.MacroRunner()
     clock = [0.0]
     call_count = [0]
@@ -1648,7 +1652,7 @@ def test_macro_runner_resets_cancellation_state_between_runs(monkeypatch) -> Non
     assert first.success is False
     assert first.message == "Macro execution canceled."
     assert second.success is True
-    assert second.completed_steps == 1
+    assert second.executed_steps == 1
 
 
 def test_macro_runner_cancellation_during_wait_keeps_prior_completed_steps(monkeypatch) -> None:
@@ -1659,7 +1663,7 @@ def test_macro_runner_cancellation_during_wait_keeps_prior_completed_steps(monke
         status = "green"
         message = "Connected and active"
 
-    monkeypatch.setattr(macro_runner, "ensure_ready_for_macro", lambda _settings: FakeState())
+    monkeypatch.setattr(macro_runner, "ensure_cached_connection_ready", lambda _settings: FakeState())
     runner = macro_runner.MacroRunner()
     clock = [0.0]
     sleep_calls = [0]
@@ -1688,7 +1692,7 @@ def test_macro_runner_cancellation_during_wait_keeps_prior_completed_steps(monke
     )
 
     assert result.success is False
-    assert result.completed_steps == 1
+    assert result.executed_steps == 1
     assert result.message == "Macro execution canceled."
 
 def test_window_detection_falls_back_to_pywinauto_when_pygetwindow_empty(monkeypatch) -> None:

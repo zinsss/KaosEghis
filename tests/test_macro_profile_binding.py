@@ -205,7 +205,7 @@ def test_macro_execution_behavior_unchanged_with_bound_profile(monkeypatch, tmp_
 
     calls: list[str] = []
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_ready_for_macro",
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
     monkeypatch.setitem(

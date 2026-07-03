@@ -249,6 +249,12 @@ class MacrosPage(QWidget):
             return
 
         result = MacroRunner(self._db_path).execute_macro(item_id, dry_run=False)
+        if not result.success and "reconnect manually and retry" in (result.message or "").casefold():
+            QMessageBox.warning(
+                self,
+                "Application reconnection required",
+                result.message,
+            )
         lines = [
             f"success: {_yes_no(result.success)}",
             f"executed_steps: {result.executed_steps}",

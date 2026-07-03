@@ -8,7 +8,8 @@ import time
 
 from KaosEghis.core.clipboard_service import copy_text, restore_clipboard
 from KaosEghis.core.eghis_connector import (
-    ensure_ready_for_macro,
+    build_connector_settings,
+    ensure_cached_connection_ready,
     refresh_cached_eghis_state,
 )
 from KaosEghis.core.macro_models import MacroRunResult, MacroStep
@@ -68,7 +69,8 @@ class MacroRunner:
                 _db_macro_step_to_runtime_step(step)
                 for step in list_macro_steps(connection, item_id)
             ]
-            run_settings = settings or get_settings(connection)
+            base_settings = settings or get_settings(connection)
+            run_settings = self._build_execution_settings(base_settings, profile)
         self._current_profile_name = profile.name if profile is not None else None
         self._current_profile_id = profile.id if profile is not None else None
 
@@ -101,7 +103,7 @@ class MacroRunner:
                 None,
             )
 
-        state = ensure_ready_for_macro(settings)
+        state = ensure_cached_connection_ready(settings)
         if state.status != "green":
             self._clear_resolved_target_cache()
             return MacroRunResult(
@@ -231,7 +233,7 @@ class MacroRunner:
         return MacroRunResult(True, f"Delayed {milliseconds} ms.", 1, None)
 
     def _run_focus_window(self, settings: dict[str, str]) -> MacroRunResult:
-        state = ensure_ready_for_macro(settings)
+        state = ensure_cached_connection_ready(settings)
         if state.status != "green":
             self._clear_resolved_target_cache()
             return MacroRunResult(False, state.message or "window not ready", 0, None)
@@ -605,6 +607,8 @@ class MacroRunner:
             "macro execution canceled.",
         }:
             return message
+        if "reconnect manually and retry" in lowered:
+            return message
         if "target" in lowered:
             return "target not found"
         if "window" in lowered or "focus" in lowered:
@@ -620,6 +624,21 @@ class MacroRunner:
                 return "clipboard failed"
             return "input failed"
         return "unknown error"
+
+    @staticmethod
+    def _build_execution_settings(
+        base_settings: dict[str, str],
+        profile,
+    ) -> dict[str, str]:
+        if profile is None:
+            return dict(base_settings)
+        return build_connector_settings(
+            base_settings,
+            process_name=profile.process_name or base_settings.get("eghis_process_name"),
+            window_title_contains=profile.window_title_contains
+            or base_settings.get("eghis_window_title_contains"),
+            executable_path=profile.executable_path or base_settings.get("eghis_executable_path"),
+        )
 
 
 def _db_macro_step_to_runtime_step(step) -> MacroStep:

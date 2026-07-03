@@ -812,7 +812,7 @@ class MacroEditorDialog(QDialog):
         form = QFormLayout()
         form.addRow("Macro name", self.name)
         form.addRow("Enabled", self.enabled)
-        form.addRow("EMR profile", self.emr_profile)
+        form.addRow("Application preset", self.emr_profile)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -836,6 +836,17 @@ class MacroEditorDialog(QDialog):
                     "value": step.value or "",
                     "timeout_seconds": step.timeout_seconds,
                     "retries": step.retries,
+                }
+            )
+        if item is None and not steps:
+            self._append_step(
+                {
+                    "step_order": 1,
+                    "action": "focus_window",
+                    "target_id": "",
+                    "value": "",
+                    "timeout_seconds": 5.0,
+                    "retries": 0,
                 }
             )
 
@@ -955,6 +966,8 @@ class MacroStepDialog(QDialog):
         self.action.addItems(sorted(ALLOWED_MACRO_ACTIONS))
         if step:
             self.action.setCurrentText(step["action"])
+        elif self.action.findText("focus_window") >= 0:
+            self.action.setCurrentText("focus_window")
 
         self.target_id = QComboBox()
         self.target_id.setEditable(True)
