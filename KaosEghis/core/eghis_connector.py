@@ -172,13 +172,6 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
             None,
             "Application not connected. Connect manually and retry.",
         )
-    if _is_state_stale(state):
-        blocked = _manual_reconnect_required(
-            state,
-            "Application connection stale. Reconnect manually and retry.",
-        )
-        _CACHED_STATE = blocked
-        return blocked
     if not state.process_running or state.pid is None or not _pid_exists(state.pid):
         blocked = _manual_reconnect_required(
             state,
