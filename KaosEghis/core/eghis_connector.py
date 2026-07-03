@@ -467,6 +467,19 @@ def _get_window_owner_pid(window_handle: int | None) -> int | None:
 def _window_handle_is_valid(window_handle: int) -> bool:
     if window_handle is None:
         return False
+    try:
+        import win32gui
+
+        return bool(win32gui.IsWindow(window_handle))
+    except Exception:
+        pass
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        return bool(ctypes.windll.user32.IsWindow(wintypes.HWND(window_handle)))
+    except Exception:
+        pass
     windows = _windows_from_pygetwindow() + _windows_from_pywinauto()
     return any(window.get("window_handle") == window_handle for window in windows)
 

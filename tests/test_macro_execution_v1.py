@@ -723,6 +723,41 @@ def test_macro_runner_uses_selected_profile_for_connection_settings(
     assert captured_settings["eghis_executable_path"] == "C:\\Windows\\System32\\notepad.exe"
 
 
+def test_focus_window_step_does_not_repeat_connector_check_within_same_run(
+    monkeypatch, tmp_path
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Fast F1", "macro", True)
+        create_macro_step(connection, item.id, 1, "focus_window")
+        create_macro_step(connection, item.id, 2, "hotkey", value="{F1}")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    ready_calls = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: ready_calls.append("ready") or FakeState(),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda _keys: None)})(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert ready_calls == ["ready"]
+
+
 def test_app_startup_does_not_execute_macro(monkeypatch, tmp_path) -> None:
     _app()
 
