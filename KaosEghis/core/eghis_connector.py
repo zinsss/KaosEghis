@@ -208,7 +208,9 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
         )
         _CACHED_STATE = blocked
         return blocked
-    if not state.is_active:
+    is_active_now = _foreground_handle_matches(state.window_handle)
+    state = replace(state, is_active=is_active_now)
+    if not is_active_now:
         focus_succeeded, _focus_reason = _focus_and_confirm_window(
             state.window_handle,
             state,
