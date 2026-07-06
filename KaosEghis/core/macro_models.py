@@ -7,11 +7,16 @@ class MacroAction(str, Enum):
     FOCUS_WINDOW = "focus_window"
     WAIT_WINDOW = "wait_window"
     WAIT_TEXT_OR_IMAGE = "wait_text_or_image"
+    IS_READY_UIA = "is_ready_uia"
     CLICK = "click"
+    PRESS = "press"
     HOTKEY = "hotkey"
     TYPE_TEXT = "type_text"
+    COPY_TEXT = "copy_text"
     PASTE_TEXT = "paste_text"
+    SET_TEXT = "set_text"
     PRESET_TEXT = "preset_text"
+    WAIT = "wait"
     DELAY_MS = "delay_ms"
 
 

@@ -1,6 +1,6 @@
 # KaosEghis Automation
 
-Last updated: 2026-07-03
+Last updated: 2026-07-06
 
 ## Purpose
 
@@ -107,6 +107,17 @@ Current transition state:
 - macros can now be bound to an EMR target profile
 - dry run can report the resolved profile name
 - actual click/send/paste target resolution is intentionally not switched over yet
+
+Current real macro actions include:
+
+- window focus/wait
+- UI target readiness checks
+- UI target click or coordinate click
+- key press sequences
+- copy/paste text
+- direct `set_text` attempts with controlled fallbacks
+- preset/randomized text usage
+- explicit waits
 
 ### EMR Target Foundation
 
