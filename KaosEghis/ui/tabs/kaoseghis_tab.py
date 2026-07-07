@@ -26,7 +26,9 @@ from KaosEghis.db.repositories import (
     create_macro_step,
     delete_item,
     delete_macro_steps_for_item,
+    get_default_emr_target_profile,
     get_item,
+    get_settings,
     list_items,
     list_launcher_items,
     list_macro_steps,
@@ -36,6 +38,8 @@ from KaosEghis.db.repositories import (
     update_item,
     validate_macro_dry_run,
 )
+from KaosEghis.core.eghis_connector import build_connector_settings
+from KaosEghis.ui.emr_connection_widget import EmrConnectionWidget
 from KaosEghis.ui.tabs.eghis_assist_tab import MacroEditorDialog
 from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
 
@@ -99,6 +103,11 @@ class MacrosPage(QWidget):
 
         title = QLabel("Macros")
         title.setObjectName("pageTitle")
+        self.connection_widget = EmrConnectionWidget(
+            self._default_profile_connector_context,
+            status_callback=self.log_status,
+            parent=self,
+        )
 
         self.automation_summary = QLabel()
         self.automation_summary.setObjectName("macroSummary")
@@ -139,6 +148,7 @@ class MacrosPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
+        layout.addWidget(self.connection_widget)
         layout.addWidget(self.automation_summary)
         layout.addWidget(self.macros_table)
         layout.addLayout(controls)
@@ -168,6 +178,7 @@ class MacrosPage(QWidget):
         self.macros_table.resizeColumnsToContents()
         macro_ids = ", ".join(str(macro.id) for macro in macros) or "None"
         self.automation_summary.setText(f"Saved automation IDs: {macro_ids}")
+        self.connection_widget.refresh_state()
 
     def add_macro(self) -> None:
         dialog = MacroEditorDialog(self)
@@ -284,6 +295,28 @@ class MacrosPage(QWidget):
         self.refresh_view()
         self.log.setPlainText("Macro deleted." if deleted else "Macro not found.")
 
+    def log_status(self, message: str) -> None:
+        self.log.setPlainText(message)
+
+    def _default_profile_connector_context(self) -> tuple[dict[str, str] | None, str | None]:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            profile = get_default_emr_target_profile(connection)
+            settings = get_settings(connection)
+        if profile is None:
+            return None, None
+        return (
+            build_connector_settings(
+                settings,
+                process_name=profile.process_name or settings.get("eghis_process_name"),
+                window_title_contains=profile.window_title_contains
+                or settings.get("eghis_window_title_contains"),
+                executable_path=profile.executable_path
+                or settings.get("eghis_executable_path"),
+            ),
+            profile.name,
+        )
+
     def _selected_macro_id(self) -> int | None:
         selected = self.macros_table.selectedItems()
         if not selected:
@@ -380,6 +413,11 @@ class LauncherPage(QWidget):
 
         title = QLabel("Saved Macros")
         title.setObjectName("pageTitle")
+        self.connection_widget = EmrConnectionWidget(
+            self._default_profile_connector_context,
+            status_callback=self.log_status,
+            parent=self,
+        )
 
         subtitle = QLabel("Double-click to run. Drag and drop to change column and order.")
         subtitle.setObjectName("macroSummary")
@@ -408,6 +446,7 @@ class LauncherPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
+        layout.addWidget(self.connection_widget)
         layout.addWidget(subtitle)
         layout.addLayout(columns_layout)
         layout.addLayout(controls)
@@ -433,6 +472,7 @@ class LauncherPage(QWidget):
                 entry.setFlags(entry.flags() & ~Qt.ItemFlag.ItemIsEnabled)
                 entry.setText(f"{item.name} [disabled]")
             list_widget.addItem(entry)
+        self.connection_widget.refresh_state()
 
     def save_positions(self) -> None:
         if self._saving_positions:
@@ -468,6 +508,28 @@ class LauncherPage(QWidget):
             f"message: {result.message}",
         ]
         self.log.setPlainText("\n".join(lines))
+
+    def log_status(self, message: str) -> None:
+        self.log.setPlainText(message)
+
+    def _default_profile_connector_context(self) -> tuple[dict[str, str] | None, str | None]:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            profile = get_default_emr_target_profile(connection)
+            settings = get_settings(connection)
+        if profile is None:
+            return None, None
+        return (
+            build_connector_settings(
+                settings,
+                process_name=profile.process_name or settings.get("eghis_process_name"),
+                window_title_contains=profile.window_title_contains
+                or settings.get("eghis_window_title_contains"),
+                executable_path=profile.executable_path
+                or settings.get("eghis_executable_path"),
+            ),
+            profile.name,
+        )
 
 
 def _get_required_item(connection, item_id: int):

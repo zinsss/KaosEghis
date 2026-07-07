@@ -73,6 +73,20 @@ QPushButton:disabled {
     border-color: #313244;
 }
 
+QPushButton[connectionState="connected"] {
+    background-color: #a6e3a1;
+    color: #181825;
+    border-color: #a6e3a1;
+    font-weight: 600;
+}
+
+QPushButton[connectionState="stale"] {
+    background-color: #f9e2af;
+    color: #181825;
+    border-color: #f38ba8;
+    font-weight: 600;
+}
+
 QTableWidget {
     background-color: #181825;
     alternate-background-color: #1e1e2e;

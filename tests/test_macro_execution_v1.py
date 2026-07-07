@@ -943,6 +943,33 @@ def test_macro_runner_uses_selected_profile_for_connection_settings(
     assert captured_settings["eghis_executable_path"] == "C:\\Windows\\System32\\notepad.exe"
 
 
+def test_macro_runner_blocks_on_preset_mismatch(tmp_path, monkeypatch) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Mismatch Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "focus_window")
+
+    class FakeState:
+        status = "red"
+        message = "Connected application does not match preset. Reconnect manually and retry."
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.executed_steps == 0
+    assert result.message == "Connected application does not match preset. Reconnect manually and retry."
+
+
 def test_focus_window_step_does_not_repeat_connector_check_within_same_run(
     monkeypatch, tmp_path
 ) -> None:

@@ -1,6 +1,6 @@
 # KaosEghis Automation
 
-Last updated: 2026-07-06
+Last updated: 2026-07-07
 
 ## Purpose
 
@@ -28,6 +28,7 @@ Responsibilities:
 - window detection
 - active-window checks
 - connector readiness state
+- shared EMR connect toggle state for launcher, macros, and EMR pages
 
 ### Read-Only UI Inspection
 
@@ -165,6 +166,13 @@ That means:
 - process and window identity must match
 - connector validity must hold
 - blocked states must stop execution
+
+Operator flow:
+
+- use the visible `Connect EMR` toggle on the launcher, macros, or EMR page
+- the toggle caches the current process/window identity for the selected or default EMR preset
+- stale or mismatched cached state must be cleared and reconnected manually
+- macro runs must not silently auto-discover a fresh connection
 
 ## Read-Only Database Automation
 
