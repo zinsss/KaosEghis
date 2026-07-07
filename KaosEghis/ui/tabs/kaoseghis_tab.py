@@ -38,11 +38,10 @@ from KaosEghis.db.repositories import (
 )
 from KaosEghis.ui.tabs.eghis_assist_tab import MacroEditorDialog
 from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
-from KaosEghis.ui.tabs.settings_tab import SettingsTab
 
 
 class KaosEghisTab(QWidget):
-    TOP_PAGES = ["Macros", "Launcher", "EMR", "Settings"]
+    TOP_PAGES = ["Launcher", "Macros", "Macro Texts", "EMR"]
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -52,16 +51,16 @@ class KaosEghisTab(QWidget):
         self.top_nav_row = QHBoxLayout()
         self.stacked_widget = QStackedWidget()
 
-        self.macros_page = MacrosPage(db_path)
         self.launcher_page = LauncherPage(db_path)
+        self.macros_page = MacrosPage(db_path)
+        self.macro_texts_page = MacroTextsPage(db_path)
         self.emr_page = EmrTargetsPage(db_path)
-        self.settings_page = SettingsTab(db_path)
 
         for page in (
-            self.macros_page,
             self.launcher_page,
+            self.macros_page,
+            self.macro_texts_page,
             self.emr_page,
-            self.settings_page,
         ):
             self.stacked_widget.addWidget(page)
 
@@ -295,11 +294,12 @@ class MacrosPage(QWidget):
         return int(item.text())
 
 
-class PresetsPage(QWidget):
-    def __init__(self) -> None:
+class MacroTextsPage(QWidget):
+    def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
+        self._db_path = db_path
 
-        title = QLabel("Presets")
+        title = QLabel("Macro Texts")
         title.setObjectName("pageTitle")
 
         self.presets_table = QTableWidget(0, 3)
@@ -327,8 +327,8 @@ class PresetsPage(QWidget):
         self.refresh_view()
 
     def refresh_view(self) -> None:
-        initialize_database()
-        with connect() as connection:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
             preset_items = []
             for item_type in ("clipboard", "randomized_clipboard"):
                 preset_items.extend(list_items(connection, item_type))

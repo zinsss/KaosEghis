@@ -30,6 +30,7 @@ def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
         "Vaccine",
         "PACS",
         "Flu-Report",
+        "Settings",
     ]
     assert window.width() == 1280
     assert window.height() == 875
@@ -67,10 +68,10 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
 
     tab = KaosEghisTab()
 
-    assert list(tab.nav_buttons.keys()) == ["Macros", "Launcher", "EMR", "Settings"]
+    assert list(tab.nav_buttons.keys()) == ["Launcher", "Macros", "Macro Texts", "EMR"]
     assert isinstance(tab.stacked_widget, QStackedWidget)
-    assert tab.stacked_widget.currentWidget() is tab.macros_page
-    assert tab.nav_buttons["Macros"].isChecked() is True
+    assert tab.stacked_widget.currentWidget() is tab.launcher_page
+    assert tab.nav_buttons["Launcher"].isChecked() is True
 
 
 def test_kaoseghis_top_nav_pages_are_reachable() -> None:
@@ -83,14 +84,14 @@ def test_kaoseghis_top_nav_pages_are_reachable() -> None:
     tab.nav_buttons["Launcher"].click()
     assert tab.stacked_widget.currentWidget() is tab.launcher_page
 
-    tab.nav_buttons["EMR"].click()
-    assert tab.stacked_widget.currentWidget() is tab.emr_page
-
-    tab.nav_buttons["Settings"].click()
-    assert tab.stacked_widget.currentWidget() is tab.settings_page
-
     tab.nav_buttons["Macros"].click()
     assert tab.stacked_widget.currentWidget() is tab.macros_page
+
+    tab.nav_buttons["Macro Texts"].click()
+    assert tab.stacked_widget.currentWidget() is tab.macro_texts_page
+
+    tab.nav_buttons["EMR"].click()
+    assert tab.stacked_widget.currentWidget() is tab.emr_page
 
 
 def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate(tmp_path, monkeypatch) -> None:
