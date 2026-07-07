@@ -30,6 +30,7 @@ def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
         "Vaccine",
         "PACS",
         "Flu-Report",
+        "Settings",
     ]
     assert window.width() == 1280
     assert window.height() == 875
@@ -67,10 +68,20 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
 
     tab = KaosEghisTab()
 
-    assert list(tab.nav_buttons.keys()) == ["Macros", "Launcher", "EMR", "Settings"]
+    assert list(tab.nav_buttons.keys()) == ["Launcher", "Macros", "Macro Texts", "EMR"]
     assert isinstance(tab.stacked_widget, QStackedWidget)
-    assert tab.stacked_widget.currentWidget() is tab.macros_page
-    assert tab.nav_buttons["Macros"].isChecked() is True
+    assert tab.stacked_widget.currentWidget() is tab.launcher_page
+    assert tab.nav_buttons["Launcher"].isChecked() is True
+    assert tab.launcher_page.connection_widget.toggle_button.text() in {
+        "Connect EMR",
+        "EMR Connected",
+        "Reconnect EMR",
+    }
+    assert tab.macros_page.connection_widget.toggle_button.text() in {
+        "Connect EMR",
+        "EMR Connected",
+        "Reconnect EMR",
+    }
 
 
 def test_kaoseghis_top_nav_pages_are_reachable() -> None:
@@ -83,14 +94,94 @@ def test_kaoseghis_top_nav_pages_are_reachable() -> None:
     tab.nav_buttons["Launcher"].click()
     assert tab.stacked_widget.currentWidget() is tab.launcher_page
 
+    tab.nav_buttons["Macros"].click()
+    assert tab.stacked_widget.currentWidget() is tab.macros_page
+
+    tab.nav_buttons["Macro Texts"].click()
+    assert tab.stacked_widget.currentWidget() is tab.macro_texts_page
+
     tab.nav_buttons["EMR"].click()
     assert tab.stacked_widget.currentWidget() is tab.emr_page
 
-    tab.nav_buttons["Settings"].click()
-    assert tab.stacked_widget.currentWidget() is tab.settings_page
 
-    tab.nav_buttons["Macros"].click()
-    assert tab.stacked_widget.currentWidget() is tab.macros_page
+def test_launcher_connection_toggle_connects_then_disconnects(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from KaosEghis.core.eghis_connector import clear_cached_eghis_state
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    class FakeState:
+        status = "green"
+        pid = 1234
+        exe_path = "C:\\eghis\\eghisEmr\\eGhis.exe"
+        process_name = "eGhis.exe"
+        message = "Connected and active"
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    clear_cached_eghis_state()
+
+    cleared: list[str] = []
+    monkeypatch.setattr(
+        "KaosEghis.ui.emr_connection_widget.refresh_cached_eghis_state",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.ui.emr_connection_widget.cached_state_matches_settings",
+        lambda _state, _settings: True,
+    )
+    monkeypatch.setattr(
+        "KaosEghis.ui.emr_connection_widget.clear_cached_eghis_state",
+        lambda: cleared.append("clear"),
+    )
+
+    page = LauncherPage(db_path)
+    page.connection_widget.toggle_button.click()
+
+    assert page.connection_widget.toggle_button.property("connectionState") == "connected"
+    assert page.connection_widget.toggle_button.text() == "EMR Connected"
+
+    monkeypatch.setattr(
+        "KaosEghis.ui.emr_connection_widget.get_cached_eghis_state",
+        lambda: FakeState(),
+    )
+    page.connection_widget.toggle_button.click()
+
+    assert cleared == ["clear", "clear"]
+
+
+def test_macros_page_shows_reconnect_when_cached_state_is_stale(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+
+    class FakeState:
+        status = "red"
+        pid = 1234
+        exe_path = "C:\\wrong\\wrong.exe"
+        process_name = "wrong.exe"
+        message = "Application not focusable. Reconnect manually and retry."
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    monkeypatch.setattr(
+        "KaosEghis.ui.emr_connection_widget.get_cached_eghis_state",
+        lambda: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.ui.emr_connection_widget.cached_state_matches_settings",
+        lambda _state, _settings: False,
+    )
+
+    page = MacrosPage(db_path)
+
+    assert page.connection_widget.toggle_button.text() == "Reconnect EMR"
+    assert page.connection_widget.status_label.text() == "Reconnect required"
+    assert page.connection_widget.toggle_button.property("connectionState") == "stale"
 
 
 def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate(tmp_path, monkeypatch) -> None:

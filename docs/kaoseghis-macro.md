@@ -1,6 +1,6 @@
 # KaosEghis Macro
 
-Last updated: 2026-07-03
+Last updated: 2026-07-06
 
 ## Purpose
 
@@ -139,6 +139,47 @@ Current real runner scope:
 - supported runner actions are intentionally narrow
 
 Current real runner actions are more limited than the stored macro action vocabulary.
+
+## Current Real Actions
+
+The current real runner now supports these operator-usable actions:
+
+- `focus_window`
+- `wait_window`
+- `is_ready_uia`
+- `click`
+  - UI target click when `target_id` is set
+  - coordinate click when `value` is `x,y` or `coords:x,y`
+- `press`
+- `hotkey`
+- `type_text`
+- `copy_text`
+- `paste_text`
+- `set_text`
+- `preset_text`
+- `delay_ms`
+- `wait`
+
+Notes:
+
+- `press` and `hotkey` both send keys through the same path
+- ordered key sequences can be written as `key1>>key2>>key3`
+- `set_text` tries direct UIA value write first, then `set_edit_text`, then clipboard paste fallback
+- `is_ready_uia` checks that a target resolves and is not visibly disabled/hidden
+
+## Text Value Helpers
+
+Text-bearing actions support lightweight runtime value helpers:
+
+- `random:alpha||beta||gamma`
+- `{{random:alpha||beta||gamma}}`
+- `{{last_text}}`
+
+Behavior:
+
+- a random helper chooses one option at runtime
+- the selected text is stored as `last_text`
+- later steps can reuse it with `{{last_text}}`
 
 ## Safety Rules
 

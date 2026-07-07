@@ -13,7 +13,7 @@ from KaosEghis.core.eghis_connector import (
     refresh_cached_eghis_state,
 )
 from KaosEghis.core.macro_models import MacroRunResult, MacroStep
-from KaosEghis.core.uia_inspector import resolve_target_element
+from KaosEghis.core.uia_inspector import inspect_target_readonly, resolve_target_element
 from KaosEghis.db.database import connect, get_database_path
 from KaosEghis.db.repositories import (
     EmrUiTargetRecord,
@@ -45,6 +45,7 @@ class MacroRunner:
         self._resolved_target_cache: dict[tuple[int | None, str, str | None], object] = {}
         self._resolved_target_aliases: dict[str, tuple[int | None, str, str | None]] = {}
         self._run_metrics = _RunMetrics()
+        self._runtime_values: dict[str, str] = {}
 
     def cancel(self) -> None:
         self._cancel_requested = True
@@ -195,14 +196,20 @@ class MacroRunner:
             return self._run_wait_window(step, self._require_settings())
         if action == "wait_text_or_image":
             return MacroRunResult(False, "unsupported action", 0, None)
+        if action == "is_ready_uia":
+            return self._run_is_ready_uia(step, self._require_settings())
         if action == "click":
             return self._run_click(step, self._require_settings())
-        if action in {"hotkey", "key"}:
+        if action in {"hotkey", "key", "press"}:
             return self._run_hotkey(step)
         if action in {"type_text", "type_text_keyboard"}:
             return self._run_type_text(step)
+        if action == "copy_text":
+            return self._run_copy_text(step)
         if action in {"paste_text", "type_text_clipboard"}:
             return self._run_paste_text(step)
+        if action in {"set_text", "set_text_uia"}:
+            return self._run_set_text(step)
         if action == "preset_text":
             return self._run_preset_text(step, self._require_settings())
         return MacroRunResult(False, "unsupported action", 0, None)
@@ -264,6 +271,9 @@ class MacroRunner:
             time.sleep(0.05)
 
     def _run_click(self, step: MacroStep, settings: dict[str, str]) -> MacroRunResult:
+        coordinate_click = self._run_coordinate_click(step)
+        if coordinate_click is not None:
+            return coordinate_click
         if not step.target_id:
             return MacroRunResult(False, "target not found", 0, None)
         target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
@@ -288,13 +298,14 @@ class MacroRunner:
         return MacroRunResult(True, f"Clicked target '{step.target_id}'.", 1, None)
 
     def _run_hotkey(self, step: MacroStep) -> MacroRunResult:
-        key = step.options.get("key", step.value)
+        key = self._resolve_text_input(step.options.get("key", step.value))
         if not isinstance(key, str) or not key:
             return MacroRunResult(False, "unknown error", 0, None)
         try:
             from pywinauto.keyboard import send_keys
 
-            send_keys(key)
+            for sequence in self._key_sequences(key):
+                send_keys(sequence)
         except Exception:
             return MacroRunResult(False, "input failed", 0, None)
         return MacroRunResult(True, f"Sent hotkey: {key}", 1, None)
@@ -304,7 +315,7 @@ class MacroRunner:
             target_result = self._focus_runtime_target(step)
             if target_result is not None:
                 return target_result
-        text = step.options.get("text", step.value)
+        text = self._resolve_text_input(step.options.get("text", step.value))
         if not isinstance(text, str) or not text:
             return MacroRunResult(False, "unknown error", 0, None)
         try:
@@ -315,12 +326,22 @@ class MacroRunner:
             return MacroRunResult(False, "input failed", 0, None)
         return MacroRunResult(True, "Typed text.", 1, None)
 
+    def _run_copy_text(self, step: MacroStep) -> MacroRunResult:
+        text = self._resolve_text_input(step.options.get("text", step.value))
+        if not isinstance(text, str) or not text:
+            return MacroRunResult(False, "clipboard failed", 0, None)
+        try:
+            copy_text(text)
+        except Exception:
+            return MacroRunResult(False, "clipboard failed", 0, None)
+        return MacroRunResult(True, "Copied text to clipboard.", 1, None)
+
     def _run_paste_text(self, step: MacroStep) -> MacroRunResult:
         if step.target_id:
             target_result = self._focus_runtime_target(step)
             if target_result is not None:
                 return target_result
-        text = step.options.get("text", step.value)
+        text = self._resolve_text_input(step.options.get("text", step.value))
         if not isinstance(text, str) or not text:
             return MacroRunResult(False, "clipboard failed", 0, None)
 
@@ -344,6 +365,32 @@ class MacroRunner:
         except Exception:
             return MacroRunResult(False, "clipboard failed", 0, None)
         return MacroRunResult(True, "Pasted text.", 1, None)
+
+    def _run_set_text(self, step: MacroStep) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        text = self._resolve_text_input(step.options.get("text", step.value))
+        if not isinstance(text, str) or not text:
+            return MacroRunResult(False, "clipboard failed", 0, None)
+        settings = self._require_settings()
+        target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+        method, success = self._set_text_on_target(target, text)
+        if not success:
+            self._clear_resolved_target_cache()
+            target, resolve_message = self._resolve_runtime_target(
+                settings,
+                step.target_id,
+                force_refresh=True,
+            )
+            if target is None:
+                return MacroRunResult(False, resolve_message, 0, None)
+            method, success = self._set_text_on_target(target, text)
+            if not success:
+                self._clear_resolved_target_cache()
+                return MacroRunResult(False, "input failed", 0, None)
+        return MacroRunResult(True, f"Set text by {method}.", 1, None)
 
     def _run_preset_text(
         self,
@@ -407,8 +454,134 @@ class MacroRunner:
             if not variants:
                 return None
             if row[2] == "randomized_clipboard":
-                return random.choice(variants)
-            return variants[0]
+                return self._remember_text(random.choice(variants))
+            return self._remember_text(variants[0])
+
+    def _run_is_ready_uia(
+        self,
+        step: MacroStep,
+        settings: dict[str, str],
+    ) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        with connect(self._db_path or get_database_path()) as connection:
+            target_record, _cache_key = self._load_runtime_target_record(
+                connection, step.target_id
+            )
+        if target_record is None:
+            return MacroRunResult(False, "target not found", 0, None)
+        inspection = inspect_target_readonly(settings, target_record)
+        if not inspection.found:
+            return MacroRunResult(False, "target not found", 0, None)
+        if inspection.is_enabled is False or inspection.is_visible is False:
+            return MacroRunResult(False, "window not ready", 0, None)
+        return MacroRunResult(True, "UI target is ready.", 1, None)
+
+    def _run_coordinate_click(self, step: MacroStep) -> MacroRunResult | None:
+        if step.target_id:
+            return None
+        coordinates = self._parse_coordinate_value(step.options.get("coords", step.value))
+        if coordinates is None:
+            return None
+        try:
+            from pywinauto import mouse
+
+            mouse.click(coords=coordinates)
+        except Exception:
+            return MacroRunResult(False, "input failed", 0, None)
+        return MacroRunResult(
+            True,
+            f"Clicked coordinates {coordinates[0]},{coordinates[1]}.",
+            1,
+            None,
+        )
+
+    def _set_text_on_target(self, target: object, text: str) -> tuple[str, bool]:
+        try:
+            iface_value = target.iface_value
+        except Exception:
+            iface_value = None
+        if iface_value is not None:
+            try:
+                is_read_only = getattr(iface_value, "CurrentIsReadOnly", None)
+            except Exception:
+                is_read_only = None
+            if is_read_only is not True:
+                try:
+                    iface_value.SetValue(text)
+                    return "ValuePattern.SetValue", True
+                except Exception:
+                    pass
+        try:
+            target.set_edit_text(text)
+            return "set_edit_text", True
+        except Exception:
+            pass
+        focused, _message = self._focus_target_element(target)
+        if not focused:
+            return "clipboard paste fallback", False
+        paste_step = MacroStep(
+            action="paste_text",
+            target_id=None,
+            value=text,
+            timeout_seconds=0.0,
+            retries=0,
+            options={"text": text},
+        )
+        paste_result = self._run_paste_text(paste_step)
+        return "clipboard paste fallback", paste_result.success
+
+    def _resolve_text_input(self, raw_value: object) -> str | None:
+        if not isinstance(raw_value, str):
+            return None
+        value = raw_value.strip()
+        if not value:
+            return None
+        value = value.replace("{{last_text}}", self._runtime_values.get("last_text", ""))
+        random_prefix = "{{random:"
+        if value.startswith(random_prefix) and value.endswith("}}"):
+            return self._remember_text(
+                self._choose_random_text(value[len(random_prefix) : -2])
+            )
+        if value.startswith("random:"):
+            return self._remember_text(self._choose_random_text(value.partition(":")[2]))
+        return self._remember_text(value)
+
+    @staticmethod
+    def _choose_random_text(options_text: str) -> str | None:
+        options = [part.strip() for part in options_text.split("||") if part.strip()]
+        if not options:
+            return None
+        return random.choice(options)
+
+    def _remember_text(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        self._runtime_values["last_text"] = value
+        return value
+
+    @staticmethod
+    def _key_sequences(value: str) -> list[str]:
+        if ">>" not in value:
+            return [value]
+        return [part.strip() for part in value.split(">>") if part.strip()]
+
+    @staticmethod
+    def _parse_coordinate_value(value: object) -> tuple[int, int] | None:
+        if not isinstance(value, str):
+            return None
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.lower().startswith("coords:"):
+            raw = raw.partition(":")[2].strip()
+        parts = [part.strip() for part in raw.split(",")]
+        if len(parts) != 2:
+            return None
+        try:
+            return int(parts[0]), int(parts[1])
+        except ValueError:
+            return None
 
     def _resolve_runtime_target(
         self, settings: dict[str, str], target_id: str, force_refresh: bool = False
@@ -518,6 +691,7 @@ class MacroRunner:
         self._clear_resolved_target_cache()
         self._connector_ready = False
         self._run_metrics = _RunMetrics()
+        self._runtime_values = {}
 
     def _clear_resolved_target_cache(self) -> None:
         self._resolved_target_cache.clear()
@@ -626,7 +800,15 @@ class MacroRunner:
             return "clipboard failed"
         if "unsupported" in lowered or action == "wait_text_or_image":
             return "unsupported action"
-        if action in {"click", "hotkey", "key", "type_text", "paste_text"}:
+        if action in {
+            "click",
+            "hotkey",
+            "key",
+            "press",
+            "type_text",
+            "paste_text",
+            "set_text",
+        }:
             if "clipboard" in lowered and action == "paste_text":
                 return "clipboard failed"
             return "input failed"
@@ -651,23 +833,35 @@ class MacroRunner:
 def _db_macro_step_to_runtime_step(step) -> MacroStep:
     options: dict[str, object] = {"step_order": step.step_order}
     action = step.action
-    if action in {"delay_ms", "wait_ms"} and step.value is not None:
+    if action in {"delay_ms", "wait_ms", "wait"} and step.value is not None:
         try:
             options["ms"] = int(step.value)
         except ValueError:
             options["ms"] = step.value
-    if action in {"hotkey", "key"} and step.value is not None:
+    if action in {"hotkey", "key", "press"} and step.value is not None:
         options["key"] = step.value
-    if action in {"type_text", "paste_text", "type_text_keyboard", "type_text_clipboard"} and step.value is not None:
+    if action in {
+        "type_text",
+        "paste_text",
+        "type_text_keyboard",
+        "type_text_clipboard",
+        "copy_text",
+        "set_text",
+        "set_text_uia",
+    } and step.value is not None:
         options["text"] = step.value
     if action == "preset_text" and step.value is not None:
         options["preset"] = step.value
 
     normalized_action = {
         "wait_ms": "delay_ms",
+        "wait": "delay_ms",
         "key": "hotkey",
+        "press": "hotkey",
         "type_text_keyboard": "type_text",
         "type_text_clipboard": "paste_text",
+        "set_text_uia": "set_text",
+        "mouse_click": "click",
     }.get(action, action)
 
     return MacroStep(

@@ -5,6 +5,7 @@ from KaosEghis.ui.plugins.pacs_panel import PacsPanel
 from KaosEghis.ui.tabs.flu_report_tab import FluReportTab
 from KaosEghis.ui.tabs.kaoseghis_tab import KaosEghisTab
 from KaosEghis.ui.tabs.kaosgdd_tab import KaosGddTab
+from KaosEghis.ui.tabs.settings_tab import SettingsTab
 from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
 
 
@@ -25,6 +26,7 @@ class MainWindow(QMainWindow):
         self.pacs_panel = PacsPanel()
         self.pacs_tab_index = tabs.addTab(self.pacs_panel, "PACS")
         tabs.addTab(FluReportTab(), "Flu-Report")
+        tabs.addTab(SettingsTab(), "Settings")
         self.pacs_panel.health_state_changed.connect(self._update_pacs_tab_health)
         self._update_pacs_tab_health(self.pacs_panel.is_healthy, self.pacs_panel.health_reason)
 

@@ -158,6 +158,14 @@ def clear_cached_eghis_state() -> None:
     _CACHED_STATE = None
 
 
+def cached_state_matches_settings(
+    state: EghisConnectorState | None, settings: dict[str, str]
+) -> bool:
+    if state is None:
+        return False
+    return _process_identity_matches_state(state, settings)
+
+
 def refresh_cached_eghis_state(settings: dict[str, str]) -> EghisConnectorState:
     global _CACHED_STATE
     _CACHED_STATE = discover_eghis(settings)

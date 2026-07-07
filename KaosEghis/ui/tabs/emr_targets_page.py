@@ -53,11 +53,9 @@ from KaosEghis.db.repositories import (
 )
 from KaosEghis.core.eghis_connector import (
     build_connector_settings,
-    clear_cached_eghis_state,
-    get_cached_eghis_state,
-    refresh_cached_eghis_state,
 )
 from KaosEghis.db.repositories import get_settings
+from KaosEghis.ui.emr_connection_widget import EmrConnectionWidget
 
 
 class EmrTargetsPage(QWidget):
@@ -126,15 +124,17 @@ class EmrTargetsPage(QWidget):
         self.save_profile_button.clicked.connect(self.save_profile)
         self.reload_button = QPushButton("Reload")
         self.reload_button.clicked.connect(self.reload_profile)
-        self.connection_toggle = QPushButton("Connect application")
-        self.connection_toggle.setCheckable(True)
-        self.connection_toggle.toggled.connect(self.toggle_connection)
-        self.connection_status_label = QLabel("Application connection: disconnected.")
+        self.emr_connection_widget = EmrConnectionWidget(
+            self._selected_profile_connector_context,
+            status_callback=self._set_status_text,
+            parent=self,
+        )
+        self.connection_toggle = self.emr_connection_widget.toggle_button
+        self.connection_status_label = self.emr_connection_widget.status_label
 
         detail_controls = QHBoxLayout()
         detail_controls.addWidget(self.save_profile_button)
         detail_controls.addWidget(self.reload_button)
-        detail_controls.addWidget(self.connection_toggle)
         detail_controls.addStretch()
 
         self.ui_targets_table = QTableWidget(0, 5)
@@ -175,7 +175,7 @@ class EmrTargetsPage(QWidget):
         left_column.addLayout(profile_controls)
         left_column.addLayout(detail_form)
         left_column.addLayout(detail_controls)
-        left_column.addWidget(self.connection_status_label)
+        left_column.addWidget(self.emr_connection_widget)
         left_column.addWidget(self.status_label)
         left_column.addStretch()
 
@@ -546,94 +546,33 @@ class EmrTargetsPage(QWidget):
             "[default]" if profile.is_default else "No"
         )
 
-    def toggle_connection(self, checked: bool) -> None:
-        if checked:
-            self.connect_selected_profile()
-            return
-        clear_cached_eghis_state()
-        self._refresh_connection_status()
-        self.status_label.setText("Application disconnected.")
-
-    def connect_selected_profile(self) -> None:
-        settings = self._selected_profile_connector_settings()
-        if settings is None:
-            self.connection_toggle.blockSignals(True)
-            self.connection_toggle.setChecked(False)
-            self.connection_toggle.blockSignals(False)
-            self.status_label.setText("Select a profile to connect.")
-            self._refresh_connection_status()
-            return
-
-        state = refresh_cached_eghis_state(settings)
-        connected = state.status in {"green", "yellow"} and state.pid is not None
-        self.connection_toggle.blockSignals(True)
-        self.connection_toggle.setChecked(connected)
-        self.connection_toggle.blockSignals(False)
-        self._refresh_connection_status()
-        self.status_label.setText(state.message)
-
-    def _selected_profile_connector_settings(self) -> dict[str, str] | None:
+    def _selected_profile_connector_context(self) -> tuple[dict[str, str] | None, str | None]:
         profile_id = self._current_profile_id
         if profile_id is None:
-            return None
+            return None, None
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             profile = get_emr_target_profile(connection, profile_id)
             settings = get_settings(connection)
         if profile is None:
-            return None
-        return build_connector_settings(
-            settings,
-            process_name=profile.process_name or settings.get("eghis_process_name"),
-            window_title_contains=profile.window_title_contains
-            or settings.get("eghis_window_title_contains"),
-            executable_path=profile.executable_path or settings.get("eghis_executable_path"),
+            return None, None
+        return (
+            build_connector_settings(
+                settings,
+                process_name=profile.process_name or settings.get("eghis_process_name"),
+                window_title_contains=profile.window_title_contains
+                or settings.get("eghis_window_title_contains"),
+                executable_path=profile.executable_path
+                or settings.get("eghis_executable_path"),
+            ),
+            profile.name,
         )
 
     def _refresh_connection_status(self) -> None:
-        state = get_cached_eghis_state()
-        settings = self._selected_profile_connector_settings()
-        if state is None:
-            self.connection_status_label.setText("Application connection: disconnected.")
-            self.connection_toggle.setText("Connect application")
-            self._set_toggle_checked(False)
-            return
-        mismatch = False
-        if settings is not None:
-            configured_process = (settings.get("eghis_process_name") or "").strip()
-            cached_process = (state.process_name or "").strip()
-            configured_path = (settings.get("eghis_executable_path") or "").strip()
-            cached_path = (state.exe_path or "").strip()
-            mismatch = bool(
-                (configured_process and cached_process and configured_process.casefold() != cached_process.casefold())
-                or (
-                    configured_path
-                    and cached_path
-                    and Path(configured_path).name.casefold() != Path(cached_path).name.casefold()
-                )
-            )
-        if mismatch:
-            self.connection_status_label.setText(
-                "Application connection: cached app does not match this preset."
-            )
-            self.connection_toggle.setText("Connect application")
-            self._set_toggle_checked(False)
-            return
-        if state.status == "yellow":
-            self.connection_status_label.setText(
-                "Application connection: connected. The app will be focused when a macro runs."
-            )
-        else:
-            self.connection_status_label.setText(f"Application connection: {state.message}")
-        self.connection_toggle.setText(
-            "Disconnect application" if state.status in {"green", "yellow"} else "Connect application"
-        )
-        self._set_toggle_checked(state.status in {"green", "yellow"})
+        self.emr_connection_widget.refresh_state()
 
-    def _set_toggle_checked(self, checked: bool) -> None:
-        self.connection_toggle.blockSignals(True)
-        self.connection_toggle.setChecked(checked)
-        self.connection_toggle.blockSignals(False)
+    def _set_status_text(self, message: str) -> None:
+        self.status_label.setText(message)
 
     def _refresh_ui_targets_table(self) -> None:
         self.ui_targets_table.setRowCount(len(self._current_ui_targets))

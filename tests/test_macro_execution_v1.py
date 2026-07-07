@@ -424,6 +424,226 @@ def test_randomized_preset_selects_one_option(monkeypatch, tmp_path) -> None:
     assert copied == ["beta"]
 
 
+def test_press_action_supports_ordered_sequences(monkeypatch, tmp_path) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Press Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "press", value="{F2}>>^a>>{ENTER}")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    sent: list[str] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda keys: sent.append(keys))})(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert sent == ["{F2}", "^a", "{ENTER}"]
+
+
+def test_coordinate_click_uses_mouse_click(monkeypatch, tmp_path) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Coordinate Click", "macro", True)
+        create_macro_step(connection, item.id, 1, "click", value="499,113")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    calls: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto",
+        type(
+            "Pwa",
+            (),
+            {
+                "mouse": type(
+                    "Mouse",
+                    (),
+                    {"click": staticmethod(lambda coords: calls.append(coords))},
+                )()
+            },
+        )(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert calls == [(499, 113)]
+
+
+def test_is_ready_uia_checks_found_visible_enabled(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.core.uia_inspector import UiaInspectionResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="SymptomBox")
+        item = create_item(connection, "Ready Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "is_ready_uia", target_id="sx")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.inspect_target_readonly",
+        lambda _settings, _target: UiaInspectionResult(
+            found=True,
+            message="Target found",
+            target_id="sx",
+            parent_target_id=None,
+            parent_automation_id=None,
+            parent_found=None,
+            automation_id="SymptomBox",
+            name=None,
+            control_type="Edit",
+            class_name=None,
+            found_name="Field",
+            found_control_type="Edit",
+            found_class_name=None,
+            is_enabled=True,
+            is_visible=True,
+            text_value=None,
+        ),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+
+
+def test_copy_text_and_last_text_placeholder(monkeypatch, tmp_path) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Copy Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "copy_text", value="random:alpha||beta")
+        create_macro_step(connection, item.id, 2, "paste_text", value="{{last_text}}")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    copied: list[str] = []
+    sent: list[str] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.random.choice",
+        lambda values: values[1],
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda text: copied.append(text) or type("Snapshot", (), {"text": text})(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.restore_clipboard",
+        lambda _snapshot: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda keys: sent.append(keys))})(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert copied == ["beta", "beta"]
+    assert sent == ["^v"]
+
+
+def test_set_text_uses_value_pattern_when_available(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="SymptomBox")
+        item = create_item(connection, "Set Text Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "set_text", target_id="sx", value="hello")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeValue:
+        CurrentIsReadOnly = False
+
+        def __init__(self) -> None:
+            self.values: list[str] = []
+
+        def SetValue(self, text: str) -> None:
+            self.values.append(text)
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.iface_value = FakeValue()
+
+    fake_element = FakeElement()
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (fake_element, None, "Target resolved."),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert fake_element.iface_value.values == ["hello"]
+
+
 def test_delay_ms_is_represented_in_dry_run(tmp_path) -> None:
     from KaosEghis.core.macro_runner import MacroRunner
     from KaosEghis.db.database import connect, initialize_database
@@ -721,6 +941,33 @@ def test_macro_runner_uses_selected_profile_for_connection_settings(
     assert captured_settings["eghis_process_name"] == "notepad.exe"
     assert captured_settings["eghis_window_title_contains"] == "Notepad"
     assert captured_settings["eghis_executable_path"] == "C:\\Windows\\System32\\notepad.exe"
+
+
+def test_macro_runner_blocks_on_preset_mismatch(tmp_path, monkeypatch) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Mismatch Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "focus_window")
+
+    class FakeState:
+        status = "red"
+        message = "Connected application does not match preset. Reconnect manually and retry."
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.executed_steps == 0
+    assert result.message == "Connected application does not match preset. Reconnect manually and retry."
 
 
 def test_focus_window_step_does_not_repeat_connector_check_within_same_run(
