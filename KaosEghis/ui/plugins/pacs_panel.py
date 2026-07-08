@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import re
+import webbrowser
 
-from PySide6.QtCore import QDate, QTimer, Signal
+from PySide6.QtCore import QDate, QTimer, QUrl, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -24,6 +25,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+try:
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+except ImportError:  # pragma: no cover - depends on optional Qt WebEngine install
+    QWebEngineView = None
+
 from KaosEghis.core.clipboard_service import copy_text
 from KaosEghis.core.eghis_db import (
     EghisDbQueryRejectedError,
@@ -35,7 +41,6 @@ from KaosEghis.core.kaospacs_client import (
     reconcile_kaospacs_worklist_to_local,
     sync_local_worklist_to_kaospacs,
 )
-from KaosEghis.core.kaospacs_gateway_client import get_imaging_worklist
 from KaosEghis.core.pacs_polling import poll_eghis_image_orders_into_local_worklist
 from KaosEghis.db.database import connect, describe_database_path, initialize_database
 from KaosEghis.db.repositories import (
@@ -58,7 +63,7 @@ class PacsPanel(QWidget):
     health_state_changed = Signal(bool, str)
     DEFAULT_POLL_INTERVAL_SECONDS = 60
     MIN_POLL_INTERVAL_SECONDS = 15
-    IMAGING_REFRESH_DELAY_MS = 350
+    ADMIN_REFRESH_DELAY_MS = 350
     WORKLIST_COLUMNS = [
         "Status",
         "Patient",
@@ -70,23 +75,6 @@ class PacsPanel(QWidget):
         "KaosPACS Status",
         "Last Synced",
         "Sync Error",
-    ]
-    IMAGING_COLUMNS = [
-        "state",
-        "AccessionNumber",
-        "PatientID",
-        "PatientName",
-        "PatientBirthDate",
-        "PatientSex",
-        "Modality",
-        "ScheduledStationAETitle",
-        "ScheduledAt",
-        "Description",
-        "CompletedAt",
-        "ExpiredAt",
-        "ExpireReason",
-        "CancelledAt",
-        "CancelReason",
     ]
     AUDIT_COLUMNS = [
         "Time",
@@ -109,35 +97,32 @@ class PacsPanel(QWidget):
         self._db_path = db_path
         self._visible_items: list[PacsWorklistItemRecord] = []
         self._visible_audit_events: list[PacsAuditEventRecord] = []
-        self._imaging_entries_all: list[dict] = []
-        self._visible_imaging_entries: list[dict] = []
         self._kaospacs_available = False
         self._eghis_db_available = False
         self._health_reason = "PACS health unknown"
         self._active_filter = "all"
-        self._imaging_filter = "active"
         self._poll_in_progress = False
         self._selected_date = date.today()
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._handle_poll_timer_tick)
 
         self.page_stack = QStackedWidget()
-        self._page_names = ["imaging", "operator_mode", "settings"]
+        self._page_names = ["admin", "operator_mode", "settings"]
         self.page_buttons: dict[str, QPushButton] = {}
 
         title = QLabel("PACS Worklist")
         title.setObjectName("pageTitle")
 
-        self._build_imaging_page()
+        self._build_admin_page()
         self._build_operator_mode_page()
         self._build_settings_page()
 
-        self.page_stack.addWidget(self.imaging_page)
+        self.page_stack.addWidget(self.admin_page)
         self.page_stack.addWidget(self.operator_mode_page)
         self.page_stack.addWidget(self.settings_page)
 
         navigation_row = QHBoxLayout()
-        navigation_row.addWidget(self._make_page_button("Imaging Worklist", "imaging"))
+        navigation_row.addWidget(self._make_page_button("KaosPACS Admin", "admin"))
         navigation_row.addWidget(self._make_page_button("Operator Mode", "operator_mode"))
         navigation_row.addWidget(self._make_page_button("Settings", "settings"))
         navigation_row.addStretch()
@@ -150,58 +135,42 @@ class PacsPanel(QWidget):
         self._set_db_labels()
         self._load_polling_settings()
         self._update_local_filter_button_states()
-        self._update_imaging_filter_button_states()
         self._update_startup_readiness_status()
         self._refresh_startup_connection_statuses()
         self._refresh_settings_diagnostics()
-        self._show_page("imaging")
+        self._show_page("admin")
 
-    def _build_imaging_page(self) -> None:
-        self.imaging_page = QWidget()
-        self.imaging_status_label = QLabel("Not loaded yet.")
-        self.imaging_search_input = QLineEdit()
-        self.imaging_search_input.setPlaceholderText(
-            "Search PatientName / PatientID / AccessionNumber / Modality"
-        )
-        self.imaging_search_input.textChanged.connect(self._refresh_imaging_table)
-        self.imaging_refresh_button = QPushButton("Refresh Imaging Worklist")
-        self.imaging_refresh_button.clicked.connect(self.refresh_imaging_worklist)
+    def _build_admin_page(self) -> None:
+        self.admin_page = QWidget()
+        self.admin_status_label = QLabel("KaosPACS Admin: embedded web view")
+        self.admin_url_label = QLabel()
+        self.admin_reload_button = QPushButton("Reload Admin Page")
+        self.admin_reload_button.clicked.connect(self.reload_admin_page)
+        self.admin_open_external_button = QPushButton("Open in External Browser")
+        self.admin_open_external_button.clicked.connect(self.open_admin_page_externally)
 
-        self.imaging_filter_buttons: dict[str, QPushButton] = {}
-        imaging_filter_row = QHBoxLayout()
-        for key, label in (
-            ("active", "Active"),
-            ("inactive", "Inactive"),
-            ("completed", "Completed"),
-            ("expired", "Expired"),
-            ("cancelled", "Cancelled"),
-            ("all", "All"),
-        ):
-            button = QPushButton(label)
-            button.setCheckable(True)
-            button.clicked.connect(self._make_imaging_filter_handler(key))
-            self.imaging_filter_buttons[key] = button
-            imaging_filter_row.addWidget(button)
-        imaging_filter_row.addStretch()
+        controls = QHBoxLayout()
+        controls.addWidget(self.admin_reload_button)
+        controls.addWidget(self.admin_open_external_button)
+        controls.addStretch()
 
-        imaging_controls = QHBoxLayout()
-        imaging_controls.addWidget(self.imaging_refresh_button)
-        imaging_controls.addWidget(self.imaging_search_input)
+        layout = QVBoxLayout(self.admin_page)
+        layout.addWidget(QLabel("KaosPACS Admin"))
+        layout.addWidget(self.admin_status_label)
+        layout.addWidget(self.admin_url_label)
+        layout.addLayout(controls)
 
-        self.imaging_table = QTableWidget(0, len(self.IMAGING_COLUMNS))
-        self.imaging_table.setHorizontalHeaderLabels(self.IMAGING_COLUMNS)
-        self.imaging_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.imaging_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self.imaging_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        if QWebEngineView is None:
+            self.admin_web_view = None
+            fallback = QLabel("Embedded browser support is unavailable.")
+            fallback.setMargin(12)
+            layout.addWidget(fallback)
+            self.admin_status_label.setText("KaosPACS Admin: embedded browser unavailable")
+            return
 
-        layout = QVBoxLayout(self.imaging_page)
-        layout.addWidget(QLabel("KaosPACS Gateway Imaging Worklist"))
-        layout.addWidget(self.imaging_status_label)
-        layout.addLayout(imaging_controls)
-        layout.addLayout(imaging_filter_row)
-        layout.addWidget(self.imaging_table)
+        self.admin_web_view = QWebEngineView()
+        layout.addWidget(self.admin_web_view)
+        self.reload_admin_page()
 
     def _build_operator_mode_page(self) -> None:
         self.operator_mode_page = QWidget()
@@ -366,6 +335,7 @@ class PacsPanel(QWidget):
         self.diagnostics_sqlite_label = QLabel()
         self.diagnostics_api_base_url_label = QLabel()
         self.diagnostics_gateway_url_label = QLabel()
+        self.diagnostics_web_admin_url_label = QLabel()
         self.diagnostics_dry_run_label = QLabel()
         self.diagnostics_command_note_label = QLabel(
             "Diagnostics: pacs poll helper is available via KaosEghis tools when needed."
@@ -375,6 +345,7 @@ class PacsPanel(QWidget):
         form.addRow("Active SQLite path", self.diagnostics_sqlite_label)
         form.addRow("KaosPACS API base URL", self.diagnostics_api_base_url_label)
         form.addRow("KaosPACS Gateway URL", self.diagnostics_gateway_url_label)
+        form.addRow("KaosPACS Web admin URL", self.diagnostics_web_admin_url_label)
         form.addRow("Dry-run status", self.diagnostics_dry_run_label)
 
         layout = QVBoxLayout(self.settings_page)
@@ -401,7 +372,7 @@ class PacsPanel(QWidget):
                 self.FILTER_BUTTON_SELECTED_STYLE if selected else self.FILTER_BUTTON_UNSELECTED_STYLE
             )
 
-        if page_name == "imaging":
+        if page_name == "admin":
             return
         if page_name == "operator_mode":
             self.refresh_rows()
@@ -457,112 +428,25 @@ class PacsPanel(QWidget):
         self.eghis_db_status.setText("Eghis DB: healthy")
         self._emit_health_state()
 
-    def refresh_imaging_worklist(self) -> None:
+    def _current_admin_url(self) -> str:
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
-        try:
-            entries = get_imaging_worklist(settings)
-        except RuntimeError:
-            self._imaging_entries_all = []
-            self._visible_imaging_entries = []
-            self.imaging_table.setRowCount(0)
-            self.imaging_status_label.setText("KaosPACS Gateway unavailable")
+        return settings.get("kaospacs_web_admin_url", "http://192.168.0.200/admin/worklist")
+
+    def reload_admin_page(self) -> None:
+        admin_url = self._current_admin_url().strip()
+        self.admin_url_label.setText(admin_url)
+        if self.admin_web_view is None:
+            self.admin_status_label.setText("Embedded browser support is unavailable.")
             return
+        self.admin_status_label.setText("KaosPACS Admin: embedded web view")
+        self.admin_web_view.setUrl(QUrl(admin_url))
 
-        self._imaging_entries_all = entries
-        self.imaging_status_label.setText(
-            f"KaosPACS Gateway imaging rows: {len(entries)}"
-        )
-        self._refresh_imaging_table()
-
-    def _refresh_imaging_table(self) -> None:
-        search_value = self.imaging_search_input.text().strip().lower()
-        visible = []
-        for entry in self._imaging_entries_all:
-            state = self._imaging_entry_state(entry)
-            if self._imaging_filter != "all" and state != self._imaging_filter:
-                continue
-            if search_value and not self._matches_imaging_search(entry, search_value):
-                continue
-            visible.append(entry)
-
-        self._visible_imaging_entries = visible
-        self.imaging_table.setRowCount(len(visible))
-        for row_index, entry in enumerate(visible):
-            values = [
-                self._imaging_entry_state(entry),
-                self._entry_text(entry, "AccessionNumber"),
-                self._entry_text(entry, "PatientID"),
-                self._entry_text(entry, "PatientName"),
-                self._entry_text(entry, "PatientBirthDate"),
-                self._entry_text(entry, "PatientSex"),
-                self._entry_text(entry, "Modality"),
-                self._entry_text(entry, "ScheduledStationAETitle"),
-                self._entry_text(entry, "ScheduledAt"),
-                self._imaging_description(entry),
-                self._entry_text(entry, "CompletedAt"),
-                self._entry_text(entry, "ExpiredAt"),
-                self._entry_text(entry, "ExpireReason"),
-                self._entry_text(entry, "CancelledAt"),
-                self._entry_text(entry, "CancelReason"),
-            ]
-            for col_index, value in enumerate(values):
-                self.imaging_table.setItem(row_index, col_index, QTableWidgetItem(value))
-        self.imaging_table.resizeColumnsToContents()
-
-    def _make_imaging_filter_handler(self, state: str):
-        def handler() -> None:
-            self._imaging_filter = state
-            self._update_imaging_filter_button_states()
-            self._refresh_imaging_table()
-
-        return handler
-
-    def _update_imaging_filter_button_states(self) -> None:
-        for key, button in self.imaging_filter_buttons.items():
-            is_selected = key == self._imaging_filter
-            button.setChecked(is_selected)
-            button.setProperty("filterActive", is_selected)
-            button.setStyleSheet(
-                self.FILTER_BUTTON_SELECTED_STYLE
-                if is_selected
-                else self.FILTER_BUTTON_UNSELECTED_STYLE
-            )
-
-    def _matches_imaging_search(self, entry: dict, search_value: str) -> bool:
-        fields = [
-            self._entry_text(entry, "PatientName"),
-            self._entry_text(entry, "PatientID"),
-            self._entry_text(entry, "AccessionNumber"),
-            self._entry_text(entry, "Modality"),
-        ]
-        return any(search_value in value.lower() for value in fields if value)
-
-    def _entry_text(self, entry: dict, key: str) -> str:
-        value = entry.get(key)
-        if value is None:
-            return ""
-        return str(value).strip()
-
-    def _imaging_description(self, entry: dict) -> str:
-        return (
-            self._entry_text(entry, "Description")
-            or self._entry_text(entry, "ScheduledProcedureStepDescription")
-            or self._entry_text(entry, "RequestedProcedureDescription")
-        )
-
-    def _imaging_entry_state(self, entry: dict) -> str:
-        state = self._entry_text(entry, "state").lower()
-        if state:
-            return state
-        if self._entry_text(entry, "CancelledAt"):
-            return "cancelled"
-        if self._entry_text(entry, "ExpiredAt"):
-            return "expired"
-        if self._entry_text(entry, "CompletedAt"):
-            return "completed"
-        return "active"
+    def open_admin_page_externally(self) -> None:
+        admin_url = self._current_admin_url().strip()
+        self.admin_url_label.setText(admin_url)
+        webbrowser.open(admin_url)
 
     def _make_filter_handler(self, status: str):
         def handler() -> None:
@@ -632,7 +516,7 @@ class PacsPanel(QWidget):
         self._refresh_startup_connection_statuses()
 
     def poll_now(self) -> None:
-        self._run_poll(refresh_imaging=True)
+        self._run_poll(refresh_admin=True)
 
     def sync_to_kaospacs(self) -> None:
         initialize_database(self._db_path)
@@ -665,7 +549,7 @@ class PacsPanel(QWidget):
             ),
         )
         self.refresh_audit()
-        self._schedule_imaging_refresh()
+        self._schedule_admin_reload()
 
     def reconcile_from_kaospacs(self) -> None:
         initialize_database(self._db_path)
@@ -683,7 +567,7 @@ class PacsPanel(QWidget):
                 dry_run=result.dry_run,
             )
             self.refresh_audit()
-            self._schedule_imaging_refresh()
+            self._schedule_admin_reload()
             return
         summary = (
             f"{'KaosPACS reconcile (DRY RUN): ' if result.dry_run else 'KaosPACS reconcile: '}"
@@ -700,7 +584,7 @@ class PacsPanel(QWidget):
             ),
         )
         self.refresh_audit()
-        self._schedule_imaging_refresh()
+        self._schedule_admin_reload()
 
     def manual_insert_row(self) -> None:
         dialog = PacsWorklistDialog(self)
@@ -867,9 +751,9 @@ class PacsPanel(QWidget):
             self._poll_timer.stop()
 
     def _handle_poll_timer_tick(self) -> None:
-        self._run_poll(refresh_imaging=True, is_auto_poll=True)
+        self._run_poll(refresh_admin=True, is_auto_poll=True)
 
-    def _run_poll(self, *, refresh_imaging: bool = False, is_auto_poll: bool = False) -> None:
+    def _run_poll(self, *, refresh_admin: bool = False, is_auto_poll: bool = False) -> None:
         if self._poll_in_progress:
             self.last_poll_result_label.setText("Last poll result: skipped overlap")
             self.polling_status.setText("Polling status: skipped overlap")
@@ -915,16 +799,16 @@ class PacsPanel(QWidget):
             self.polling_status.setText(f"Polling status: {summary}")
             self._log_audit_aggregate(event_type="poll", summary=summary)
             self.refresh_audit()
-            if refresh_imaging:
-                self._schedule_imaging_refresh()
+            if refresh_admin:
+                self._schedule_admin_reload()
         finally:
             self._poll_in_progress = False
 
-    def _schedule_imaging_refresh(self) -> None:
-        self.imaging_status_label.setText(
-            f"Waiting {self.IMAGING_REFRESH_DELAY_MS} ms before imaging refresh..."
+    def _schedule_admin_reload(self) -> None:
+        self.admin_status_label.setText(
+            f"Waiting {self.ADMIN_REFRESH_DELAY_MS} ms before admin reload..."
         )
-        QTimer.singleShot(self.IMAGING_REFRESH_DELAY_MS, self.refresh_imaging_worklist)
+        QTimer.singleShot(self.ADMIN_REFRESH_DELAY_MS, self.reload_admin_page)
 
     @property
     def is_healthy(self) -> bool:
@@ -990,6 +874,7 @@ class PacsPanel(QWidget):
         self.diagnostics_sqlite_label.setText(describe_database_path(self._db_path))
         self.diagnostics_api_base_url_label.setText(settings.get("kaospacs_api_base_url", ""))
         self.diagnostics_gateway_url_label.setText(settings.get("kaospacs_gateway_url", ""))
+        self.diagnostics_web_admin_url_label.setText(settings.get("kaospacs_web_admin_url", ""))
         self.diagnostics_dry_run_label.setText(
             "on" if (settings.get("pacs_dry_run") or "").strip().lower() == "true" else "off"
         )

@@ -25,6 +25,7 @@ class SettingsTab(QWidget):
         "eghis_db_weekly_age_report_query": DEFAULT_SETTINGS["eghis_db_weekly_age_report_query"],
         "kaospacs_api_base_url": DEFAULT_SETTINGS["kaospacs_api_base_url"],
         "kaospacs_gateway_url": DEFAULT_SETTINGS["kaospacs_gateway_url"],
+        "kaospacs_web_admin_url": DEFAULT_SETTINGS["kaospacs_web_admin_url"],
         "kaospacs_gateway_api_token": DEFAULT_SETTINGS["kaospacs_gateway_api_token"],
         "kaospacs_api_timeout_seconds": DEFAULT_SETTINGS["kaospacs_api_timeout_seconds"],
         "pacs_auto_poll_enabled": DEFAULT_SETTINGS["pacs_auto_poll_enabled"],
@@ -46,6 +47,7 @@ class SettingsTab(QWidget):
         self.eghis_db_weekly_age_report_query = QPlainTextEdit()
         self.kaospacs_api_base_url = QLineEdit()
         self.kaospacs_gateway_url = QLineEdit()
+        self.kaospacs_web_admin_url = QLineEdit()
         self.kaospacs_gateway_api_token = QLineEdit()
         self.kaospacs_gateway_api_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.kaospacs_api_timeout_seconds = QLineEdit()
@@ -59,7 +61,7 @@ class SettingsTab(QWidget):
         self.sqlite_path_label = QLabel()
         self.pacs_info = QLabel(
             "PACS settings control Eghis DB polling, KaosPACS API access, and "
-            "KaosPACS Gateway imaging worklist access. "
+            "KaosPACS Web admin access. "
             "Sync remains manual unless auto-poll is enabled; auto-poll only polls "
             "Eghis into local SQLite and never syncs to KaosPACS. "
             "PACS dry run keeps polling live but simulates sync and reconcile."
@@ -98,6 +100,7 @@ class SettingsTab(QWidget):
         pacs_form.addRow("Flu weekly report query", self.eghis_db_weekly_age_report_query)
         pacs_form.addRow("KaosPACS API base URL", self.kaospacs_api_base_url)
         pacs_form.addRow("KaosPACS Gateway URL", self.kaospacs_gateway_url)
+        pacs_form.addRow("KaosPACS Web admin URL", self.kaospacs_web_admin_url)
         pacs_form.addRow("KaosPACS Gateway API token", self.kaospacs_gateway_api_token)
         pacs_form.addRow("KaosPACS API timeout seconds", self.kaospacs_api_timeout_seconds)
         pacs_form.addRow(self.pacs_auto_poll_enabled)
@@ -153,6 +156,7 @@ class SettingsTab(QWidget):
         )
         self.kaospacs_api_base_url.setText(settings["kaospacs_api_base_url"])
         self.kaospacs_gateway_url.setText(settings["kaospacs_gateway_url"])
+        self.kaospacs_web_admin_url.setText(settings["kaospacs_web_admin_url"])
         self.kaospacs_gateway_api_token.setText(settings["kaospacs_gateway_api_token"])
         self.kaospacs_api_timeout_seconds.setText(
             settings["kaospacs_api_timeout_seconds"]
@@ -205,6 +209,7 @@ class SettingsTab(QWidget):
         )
         self.kaospacs_api_base_url.setText(self.PACS_DEFAULTS["kaospacs_api_base_url"])
         self.kaospacs_gateway_url.setText(self.PACS_DEFAULTS["kaospacs_gateway_url"])
+        self.kaospacs_web_admin_url.setText(self.PACS_DEFAULTS["kaospacs_web_admin_url"])
         self.kaospacs_gateway_api_token.setText(self.PACS_DEFAULTS["kaospacs_gateway_api_token"])
         self.kaospacs_api_timeout_seconds.setText(
             self.PACS_DEFAULTS["kaospacs_api_timeout_seconds"]
@@ -253,6 +258,7 @@ class SettingsTab(QWidget):
             "eghis_db_weekly_age_report_query": self.eghis_db_weekly_age_report_query.toPlainText().strip(),
             "kaospacs_api_base_url": self.kaospacs_api_base_url.text().strip(),
             "kaospacs_gateway_url": self.kaospacs_gateway_url.text().strip(),
+            "kaospacs_web_admin_url": self.kaospacs_web_admin_url.text().strip(),
             "kaospacs_gateway_api_token": self.kaospacs_gateway_api_token.text().strip(),
             "kaospacs_api_timeout_seconds": normalized_timeout,
             "pacs_auto_poll_enabled": "true" if self.pacs_auto_poll_enabled.isChecked() else "false",
@@ -274,6 +280,12 @@ class SettingsTab(QWidget):
             gateway_url.startswith("http://") or gateway_url.startswith("https://")
         ):
             return "KaosPACS Gateway URL must start with http:// or https://."
+
+        web_admin_url = self.kaospacs_web_admin_url.text().strip()
+        if not web_admin_url or not (
+            web_admin_url.startswith("http://") or web_admin_url.startswith("https://")
+        ):
+            return "KaosPACS Web admin URL must start with http:// or https://."
 
         timeout_text = self.kaospacs_api_timeout_seconds.text().strip()
         try:

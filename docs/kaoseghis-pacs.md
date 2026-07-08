@@ -1,6 +1,6 @@
 # KaosEghis PACS
 
-Last updated: 2026-07-01
+Last updated: 2026-07-08
 
 Project name: `KaosEghis-pacs`  
 Panel title: `PACS Worklist`
@@ -16,7 +16,8 @@ Current scope:
 - local PACS audit
 - explicit KaosPACS API sync
 - explicit KaosPACS reconciliation
-- operator-facing PACS settings and worklist tools
+- operator-facing PACS settings and local worklist tools
+- embedded KaosPACS Web admin page
 
 This project does not implement direct DICOM behavior in KaosEghis itself.
 
@@ -100,7 +101,7 @@ Status ownership:
 - never deletes local rows
 - never infers local business cancellation from KaosPACS imaging state
 
-Gateway imaging states are shown as-is in the imaging view filters. `inactive` is not treated as `active` unless KaosPACS defines that compatibility explicitly in future.
+KaosEghis embeds KaosPACS Web `/admin/worklist` for admin imaging lifecycle and correction UI. KaosEghis does not render or own imaging completion correction locally.
 
 Local state transition model:
 
@@ -114,6 +115,8 @@ KaosPACS Expired -> Expired
 Only KaosEghis-pacs may produce `cancelled`.
 
 Only KaosPACS may produce `completed` and `expired`.
+
+KaosEghis does not mark imaging complete.
 
 ## Local Storage Model
 
@@ -198,6 +201,8 @@ Visible PACS actions:
 - `Previous day`
 - `Next day`
 - `Today`
+- `Reload Admin Page`
+- `Open in External Browser`
 - `Refresh`
 - `Check KaosPACS`
 - `Poll now`
@@ -211,6 +216,8 @@ Visible PACS actions:
 - `Copy audit summary`
 
 Current table columns:
+
+Local source worklist columns:
 
 - `Status`
 - `Patient`
@@ -231,6 +238,12 @@ Current worklist filters:
 - `Expired`
 - `Error`
 - `All`
+
+Admin correction UI:
+
+- KaosPACS Admin page is embedded in the PACS tab
+- if Qt WebEngine is unavailable, KaosEghis shows the configured admin URL and an external-browser fallback
+- KaosPACS Web owns correction actions such as manual Mark Complete or Mark Cancelled
 
 Selected-date behavior:
 
@@ -257,6 +270,7 @@ Editable PACS settings in the Settings tab:
 - `eghis_db_image_study_query`
 - `kaospacs_api_base_url`
 - `kaospacs_gateway_url`
+- `kaospacs_web_admin_url`
 - `kaospacs_gateway_api_token`
 - `kaospacs_api_timeout_seconds`
 - `pacs_auto_poll_enabled`
@@ -268,6 +282,7 @@ Rules:
 - connection string is hidden by default
 - gateway API token is hidden by default
 - production `kaospacs_api_base_url` should point to Gateway `:8060`, not MWL internal API `:8055`
+- `kaospacs_web_admin_url` points to KaosPACS Web admin, not the Gateway API
 - poll interval minimum is `15` seconds
 - auto poll is off by default
 - dry run is off by default
@@ -375,6 +390,7 @@ Diagnostic rules:
 - Reconciliation
 - PACS settings UI
 - Local audit
+- Embedded KaosPACS Web admin page
 
 ## Not In Scope
 

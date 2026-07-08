@@ -14,6 +14,7 @@ DEFAULT_SETTINGS = {
     "eghis_db_weekly_age_report_query": "",
     "kaospacs_api_base_url": "http://127.0.0.1:8060",
     "kaospacs_gateway_url": "http://127.0.0.1:8060",
+    "kaospacs_web_admin_url": "http://192.168.0.200/admin/worklist",
     "kaospacs_gateway_api_token": "",
     "kaospacs_api_timeout_seconds": "5",
     "pacs_auto_poll_enabled": "false",

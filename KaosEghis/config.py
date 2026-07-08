@@ -10,6 +10,8 @@ class AppConfig:
     eghis_db_connection_string: str = ""
     eghis_db_image_study_query: str = ""
     kaospacs_api_base_url: str = "http://127.0.0.1:8060"
+    kaospacs_gateway_url: str = "http://127.0.0.1:8060"
+    kaospacs_web_admin_url: str = "http://192.168.0.200/admin/worklist"
     kaospacs_api_timeout_seconds: str = "5"
     pacs_auto_poll_enabled: str = "false"
     pacs_poll_interval_seconds: str = "60"
