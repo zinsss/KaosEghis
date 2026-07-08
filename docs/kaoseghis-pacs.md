@@ -101,7 +101,7 @@ Status ownership:
 - never deletes local rows
 - never infers local business cancellation from KaosPACS imaging state
 
-KaosEghis embeds KaosPACS Web `/admin/worklist` for admin imaging lifecycle and correction UI. KaosEghis does not render or own imaging completion correction locally.
+KaosEghis embeds KaosPACS Web `/imaging/worklist` on the KaosPACS Web service for admin imaging lifecycle and correction UI. KaosEghis does not render or own imaging completion correction locally.
 
 Local state transition model:
 
@@ -282,7 +282,7 @@ Rules:
 - connection string is hidden by default
 - gateway API token is hidden by default
 - production `kaospacs_api_base_url` should point to Gateway `:8060`, not MWL internal API `:8055`
-- `kaospacs_web_admin_url` points to KaosPACS Web admin, not the Gateway API
+- `kaospacs_web_admin_url` points to KaosPACS Web at `:8070/imaging/worklist`, not the Gateway API
 - poll interval minimum is `15` seconds
 - auto poll is off by default
 - dry run is off by default

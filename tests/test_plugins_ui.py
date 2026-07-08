@@ -51,7 +51,7 @@ def test_pacs_panel_default_page_is_admin(monkeypatch, tmp_path) -> None:
     assert panel.page_stack.currentWidget() is panel.admin_page
     assert panel.page_buttons["admin"].isChecked() is True
     assert panel.admin_status_label.text() == "KaosPACS Admin: embedded web view"
-    assert panel.admin_web_view.loaded_url == "http://192.168.0.200/admin/worklist"
+    assert panel.admin_web_view.loaded_url == "http://192.168.0.200:8070/imaging/worklist"
 
 
 def test_pacs_panel_navigation_buttons_are_exact(monkeypatch, tmp_path) -> None:
@@ -116,14 +116,14 @@ def test_reload_admin_page_uses_configured_url(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
     with connect(db_path) as connection:
-        set_settings(connection, {"kaospacs_web_admin_url": "http://example/admin/worklist"})
+        set_settings(connection, {"kaospacs_web_admin_url": "http://example:8070/imaging/worklist"})
 
     monkeypatch.setattr(pacs_panel_module, "QWebEngineView", FakeWebView)
     panel = pacs_panel_module.PacsPanel(db_path=db_path)
     panel.reload_admin_page()
 
-    assert panel.admin_url_label.text() == "http://example/admin/worklist"
-    assert panel.admin_web_view.loaded_url == "http://example/admin/worklist"
+    assert panel.admin_url_label.text() == "http://example:8070/imaging/worklist"
+    assert panel.admin_web_view.loaded_url == "http://example:8070/imaging/worklist"
 
 
 def test_open_external_browser_uses_configured_url(monkeypatch, tmp_path) -> None:
@@ -136,7 +136,7 @@ def test_open_external_browser_uses_configured_url(monkeypatch, tmp_path) -> Non
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
     with connect(db_path) as connection:
-        set_settings(connection, {"kaospacs_web_admin_url": "http://example/admin/worklist"})
+        set_settings(connection, {"kaospacs_web_admin_url": "http://example:8070/imaging/worklist"})
 
     monkeypatch.setattr(pacs_panel_module, "QWebEngineView", None)
     opened = []
@@ -145,8 +145,8 @@ def test_open_external_browser_uses_configured_url(monkeypatch, tmp_path) -> Non
     panel = pacs_panel_module.PacsPanel(db_path=db_path)
     panel.open_admin_page_externally()
 
-    assert opened == ["http://example/admin/worklist"]
-    assert panel.admin_url_label.text() == "http://example/admin/worklist"
+    assert opened == ["http://example:8070/imaging/worklist"]
+    assert panel.admin_url_label.text() == "http://example:8070/imaging/worklist"
 
 
 def test_no_mark_done_button_or_completion_method_remains(monkeypatch, tmp_path) -> None:
@@ -166,7 +166,7 @@ def test_no_mark_done_button_or_completion_method_remains(monkeypatch, tmp_path)
 def test_default_settings_include_kaospacs_web_admin_url() -> None:
     from KaosEghis.db.repositories import DEFAULT_SETTINGS
 
-    assert DEFAULT_SETTINGS["kaospacs_web_admin_url"] == "http://192.168.0.200/admin/worklist"
+    assert DEFAULT_SETTINGS["kaospacs_web_admin_url"] == "http://192.168.0.200:8070/imaging/worklist"
 
 
 def test_operator_mode_contains_local_orders_controls(monkeypatch, tmp_path) -> None:
@@ -227,7 +227,7 @@ def test_settings_diagnostics_hide_gateway_token(monkeypatch, tmp_path) -> None:
             connection,
             {
                 "kaospacs_gateway_url": "http://127.0.0.1:8060",
-                "kaospacs_web_admin_url": "http://192.168.0.200/admin/worklist",
+                "kaospacs_web_admin_url": "http://192.168.0.200:8070/imaging/worklist",
                 "kaospacs_gateway_api_token": "super-secret-token",
             },
         )
@@ -239,7 +239,7 @@ def test_settings_diagnostics_hide_gateway_token(monkeypatch, tmp_path) -> None:
     all_text = " ".join(label.text() for label in panel.findChildren(type(panel.diagnostics_sqlite_label)))
     assert "super-secret-token" not in all_text
     assert "http://127.0.0.1:8060" in panel.diagnostics_gateway_url_label.text()
-    assert "http://192.168.0.200/admin/worklist" in panel.diagnostics_web_admin_url_label.text()
+    assert "http://192.168.0.200:8070/imaging/worklist" in panel.diagnostics_web_admin_url_label.text()
 
 
 def test_pacs_panel_default_auto_poll_setting_is_false(monkeypatch, tmp_path) -> None:

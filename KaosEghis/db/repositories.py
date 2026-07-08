@@ -2,6 +2,8 @@ import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+DEFAULT_KAOSPACS_WEB_ADMIN_URL = "http://192.168.0.200:8070/imaging/worklist"
+LEGACY_KAOSPACS_WEB_ADMIN_URL = "http://192.168.0.200/admin/worklist"
 
 DEFAULT_SETTINGS = {
     "eghis_process_name": "Eghis.exe",
@@ -14,7 +16,7 @@ DEFAULT_SETTINGS = {
     "eghis_db_weekly_age_report_query": "",
     "kaospacs_api_base_url": "http://127.0.0.1:8060",
     "kaospacs_gateway_url": "http://127.0.0.1:8060",
-    "kaospacs_web_admin_url": "http://192.168.0.200/admin/worklist",
+    "kaospacs_web_admin_url": DEFAULT_KAOSPACS_WEB_ADMIN_URL,
     "kaospacs_gateway_api_token": "",
     "kaospacs_api_timeout_seconds": "5",
     "pacs_auto_poll_enabled": "false",
@@ -175,7 +177,11 @@ def get_settings(connection: sqlite3.Connection) -> dict[str, str]:
     rows: Iterable[tuple[str, str]] = connection.execute(
         "SELECT key, value FROM app_settings"
     )
-    return DEFAULT_SETTINGS | dict(rows)
+    settings = DEFAULT_SETTINGS | dict(rows)
+    web_admin_url = (settings.get("kaospacs_web_admin_url") or "").strip()
+    if not web_admin_url or web_admin_url == LEGACY_KAOSPACS_WEB_ADMIN_URL:
+        settings["kaospacs_web_admin_url"] = DEFAULT_KAOSPACS_WEB_ADMIN_URL
+    return settings
 
 
 def set_setting(connection: sqlite3.Connection, key: str, value: str) -> None:

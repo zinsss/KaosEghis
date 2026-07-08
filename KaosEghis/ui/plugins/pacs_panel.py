@@ -44,6 +44,7 @@ from KaosEghis.core.kaospacs_client import (
 from KaosEghis.core.pacs_polling import poll_eghis_image_orders_into_local_worklist
 from KaosEghis.db.database import connect, describe_database_path, initialize_database
 from KaosEghis.db.repositories import (
+    DEFAULT_KAOSPACS_WEB_ADMIN_URL,
     PacsAuditEventRecord,
     PacsWorklistItemRecord,
     clear_pacs_audit_events,
@@ -432,7 +433,7 @@ class PacsPanel(QWidget):
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
-        return settings.get("kaospacs_web_admin_url", "http://192.168.0.200/admin/worklist")
+        return settings.get("kaospacs_web_admin_url", DEFAULT_KAOSPACS_WEB_ADMIN_URL)
 
     def reload_admin_page(self) -> None:
         admin_url = self._current_admin_url().strip()
