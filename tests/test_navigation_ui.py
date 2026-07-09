@@ -25,11 +25,12 @@ def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
     window = MainWindow()
 
     assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [
-        "KaosEghis",
+        "Macros",
         "KaosGdd",
         "Vaccine",
         "PACS",
         "Flu-Report",
+        "Settings",
     ]
     assert window.width() == 1280
     assert window.height() == 875
@@ -67,10 +68,15 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
 
     tab = KaosEghisTab()
 
-    assert list(tab.nav_buttons.keys()) == ["Macros", "Presets", "EMR", "Settings"]
+    assert list(tab.nav_buttons.keys()) == ["Launcher", "Builder", "MacroTexts", "EMR"]
     assert isinstance(tab.stacked_widget, QStackedWidget)
-    assert tab.stacked_widget.currentWidget() is tab.macros_page
-    assert tab.nav_buttons["Macros"].isChecked() is True
+    assert tab.stacked_widget.currentWidget() is tab.launcher_page
+    assert tab.nav_buttons["Launcher"].isChecked() is True
+    assert list(tab.launcher_page.launcher_lists.keys()) == [
+        "Eghis",
+        "Medical Documents",
+        "ETC",
+    ]
 
 
 def test_kaoseghis_top_nav_pages_are_reachable() -> None:
@@ -80,17 +86,45 @@ def test_kaoseghis_top_nav_pages_are_reachable() -> None:
 
     tab = KaosEghisTab()
 
-    tab.nav_buttons["Presets"].click()
-    assert tab.stacked_widget.currentWidget() is tab.presets_page
+    tab.nav_buttons["Builder"].click()
+    assert tab.stacked_widget.currentWidget() is tab.builder_page
+
+    tab.nav_buttons["MacroTexts"].click()
+    assert tab.stacked_widget.currentWidget() is tab.macrotexts_page
 
     tab.nav_buttons["EMR"].click()
     assert tab.stacked_widget.currentWidget() is tab.emr_page
 
-    tab.nav_buttons["Settings"].click()
-    assert tab.stacked_widget.currentWidget() is tab.settings_page
+    tab.nav_buttons["Launcher"].click()
+    assert tab.stacked_widget.currentWidget() is tab.launcher_page
 
-    tab.nav_buttons["Macros"].click()
-    assert tab.stacked_widget.currentWidget() is tab.macros_page
+
+def test_launcher_page_places_macros_into_three_columns(tmp_path, monkeypatch) -> None:
+    _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, update_item_launcher_placement
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        eghis = create_item(connection, "Open Chart", "macro", True)
+        docs = create_item(connection, "Print Referral", "macro", True)
+        etc = create_item(connection, "Misc Action", "macro", True)
+        update_item_launcher_placement(connection, docs.id, "Medical Documents", 1)
+        update_item_launcher_placement(connection, etc.id, "ETC", 1)
+
+    page = LauncherPage(db_path)
+
+    assert page.launcher_lists["Eghis"].count() == 1
+    assert page.launcher_lists["Medical Documents"].count() == 1
+    assert page.launcher_lists["ETC"].count() == 1
+    assert page.launcher_lists["Eghis"].item(0).text() == "Open Chart"
+    assert page.launcher_lists["Medical Documents"].item(0).text() == "Print Referral"
+    assert page.launcher_lists["ETC"].item(0).text() == "Misc Action"
 
 
 def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate(tmp_path, monkeypatch) -> None:

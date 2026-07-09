@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import webbrowser
 
-from PySide6.QtCore import QDate, QTimer, QUrl, Signal
+from PySide6.QtCore import QDate, QTimer, QUrl, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QStackedWidget,
     QTableWidget,
@@ -144,22 +145,37 @@ class PacsPanel(QWidget):
     def _build_admin_page(self) -> None:
         self.admin_page = QWidget()
         self.admin_status_label = QLabel("KaosPACS Admin: embedded web view")
+        self.admin_status_label.setSizePolicy(
+            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Preferred,
+        )
         self.admin_url_label = QLabel()
+        self.admin_url_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.admin_url_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         self.admin_reload_button = QPushButton("Reload Admin Page")
         self.admin_reload_button.clicked.connect(self.reload_admin_page)
         self.admin_open_external_button = QPushButton("Open in External Browser")
         self.admin_open_external_button.clicked.connect(self.open_admin_page_externally)
 
-        controls = QHBoxLayout()
-        controls.addWidget(self.admin_reload_button)
-        controls.addWidget(self.admin_open_external_button)
-        controls.addStretch()
-
         layout = QVBoxLayout(self.admin_page)
-        layout.addWidget(QLabel("KaosPACS Admin"))
-        layout.addWidget(self.admin_status_label)
-        layout.addWidget(self.admin_url_label)
-        layout.addLayout(controls)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.addWidget(QLabel("KaosPACS Admin"))
+        top_row.addSpacing(8)
+        top_row.addWidget(self.admin_status_label)
+        top_row.addSpacing(12)
+        top_row.addWidget(self.admin_url_label, 1)
+        top_row.addWidget(self.admin_reload_button)
+        top_row.addWidget(self.admin_open_external_button)
+        layout.addLayout(top_row)
 
         if QWebEngineView is None:
             self.admin_web_view = None
@@ -170,7 +186,11 @@ class PacsPanel(QWidget):
             return
 
         self.admin_web_view = QWebEngineView()
-        layout.addWidget(self.admin_web_view)
+        self.admin_web_view.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        layout.addWidget(self.admin_web_view, 1)
         self.reload_admin_page()
 
     def _build_operator_mode_page(self) -> None:

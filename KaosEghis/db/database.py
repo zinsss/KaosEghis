@@ -80,6 +80,39 @@ def _migrate_items(connection: sqlite3.Connection) -> None:
     }
     if "emr_target_profile_id" not in columns:
         connection.execute("ALTER TABLE items ADD COLUMN emr_target_profile_id INTEGER")
+    if "launcher_section" not in columns:
+        connection.execute(
+            "ALTER TABLE items ADD COLUMN launcher_section TEXT NOT NULL DEFAULT 'Eghis'"
+        )
+    if "launcher_position" not in columns:
+        connection.execute(
+            "ALTER TABLE items ADD COLUMN launcher_position INTEGER NOT NULL DEFAULT 0"
+        )
+    _normalize_launcher_positions(connection)
+
+
+def _normalize_launcher_positions(connection: sqlite3.Connection) -> None:
+    rows = connection.execute(
+        """
+        SELECT id, COALESCE(launcher_section, 'Eghis')
+        FROM items
+        WHERE item_type = 'macro'
+        ORDER BY COALESCE(launcher_section, 'Eghis'), launcher_position, id
+        """
+    ).fetchall()
+    positions_by_section: dict[str, int] = {}
+    for item_id, launcher_section in rows:
+        section = launcher_section or "Eghis"
+        positions_by_section[section] = positions_by_section.get(section, 0) + 1
+        connection.execute(
+            """
+            UPDATE items
+            SET launcher_section = ?,
+                launcher_position = ?
+            WHERE id = ?
+            """,
+            (section, positions_by_section[section], item_id),
+        )
 
 
 def _migrate_pacs_worklist(connection: sqlite3.Connection) -> None:

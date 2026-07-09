@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS items (
     item_type TEXT NOT NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
     emr_target_profile_id INTEGER,
+    launcher_section TEXT NOT NULL DEFAULT 'Eghis',
+    launcher_position INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (emr_target_profile_id) REFERENCES emr_target_profiles(id)

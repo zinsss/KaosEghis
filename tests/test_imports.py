@@ -180,8 +180,10 @@ def test_items_repository_crud(tmp_path) -> None:
         create_item,
         delete_item,
         get_item,
+        list_launcher_items,
         list_macro_steps,
         list_items,
+        update_item_launcher_placement,
         update_item,
     )
 
@@ -194,6 +196,8 @@ def test_items_repository_crud(tmp_path) -> None:
         assert item.name == "Morning macro"
         assert item.item_type == "macro"
         assert item.is_enabled is True
+        assert item.launcher_section == "Eghis"
+        assert item.launcher_position == 1
 
         assert len(list_items(connection, "macro")) == 1
 
@@ -202,6 +206,7 @@ def test_items_repository_crud(tmp_path) -> None:
         assert updated.name == "Morning workflow"
         assert updated.item_type == "workflow"
         assert updated.is_enabled is False
+        assert updated.launcher_section == "Eghis"
 
         assert get_item(connection, item.id) is not None
         create_macro_step(connection, item.id, 1, "wait_ms", value="100")
@@ -209,6 +214,20 @@ def test_items_repository_crud(tmp_path) -> None:
         assert delete_item(connection, item.id) is True
         assert get_item(connection, item.id) is None
         assert list_macro_steps(connection, item.id) == []
+
+        first = create_item(connection, "Alpha", "macro", True)
+        second = create_item(connection, "Beta", "macro", True)
+        moved = update_item_launcher_placement(
+            connection,
+            second.id,
+            "Medical Documents",
+            1,
+        )
+        assert moved is not None
+        assert moved.launcher_section == "Medical Documents"
+        launcher_items = list_launcher_items(connection, "Medical Documents")
+        assert [item.id for item in launcher_items] == [second.id]
+        assert get_item(connection, first.id).launcher_section == "Eghis"
 
 
 def test_macro_steps_repository_crud_and_reorder(tmp_path) -> None:

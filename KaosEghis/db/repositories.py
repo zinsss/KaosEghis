@@ -45,6 +45,8 @@ class ItemRecord:
     item_type: str
     is_enabled: bool
     emr_target_profile_id: int | None
+    launcher_section: str
+    launcher_position: int
     created_at: str
     updated_at: str
 
@@ -131,6 +133,7 @@ class EmrUiTargetRecord:
 
 
 SUPPORTED_ITEM_TYPES = {"clipboard", "randomized_clipboard", "macro", "workflow"}
+LAUNCHER_SECTIONS = ("Eghis", "Medical Documents", "ETC")
 ALLOWED_MACRO_ACTIONS = {
     "focus_window",
     "wait_window",
@@ -207,7 +210,8 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
     if item_type is None:
         rows = connection.execute(
             """
-            SELECT id, name, item_type, is_enabled, emr_target_profile_id, created_at, updated_at
+            SELECT id, name, item_type, is_enabled, emr_target_profile_id,
+                   launcher_section, launcher_position, created_at, updated_at
             FROM items
             ORDER BY name
             """
@@ -215,7 +219,8 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
     else:
         rows = connection.execute(
             """
-            SELECT id, name, item_type, is_enabled, emr_target_profile_id, created_at, updated_at
+            SELECT id, name, item_type, is_enabled, emr_target_profile_id,
+                   launcher_section, launcher_position, created_at, updated_at
             FROM items
             WHERE item_type = ?
             ORDER BY name
@@ -228,7 +233,8 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
 def get_item(connection: sqlite3.Connection, item_id: int) -> ItemRecord | None:
     row = connection.execute(
         """
-        SELECT id, name, item_type, is_enabled, emr_target_profile_id, created_at, updated_at
+        SELECT id, name, item_type, is_enabled, emr_target_profile_id,
+               launcher_section, launcher_position, created_at, updated_at
         FROM items
         WHERE id = ?
         """,
@@ -245,14 +251,30 @@ def create_item(
     item_type: str,
     is_enabled: bool = True,
     emr_target_profile_id: int | None = None,
+    launcher_section: str = "Eghis",
 ) -> ItemRecord:
     _validate_item_type(item_type)
+    normalized_launcher_section = _normalize_launcher_section(launcher_section)
+    launcher_position = _next_launcher_position(
+        connection,
+        normalized_launcher_section,
+    ) if item_type == "macro" else 0
     cursor = connection.execute(
         """
-        INSERT INTO items (name, item_type, is_enabled, emr_target_profile_id)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO items (
+            name, item_type, is_enabled, emr_target_profile_id,
+            launcher_section, launcher_position
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (name.strip(), item_type, int(is_enabled), emr_target_profile_id),
+        (
+            name.strip(),
+            item_type,
+            int(is_enabled),
+            emr_target_profile_id,
+            normalized_launcher_section,
+            launcher_position,
+        ),
     )
     connection.commit()
     created = get_item(connection, cursor.lastrowid)
@@ -268,8 +290,15 @@ def update_item(
     item_type: str,
     is_enabled: bool,
     emr_target_profile_id: int | None = None,
+    launcher_section: str | None = None,
 ) -> ItemRecord | None:
     _validate_item_type(item_type)
+    current = get_item(connection, item_id)
+    if current is None:
+        return None
+    normalized_launcher_section = _normalize_launcher_section(
+        launcher_section or current.launcher_section
+    )
     connection.execute(
         """
         UPDATE items
@@ -277,10 +306,68 @@ def update_item(
             item_type = ?,
             is_enabled = ?,
             emr_target_profile_id = ?,
+            launcher_section = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (name.strip(), item_type, int(is_enabled), emr_target_profile_id, item_id),
+        (
+            name.strip(),
+            item_type,
+            int(is_enabled),
+            emr_target_profile_id,
+            normalized_launcher_section,
+            item_id,
+        ),
+    )
+    connection.commit()
+    return get_item(connection, item_id)
+
+
+def list_launcher_items(
+    connection: sqlite3.Connection,
+    launcher_section: str | None = None,
+) -> list[ItemRecord]:
+    if launcher_section is None:
+        rows = connection.execute(
+            """
+            SELECT id, name, item_type, is_enabled, emr_target_profile_id,
+                   launcher_section, launcher_position, created_at, updated_at
+            FROM items
+            WHERE item_type = 'macro'
+            ORDER BY launcher_section, launcher_position, id
+            """
+        )
+    else:
+        normalized_launcher_section = _normalize_launcher_section(launcher_section)
+        rows = connection.execute(
+            """
+            SELECT id, name, item_type, is_enabled, emr_target_profile_id,
+                   launcher_section, launcher_position, created_at, updated_at
+            FROM items
+            WHERE item_type = 'macro' AND launcher_section = ?
+            ORDER BY launcher_position, id
+            """,
+            (normalized_launcher_section,),
+        )
+    return [_item_from_row(row) for row in rows]
+
+
+def update_item_launcher_placement(
+    connection: sqlite3.Connection,
+    item_id: int,
+    launcher_section: str,
+    launcher_position: int,
+) -> ItemRecord | None:
+    normalized_launcher_section = _normalize_launcher_section(launcher_section)
+    connection.execute(
+        """
+        UPDATE items
+        SET launcher_section = ?,
+            launcher_position = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (normalized_launcher_section, launcher_position, item_id),
     )
     connection.commit()
     return get_item(connection, item_id)
@@ -1267,8 +1354,10 @@ def _item_from_row(row: sqlite3.Row | tuple) -> ItemRecord:
         item_type=row[2],
         is_enabled=bool(row[3]),
         emr_target_profile_id=row[4],
-        created_at=row[5],
-        updated_at=row[6],
+        launcher_section=row[5] or "Eghis",
+        launcher_position=int(row[6] or 0),
+        created_at=row[7],
+        updated_at=row[8],
     )
 
 
@@ -1390,6 +1479,28 @@ def _blank_to_none(value: str | None) -> str | None:
 def _validate_item_type(item_type: str) -> None:
     if item_type not in SUPPORTED_ITEM_TYPES:
         raise ValueError(f"Unsupported item_type: {item_type}")
+
+
+def _normalize_launcher_section(launcher_section: str | None) -> str:
+    normalized = (launcher_section or "Eghis").strip()
+    if normalized not in LAUNCHER_SECTIONS:
+        return "Eghis"
+    return normalized
+
+
+def _next_launcher_position(
+    connection: sqlite3.Connection,
+    launcher_section: str,
+) -> int:
+    row = connection.execute(
+        """
+        SELECT COALESCE(MAX(launcher_position), 0)
+        FROM items
+        WHERE item_type = 'macro' AND launcher_section = ?
+        """,
+        (launcher_section,),
+    ).fetchone()
+    return int(row[0] or 0) + 1
 
 
 def _validate_macro_action(action: str) -> None:
