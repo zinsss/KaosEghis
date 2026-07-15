@@ -458,6 +458,7 @@ def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
     _app()
 
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.kaospacs_client import KaosPacsSyncResult
     from KaosEghis.core.pacs_polling import PollResult
 
     calls = {"health": 0, "poll": 0, "sync": 0}
@@ -475,7 +476,8 @@ def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         pacs_panel_module,
         "sync_local_worklist_to_kaospacs",
-        lambda settings, db_path: calls.__setitem__("sync", calls["sync"] + 1),
+        lambda settings, db_path: calls.__setitem__("sync", calls["sync"] + 1)
+        or KaosPacsSyncResult(sent=1, cancelled=0, errors=0, skipped=0),
     )
     monkeypatch.setattr(pacs_panel_module, "QWebEngineView", None)
 
@@ -483,20 +485,29 @@ def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
     panel.page_buttons["operator_mode"].click()
     panel.poll_button.click()
 
-    assert calls == {"health": 2, "poll": 1, "sync": 0}
-    assert panel.polling_status.text() == "Polling status: inserted=1, updated=0, skipped=0"
+    assert calls == {"health": 2, "poll": 1, "sync": 1}
+    assert (
+        panel.polling_status.text()
+        == "Polling status: inserted=1, updated=0, skipped=0 | KaosPACS sync: sent=1, cancelled=0, errors=0, skipped=0"
+    )
 
 
 def test_pacs_panel_manual_poll_schedules_deferred_admin_reload(monkeypatch, tmp_path) -> None:
     _app()
 
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.kaospacs_client import KaosPacsSyncResult
     from KaosEghis.core.pacs_polling import PollResult
 
     monkeypatch.setattr(
         pacs_panel_module,
         "poll_eghis_image_orders_into_local_worklist",
         lambda settings, db_path, selected_date=None: PollResult(inserted=1, updated=0, skipped=0),
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "sync_local_worklist_to_kaospacs",
+        lambda settings, db_path: KaosPacsSyncResult(sent=1, cancelled=0, errors=0, skipped=0),
     )
     monkeypatch.setattr(pacs_panel_module, "QWebEngineView", None)
 
@@ -513,6 +524,7 @@ def test_pacs_panel_auto_poll_schedules_deferred_admin_reload(monkeypatch, tmp_p
     _app()
 
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.kaospacs_client import KaosPacsSyncResult
     from KaosEghis.core.pacs_polling import PollResult
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import set_settings
@@ -529,6 +541,11 @@ def test_pacs_panel_auto_poll_schedules_deferred_admin_reload(monkeypatch, tmp_p
         "poll_eghis_image_orders_into_local_worklist",
         lambda settings, db_path, selected_date=None: PollResult(inserted=1, updated=0, skipped=0),
     )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "sync_local_worklist_to_kaospacs",
+        lambda settings, db_path: KaosPacsSyncResult(sent=1, cancelled=0, errors=0, skipped=0),
+    )
     monkeypatch.setattr(pacs_panel_module, "QWebEngineView", None)
 
     panel = pacs_panel_module.PacsPanel(db_path=db_path)
@@ -538,6 +555,43 @@ def test_pacs_panel_auto_poll_schedules_deferred_admin_reload(monkeypatch, tmp_p
     panel._handle_poll_timer_tick()
 
     assert scheduled == [True]
+
+
+def test_pacs_panel_auto_poll_hits_sync(monkeypatch, tmp_path) -> None:
+    _app()
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+    from KaosEghis.core.kaospacs_client import KaosPacsSyncResult
+    from KaosEghis.core.pacs_polling import PollResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(connection, {"eghis_db_connection_string": "dbname=test"})
+
+    calls = {"poll": 0, "sync": 0}
+    monkeypatch.setattr(pacs_panel_module, "check_kaospacs_health", lambda settings: True)
+    monkeypatch.setattr(pacs_panel_module, "run_readonly_query", lambda *_args, **_kwargs: (["?column?"], [(1,)]))
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "poll_eghis_image_orders_into_local_worklist",
+        lambda settings, db_path, selected_date=None: calls.__setitem__("poll", calls["poll"] + 1)
+        or PollResult(inserted=1, updated=0, skipped=0),
+    )
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "sync_local_worklist_to_kaospacs",
+        lambda settings, db_path: calls.__setitem__("sync", calls["sync"] + 1)
+        or KaosPacsSyncResult(sent=1, cancelled=0, errors=0, skipped=0),
+    )
+    monkeypatch.setattr(pacs_panel_module, "QWebEngineView", None)
+
+    panel = pacs_panel_module.PacsPanel(db_path=db_path)
+    panel._handle_poll_timer_tick()
+
+    assert calls == {"poll": 1, "sync": 1}
 
 
 def test_pacs_panel_auto_poll_stops_when_kaospacs_unavailable(monkeypatch, tmp_path) -> None:

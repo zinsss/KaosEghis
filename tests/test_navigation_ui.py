@@ -127,6 +127,43 @@ def test_launcher_page_places_macros_into_three_columns(tmp_path, monkeypatch) -
     assert page.launcher_lists["ETC"].item(0).text() == "Misc Action"
 
 
+def test_launcher_page_has_emr_connection_toggle(tmp_path, monkeypatch) -> None:
+    _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+
+    class _State:
+        status = "green"
+        pid = 1234
+        message = "Connected and active"
+        process_name = "eGhis.exe"
+        exe_path = r"C:\eghis\eGhis.exe"
+
+    class _Profile:
+        name = "eGHIS Production"
+        process_name = "eGhis.exe"
+        window_title_contains = "이지스 전자차트 2.0"
+        executable_path = r"C:\eghis\eGhis.exe"
+
+    import KaosEghis.ui.tabs.kaoseghis_tab as tab_module
+
+    monkeypatch.setattr(tab_module, "get_active_emr_target_profile", lambda connection: _Profile())
+    monkeypatch.setattr(tab_module, "get_settings", lambda connection: {})
+    monkeypatch.setattr(tab_module, "refresh_cached_eghis_state", lambda settings: _State())
+    monkeypatch.setattr(tab_module, "get_cached_eghis_state", lambda: _State())
+
+    page = LauncherPage(db_path)
+    page.connection_toggle.click()
+
+    assert page.connection_toggle.text() == "EMR Connected"
+    assert page.connection_toggle.isChecked() is True
+    assert "Connected and active" in page.connection_status_label.text()
+
+
 def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate(tmp_path, monkeypatch) -> None:
     _app()
 

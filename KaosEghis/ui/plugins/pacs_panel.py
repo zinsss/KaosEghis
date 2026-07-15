@@ -813,12 +813,35 @@ class PacsPanel(QWidget):
                 self._log_audit_aggregate(event_type="poll", summary=result.message)
                 self.refresh_audit()
                 return
-            summary = (
+            poll_summary = (
                 f"inserted={result.inserted}, updated={result.updated}, skipped={result.skipped}"
             )
-            self.last_poll_result_label.setText(f"Last poll result: {summary}")
-            self.polling_status.setText(f"Polling status: {summary}")
-            self._log_audit_aggregate(event_type="poll", summary=summary)
+            self.last_poll_result_label.setText(f"Last poll result: {poll_summary}")
+            self._log_audit_aggregate(event_type="poll", summary=poll_summary)
+
+            sync_result = sync_local_worklist_to_kaospacs(settings, self._db_path)
+            sync_prefix = "DRY RUN - " if sync_result.dry_run else ""
+            sync_summary = (
+                f"{sync_prefix}sent={sync_result.sent}, cancelled={sync_result.cancelled}, "
+                f"errors={sync_result.errors}, skipped={sync_result.skipped}"
+            )
+            if sync_result.message is not None:
+                self.polling_status.setText(
+                    f"Polling status: {poll_summary} | KaosPACS sync: {sync_result.message}"
+                )
+                self._log_audit_error(
+                    summary="poll-triggered sync failed",
+                    error_message=sync_result.message,
+                    dry_run=sync_result.dry_run,
+                )
+            else:
+                self.polling_status.setText(
+                    f"Polling status: {poll_summary} | KaosPACS sync: {sync_summary}"
+                )
+                self._log_audit_aggregate(
+                    event_type="sync",
+                    summary=self._prefix_dry_run_summary(sync_result.dry_run, sync_summary),
+                )
             self.refresh_audit()
             if refresh_admin:
                 self._schedule_admin_reload()

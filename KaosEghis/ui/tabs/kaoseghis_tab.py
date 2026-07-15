@@ -21,6 +21,12 @@ from PySide6.QtWidgets import (
 )
 
 from KaosEghis.core.macro_runner import MacroRunner
+from KaosEghis.core.eghis_connector import (
+    build_connector_settings,
+    clear_cached_eghis_state,
+    get_cached_eghis_state,
+    refresh_cached_eghis_state,
+)
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     LAUNCHER_SECTIONS,
@@ -28,10 +34,12 @@ from KaosEghis.db.repositories import (
     create_macro_step,
     delete_item,
     delete_macro_steps_for_item,
+    get_active_emr_target_profile,
     get_item,
     list_items,
     list_launcher_items,
     list_macro_steps,
+    get_settings,
     resolve_macro_emr_target_profile,
     reorder_macro_steps,
     update_item_launcher_placement,
@@ -106,6 +114,16 @@ class LauncherPage(QWidget):
         self.summary_label = QLabel("Double-click a macro to run it. Drag between columns to organize.")
         self.summary_label.setObjectName("macroSummary")
 
+        self.connection_toggle = QPushButton("Connect EMR")
+        self.connection_toggle.setCheckable(True)
+        self.connection_toggle.toggled.connect(self.toggle_connection)
+        self.connection_status_label = QLabel("EMR: disconnected.")
+
+        connection_row = QHBoxLayout()
+        connection_row.addWidget(self.connection_toggle)
+        connection_row.addWidget(self.connection_status_label, 1)
+        connection_row.addStretch()
+
         self.launcher_lists: dict[str, LauncherListWidget] = {}
         columns = QGridLayout()
         columns.setContentsMargins(0, 0, 0, 0)
@@ -140,6 +158,7 @@ class LauncherPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
+        layout.addLayout(connection_row)
         layout.addWidget(self.summary_label)
         layout.addLayout(columns, 1)
         layout.addLayout(controls)
@@ -150,12 +169,103 @@ class LauncherPage(QWidget):
     def refresh_view(self) -> None:
         macros = _load_launcher_macros(self._db_path)
         self._populate_launcher_lists(macros)
+        self._refresh_connection_status()
         macro_names = ", ".join(macro.name for macro in macros[:6])
         if len(macros) > 6:
             macro_names += ", ..."
         self.summary_label.setText(
             macro_names if macro_names else "No saved macros available."
         )
+
+    def toggle_connection(self, checked: bool) -> None:
+        if checked:
+            self.connect_active_profile()
+            return
+        clear_cached_eghis_state()
+        self._refresh_connection_status()
+        self.log.setPlainText("EMR disconnected.")
+
+    def connect_active_profile(self) -> None:
+        settings = self._active_profile_connector_settings()
+        if settings is None:
+            self._set_toggle_checked(False)
+            self.log.setPlainText("No enabled EMR profile is available.")
+            self._refresh_connection_status()
+            return
+
+        state = refresh_cached_eghis_state(settings)
+        connected = state.status in {"green", "yellow"} and state.pid is not None
+        self._set_toggle_checked(connected)
+        self._refresh_connection_status()
+        self.log.setPlainText(state.message)
+
+    def _active_profile_connector_settings(self) -> dict[str, str] | None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            profile = get_active_emr_target_profile(connection)
+            settings = get_settings(connection)
+        if profile is None:
+            return None
+        return build_connector_settings(
+            settings,
+            process_name=profile.process_name or settings.get("eghis_process_name"),
+            window_title_contains=profile.window_title_contains
+            or settings.get("eghis_window_title_contains"),
+            executable_path=profile.executable_path or settings.get("eghis_executable_path"),
+        )
+
+    def _refresh_connection_status(self) -> None:
+        state = get_cached_eghis_state()
+        settings = self._active_profile_connector_settings()
+        profile_name = self._active_profile_name()
+        if state is None:
+            self.connection_status_label.setText(
+                f"EMR: disconnected{f' ({profile_name})' if profile_name else ''}."
+            )
+            self.connection_toggle.setText("Connect EMR")
+            self._set_toggle_checked(False)
+            return
+        if settings is not None:
+            configured_process = (settings.get("eghis_process_name") or "").strip()
+            cached_process = (state.process_name or "").strip()
+            configured_path = (settings.get("eghis_executable_path") or "").strip()
+            cached_path = (state.exe_path or "").strip()
+            mismatch = bool(
+                (configured_process and cached_process and configured_process.casefold() != cached_process.casefold())
+                or (
+                    configured_path
+                    and cached_path
+                    and Path(configured_path).name.casefold() != Path(cached_path).name.casefold()
+                )
+            )
+            if mismatch:
+                self.connection_status_label.setText(
+                    f"EMR: reconnect required{f' ({profile_name})' if profile_name else ''}."
+                )
+                self.connection_toggle.setText("Reconnect EMR")
+                self._set_toggle_checked(False)
+                return
+        self.connection_status_label.setText(
+            f"EMR: {state.message}{f' ({profile_name})' if profile_name else ''}"
+        )
+        if state.status in {"green", "yellow"}:
+            self.connection_toggle.setText("EMR Connected")
+        else:
+            self.connection_toggle.setText("Reconnect EMR")
+        self._set_toggle_checked(state.status in {"green", "yellow"})
+
+    def _active_profile_name(self) -> str | None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            profile = get_active_emr_target_profile(connection)
+        if profile is None:
+            return None
+        return profile.name
+
+    def _set_toggle_checked(self, checked: bool) -> None:
+        self.connection_toggle.blockSignals(True)
+        self.connection_toggle.setChecked(checked)
+        self.connection_toggle.blockSignals(False)
 
     def dry_run_macro(self) -> None:
         item_id = self._selected_macro_id()

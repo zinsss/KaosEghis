@@ -349,6 +349,7 @@ def test_pacs_panel_poll_status_remains_visible_after_poll_now(
     from PySide6.QtWidgets import QApplication
 
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel
+    from KaosEghis.core.kaospacs_client import KaosPacsSyncResult
     from KaosEghis.core.pacs_polling import PollResult
 
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -359,12 +360,20 @@ def test_pacs_panel_poll_status_remains_visible_after_poll_now(
         "poll_eghis_image_orders_into_local_worklist",
         lambda _settings, _db_path, selected_date=None: PollResult(inserted=0, updated=1, skipped=2),
     )
+    monkeypatch.setattr(
+        pacs_panel,
+        "sync_local_worklist_to_kaospacs",
+        lambda _settings, _db_path: KaosPacsSyncResult(sent=0, cancelled=0, errors=0, skipped=0),
+    )
 
     db_path = Path(tmp_path / "KaosEghis.sqlite")
     panel = pacs_panel.PacsPanel(db_path=db_path)
     panel.poll_now()
 
-    assert panel.polling_status.text() == "Polling status: inserted=0, updated=1, skipped=2"
+    assert (
+        panel.polling_status.text()
+        == "Polling status: inserted=0, updated=1, skipped=2 | KaosPACS sync: sent=0, cancelled=0, errors=0, skipped=0"
+    )
 
 
 def test_pacs_panel_poll_now_handles_adapter_unavailable(
