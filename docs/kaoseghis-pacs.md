@@ -292,6 +292,7 @@ Default listener settings:
 kaospacs_patient_context_api_enabled=true
 kaospacs_patient_context_api_host=0.0.0.0
 kaospacs_patient_context_api_port=8765
+kaospacs_patient_context_api_allow_loopback_without_token=true
 ```
 
 The endpoint returns only:
@@ -310,6 +311,12 @@ For the clinic deployment, allow the PACS host `192.168.0.200` to reach the EMR
 host `192.168.0.100:8765`. KaosPACS Web uses this endpoint only when
 `/emr.php?m_patid=<chart_no>` lacks name/DOB/sex and Orthanc has no local DICOM
 metadata for that patient yet.
+
+KaosPACS Web also has a browser-local fallback for EMR desktops. The browser can
+call `http://127.0.0.1:8765/api/kaospacs/patient-context` from the EMR machine
+itself. Loopback calls may be allowed without a bearer token so the shared token
+is not exposed in browser HTML. Non-loopback callers still require the bearer
+token when configured.
 
 ## Startup Validation
 

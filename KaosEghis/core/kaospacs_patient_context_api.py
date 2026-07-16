@@ -24,6 +24,7 @@ class PatientContextApiConfig:
     port: int = 8765
     token: str = ""
     db_path: Path | None = None
+    allow_loopback_without_token: bool = True
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,10 @@ def config_from_settings(settings: dict[str, str]) -> PatientContextApiConfig:
         ),
         token=token,
         db_path=get_database_path(),
+        allow_loopback_without_token=_bool_setting(
+            settings.get("kaospacs_patient_context_api_allow_loopback_without_token"),
+            True,
+        ),
     )
 
 
@@ -115,6 +120,12 @@ def create_patient_context_handler(
                 return
             self._json(result.payload)
 
+        def do_OPTIONS(self) -> None:
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self._send_cors_headers()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
         def log_message(self, fmt: str, *args: Any) -> None:
             parsed = urlparse(getattr(self, "path", ""))
             client_ip = self.client_address[0] if self.client_address else "-"
@@ -126,6 +137,8 @@ def create_patient_context_handler(
             )
 
         def _authorized(self) -> bool:
+            if config.allow_loopback_without_token and self._is_loopback_client():
+                return True
             if not config.token:
                 return True
             header = self.headers.get("Authorization", "")
@@ -135,13 +148,26 @@ def create_patient_context_handler(
             supplied = header[len(prefix) :].strip()
             return hmac.compare_digest(supplied, config.token)
 
+        def _is_loopback_client(self) -> bool:
+            client_ip = self.client_address[0] if self.client_address else ""
+            return client_ip in {"127.0.0.1", "::1"}
+
         def _json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
             encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
+            self._send_cors_headers()
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)
+
+        def _send_cors_headers(self) -> None:
+            origin = self.headers.get("Origin", "")
+            if _allowed_origin(origin):
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+                self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Accept, Authorization")
 
     return Handler
 
@@ -209,3 +235,14 @@ def _int_setting(raw: str | None, default: int) -> int:
         return int(raw or "")
     except ValueError:
         return default
+
+
+def _allowed_origin(origin: str) -> bool:
+    return origin in {
+        "http://192.168.0.200",
+        "http://192.168.0.200:8070",
+        "http://127.0.0.1",
+        "http://127.0.0.1:8070",
+        "http://localhost",
+        "http://localhost:8070",
+    }

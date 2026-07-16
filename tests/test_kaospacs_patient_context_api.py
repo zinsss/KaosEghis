@@ -18,6 +18,7 @@ def test_patient_context_config_defaults_bind_lan() -> None:
     assert config.enabled is True
     assert config.host == "0.0.0.0"
     assert config.port == 8765
+    assert config.allow_loopback_without_token is True
 
 
 def test_patient_context_config_uses_gateway_token() -> None:
@@ -92,7 +93,7 @@ def test_lookup_patient_context_ambiguous_conflicting_identity(tmp_path) -> None
     assert result.status == "ambiguous"
 
 
-def test_patient_context_http_endpoint_requires_bearer_token(tmp_path) -> None:
+def test_patient_context_http_endpoint_allows_loopback_without_token(tmp_path) -> None:
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
     with connect(db_path) as connection:
@@ -111,22 +112,59 @@ def test_patient_context_http_endpoint_requires_bearer_token(tmp_path) -> None:
     assert server is not None
     try:
         host, port = server.server.server_address
-        try:
-            urlopen(f"http://{host}:{port}/api/kaospacs/patient-context?chart_no=2735", timeout=3)
-            raise AssertionError("expected unauthorized")
-        except HTTPError as exc:
-            assert exc.code == 401
-
-        request = Request(
+        response = urlopen(
             f"http://{host}:{port}/api/kaospacs/patient-context?chart_no=2735",
-            headers={"Authorization": "Bearer secret"},
+            timeout=3,
         )
-        response = urlopen(request, timeout=3)
         payload = json.loads(response.read().decode("utf-8"))
 
         assert response.status == 200
         assert payload["patient_name"] == "홍길동"
         assert payload["patient_birth_date"] == "19700101"
+    finally:
+        server.stop()
+
+
+def test_patient_context_http_endpoint_requires_bearer_token_for_non_loopback(tmp_path) -> None:
+    handler = start_patient_context_api(
+        PatientContextApiConfig(
+            host="127.0.0.1",
+            port=0,
+            token="secret",
+            db_path=tmp_path / "missing.sqlite",
+            allow_loopback_without_token=False,
+        )
+    )
+    assert handler is not None
+    try:
+        host, port = handler.server.server_address
+        try:
+            urlopen(f"http://{host}:{port}/api/kaospacs/patient-context?chart_no=2735", timeout=3)
+            raise AssertionError("expected unauthorized")
+        except HTTPError as exc:
+            assert exc.code == 401
+    finally:
+        handler.stop()
+
+
+def test_patient_context_options_returns_cors_for_kaospacs_origin(tmp_path) -> None:
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    server = start_patient_context_api(
+        PatientContextApiConfig(host="127.0.0.1", port=0, token="secret", db_path=db_path)
+    )
+    assert server is not None
+    try:
+        host, port = server.server.server_address
+        request = Request(
+            f"http://{host}:{port}/api/kaospacs/patient-context?chart_no=2735",
+            method="OPTIONS",
+            headers={"Origin": "http://192.168.0.200"},
+        )
+        response = urlopen(request, timeout=3)
+
+        assert response.status == 204
+        assert response.headers["Access-Control-Allow-Origin"] == "http://192.168.0.200"
     finally:
         server.stop()
 

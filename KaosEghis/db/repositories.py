@@ -19,6 +19,7 @@ DEFAULT_SETTINGS = {
     "kaospacs_patient_context_api_enabled": "true",
     "kaospacs_patient_context_api_host": "0.0.0.0",
     "kaospacs_patient_context_api_port": "8765",
+    "kaospacs_patient_context_api_allow_loopback_without_token": "true",
     "pacs_auto_poll_enabled": "false",
     "pacs_poll_interval_seconds": "60",
     "pacs_dry_run": "false",
