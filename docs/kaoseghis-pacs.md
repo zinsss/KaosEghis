@@ -259,6 +259,9 @@ Editable PACS settings in the Settings tab:
 - `kaospacs_gateway_url`
 - `kaospacs_gateway_api_token`
 - `kaospacs_api_timeout_seconds`
+- `kaospacs_patient_context_api_enabled`
+- `kaospacs_patient_context_api_host`
+- `kaospacs_patient_context_api_port`
 - `pacs_auto_poll_enabled`
 - `pacs_poll_interval_seconds`
 - `pacs_dry_run`
@@ -272,6 +275,41 @@ Rules:
 - auto poll is off by default
 - dry run is off by default
 - testing KaosPACS connection uses `GET /health` only
+
+## KaosPACS Patient-Context API
+
+KaosEghis-PACS exposes a small read-only endpoint for KaosPACS Web patient
+demographic fallback:
+
+```text
+GET /api/kaospacs/patient-context?chart_no=<chart_no>
+Authorization: Bearer <kaospacs_gateway_api_token>
+```
+
+Default listener settings:
+
+```text
+kaospacs_patient_context_api_enabled=true
+kaospacs_patient_context_api_host=0.0.0.0
+kaospacs_patient_context_api_port=8765
+```
+
+The endpoint returns only:
+
+- `chart_no`
+- `patient_name`
+- `patient_birth_date`
+- `patient_sex`
+- `source`
+- `confidence`
+
+It does not return orders, reports, diagnoses, notes, resident IDs, phone
+numbers, addresses, insurance data, or raw eGHIS records.
+
+For the clinic deployment, allow the PACS host `192.168.0.200` to reach the EMR
+host `192.168.0.100:8765`. KaosPACS Web uses this endpoint only when
+`/emr.php?m_patid=<chart_no>` lacks name/DOB/sex and Orthanc has no local DICOM
+metadata for that patient yet.
 
 ## Startup Validation
 
