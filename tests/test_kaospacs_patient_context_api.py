@@ -165,6 +165,7 @@ def test_patient_context_options_returns_cors_for_kaospacs_origin(tmp_path) -> N
 
         assert response.status == 204
         assert response.headers["Access-Control-Allow-Origin"] == "http://192.168.0.200"
+        assert response.headers["Access-Control-Allow-Private-Network"] == "true"
     finally:
         server.stop()
 

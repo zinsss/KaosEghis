@@ -168,6 +168,7 @@ def create_patient_context_handler(
                 self.send_header("Vary", "Origin")
                 self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
                 self.send_header("Access-Control-Allow-Headers", "Accept, Authorization")
+                self.send_header("Access-Control-Allow-Private-Network", "true")
 
     return Handler
 
