@@ -88,8 +88,8 @@ class PacsPanel(QWidget):
         "Error",
     ]
     FILTER_BUTTON_SELECTED_STYLE = (
-        "background-color: #cba6f7; color: #1e1e2e; "
-        "border: 1px solid #cba6f7; font-weight: 700;"
+        "background-color: #88c0d0; color: #2e3440; "
+        "border: 1px solid #8fbcbb;"
     )
     FILTER_BUTTON_UNSELECTED_STYLE = ""
 

@@ -1,6 +1,6 @@
 # KaosEghis Plans
 
-Last updated: 2026-06-30
+Last updated: 2026-07-15
 
 ## Current Working State
 
@@ -39,6 +39,29 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - weekly practice-count/statistics backend
 - no export-grade workflow yet
 
+### KaosEghis-inj
+
+- future injection-order track
+- read-only eGHIS DB polling for `ord_type='07'` and `proc_dept_cd='INJ'`
+- KaosEghis-side authoritative INJ worklist
+- Raspberry Pi receives reload signal only
+- Raspberry Pi pulls current worklist from KaosEghis-inj
+- no Raspberry Pi durable PHI storage by default
+
+### KaosEghis-scan
+
+- top-level `Scan` tab implemented
+- non-GUI Canon DR-C125 scanning through NAPS2 profile `Canon DR-C125 Native`
+- one timestamped PDF per scan job
+- dedicated `<KaosEghis data>/temp` folder
+- fully manual upload; no PACS upload API call from KaosEghis-scan
+- in-app PDF preview and native file drag to a browser upload control
+- View folder fallback when browser drag/drop is unavailable
+- no direct Orthanc/MWL/DICOM write
+- configurable interval that empties direct files from the temporary folder
+- explicit `Clean now` control
+- no patient identifiers in spool filenames or routine logs
+
 ### KaosClip
 
 - redesign into KaosEghis plugin/capability
@@ -62,6 +85,7 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - KaosPACS local API bridge
 - weekly age/practice-count reporting
 - PACS production-readiness hardening
+- KaosEghis-scan first milestone: scan, preview, drag-out, folder access, and cleanup
 
 ## In-Progress or Partially Integrated Areas
 
@@ -78,13 +102,16 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - keep PACS deployment checklist and production-readiness docs current
 - keep PACS dry-run behavior explicit and safe
 - refine flu reporting UX and export/report format
-- reconcile visible UI with older tab remnants and placeholder surfaces
+- define KaosEghis-inj ownership and API boundary before implementation
+- validate KaosEghis-scan behavior with representative multi-page feeder documents
 
 ### Medium Priority
 
 - unify macro configuration surfaces with current tab architecture
 - define final home for KaosClip
 - improve plugin naming consistency
+- design Raspberry Pi reload/fetch protocol for KaosEghis-inj
+- consider scanner settings UI only after the fixed NAPS2 profile workflow is proven in daily use
 
 ### Deferred
 

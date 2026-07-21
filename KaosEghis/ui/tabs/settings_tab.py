@@ -27,6 +27,9 @@ class SettingsTab(QWidget):
         "kaospacs_gateway_url": DEFAULT_SETTINGS["kaospacs_gateway_url"],
         "kaospacs_web_admin_url": DEFAULT_SETTINGS["kaospacs_web_admin_url"],
         "kaospacs_gateway_api_token": DEFAULT_SETTINGS["kaospacs_gateway_api_token"],
+        "kaospacs_patient_context_bind_host": DEFAULT_SETTINGS["kaospacs_patient_context_bind_host"],
+        "kaospacs_patient_context_port": DEFAULT_SETTINGS["kaospacs_patient_context_port"],
+        "kaospacs_integration_token": DEFAULT_SETTINGS["kaospacs_integration_token"],
         "kaospacs_api_timeout_seconds": DEFAULT_SETTINGS["kaospacs_api_timeout_seconds"],
         "pacs_auto_poll_enabled": DEFAULT_SETTINGS["pacs_auto_poll_enabled"],
         "pacs_poll_interval_seconds": DEFAULT_SETTINGS["pacs_poll_interval_seconds"],
@@ -50,6 +53,10 @@ class SettingsTab(QWidget):
         self.kaospacs_web_admin_url = QLineEdit()
         self.kaospacs_gateway_api_token = QLineEdit()
         self.kaospacs_gateway_api_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.kaospacs_patient_context_bind_host = QLineEdit()
+        self.kaospacs_patient_context_port = QLineEdit()
+        self.kaospacs_integration_token = QLineEdit()
+        self.kaospacs_integration_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.kaospacs_api_timeout_seconds = QLineEdit()
         self.pacs_auto_poll_enabled = QCheckBox("Enable PACS auto poll")
         self.pacs_dry_run = QCheckBox("Enable PACS dry run")
@@ -64,7 +71,8 @@ class SettingsTab(QWidget):
             "KaosPACS Web admin access. "
             "Sync remains manual unless auto-poll is enabled; auto-poll only polls "
             "Eghis into local SQLite and never syncs to KaosPACS. "
-            "PACS dry run keeps polling live but simulates sync and reconcile."
+            "PACS dry run keeps polling live but simulates sync and reconcile. "
+            "Patient-context API host/port are for KaosPACS fallback demographic lookup."
         )
         self.toggle_connection_string_button = QPushButton("Show")
         self.toggle_connection_string_button.clicked.connect(
@@ -102,6 +110,9 @@ class SettingsTab(QWidget):
         pacs_form.addRow("KaosPACS Gateway URL", self.kaospacs_gateway_url)
         pacs_form.addRow("KaosPACS Web admin URL", self.kaospacs_web_admin_url)
         pacs_form.addRow("KaosPACS Gateway API token", self.kaospacs_gateway_api_token)
+        pacs_form.addRow("Patient-context bind host", self.kaospacs_patient_context_bind_host)
+        pacs_form.addRow("Patient-context port", self.kaospacs_patient_context_port)
+        pacs_form.addRow("Patient-context integration token", self.kaospacs_integration_token)
         pacs_form.addRow("KaosPACS API timeout seconds", self.kaospacs_api_timeout_seconds)
         pacs_form.addRow(self.pacs_auto_poll_enabled)
         pacs_form.addRow(self.pacs_dry_run)
@@ -158,6 +169,9 @@ class SettingsTab(QWidget):
         self.kaospacs_gateway_url.setText(settings["kaospacs_gateway_url"])
         self.kaospacs_web_admin_url.setText(settings["kaospacs_web_admin_url"])
         self.kaospacs_gateway_api_token.setText(settings["kaospacs_gateway_api_token"])
+        self.kaospacs_patient_context_bind_host.setText(settings["kaospacs_patient_context_bind_host"])
+        self.kaospacs_patient_context_port.setText(settings["kaospacs_patient_context_port"])
+        self.kaospacs_integration_token.setText(settings["kaospacs_integration_token"])
         self.kaospacs_api_timeout_seconds.setText(
             settings["kaospacs_api_timeout_seconds"]
         )
@@ -211,6 +225,9 @@ class SettingsTab(QWidget):
         self.kaospacs_gateway_url.setText(self.PACS_DEFAULTS["kaospacs_gateway_url"])
         self.kaospacs_web_admin_url.setText(self.PACS_DEFAULTS["kaospacs_web_admin_url"])
         self.kaospacs_gateway_api_token.setText(self.PACS_DEFAULTS["kaospacs_gateway_api_token"])
+        self.kaospacs_patient_context_bind_host.setText(self.PACS_DEFAULTS["kaospacs_patient_context_bind_host"])
+        self.kaospacs_patient_context_port.setText(self.PACS_DEFAULTS["kaospacs_patient_context_port"])
+        self.kaospacs_integration_token.setText(self.PACS_DEFAULTS["kaospacs_integration_token"])
         self.kaospacs_api_timeout_seconds.setText(
             self.PACS_DEFAULTS["kaospacs_api_timeout_seconds"]
         )
@@ -260,6 +277,9 @@ class SettingsTab(QWidget):
             "kaospacs_gateway_url": self.kaospacs_gateway_url.text().strip(),
             "kaospacs_web_admin_url": self.kaospacs_web_admin_url.text().strip(),
             "kaospacs_gateway_api_token": self.kaospacs_gateway_api_token.text().strip(),
+            "kaospacs_patient_context_bind_host": self.kaospacs_patient_context_bind_host.text().strip(),
+            "kaospacs_patient_context_port": self.kaospacs_patient_context_port.text().strip(),
+            "kaospacs_integration_token": self.kaospacs_integration_token.text().strip(),
             "kaospacs_api_timeout_seconds": normalized_timeout,
             "pacs_auto_poll_enabled": "true" if self.pacs_auto_poll_enabled.isChecked() else "false",
             "pacs_dry_run": "true" if self.pacs_dry_run.isChecked() else "false",
@@ -286,6 +306,18 @@ class SettingsTab(QWidget):
             web_admin_url.startswith("http://") or web_admin_url.startswith("https://")
         ):
             return "KaosPACS Web admin URL must start with http:// or https://."
+
+        bind_host = self.kaospacs_patient_context_bind_host.text().strip()
+        if not bind_host:
+            return "Patient-context bind host is required."
+
+        port_text = self.kaospacs_patient_context_port.text().strip()
+        try:
+            port_value = int(port_text)
+        except ValueError:
+            return "Patient-context port must be an integer between 1 and 65535."
+        if port_value <= 0 or port_value > 65535:
+            return "Patient-context port must be an integer between 1 and 65535."
 
         timeout_text = self.kaospacs_api_timeout_seconds.text().strip()
         try:

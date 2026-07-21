@@ -167,6 +167,8 @@ def test_default_settings_include_kaospacs_web_admin_url() -> None:
     from KaosEghis.db.repositories import DEFAULT_SETTINGS
 
     assert DEFAULT_SETTINGS["kaospacs_web_admin_url"] == "http://192.168.0.200:8070/imaging/worklist"
+    assert DEFAULT_SETTINGS["kaospacs_patient_context_bind_host"] == "127.0.0.1"
+    assert DEFAULT_SETTINGS["kaospacs_patient_context_port"] == "8765"
 
 
 def test_operator_mode_contains_local_orders_controls(monkeypatch, tmp_path) -> None:

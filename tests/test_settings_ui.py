@@ -20,6 +20,7 @@ def test_settings_panel_instantiates(tmp_path) -> None:
     assert tab is not None
     assert tab.eghis_db_connection_string.echoMode() == tab.eghis_db_connection_string.EchoMode.Password
     assert tab.kaospacs_gateway_api_token.echoMode() == tab.kaospacs_gateway_api_token.EchoMode.Password
+    assert tab.kaospacs_integration_token.echoMode() == tab.kaospacs_integration_token.EchoMode.Password
 
 
 def test_save_pacs_settings_persists_values(tmp_path) -> None:
@@ -37,6 +38,9 @@ def test_save_pacs_settings_persists_values(tmp_path) -> None:
     tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_web_admin_url.setText("http://192.168.0.200:8070/imaging/worklist")
     tab.kaospacs_gateway_api_token.setText("secret-token")
+    tab.kaospacs_patient_context_bind_host.setText("192.168.0.100")
+    tab.kaospacs_patient_context_port.setText("8877")
+    tab.kaospacs_integration_token.setText("integration-secret")
     tab.kaospacs_api_timeout_seconds.setText("5")
     tab.pacs_auto_poll_enabled.setChecked(True)
     tab.pacs_dry_run.setChecked(True)
@@ -52,6 +56,9 @@ def test_save_pacs_settings_persists_values(tmp_path) -> None:
     assert settings["kaospacs_gateway_url"] == "http://127.0.0.1:8060"
     assert settings["kaospacs_web_admin_url"] == "http://192.168.0.200:8070/imaging/worklist"
     assert settings["kaospacs_gateway_api_token"] == "secret-token"
+    assert settings["kaospacs_patient_context_bind_host"] == "192.168.0.100"
+    assert settings["kaospacs_patient_context_port"] == "8877"
+    assert settings["kaospacs_integration_token"] == "integration-secret"
     assert settings["kaospacs_api_timeout_seconds"] == "5"
     assert settings["pacs_auto_poll_enabled"] == "true"
     assert settings["pacs_dry_run"] == "true"
@@ -73,6 +80,9 @@ def test_reset_pacs_settings_restores_defaults(tmp_path) -> None:
     tab.kaospacs_gateway_url.setText("https://gateway")
     tab.kaospacs_web_admin_url.setText("https://admin")
     tab.kaospacs_gateway_api_token.setText("secret-token")
+    tab.kaospacs_patient_context_bind_host.setText("192.168.0.100")
+    tab.kaospacs_patient_context_port.setText("8877")
+    tab.kaospacs_integration_token.setText("integration-secret")
     tab.kaospacs_api_timeout_seconds.setText("9")
     tab.pacs_auto_poll_enabled.setChecked(True)
     tab.pacs_dry_run.setChecked(True)
@@ -88,6 +98,9 @@ def test_reset_pacs_settings_restores_defaults(tmp_path) -> None:
     assert settings["kaospacs_gateway_url"] == "http://127.0.0.1:8060"
     assert settings["kaospacs_web_admin_url"] == "http://192.168.0.200:8070/imaging/worklist"
     assert settings["kaospacs_gateway_api_token"] == ""
+    assert settings["kaospacs_patient_context_bind_host"] == "127.0.0.1"
+    assert settings["kaospacs_patient_context_port"] == "8765"
+    assert settings["kaospacs_integration_token"] == ""
     assert settings["kaospacs_api_timeout_seconds"] == "5"
     assert settings["pacs_auto_poll_enabled"] == "false"
     assert settings["pacs_dry_run"] == "false"
@@ -154,6 +167,23 @@ def test_invalid_timeout_rejected(tmp_path) -> None:
     assert "must be numeric and greater than 0" in tab.pacs_status.text()
 
 
+def test_invalid_patient_context_port_rejected(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.settings_tab import SettingsTab
+
+    tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
+    tab.kaospacs_api_base_url.setText("http://127.0.0.1:8060")
+    tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
+    tab.kaospacs_web_admin_url.setText("http://192.168.0.200:8070/imaging/worklist")
+    tab.kaospacs_patient_context_bind_host.setText("192.168.0.100")
+    tab.kaospacs_patient_context_port.setText("70000")
+    tab.kaospacs_api_timeout_seconds.setText("5")
+    tab.save_pacs_settings()
+
+    assert "Patient-context port must be an integer between 1 and 65535." in tab.pacs_status.text()
+
+
 def test_interval_below_15_is_clamped(tmp_path) -> None:
     _app()
 
@@ -201,6 +231,7 @@ def test_connection_string_not_displayed_in_status_labels(tmp_path) -> None:
     tab.kaospacs_gateway_url.setText("http://127.0.0.1:8060")
     tab.kaospacs_web_admin_url.setText("http://192.168.0.200:8070/imaging/worklist")
     tab.kaospacs_gateway_api_token.setText("gateway-secret")
+    tab.kaospacs_integration_token.setText("integration-secret")
     tab.kaospacs_api_timeout_seconds.setText("5")
     tab.save_pacs_settings()
 
@@ -208,3 +239,5 @@ def test_connection_string_not_displayed_in_status_labels(tmp_path) -> None:
     assert secret not in tab.pacs_status.text()
     assert "gateway-secret" not in tab.general_status.text()
     assert "gateway-secret" not in tab.pacs_status.text()
+    assert "integration-secret" not in tab.general_status.text()
+    assert "integration-secret" not in tab.pacs_status.text()

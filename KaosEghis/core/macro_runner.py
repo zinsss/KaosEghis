@@ -122,7 +122,7 @@ class MacroRunner:
                     False, "Macro execution canceled.", executed_steps, executed_steps + 1
                 )
 
-            result = self._execute_step_with_retries(step)
+            result = self._execute_step_with_timing(step)
             if not result.success:
                 failed_step = step.options.get("step_order")
                 if not isinstance(failed_step, int):
@@ -183,6 +183,24 @@ class MacroRunner:
             self._clear_resolved_target_cache()
         return last_result
 
+    def _execute_step_with_timing(self, step: MacroStep) -> MacroRunResult:
+        before_result = self._run_optional_step_wait(step)
+        if not before_result.success:
+            return before_result
+        return self._execute_step_with_retries(step)
+
+    def _run_optional_step_wait(
+        self,
+        step: MacroStep,
+    ) -> MacroRunResult:
+        if not step.options.get("wait_before_enabled", False):
+            return MacroRunResult(True, "Optional wait disabled.", 0, None)
+        milliseconds = step.options.get("wait_before_ms", 100)
+        return self._wait_milliseconds(
+            milliseconds,
+            success_message="Waited before action.",
+        )
+
     def _execute_step(self, step: MacroStep) -> MacroRunResult:
         action = self._action_name(step)
         if action in {"delay_ms", "wait"}:
@@ -207,6 +225,14 @@ class MacroRunner:
 
     def _run_delay(self, step: MacroStep) -> MacroRunResult:
         milliseconds = step.options.get("ms", step.value)
+        return self._wait_milliseconds(milliseconds)
+
+    def _wait_milliseconds(
+        self,
+        milliseconds: object,
+        *,
+        success_message: str | None = None,
+    ) -> MacroRunResult:
         if isinstance(milliseconds, str):
             try:
                 milliseconds = int(milliseconds)
@@ -230,7 +256,12 @@ class MacroRunner:
                 break
 
             time.sleep(min(0.05, remaining))
-        return MacroRunResult(True, f"Delayed {milliseconds} ms.", 1, None)
+        return MacroRunResult(
+            True,
+            success_message or f"Delayed {milliseconds} ms.",
+            1,
+            None,
+        )
 
     def _run_focus_window(self, settings: dict[str, str]) -> MacroRunResult:
         state = ensure_cached_connection_ready(settings)
@@ -306,8 +337,12 @@ class MacroRunner:
             from pywinauto.keyboard import send_keys
 
             send_keys(text)
+            if step.options.get("press_enter_after", False):
+                send_keys("{ENTER}")
         except Exception:
             return MacroRunResult(False, "input failed", 0, None)
+        if step.options.get("press_enter_after", False):
+            return MacroRunResult(True, "Typed text and pressed Enter.", 1, None)
         return MacroRunResult(True, "Typed text.", 1, None)
 
     def _run_paste_text(self, step: MacroStep) -> MacroRunResult:
@@ -478,26 +513,48 @@ class MacroRunner:
         action = self._action_name(step)
         display_order = step.options.get("step_order", index)
         target = f" target_id={step.target_id}" if step.target_id else ""
+        timing_text = self._dry_run_timing_text(step)
 
         if action in {"delay_ms", "wait"}:
             duration = step.options.get("ms", step.value)
-            return f"{display_order}. delay_ms value={duration} (dry run only)"
+            return (
+                f"{display_order}. delay_ms value={duration}{timing_text} "
+                "(dry run only)"
+            )
         if action == "preset_text":
-            return f"{display_order}. preset_text value={step.value} (dry run only)"
+            return (
+                f"{display_order}. preset_text value={step.value}{timing_text} "
+                "(dry run only)"
+            )
         if action == "wait_text_or_image":
-            return f"{display_order}. wait_text_or_image{target} (placeholder, dry run only)"
+            return (
+                f"{display_order}. wait_text_or_image{target}{timing_text} "
+                "(placeholder, dry run only)"
+            )
         if action == "wait_window":
             return (
                 f"{display_order}. wait_window timeout={step.timeout_seconds} "
-                f"retries={step.retries} (dry run only)"
+                f"retries={step.retries}{timing_text} (dry run only)"
             )
 
         value = step.options.get("text") or step.options.get("key") or step.value
         value_text = f" value={value}" if value else ""
+        enter_text = (
+            " enter_after=yes"
+            if action == "type_text" and step.options.get("press_enter_after", False)
+            else ""
+        )
         return (
-            f"{display_order}. {action}{target}{value_text} "
+            f"{display_order}. {action}{target}{value_text}{enter_text}{timing_text} "
             f"timeout={step.timeout_seconds} retries={step.retries}"
         )
+
+    @staticmethod
+    def _dry_run_timing_text(step: MacroStep) -> str:
+        parts: list[str] = []
+        if step.options.get("wait_before_enabled", False):
+            parts.append(f"wait_before={step.options.get('wait_before_ms', 100)}ms")
+        return f" {' '.join(parts)}" if parts else ""
 
     @staticmethod
     def _action_name(step: MacroStep) -> str:
@@ -653,6 +710,11 @@ def _db_macro_step_to_runtime_step(step) -> MacroStep:
         options["key"] = step.value
     if action in {"type_text", "paste_text", "type_text_keyboard", "type_text_clipboard"} and step.value is not None:
         options["text"] = step.value
+    if action in {"type_text", "type_text_keyboard"} and step.press_enter_after:
+        options["press_enter_after"] = True
+    if step.wait_before_enabled:
+        options["wait_before_enabled"] = True
+        options["wait_before_ms"] = step.wait_before_ms
     if action == "preset_text" and step.value is not None:
         options["preset"] = step.value
 

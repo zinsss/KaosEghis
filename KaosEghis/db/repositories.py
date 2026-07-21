@@ -18,6 +18,9 @@ DEFAULT_SETTINGS = {
     "kaospacs_gateway_url": "http://127.0.0.1:8060",
     "kaospacs_web_admin_url": DEFAULT_KAOSPACS_WEB_ADMIN_URL,
     "kaospacs_gateway_api_token": "",
+    "kaospacs_patient_context_bind_host": "127.0.0.1",
+    "kaospacs_patient_context_port": "8765",
+    "kaospacs_integration_token": "",
     "kaospacs_api_timeout_seconds": "5",
     "pacs_auto_poll_enabled": "false",
     "pacs_poll_interval_seconds": "60",
@@ -52,6 +55,15 @@ class ItemRecord:
 
 
 @dataclass(frozen=True)
+class ClipboardVariantRecord:
+    id: int
+    item_id: int
+    label: str
+    body: str
+    created_at: str
+
+
+@dataclass(frozen=True)
 class MacroStepRecord:
     id: int
     item_id: int
@@ -61,6 +73,9 @@ class MacroStepRecord:
     value: str | None
     timeout_seconds: float
     retries: int
+    press_enter_after: bool
+    wait_before_enabled: bool
+    wait_before_ms: int
 
 
 @dataclass(frozen=True)
@@ -133,7 +148,8 @@ class EmrUiTargetRecord:
 
 
 SUPPORTED_ITEM_TYPES = {"clipboard", "randomized_clipboard", "macro", "workflow"}
-LAUNCHER_SECTIONS = ("Eghis", "Medical Documents", "ETC")
+LAUNCHER_SECTIONS = ("Favorite", "Macro", "Comments")
+LAUNCHER_ITEM_TYPES = ("macro", "clipboard", "randomized_clipboard")
 ALLOWED_MACRO_ACTIONS = {
     "focus_window",
     "wait_window",
@@ -251,14 +267,21 @@ def create_item(
     item_type: str,
     is_enabled: bool = True,
     emr_target_profile_id: int | None = None,
-    launcher_section: str = "Eghis",
+    launcher_section: str | None = None,
 ) -> ItemRecord:
     _validate_item_type(item_type)
-    normalized_launcher_section = _normalize_launcher_section(launcher_section)
+    default_section = (
+        "Comments"
+        if item_type in {"clipboard", "randomized_clipboard"}
+        else "Macro"
+    )
+    normalized_launcher_section = _normalize_launcher_section(
+        launcher_section or default_section
+    )
     launcher_position = _next_launcher_position(
         connection,
         normalized_launcher_section,
-    ) if item_type == "macro" else 0
+    ) if item_type in LAUNCHER_ITEM_TYPES else 0
     cursor = connection.execute(
         """
         INSERT INTO items (
@@ -333,7 +356,7 @@ def list_launcher_items(
             SELECT id, name, item_type, is_enabled, emr_target_profile_id,
                    launcher_section, launcher_position, created_at, updated_at
             FROM items
-            WHERE item_type = 'macro'
+            WHERE item_type IN ('macro', 'clipboard', 'randomized_clipboard')
             ORDER BY launcher_section, launcher_position, id
             """
         )
@@ -344,12 +367,57 @@ def list_launcher_items(
             SELECT id, name, item_type, is_enabled, emr_target_profile_id,
                    launcher_section, launcher_position, created_at, updated_at
             FROM items
-            WHERE item_type = 'macro' AND launcher_section = ?
+            WHERE item_type IN ('macro', 'clipboard', 'randomized_clipboard')
+              AND launcher_section = ?
             ORDER BY launcher_position, id
             """,
             (normalized_launcher_section,),
         )
     return [_item_from_row(row) for row in rows]
+
+
+def list_clipboard_variants(
+    connection: sqlite3.Connection,
+    item_id: int,
+) -> list[ClipboardVariantRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, item_id, label, body, created_at
+        FROM clipboard_variants
+        WHERE item_id = ?
+        ORDER BY id
+        """,
+        (item_id,),
+    )
+    return [
+        ClipboardVariantRecord(
+            id=row[0],
+            item_id=row[1],
+            label=row[2],
+            body=row[3],
+            created_at=row[4],
+        )
+        for row in rows
+    ]
+
+
+def replace_clipboard_variants(
+    connection: sqlite3.Connection,
+    item_id: int,
+    bodies: list[str],
+) -> int:
+    connection.execute("DELETE FROM clipboard_variants WHERE item_id = ?", (item_id,))
+    normalized_bodies = [body.strip() for body in bodies if body.strip()]
+    for index, body in enumerate(normalized_bodies, start=1):
+        connection.execute(
+            """
+            INSERT INTO clipboard_variants (item_id, label, body)
+            VALUES (?, ?, ?)
+            """,
+            (item_id, f"Option {index}", body),
+        )
+    connection.commit()
+    return len(normalized_bodies)
 
 
 def update_item_launcher_placement(
@@ -375,6 +443,7 @@ def update_item_launcher_placement(
 
 def delete_item(connection: sqlite3.Connection, item_id: int) -> bool:
     delete_macro_steps_for_item(connection, item_id)
+    connection.execute("DELETE FROM clipboard_variants WHERE item_id = ?", (item_id,))
     cursor = connection.execute("DELETE FROM items WHERE id = ?", (item_id,))
     connection.commit()
     return cursor.rowcount > 0
@@ -383,7 +452,8 @@ def delete_item(connection: sqlite3.Connection, item_id: int) -> bool:
 def list_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[MacroStepRecord]:
     rows = connection.execute(
         """
-        SELECT id, item_id, step_order, action, target_id, value, timeout_seconds, retries
+        SELECT id, item_id, step_order, action, target_id, value, timeout_seconds,
+               retries, press_enter_after, wait_before_enabled, wait_before_ms
         FROM macro_steps
         WHERE item_id = ?
         ORDER BY step_order, id
@@ -406,13 +476,17 @@ def create_macro_step(
     value: str | None = None,
     timeout_seconds: float = 5.0,
     retries: int = 0,
+    press_enter_after: bool = False,
+    wait_before_enabled: bool = False,
+    wait_before_ms: int = 100,
 ) -> MacroStepRecord:
     _validate_macro_action(action)
     cursor = connection.execute(
         """
         INSERT INTO macro_steps
-            (item_id, step_order, action, target_id, value, timeout_seconds, retries)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (item_id, step_order, action, target_id, value, timeout_seconds, retries,
+             press_enter_after, wait_before_enabled, wait_before_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             item_id,
@@ -422,6 +496,9 @@ def create_macro_step(
             _blank_to_none(value),
             timeout_seconds,
             retries,
+            int(press_enter_after),
+            int(wait_before_enabled),
+            max(int(wait_before_ms), 0),
         ),
     )
     connection.commit()
@@ -440,6 +517,9 @@ def update_macro_step(
     value: str | None = None,
     timeout_seconds: float = 5.0,
     retries: int = 0,
+    press_enter_after: bool = False,
+    wait_before_enabled: bool = False,
+    wait_before_ms: int = 100,
 ) -> MacroStepRecord | None:
     _validate_macro_action(action)
     connection.execute(
@@ -450,7 +530,10 @@ def update_macro_step(
             target_id = ?,
             value = ?,
             timeout_seconds = ?,
-            retries = ?
+            retries = ?,
+            press_enter_after = ?,
+            wait_before_enabled = ?,
+            wait_before_ms = ?
         WHERE id = ?
         """,
         (
@@ -460,6 +543,9 @@ def update_macro_step(
             _blank_to_none(value),
             timeout_seconds,
             retries,
+            int(press_enter_after),
+            int(wait_before_enabled),
+            max(int(wait_before_ms), 0),
             step_id,
         ),
     )
@@ -1354,7 +1440,7 @@ def _item_from_row(row: sqlite3.Row | tuple) -> ItemRecord:
         item_type=row[2],
         is_enabled=bool(row[3]),
         emr_target_profile_id=row[4],
-        launcher_section=row[5] or "Eghis",
+        launcher_section=row[5] or "Macro",
         launcher_position=int(row[6] or 0),
         created_at=row[7],
         updated_at=row[8],
@@ -1371,6 +1457,9 @@ def _macro_step_from_row(row: sqlite3.Row | tuple) -> MacroStepRecord:
         value=row[5],
         timeout_seconds=row[6],
         retries=row[7],
+        press_enter_after=bool(row[8]),
+        wait_before_enabled=bool(row[9]),
+        wait_before_ms=int(row[10]),
     )
 
 
@@ -1458,7 +1547,8 @@ def _get_macro_step_by_id(
 ) -> MacroStepRecord | None:
     row = connection.execute(
         """
-        SELECT id, item_id, step_order, action, target_id, value, timeout_seconds, retries
+        SELECT id, item_id, step_order, action, target_id, value, timeout_seconds,
+               retries, press_enter_after, wait_before_enabled, wait_before_ms
         FROM macro_steps
         WHERE id = ?
         """,
@@ -1482,9 +1572,15 @@ def _validate_item_type(item_type: str) -> None:
 
 
 def _normalize_launcher_section(launcher_section: str | None) -> str:
-    normalized = (launcher_section or "Eghis").strip()
+    normalized = (launcher_section or "Macro").strip()
+    if normalized == "Medical Documents":
+        normalized = "Comments"
+    elif normalized == "Eghis":
+        normalized = "Macro"
+    elif normalized == "ETC":
+        normalized = "Favorite"
     if normalized not in LAUNCHER_SECTIONS:
-        return "Eghis"
+        return "Macro"
     return normalized
 
 
@@ -1496,7 +1592,8 @@ def _next_launcher_position(
         """
         SELECT COALESCE(MAX(launcher_position), 0)
         FROM items
-        WHERE item_type = 'macro' AND launcher_section = ?
+        WHERE item_type IN ('macro', 'clipboard', 'randomized_clipboard')
+          AND launcher_section = ?
         """,
         (launcher_section,),
     ).fetchone()

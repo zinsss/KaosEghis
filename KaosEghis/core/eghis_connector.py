@@ -172,13 +172,6 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
             None,
             "Application not connected. Connect manually and retry.",
         )
-    if _is_state_stale(state):
-        blocked = _manual_reconnect_required(
-            state,
-            "Application connection stale. Reconnect manually and retry.",
-        )
-        _CACHED_STATE = blocked
-        return blocked
     if not state.process_running or state.pid is None or not _pid_exists(state.pid):
         blocked = _manual_reconnect_required(
             state,
@@ -215,7 +208,8 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
         )
         _CACHED_STATE = blocked
         return blocked
-    if not state.is_active:
+    foreground = _get_foreground_window_info()
+    if foreground is None or foreground.get("window_handle") != state.window_handle:
         focus_succeeded, _focus_reason = _focus_and_confirm_window(
             state.window_handle,
             state,
@@ -228,7 +222,7 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
             )
             _CACHED_STATE = blocked
             return blocked
-    foreground = _get_foreground_window_info()
+        foreground = _get_foreground_window_info()
     if foreground is None or foreground.get("window_handle") != state.window_handle:
         blocked = _manual_reconnect_required(
             state,

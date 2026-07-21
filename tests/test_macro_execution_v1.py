@@ -36,6 +36,124 @@ def test_macro_dry_run_does_not_call_os_input_functions(monkeypatch, tmp_path) -
     assert "paste_text" in result.message
 
 
+def test_type_text_can_send_enter_after_text(monkeypatch) -> None:
+    from KaosEghis.core.macro_models import MacroStep
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    sent_keys: list[str] = []
+    monkeypatch.setattr("pywinauto.keyboard.send_keys", sent_keys.append)
+
+    result = MacroRunner()._run_type_text(
+        MacroStep(
+            action="type_text",
+            value="hello",
+            options={"text": "hello", "press_enter_after": True},
+        )
+    )
+
+    assert result.success is True
+    assert result.message == "Typed text and pressed Enter."
+    assert sent_keys == ["hello", "{ENTER}"]
+
+
+def test_type_text_without_enter_option_does_not_send_enter(monkeypatch) -> None:
+    from KaosEghis.core.macro_models import MacroStep
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    sent_keys: list[str] = []
+    monkeypatch.setattr("pywinauto.keyboard.send_keys", sent_keys.append)
+
+    result = MacroRunner()._run_type_text(
+        MacroStep(action="type_text", value="hello", options={"text": "hello"})
+    )
+
+    assert result.success is True
+    assert sent_keys == ["hello"]
+
+
+def test_type_text_dry_run_shows_enter_option_without_input(
+    monkeypatch, tmp_path
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Type and submit", "macro", True)
+        create_macro_step(
+            connection,
+            item.id,
+            1,
+            "type_text",
+            value="hello",
+            press_enter_after=True,
+            wait_before_enabled=True,
+            wait_before_ms=125,
+        )
+
+    monkeypatch.setattr(
+        "pywinauto.keyboard.send_keys",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("dry run must not send keys")
+        ),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=True)
+
+    assert result.success is True
+    assert "type_text value=hello enter_after=yes" in result.message
+    assert "wait_before=125ms" in result.message
+
+
+def test_step_wait_runs_before_actual_action(monkeypatch) -> None:
+    from KaosEghis.core.macro_models import MacroRunResult, MacroStep
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    class FakeState:
+        status = "green"
+        message = "Connected"
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "pywinauto.keyboard.send_keys",
+        lambda key: events.append(f"key:{key}"),
+    )
+
+    runner = MacroRunner()
+
+    def fake_wait(milliseconds, *, success_message=None):
+        events.append(f"wait:{milliseconds}")
+        return MacroRunResult(True, success_message or "waited", 1, None)
+
+    monkeypatch.setattr(runner, "_wait_milliseconds", fake_wait)
+
+    result = runner.run(
+        [
+            MacroStep(
+                action="hotkey",
+                value="^a",
+                options={
+                    "key": "^a",
+                    "wait_before_enabled": True,
+                    "wait_before_ms": 25,
+                },
+            )
+        ],
+        dry_run=False,
+        settings={},
+    )
+
+    assert result.success is True
+    assert result.executed_steps == 1
+    assert events == ["wait:25", "key:^a"]
+
+
 def test_disabled_macro_cannot_run_real_execution(monkeypatch, tmp_path) -> None:
     from KaosEghis.core.macro_runner import MacroRunner
     from KaosEghis.db.database import connect, initialize_database
@@ -641,6 +759,60 @@ def test_new_macro_editor_seeds_focus_window_step(monkeypatch, tmp_path) -> None
     assert dialog.steps_table.item(0, 1).text() == "focus_window"
 
 
+def test_macro_editor_reorders_complete_steps_by_drag_order(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QAbstractItemView, QWidget
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.eghis_assist_tab import MacroEditorDialog
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    initialize_database(tmp_path / "KaosEghis.sqlite")
+
+    parent = QWidget()
+    dialog = MacroEditorDialog(parent)
+    dialog._append_step(
+        {
+            "step_order": 2,
+            "action": "hotkey",
+            "target_id": "",
+            "value": "^a",
+            "timeout_seconds": 5.0,
+            "retries": 0,
+            "wait_before_enabled": True,
+            "wait_before_ms": 25,
+        }
+    )
+    dialog._append_step(
+        {
+            "step_order": 3,
+            "action": "click",
+            "target_id": "submit",
+            "value": "",
+            "timeout_seconds": 5.0,
+            "retries": 0,
+            "wait_before_enabled": True,
+            "wait_before_ms": 40,
+        }
+    )
+
+    assert (
+        dialog.steps_table.dragDropMode()
+        == QAbstractItemView.DragDropMode.InternalMove
+    )
+
+    dialog.steps_table.move_row(2, 0)
+    steps = dialog.values()["steps"]
+
+    assert [step["action"] for step in steps] == ["click", "focus_window", "hotkey"]
+    assert [step["step_order"] for step in steps] == [1, 2, 3]
+    assert steps[0]["wait_before_enabled"] is True
+    assert steps[0]["wait_before_ms"] == 40
+    assert steps[2]["wait_before_enabled"] is True
+    assert steps[2]["wait_before_ms"] == 25
+
+
 def test_new_macro_step_dialog_defaults_to_focus_window(monkeypatch, tmp_path) -> None:
     _app()
 
@@ -656,6 +828,106 @@ def test_new_macro_step_dialog_defaults_to_focus_window(monkeypatch, tmp_path) -
     dialog = MacroStepDialog(parent)
 
     assert dialog.action.currentText() == "focus_window"
+    assert dialog.press_enter_after.isEnabled() is False
+    assert not hasattr(dialog, "step_order")
+
+
+def test_macro_step_dialog_selects_saved_macrotext(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QWidget
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, replace_clipboard_variants
+    from KaosEghis.ui.tabs.eghis_assist_tab import MacroStepDialog
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        preset = create_item(connection, "Referral comment", "clipboard", True)
+        replace_clipboard_variants(connection, preset.id, ["text"])
+
+    parent = QWidget()
+    dialog = MacroStepDialog(
+        parent,
+        {
+            "step_order": 1,
+            "action": "preset_text",
+            "target_id": "",
+            "value": str(preset.id),
+            "timeout_seconds": 5.0,
+            "retries": 0,
+        },
+        db_path=db_path,
+    )
+
+    assert dialog.preset_text.currentData() == preset.id
+    assert "Referral comment" in dialog.preset_text.currentText()
+    assert dialog.values()["value"] == str(preset.id)
+    assert dialog.value.isVisible() is False
+
+
+def test_macrotext_dialog_supports_simple_and_randomized_content() -> None:
+    _app()
+
+    from PySide6.QtWidgets import QWidget
+
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacroTextDialog
+
+    parent = QWidget()
+    dialog = MacroTextDialog(parent)
+    dialog.name.setText("Comment")
+    dialog.content.setPlainText("first line\nsecond line")
+
+    assert dialog.values() == {
+        "name": "Comment",
+        "item_type": "clipboard",
+        "bodies": ["first line\nsecond line"],
+    }
+
+    dialog.randomized.setChecked(True)
+    assert dialog.values()["item_type"] == "randomized_clipboard"
+    assert dialog.values()["bodies"] == ["first line", "second line"]
+
+
+def test_macro_step_dialog_offers_enter_after_for_type_text(
+    monkeypatch, tmp_path
+) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QWidget
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.eghis_assist_tab import MacroStepDialog
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    initialize_database(tmp_path / "KaosEghis.sqlite")
+
+    parent = QWidget()
+    dialog = MacroStepDialog(
+        parent,
+        {
+            "step_order": 1,
+            "action": "type_text",
+            "target_id": "",
+            "value": "hello",
+            "timeout_seconds": 5.0,
+            "retries": 0,
+            "press_enter_after": True,
+        },
+    )
+
+    assert dialog.press_enter_after.isEnabled() is True
+    assert dialog.press_enter_after.isChecked() is True
+    assert dialog.values()["press_enter_after"] is True
+
+    dialog.wait_before_enabled.setChecked(True)
+    dialog.wait_before_ms.setValue(150)
+
+    values = dialog.values()
+    assert values["wait_before_enabled"] is True
+    assert values["wait_before_ms"] == 150
 
 
 def test_macro_runner_requires_manual_connection_before_real_run(tmp_path) -> None:

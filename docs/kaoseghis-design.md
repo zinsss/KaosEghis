@@ -1,6 +1,6 @@
 # KaosEghis Design
 
-Last updated: 2026-06-30
+Last updated: 2026-07-21
 
 ## Purpose
 
@@ -24,27 +24,49 @@ Entry point:
 Main window:
 
 - [KaosEghis/ui/main_window.py](/E:/Kaos/KaosEghis/KaosEghis/ui/main_window.py)
-- resizable `QMainWindow`
-- global Catppuccin Mocha stylesheet
+- fixed-size `QMainWindow`
+- global Nord stylesheet, including themed vertical and horizontal scrollbars
+- shared button sizing reserves enough vertical space for bold selected-state text,
+  including Korean glyphs, without clipping
+- the optional KaosEghis-PACS patient-context listener follows the desktop app
+  lifecycle; it starts from saved settings and closes with the application
 - top-level tabs:
-  - `KaosEghis`
+  - `Macros`
   - `KaosGdd`
   - `Vaccine`
   - `PACS`
   - `Flu-Report`
+  - `Scan`
+  - `Settings`
 
 ## Current Top-Level Information Architecture
 
-### `KaosEghis`
+### `Macros`
 
 Primary daily-use tab.
 
 - contains compact in-tab navigation:
-  - `Macros`
-  - `Presets`
+  - `Launcher`
+  - `Builder`
+  - `MacroTexts`
   - `EMR`
-  - `Settings`
 - `EMR` now hosts the EMR target profile foundation rather than a simple summary view
+- `Launcher` is the daily-use macro launcher surface; double-click or its run button
+  executes immediately with an in-page `Running '<macro name>'...` status instead of
+  a confirmation dialog
+- the Launcher columns are `Favorite`, `Macro`, and `Comments`
+- existing `Eghis` entries migrate to `Macro`, `ETC` entries migrate to `Favorite`,
+  and the former `Medical Documents` category migrates to `Comments` without
+  deleting entries
+- `Comments` also shows saved MacroTexts; double-clicking one copies its fixed text
+  or one randomized option to the Windows clipboard without running an EMR action
+- `Builder` is the macro add/edit surface
+- `MacroTexts` creates and edits fixed or randomized reusable text; the same item can
+  be selected by a macro `preset_text` step or copied directly from `Comments`
+
+### `Settings`
+
+Dedicated top-level settings tab.
 
 ### `KaosGdd`
 
@@ -75,9 +97,16 @@ Dedicated KaosEghis-flu report surface.
 
 - panel title: `Weekly - Influenza Report`
 
-Settings now lives under:
+### `Scan`
 
-- `KaosEghis -> Settings`
+Dedicated KaosEghis-scan surface.
+
+- one-click non-GUI scan through the saved NAPS2 profile `Canon DR-C125 Native`
+- timestamped PDF output under the active KaosEghis data directory's `temp` folder
+- in-app PDF list and preview
+- native file drag-out for manual browser upload
+- `View folder` fallback
+- configurable periodic cleanup and explicit `Clean now`
 
 ## Architectural Boundaries
 
@@ -175,12 +204,15 @@ The design strategy is milestone-based:
 - macros can now bind to a specific EMR target profile or fall back to the default profile
 - PACS and flu are product/plugin workflows, not separate executables inside this repo
 - KaosClip remains a future plugin direction, not a standalone app
+- future `KaosEghis-inj` should keep authoritative injection worklist ownership on the KaosEghis side and treat Raspberry Pi as a reload-only consumer
+- `KaosEghis-scan` uses a non-GUI NAPS2 process with the Canon DR-C125 Native profile, keeps PDFs in a dedicated temporary folder, and supports manual browser upload through in-app preview, native file drag-out, and a View folder fallback
 
 ## Removed or Superseded Directions
 
 - standalone KaosClip app direction: superseded
 - dashboard-first layout: superseded
 - overloaded `Eghis Assist` top-level workflow: superseded by use-first vs configuration/plugin separation
+- older `KaosEghis` top-level tab naming: superseded by direct product tab naming
 
 ## Near-Term Design Maintenance Rule
 
@@ -190,3 +222,4 @@ This document should be updated whenever:
 - a plugin is added, removed, renamed, or regrouped
 - a workflow moves between tabs
 - KaosClip integration direction changes again
+- the KaosEghis-inj or KaosEghis-scan ownership/privacy boundary changes

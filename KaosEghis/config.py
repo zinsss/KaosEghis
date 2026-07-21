@@ -15,6 +15,9 @@ class AppConfig:
     kaospacs_api_base_url: str = "http://127.0.0.1:8060"
     kaospacs_gateway_url: str = "http://127.0.0.1:8060"
     kaospacs_web_admin_url: str = DEFAULT_KAOSPACS_WEB_ADMIN_URL
+    kaospacs_patient_context_bind_host: str = "127.0.0.1"
+    kaospacs_patient_context_port: str = "8765"
+    kaospacs_integration_token: str = ""
     kaospacs_api_timeout_seconds: str = "5"
     pacs_auto_poll_enabled: str = "false"
     pacs_poll_interval_seconds: str = "60"

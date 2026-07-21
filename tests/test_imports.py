@@ -10,6 +10,7 @@ def test_core_modules_import() -> None:
     import KaosEghis.core.macro_models
     import KaosEghis.core.macro_runner
     import KaosEghis.core.paste_test
+    import KaosEghis.core.scan_service
     import KaosEghis.core.safety_gate
     import KaosEghis.core.uia_inspector
     import KaosEghis.core.wait_engine
@@ -19,6 +20,22 @@ def test_core_modules_import() -> None:
     import KaosEghis.ui.main_window
     import KaosEghis.ui.tabs.eghis_assist_tab
     import KaosEghis.ui.tabs.kaoseghis_tab
+    import KaosEghis.ui.tabs.scan_tab
+
+
+def test_nord_theme_includes_complete_scrollbar_styling() -> None:
+    from KaosEghis.ui.theme import nord_stylesheet
+
+    stylesheet = nord_stylesheet().casefold()
+
+    assert "#2e3440" in stylesheet
+    assert "#88c0d0" in stylesheet
+    assert "qscrollbar:vertical" in stylesheet
+    assert "qscrollbar:horizontal" in stylesheet
+    assert "qscrollbar::handle:vertical:hover" in stylesheet
+    assert "qscrollbar::handle:horizontal:pressed" in stylesheet
+    assert "#1e1e2e" not in stylesheet
+    assert "#cba6f7" not in stylesheet
 
 
 def test_settings_repository_can_save_and_load(tmp_path) -> None:
@@ -181,9 +198,11 @@ def test_items_repository_crud(tmp_path) -> None:
         delete_item,
         get_item,
         list_launcher_items,
+        list_clipboard_variants,
         list_macro_steps,
         list_items,
         update_item_launcher_placement,
+        replace_clipboard_variants,
         update_item,
     )
 
@@ -196,7 +215,7 @@ def test_items_repository_crud(tmp_path) -> None:
         assert item.name == "Morning macro"
         assert item.item_type == "macro"
         assert item.is_enabled is True
-        assert item.launcher_section == "Eghis"
+        assert item.launcher_section == "Macro"
         assert item.launcher_position == 1
 
         assert len(list_items(connection, "macro")) == 1
@@ -206,7 +225,7 @@ def test_items_repository_crud(tmp_path) -> None:
         assert updated.name == "Morning workflow"
         assert updated.item_type == "workflow"
         assert updated.is_enabled is False
-        assert updated.launcher_section == "Eghis"
+        assert updated.launcher_section == "Macro"
 
         assert get_item(connection, item.id) is not None
         create_macro_step(connection, item.id, 1, "wait_ms", value="100")
@@ -220,14 +239,59 @@ def test_items_repository_crud(tmp_path) -> None:
         moved = update_item_launcher_placement(
             connection,
             second.id,
-            "Medical Documents",
+            "Comments",
             1,
         )
         assert moved is not None
-        assert moved.launcher_section == "Medical Documents"
-        launcher_items = list_launcher_items(connection, "Medical Documents")
+        assert moved.launcher_section == "Comments"
+        launcher_items = list_launcher_items(connection, "Comments")
         assert [item.id for item in launcher_items] == [second.id]
-        assert get_item(connection, first.id).launcher_section == "Eghis"
+        assert get_item(connection, first.id).launcher_section == "Macro"
+
+        macrotext = create_item(connection, "Comment", "clipboard", True)
+        assert macrotext.launcher_section == "Comments"
+        assert replace_clipboard_variants(
+            connection, macrotext.id, ["First line\nSecond line"]
+        ) == 1
+        variants = list_clipboard_variants(connection, macrotext.id)
+        assert [variant.body for variant in variants] == ["First line\nSecond line"]
+        assert macrotext.id in [
+            item.id for item in list_launcher_items(connection, "Comments")
+        ]
+
+
+def test_launcher_section_migration_preserves_legacy_items(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, get_item
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        document = create_item(connection, "Legacy document", "macro", True)
+        eghis = create_item(connection, "Legacy Eghis", "macro", True)
+        etc = create_item(connection, "Legacy ETC", "macro", True)
+        connection.executemany(
+            "UPDATE items SET launcher_section = ? WHERE id = ?",
+            [
+                ("Medical Documents", document.id),
+                ("Eghis", eghis.id),
+                ("ETC", etc.id),
+            ],
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        migrated_document = get_item(connection, document.id)
+        migrated_eghis = get_item(connection, eghis.id)
+        migrated_etc = get_item(connection, etc.id)
+    assert migrated_document is not None
+    assert migrated_document.launcher_section == "Comments"
+    assert migrated_eghis is not None
+    assert migrated_eghis.launcher_section == "Macro"
+    assert migrated_etc is not None
+    assert migrated_etc.launcher_section == "Favorite"
 
 
 def test_macro_steps_repository_crud_and_reorder(tmp_path) -> None:
@@ -290,6 +354,83 @@ def test_macro_steps_repository_crud_and_reorder(tmp_path) -> None:
         assert len(list_macro_steps(connection, item.id)) == 1
         assert delete_macro_steps_for_item(connection, item.id) == 1
         assert list_macro_steps(connection, item.id) == []
+
+
+def test_macro_step_press_enter_after_is_persisted(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_item,
+        create_macro_step,
+        update_macro_step,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        item = create_item(connection, "Submit text", "macro", True)
+        step = create_macro_step(
+            connection,
+            item.id,
+            1,
+            "type_text",
+            value="hello",
+            press_enter_after=True,
+            wait_before_enabled=True,
+            wait_before_ms=250,
+        )
+        assert step.press_enter_after is True
+        assert step.wait_before_enabled is True
+        assert step.wait_before_ms == 250
+
+        updated = update_macro_step(
+            connection,
+            step.id,
+            1,
+            "type_text",
+            value="hello again",
+            press_enter_after=False,
+            wait_before_enabled=False,
+            wait_before_ms=125,
+        )
+        assert updated is not None
+        assert updated.press_enter_after is False
+        assert updated.wait_before_enabled is False
+        assert updated.wait_before_ms == 125
+
+
+def test_macro_step_migration_adds_press_enter_after(tmp_path) -> None:
+    import sqlite3
+
+    from KaosEghis.db.database import initialize_database
+
+    db_path = tmp_path / "legacy.sqlite"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE macro_steps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER NOT NULL,
+                step_order INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                target_id TEXT,
+                value TEXT,
+                timeout_seconds REAL NOT NULL DEFAULT 5,
+                retries INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+
+    initialize_database(db_path)
+
+    with sqlite3.connect(db_path) as connection:
+        columns = {
+            row[1]: row for row in connection.execute("PRAGMA table_info(macro_steps)")
+        }
+        assert "press_enter_after" in columns
+        assert columns["press_enter_after"][4] == "0"
+        assert columns["wait_before_enabled"][4] == "0"
+        assert columns["wait_before_ms"][4] == "100"
 
 
 def test_macro_dry_run_validation_reports_missing_target(tmp_path) -> None:
@@ -1291,6 +1432,119 @@ def test_discover_eghis_prefers_exact_process_match_over_partial_helper_process(
     assert state.window_owner_pid == 20
     assert state.process_name == "eGhis.exe"
     assert state.message == "Connected and active"
+
+
+def test_manual_cached_connection_revalidates_after_ttl_without_reconnect(
+    monkeypatch,
+) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    cached = connector.EghisConnectorState(
+        "green",
+        True,
+        "Eghis.exe",
+        12,
+        "C:/Eghis.exe",
+        True,
+        "Eghis EMR",
+        55,
+        12,
+        True,
+        "2026-06-19T12:00:00",
+        "Connected and active",
+    )
+    monkeypatch.setattr(connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(connector, "_is_state_stale", lambda _state: True)
+    monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(
+        connector, "_process_identity_matches_state", lambda _state, _settings: True
+    )
+    monkeypatch.setattr(connector, "_window_handle_is_valid", lambda _hwnd: True)
+    monkeypatch.setattr(connector, "_get_window_owner_pid", lambda _hwnd: 12)
+    monkeypatch.setattr(
+        connector, "_has_blocking_modal_dialog", lambda _state, _settings: False
+    )
+    monkeypatch.setattr(
+        connector,
+        "_get_foreground_window_info",
+        lambda: {"window_handle": 55, "window_title": "Eghis EMR"},
+    )
+    monkeypatch.setattr(
+        connector,
+        "_focus_and_confirm_window",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("already-foreground window should not be refocused")
+        ),
+    )
+    monkeypatch.setattr(connector, "_timestamp_now", lambda: "2026-06-19T12:01:00")
+
+    state = connector.ensure_cached_connection_ready(
+        {
+            "eghis_process_name": "Eghis.exe",
+            "eghis_window_title_contains": "Eghis",
+        }
+    )
+
+    assert state.status == "green"
+    assert state.last_seen_at == "2026-06-19T12:01:00"
+    assert state.message == "Connected and active"
+
+
+def test_manual_cached_connection_refocuses_on_each_later_macro_run(
+    monkeypatch,
+) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    cached = connector.EghisConnectorState(
+        "green",
+        True,
+        "Eghis.exe",
+        12,
+        "C:/Eghis.exe",
+        True,
+        "Eghis EMR",
+        55,
+        12,
+        True,
+        "2026-06-19T12:00:00",
+        "Connected and active",
+    )
+    foreground = {"window_handle": 999, "window_title": "KaosEghis"}
+    focus_calls: list[int] = []
+
+    monkeypatch.setattr(connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(
+        connector, "_process_identity_matches_state", lambda _state, _settings: True
+    )
+    monkeypatch.setattr(connector, "_window_handle_is_valid", lambda _hwnd: True)
+    monkeypatch.setattr(connector, "_get_window_owner_pid", lambda _hwnd: 12)
+    monkeypatch.setattr(
+        connector, "_has_blocking_modal_dialog", lambda _state, _settings: False
+    )
+    monkeypatch.setattr(
+        connector, "_get_foreground_window_info", lambda: dict(foreground)
+    )
+
+    def focus_and_confirm(window_handle, _state, _settings):
+        focus_calls.append(window_handle)
+        foreground.update(window_handle=55, window_title="Eghis EMR")
+        return True, "Connected and active"
+
+    monkeypatch.setattr(connector, "_focus_and_confirm_window", focus_and_confirm)
+    settings = {
+        "eghis_process_name": "Eghis.exe",
+        "eghis_window_title_contains": "Eghis",
+    }
+
+    first = connector.ensure_cached_connection_ready(settings)
+    foreground.update(window_handle=999, window_title="KaosEghis")
+    second = connector.ensure_cached_connection_ready(settings)
+
+    assert first.status == "green"
+    assert second.status == "green"
+    assert focus_calls == [55, 55]
+
 
 def test_ensure_ready_for_macro_uses_cached_state_but_still_confirms_focus(monkeypatch) -> None:
     import KaosEghis.core.eghis_connector as connector

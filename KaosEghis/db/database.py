@@ -45,6 +45,7 @@ def initialize_database(path: Path | None = None) -> None:
     with connect(path) as connection:
         connection.executescript(schema_path.read_text(encoding="utf-8"))
         _migrate_items(connection)
+        _migrate_macro_steps(connection)
         _migrate_ui_targets_columns(connection)
         _migrate_pacs_worklist(connection)
         _migrate_pacs_audit_events(connection)
@@ -82,27 +83,62 @@ def _migrate_items(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE items ADD COLUMN emr_target_profile_id INTEGER")
     if "launcher_section" not in columns:
         connection.execute(
-            "ALTER TABLE items ADD COLUMN launcher_section TEXT NOT NULL DEFAULT 'Eghis'"
+            "ALTER TABLE items ADD COLUMN launcher_section TEXT NOT NULL DEFAULT 'Macro'"
         )
     if "launcher_position" not in columns:
         connection.execute(
             "ALTER TABLE items ADD COLUMN launcher_position INTEGER NOT NULL DEFAULT 0"
         )
+    connection.execute(
+        """
+        UPDATE items
+        SET launcher_section = CASE
+            WHEN item_type IN ('clipboard', 'randomized_clipboard') THEN 'Comments'
+            WHEN launcher_section = 'Medical Documents' THEN 'Comments'
+            WHEN launcher_section = 'Eghis' THEN 'Macro'
+            WHEN launcher_section = 'ETC' THEN 'Favorite'
+            ELSE launcher_section
+        END
+        WHERE item_type IN ('clipboard', 'randomized_clipboard')
+           OR launcher_section IN ('Medical Documents', 'Eghis', 'ETC')
+        """
+    )
     _normalize_launcher_positions(connection)
+
+
+def _migrate_macro_steps(connection: sqlite3.Connection) -> None:
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(macro_steps)").fetchall()
+    }
+    if "press_enter_after" not in columns:
+        connection.execute(
+            "ALTER TABLE macro_steps "
+            "ADD COLUMN press_enter_after INTEGER NOT NULL DEFAULT 0"
+        )
+    if "wait_before_enabled" not in columns:
+        connection.execute(
+            "ALTER TABLE macro_steps "
+            "ADD COLUMN wait_before_enabled INTEGER NOT NULL DEFAULT 0"
+        )
+    if "wait_before_ms" not in columns:
+        connection.execute(
+            "ALTER TABLE macro_steps "
+            "ADD COLUMN wait_before_ms INTEGER NOT NULL DEFAULT 100"
+        )
 
 
 def _normalize_launcher_positions(connection: sqlite3.Connection) -> None:
     rows = connection.execute(
         """
-        SELECT id, COALESCE(launcher_section, 'Eghis')
+        SELECT id, COALESCE(launcher_section, 'Macro')
         FROM items
-        WHERE item_type = 'macro'
-        ORDER BY COALESCE(launcher_section, 'Eghis'), launcher_position, id
+        WHERE item_type IN ('macro', 'clipboard', 'randomized_clipboard')
+        ORDER BY COALESCE(launcher_section, 'Macro'), launcher_position, id
         """
     ).fetchall()
     positions_by_section: dict[str, int] = {}
     for item_id, launcher_section in rows:
-        section = launcher_section or "Eghis"
+        section = launcher_section or "Macro"
         positions_by_section[section] = positions_by_section.get(section, 0) + 1
         connection.execute(
             """

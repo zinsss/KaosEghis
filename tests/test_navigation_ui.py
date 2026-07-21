@@ -10,6 +10,13 @@ def _app():
     return app if app is not None else QApplication([])
 
 
+def test_theme_leaves_room_for_bold_button_text() -> None:
+    from KaosEghis.ui.theme import NORD_QSS
+
+    assert "min-height: 20px;" in NORD_QSS
+    assert "padding: 8px 12px;" in NORD_QSS
+
+
 def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
     _app()
 
@@ -30,14 +37,15 @@ def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
         "Vaccine",
         "PACS",
         "Flu-Report",
+        "Scan",
         "Settings",
     ]
-    assert window.width() == 1280
-    assert window.height() == 875
-    assert window.minimumWidth() == 1280
-    assert window.maximumWidth() == 1280
-    assert window.minimumHeight() == 875
-    assert window.maximumHeight() == 875
+    assert window.width() == 1438
+    assert window.height() == 1194
+    assert window.minimumWidth() == 1438
+    assert window.maximumWidth() == 1438
+    assert window.minimumHeight() == 1194
+    assert window.maximumHeight() == 1194
 
 
 def test_main_window_marks_pacs_tab_red_when_unhealthy(tmp_path, monkeypatch) -> None:
@@ -55,7 +63,7 @@ def test_main_window_marks_pacs_tab_red_when_unhealthy(tmp_path, monkeypatch) ->
     window = MainWindow()
 
     pacs_index = [window.tabs.tabText(index) for index in range(window.tabs.count())].index("PACS")
-    assert window.tabs.tabBar().tabTextColor(pacs_index).name().lower() == "#f38ba8"
+    assert window.tabs.tabBar().tabTextColor(pacs_index).name().lower() == "#bf616a"
     assert "KaosPACS unavailable" in window.tabs.tabBar().tabToolTip(pacs_index)
 
 
@@ -73,9 +81,9 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
     assert tab.stacked_widget.currentWidget() is tab.launcher_page
     assert tab.nav_buttons["Launcher"].isChecked() is True
     assert list(tab.launcher_page.launcher_lists.keys()) == [
-        "Eghis",
-        "Medical Documents",
-        "ETC",
+        "Favorite",
+        "Macro",
+        "Comments",
     ]
 
 
@@ -114,17 +122,103 @@ def test_launcher_page_places_macros_into_three_columns(tmp_path, monkeypatch) -
         eghis = create_item(connection, "Open Chart", "macro", True)
         docs = create_item(connection, "Print Referral", "macro", True)
         etc = create_item(connection, "Misc Action", "macro", True)
-        update_item_launcher_placement(connection, docs.id, "Medical Documents", 1)
-        update_item_launcher_placement(connection, etc.id, "ETC", 1)
+        update_item_launcher_placement(connection, docs.id, "Comments", 1)
+        update_item_launcher_placement(connection, etc.id, "Favorite", 1)
 
     page = LauncherPage(db_path)
 
-    assert page.launcher_lists["Eghis"].count() == 1
-    assert page.launcher_lists["Medical Documents"].count() == 1
-    assert page.launcher_lists["ETC"].count() == 1
-    assert page.launcher_lists["Eghis"].item(0).text() == "Open Chart"
-    assert page.launcher_lists["Medical Documents"].item(0).text() == "Print Referral"
-    assert page.launcher_lists["ETC"].item(0).text() == "Misc Action"
+    assert page.launcher_lists["Macro"].count() == 1
+    assert page.launcher_lists["Comments"].count() == 1
+    assert page.launcher_lists["Favorite"].count() == 1
+    assert page.launcher_lists["Macro"].item(0).text() == "Open Chart"
+    assert page.launcher_lists["Comments"].item(0).text() == "Print Referral"
+    assert page.launcher_lists["Favorite"].item(0).text() == "Misc Action"
+
+
+def test_launcher_comments_copy_simple_and_random_macrotexts(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, replace_clipboard_variants
+    import KaosEghis.ui.tabs.kaoseghis_tab as tab_module
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        fixed = create_item(connection, "Referral comment", "clipboard", True)
+        replace_clipboard_variants(connection, fixed.id, ["fixed text"])
+        randomized = create_item(
+            connection, "Greeting", "randomized_clipboard", True
+        )
+        replace_clipboard_variants(connection, randomized.id, ["one", "two"])
+
+    copied: list[str] = []
+    monkeypatch.setattr(tab_module, "copy_text", lambda text: copied.append(text))
+    monkeypatch.setattr(tab_module.random, "choice", lambda values: values[1])
+
+    page = tab_module.LauncherPage(db_path)
+    comments = page.launcher_lists["Comments"]
+    assert [comments.item(index).text() for index in range(comments.count())] == [
+        "Referral comment",
+        "Greeting",
+    ]
+
+    page.activate_launcher_item(comments, comments.item(0))
+    page.activate_launcher_item(comments, comments.item(1))
+
+    assert copied == ["fixed text", "two"]
+    assert page.log.toPlainText() == "Copied 'Greeting' to clipboard."
+
+
+def test_launcher_runs_without_confirmation_and_shows_running_status(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from types import SimpleNamespace
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item
+    import KaosEghis.ui.tabs.kaoseghis_tab as tab_module
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        macro = create_item(connection, "물치", "macro", True)
+
+    page = tab_module.LauncherPage(db_path)
+
+    def fail_if_confirmed(*_args, **_kwargs):
+        raise AssertionError("Launcher macro execution must not ask for confirmation.")
+
+    class FakeMacroRunner:
+        def __init__(self, _db_path) -> None:
+            pass
+
+        def execute_macro(self, item_id, dry_run=False):
+            assert item_id == macro.id
+            assert dry_run is False
+            assert page.log.toPlainText() == "Running '물치'..."
+            return SimpleNamespace(
+                success=True,
+                message="Macro execution completed.",
+                executed_steps=1,
+                failed_step=None,
+            )
+
+    monkeypatch.setattr(tab_module.QMessageBox, "question", fail_if_confirmed)
+    monkeypatch.setattr(tab_module, "MacroRunner", FakeMacroRunner)
+
+    page._run_macro_by_id(macro.id)
+
+    assert page.log.toPlainText().startswith("Completed '물치'.")
 
 
 def test_launcher_page_has_emr_connection_toggle(tmp_path, monkeypatch) -> None:

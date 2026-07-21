@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS items (
     item_type TEXT NOT NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
     emr_target_profile_id INTEGER,
-    launcher_section TEXT NOT NULL DEFAULT 'Eghis',
+    launcher_section TEXT NOT NULL DEFAULT 'Macro',
     launcher_position INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS macro_steps (
     value TEXT,
     timeout_seconds REAL NOT NULL DEFAULT 5,
     retries INTEGER NOT NULL DEFAULT 0,
+    press_enter_after INTEGER NOT NULL DEFAULT 0,
+    wait_before_enabled INTEGER NOT NULL DEFAULT 0,
+    wait_before_ms INTEGER NOT NULL DEFAULT 100,
     FOREIGN KEY (item_id) REFERENCES items(id)
 );
 

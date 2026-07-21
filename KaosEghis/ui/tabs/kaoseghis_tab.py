@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEventLoop, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -20,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from KaosEghis.core.clipboard_service import copy_text
 from KaosEghis.core.macro_runner import MacroRunner
 from KaosEghis.core.eghis_connector import (
     build_connector_settings,
@@ -36,12 +44,14 @@ from KaosEghis.db.repositories import (
     delete_macro_steps_for_item,
     get_active_emr_target_profile,
     get_item,
+    list_clipboard_variants,
     list_items,
     list_launcher_items,
     list_macro_steps,
     get_settings,
     resolve_macro_emr_target_profile,
     reorder_macro_steps,
+    replace_clipboard_variants,
     update_item_launcher_placement,
     update_item,
 )
@@ -111,7 +121,9 @@ class LauncherPage(QWidget):
         title = QLabel("Launcher")
         title.setObjectName("pageTitle")
 
-        self.summary_label = QLabel("Double-click a macro to run it. Drag between columns to organize.")
+        self.summary_label = QLabel(
+            "Double-click a macro to run it or a MacroText to copy it."
+        )
         self.summary_label.setObjectName("macroSummary")
 
         self.connection_toggle = QPushButton("Connect EMR")
@@ -133,7 +145,9 @@ class LauncherPage(QWidget):
             section_label.setObjectName("launcherSectionTitle")
             section_list = LauncherListWidget(section, self)
             section_list.itemDoubleClicked.connect(
-                lambda item, list_widget=section_list: self.run_macro_from_list(list_widget, item)
+                lambda item, list_widget=section_list: self.activate_launcher_item(
+                    list_widget, item
+                )
             )
             self.launcher_lists[section] = section_list
             columns.addWidget(section_label, 0, index)
@@ -167,10 +181,11 @@ class LauncherPage(QWidget):
         self.refresh_view()
 
     def refresh_view(self) -> None:
-        macros = _load_launcher_macros(self._db_path)
-        self._populate_launcher_lists(macros)
+        launcher_items = _load_launcher_items(self._db_path)
+        self._populate_launcher_lists(launcher_items)
         self._refresh_connection_status()
-        macro_names = ", ".join(macro.name for macro in macros[:6])
+        macros = [item for item in launcher_items if item.item_type == "macro"]
+        macro_names = ", ".join(item.name for item in macros[:6])
         if len(macros) > 6:
             macro_names += ", ..."
         self.summary_label.setText(
@@ -283,29 +298,51 @@ class LauncherPage(QWidget):
             return
         self._run_macro_by_id(item_id)
 
-    def run_macro_from_list(
+    def activate_launcher_item(
         self,
         list_widget: "LauncherListWidget",
         item: QListWidgetItem,
     ) -> None:
         item_id = item.data(list_widget.ITEM_ID_ROLE)
-        if isinstance(item_id, int):
-            list_widget.setCurrentItem(item)
+        item_type = item.data(list_widget.ITEM_TYPE_ROLE)
+        if not isinstance(item_id, int):
+            return
+        list_widget.setCurrentItem(item)
+        if item_type == "macro":
             self._run_macro_by_id(item_id)
+            return
+        if item_type in {"clipboard", "randomized_clipboard"}:
+            self._copy_macrotext_by_id(item_id)
+
+    # Compatibility name retained for callers that still invoke the old handler.
+    def run_macro_from_list(
+        self,
+        list_widget: "LauncherListWidget",
+        item: QListWidgetItem,
+    ) -> None:
+        self.activate_launcher_item(list_widget, item)
+
+    def _copy_macrotext_by_id(self, item_id: int) -> None:
+        success, message = _copy_macrotext(self._db_path, item_id)
+        self.log.setPlainText(message)
 
     def _run_macro_by_id(self, item_id: int) -> None:
-        if (
-            QMessageBox.question(
-                self,
-                "Confirm Macro Execution",
-                "Run the selected macro now?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            != QMessageBox.StandardButton.Yes
-        ):
-            self.log.setPlainText("Macro execution canceled.")
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            item = get_item(connection, item_id)
+        if item is None:
+            self.log.setPlainText("Macro not found.")
             return
+        if item.item_type != "macro":
+            self.log.setPlainText("Select a macro to run.")
+            return
+
+        self.log.setPlainText(f"Running '{item.name}'...")
+        application = QApplication.instance()
+        if application is not None:
+            application.processEvents(
+                QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
+            )
 
         result = MacroRunner(self._db_path).execute_macro(item_id, dry_run=False)
         if not result.success and "reconnect manually and retry" in (result.message or "").casefold():
@@ -314,7 +351,10 @@ class LauncherPage(QWidget):
                 "Application reconnection required",
                 result.message,
             )
-        self.log.setPlainText(_format_macro_run_result(result))
+        outcome = "Completed" if result.success else "Stopped"
+        self.log.setPlainText(
+            f"{outcome} '{item.name}'.\n\n{_format_macro_run_result(result)}"
+        )
 
     def persist_launcher_layout(self) -> None:
         initialize_database(self._db_path)
@@ -331,18 +371,28 @@ class LauncherPage(QWidget):
                             index + 1,
                         )
 
-    def _populate_launcher_lists(self, macros: list) -> None:
+    def _populate_launcher_lists(self, launcher_items: list) -> None:
         by_section = {section: [] for section in LAUNCHER_SECTIONS}
-        for macro in macros:
-            by_section.setdefault(macro.launcher_section, []).append(macro)
+        for launcher_item in launcher_items:
+            by_section.setdefault(launcher_item.launcher_section, []).append(
+                launcher_item
+            )
         for section, list_widget in self.launcher_lists.items():
             list_widget.blockSignals(True)
             list_widget.clear()
-            for macro in by_section.get(section, []):
-                profile_text = _macro_profile_text(self._db_path, macro)
-                item = QListWidgetItem(macro.name)
-                item.setData(list_widget.ITEM_ID_ROLE, macro.id)
-                item.setToolTip(profile_text)
+            for launcher_item in by_section.get(section, []):
+                item = QListWidgetItem(launcher_item.name)
+                item.setData(list_widget.ITEM_ID_ROLE, launcher_item.id)
+                item.setData(list_widget.ITEM_TYPE_ROLE, launcher_item.item_type)
+                if launcher_item.item_type == "macro":
+                    item.setToolTip(_macro_profile_text(self._db_path, launcher_item))
+                else:
+                    mode = (
+                        "Random selection"
+                        if launcher_item.item_type == "randomized_clipboard"
+                        else "Simple copy"
+                    )
+                    item.setToolTip(f"MacroText: {mode}")
                 list_widget.addItem(item)
             list_widget.blockSignals(False)
 
@@ -352,7 +402,8 @@ class LauncherPage(QWidget):
             if current is None:
                 continue
             item_id = current.data(list_widget.ITEM_ID_ROLE)
-            if isinstance(item_id, int):
+            item_type = current.data(list_widget.ITEM_TYPE_ROLE)
+            if isinstance(item_id, int) and item_type == "macro":
                 return item_id
         return None
 
@@ -412,7 +463,7 @@ class MacrosPage(QWidget):
         self.automation_summary.setText(f"Saved automation IDs: {macro_ids}")
 
     def add_macro(self) -> None:
-        dialog = MacroEditorDialog(self)
+        dialog = MacroEditorDialog(self, db_path=self._db_path)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         values = dialog.values()
@@ -445,7 +496,7 @@ class MacrosPage(QWidget):
             item = _get_required_item(connection, item_id)
             steps = list_macro_steps(connection, item_id)
 
-        dialog = MacroEditorDialog(self, item, steps)
+        dialog = MacroEditorDialog(self, item, steps, db_path=self._db_path)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         values = dialog.values()
@@ -532,8 +583,10 @@ class MacroTextsPage(QWidget):
         title = QLabel("MacroTexts")
         title.setObjectName("pageTitle")
 
-        self.presets_table = QTableWidget(0, 3)
-        self.presets_table.setHorizontalHeaderLabels(["id", "name", "type"])
+        self.presets_table = QTableWidget(0, 4)
+        self.presets_table.setHorizontalHeaderLabels(
+            ["id", "name", "mode", "options"]
+        )
         self.presets_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.presets_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.presets_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -541,10 +594,27 @@ class MacroTextsPage(QWidget):
         self.empty_state = QLabel("No preset strings configured.")
         self.empty_state.setObjectName("presetEmptyState")
 
+        self.add_button = QPushButton("Add MacroText")
+        self.add_button.clicked.connect(self.add_macrotext)
+        self.edit_button = QPushButton("Edit MacroText")
+        self.edit_button.clicked.connect(self.edit_macrotext)
+        self.delete_button = QPushButton("Delete MacroText")
+        self.delete_button.clicked.connect(self.delete_macrotext)
+        self.copy_button = QPushButton("Copy to Clipboard")
+        self.copy_button.clicked.connect(self.copy_macrotext)
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_view)
 
+        self.status_label = QLabel("")
+        self.presets_table.cellDoubleClicked.connect(
+            lambda _row, _column: self.copy_macrotext()
+        )
+
         controls = QHBoxLayout()
+        controls.addWidget(self.add_button)
+        controls.addWidget(self.edit_button)
+        controls.addWidget(self.delete_button)
+        controls.addWidget(self.copy_button)
         controls.addWidget(self.refresh_button)
         controls.addStretch()
 
@@ -553,6 +623,7 @@ class MacroTextsPage(QWidget):
         layout.addWidget(self.empty_state)
         layout.addWidget(self.presets_table)
         layout.addLayout(controls)
+        layout.addWidget(self.status_label)
 
         self.refresh_view()
 
@@ -562,16 +633,182 @@ class MacroTextsPage(QWidget):
             preset_items = []
             for item_type in ("clipboard", "randomized_clipboard"):
                 preset_items.extend(list_items(connection, item_type))
+            variant_counts = {
+                item.id: len(list_clipboard_variants(connection, item.id))
+                for item in preset_items
+            }
 
         self.presets_table.setRowCount(len(preset_items))
         for row_index, item in enumerate(preset_items):
             self.presets_table.setItem(row_index, 0, QTableWidgetItem(str(item.id)))
             self.presets_table.setItem(row_index, 1, QTableWidgetItem(item.name))
-            self.presets_table.setItem(row_index, 2, QTableWidgetItem(item.item_type))
+            mode = (
+                "Random selection"
+                if item.item_type == "randomized_clipboard"
+                else "Simple copy"
+            )
+            self.presets_table.setItem(row_index, 2, QTableWidgetItem(mode))
+            self.presets_table.setItem(
+                row_index, 3, QTableWidgetItem(str(variant_counts[item.id]))
+            )
         self.presets_table.resizeColumnsToContents()
         has_presets = bool(preset_items)
         self.empty_state.setVisible(not has_presets)
         self.presets_table.setVisible(has_presets)
+
+    def add_macrotext(self) -> None:
+        dialog = MacroTextDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        values = dialog.values()
+        if not self._validate_values(values):
+            return
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            item = create_item(
+                connection,
+                values["name"],
+                values["item_type"],
+                True,
+                launcher_section="Comments",
+            )
+            replace_clipboard_variants(connection, item.id, values["bodies"])
+        self.refresh_view()
+        self.status_label.setText("MacroText added to Comments.")
+
+    def edit_macrotext(self) -> None:
+        item_id = self._selected_item_id()
+        if item_id is None:
+            self.status_label.setText("Select a MacroText to edit.")
+            return
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            item = get_item(connection, item_id)
+            variants = list_clipboard_variants(connection, item_id)
+        if item is None:
+            self.status_label.setText("MacroText not found.")
+            return
+        dialog = MacroTextDialog(self, item, [variant.body for variant in variants])
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        values = dialog.values()
+        if not self._validate_values(values):
+            return
+        with connect(self._db_path) as connection:
+            update_item(
+                connection,
+                item_id,
+                values["name"],
+                values["item_type"],
+                True,
+                launcher_section="Comments",
+            )
+            replace_clipboard_variants(connection, item_id, values["bodies"])
+        self.refresh_view()
+        self.status_label.setText("MacroText updated.")
+
+    def delete_macrotext(self) -> None:
+        item_id = self._selected_item_id()
+        if item_id is None:
+            self.status_label.setText("Select a MacroText to delete.")
+            return
+        if (
+            QMessageBox.question(self, "Confirm", "Delete selected MacroText?")
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        with connect(self._db_path) as connection:
+            deleted = delete_item(connection, item_id)
+        self.refresh_view()
+        self.status_label.setText(
+            "MacroText deleted." if deleted else "MacroText not found."
+        )
+
+    def copy_macrotext(self) -> None:
+        item_id = self._selected_item_id()
+        if item_id is None:
+            self.status_label.setText("Select a MacroText to copy.")
+            return
+        _success, message = _copy_macrotext(self._db_path, item_id)
+        self.status_label.setText(message)
+
+    def _selected_item_id(self) -> int | None:
+        selected = self.presets_table.selectedItems()
+        if not selected:
+            return None
+        id_item = self.presets_table.item(selected[0].row(), 0)
+        return int(id_item.text()) if id_item is not None else None
+
+    def _validate_values(self, values: dict) -> bool:
+        if not values["name"]:
+            self.status_label.setText("MacroText name is required.")
+            return False
+        if not values["bodies"]:
+            self.status_label.setText("MacroText content is required.")
+            return False
+        return True
+
+
+class MacroTextDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget,
+        item=None,
+        bodies: list[str] | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("MacroText")
+        self.name = QLineEdit(item.name if item is not None else "")
+        self.randomized = QCheckBox("Choose one option at random")
+        self.randomized.setChecked(
+            item is not None and item.item_type == "randomized_clipboard"
+        )
+        self.content = QPlainTextEdit()
+        self.content.setPlaceholderText("Enter text to copy.")
+        self.content.setPlainText(self._display_content(bodies or []))
+        self.randomized.toggled.connect(self._update_content_hint)
+        self._update_content_hint(self.randomized.isChecked())
+
+        form = QFormLayout()
+        form.addRow("Name", self.name)
+        form.addRow("Mode", self.randomized)
+        form.addRow("Text", self.content)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+        self.resize(560, 420)
+
+    def values(self) -> dict:
+        content = self.content.toPlainText().strip()
+        if self.randomized.isChecked():
+            bodies = [line.strip() for line in content.splitlines() if line.strip()]
+            item_type = "randomized_clipboard"
+        else:
+            bodies = [content] if content else []
+            item_type = "clipboard"
+        return {
+            "name": self.name.text().strip(),
+            "item_type": item_type,
+            "bodies": bodies,
+        }
+
+    def _display_content(self, bodies: list[str]) -> str:
+        return "\n".join(bodies)
+
+    def _update_content_hint(self, randomized: bool) -> None:
+        self.content.setPlaceholderText(
+            "Enter one option per line."
+            if randomized
+            else "Enter the text to copy. Multiline text is supported."
+        )
 
 
 PresetsPage = MacroTextsPage
@@ -579,6 +816,7 @@ PresetsPage = MacroTextsPage
 
 class LauncherListWidget(QListWidget):
     ITEM_ID_ROLE = 256
+    ITEM_TYPE_ROLE = 257
 
     def __init__(self, section: str, launcher_page: LauncherPage) -> None:
         super().__init__()
@@ -592,14 +830,28 @@ class LauncherListWidget(QListWidget):
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setStyleSheet(
             "QListWidget {"
-            " border: 1px solid #45475a;"
+            " border: 1px solid #4c566a;"
             " border-radius: 6px;"
             " padding: 4px;"
-            " background-color: #1e1e2e;"
+            " background-color: #2e3440;"
             "}"
         )
 
     def dropEvent(self, event) -> None:
+        source = event.source()
+        if isinstance(source, LauncherListWidget):
+            source_item = source.currentItem()
+            item_type = (
+                source_item.data(self.ITEM_TYPE_ROLE)
+                if source_item is not None
+                else None
+            )
+            if (
+                item_type in {"clipboard", "randomized_clipboard"}
+                and self.section != "Comments"
+            ):
+                event.ignore()
+                return
         super().dropEvent(event)
         self.launcher_page.persist_launcher_layout()
 
@@ -619,10 +871,37 @@ def _load_macros(db_path: Path | None) -> list:
         return list_items(connection, "macro")
 
 
-def _load_launcher_macros(db_path: Path | None) -> list:
+def _load_launcher_items(db_path: Path | None) -> list:
     initialize_database(db_path)
     with connect(db_path) as connection:
         return list_launcher_items(connection)
+
+
+def _load_launcher_macros(db_path: Path | None) -> list:
+    return [
+        item for item in _load_launcher_items(db_path) if item.item_type == "macro"
+    ]
+
+
+def _copy_macrotext(db_path: Path | None, item_id: int) -> tuple[bool, str]:
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = get_item(connection, item_id)
+        variants = list_clipboard_variants(connection, item_id)
+    if item is None or item.item_type not in {"clipboard", "randomized_clipboard"}:
+        return False, "MacroText not found."
+    if not variants:
+        return False, f"MacroText '{item.name}' has no text."
+    text = (
+        random.choice(variants).body
+        if item.item_type == "randomized_clipboard"
+        else variants[0].body
+    )
+    try:
+        copy_text(text)
+    except Exception:
+        return False, "Clipboard copy failed."
+    return True, f"Copied '{item.name}' to clipboard."
 
 
 def _populate_macro_table(

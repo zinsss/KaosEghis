@@ -1,6 +1,6 @@
 # KaosEghis Macro
 
-Last updated: 2026-06-30
+Last updated: 2026-07-21
 
 ## Purpose
 
@@ -48,6 +48,15 @@ Supported item types:
 - `macro`
 - `workflow`
 
+`clipboard` and `randomized_clipboard` items are presented as **MacroTexts**.
+They share one source of truth:
+
+- a `clipboard` MacroText stores one fixed body
+- a `randomized_clipboard` MacroText stores multiple options and chooses one per use
+- the Launcher `Comments` column copies the resolved body to the clipboard
+- a macro `preset_text` step selects the same item by its stable item ID and pastes
+  the resolved body through the guarded macro runner
+
 ## Macro Definition Structure
 
 Current step fields:
@@ -76,6 +85,24 @@ Allowed stored actions in the model:
 - `mouse_click`
 - `wait_ms`
 
+`type_text`/`type_text_keyboard` steps can optionally send one `{ENTER}` after the
+configured text. The option is off by default, including for existing saved macros.
+
+Every macro step also has an optional **Wait before action** timing toggle with an
+editable millisecond value. It is off by default for existing and new steps; an
+enabled wait is cancellation-aware and appears in dry-run output. There is no
+automatic post-action delay.
+
+Step order is managed directly in the Macro Builder table. Drag a complete row to a
+new position; the order display renumbers automatically and is persisted when the
+macro is saved. The Add/Edit Step dialog does not expose manual order numbering.
+
+The manual EMR connection remains cached between macro runs. Before each real run,
+KaosEghis revalidates the cached PID, executable identity, window handle, and owning
+PID, then focuses the cached window if it is no longer foreground. Elapsed time or a
+previous run alone does not invalidate a healthy manual connection; a dead,
+mismatched, blocked, or unfocusable application still requires manual reconnection.
+
 Important:
 
 - the storage model is intentionally broader than the currently allowed real execution engine
@@ -86,9 +113,19 @@ Important:
 Daily-use macro access:
 
 - [KaosEghis/ui/tabs/kaoseghis_tab.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/kaoseghis_tab.py)
-- shows macro list
-- supports dry run and manual run
+- shows saved macros in the three Launcher columns
+- double-click and `Run selected macro` start the selected Launcher macro immediately
+- shows `Running '<macro name>'...` while the macro is executing
+- does not show a per-run confirmation in Launcher; the EMR connection and runtime
+  safety gates still block stale, mismatched, or unavailable targets
+- supports dry run
 - shows the resolved EMR profile name for each macro
+- uses the three columns `Favorite`, `Macro`, and `Comments`; new macros default to
+  `Macro`, favorite macros can be dragged into `Favorite`, and `Comments` can contain
+  both macros and directly copied MacroTexts
+
+The Builder remains the configuration/testing surface and keeps confirmation before
+its explicit real-run action.
 
 EMR targeting foundation:
 
@@ -100,6 +137,8 @@ Editor behavior:
 
 - the macro editor exposes an EMR profile selector
 - the step editor exposes a target selector populated from the selected profile's EMR UI target keys
+- the `preset_text` step exposes a MacroText selector instead of requiring the
+  operator to remember an item ID
 
 Configuration/editing surfaces:
 
