@@ -40,7 +40,8 @@ def resolve_target_element(
     messages: list[str] = []
     saw_empty_title = False
     resolved_parent_found: bool | None = None
-    for backend in ("uia", "win32"):
+    backend_order = _preferred_backend_order(target)
+    for backend in backend_order:
         match, parent_found, message = _resolve_target_element_for_backend(
             Desktop,
             backend,
@@ -61,6 +62,12 @@ def resolve_target_element(
     if messages:
         return None, resolved_parent_found, " | ".join(messages)
     return None, resolved_parent_found, "Target could not be resolved."
+
+
+def _preferred_backend_order(target: UiTargetRecord) -> tuple[str, ...]:
+    if _clean(target.parent_automation_id) or _clean(getattr(target, "ancestor_path", None)):
+        return ("win32", "uia")
+    return ("uia", "win32")
 
 
 def _resolve_target_element_for_backend(
@@ -226,51 +233,22 @@ def _resolve_target_element(
 
     parent_automation_id = _clean(target.parent_automation_id)
     ancestor_path = _clean(getattr(target, "ancestor_path", None))
-    if ancestor_path:
-        scoped_parent, parent_found, message = _resolve_ancestor_path_scope(
-            window,
-            target,
-            ancestor_path,
-        )
-        if scoped_parent is None:
-            return None, parent_found, message
-        try:
-            elements = scoped_parent.descendants()
-        except Exception as error:
-            return (
-                None,
-                parent_found,
-                f"Unable to inspect ancestor-scoped children for UI target '{target.target_id}': {error}",
-            )
-        match, message = _find_target_element(
-            elements,
-            target,
-            scope_description="inside ancestor path",
-        )
-        if match is None:
-            return None, parent_found, message
-        return match, parent_found, "Target found."
-
     if parent_automation_id:
         parent, message = _find_parent_element(window, target, parent_automation_id)
         if parent is None:
+            if ancestor_path:
+                return _resolve_target_with_ancestor_path(window, target, ancestor_path)
             return None, False, message
-        try:
-            elements = parent.descendants()
-        except Exception as error:
-            return (
-                None,
-                True,
-                f"Unable to inspect children of parent '{parent_automation_id}': {error}",
-            )
-        match, message = _find_target_element(
-            elements,
+        return _resolve_target_inside_parent_scope(
+            parent,
             target,
             scope_description=f"inside parent automation_id '{parent_automation_id}'",
+            ancestor_path=ancestor_path,
+            parent_anchor_name=_element_name(parent),
         )
-        if match is None:
-            return None, True, message
-        return match, True, "Target found."
+
+    if ancestor_path:
+        return _resolve_target_with_ancestor_path(window, target, ancestor_path)
 
     try:
         elements = window.descendants()
@@ -293,9 +271,23 @@ def _find_parent_element(
     try:
         parent = window.child_window(auto_id=parent_automation_id).wrapper_object()
     except Exception as error:
+        fallback_parent = _find_parent_element_from_descendants(
+            window,
+            target,
+            parent_automation_id,
+        )
+        if fallback_parent is not None:
+            return fallback_parent, "Parent found."
         message = _parent_lookup_error_message(target, parent_automation_id, error)
         return None, message
     if parent is None:
+        fallback_parent = _find_parent_element_from_descendants(
+            window,
+            target,
+            parent_automation_id,
+        )
+        if fallback_parent is not None:
+            return fallback_parent, "Parent found."
         return (
             None,
             f"Parent automation_id '{parent_automation_id}' for UI target "
@@ -319,6 +311,39 @@ def _parent_lookup_error_message(
         f"Parent automation_id '{parent_automation_id}' for UI target "
         f"'{target.target_id}' was not found."
     )
+
+
+def _find_parent_element_from_descendants(
+    window: Any,
+    target: UiTargetRecord,
+    parent_automation_id: str,
+) -> Any | None:
+    try:
+        descendants = window.descendants()
+    except Exception:
+        return None
+
+    auto_matches = [
+        element
+        for element in descendants
+        if _element_automation_id(element) == parent_automation_id
+    ]
+    if len(auto_matches) == 1:
+        return auto_matches[0]
+    if len(auto_matches) > 1:
+        return None
+
+    for ancestor_name in _meaningful_ancestor_names(
+        _clean(getattr(target, "ancestor_path", None))
+    ):
+        name_matches = [
+            element
+            for element in descendants
+            if _element_name(element) == ancestor_name
+        ]
+        if len(name_matches) == 1:
+            return name_matches[0]
+    return None
 
 
 def _find_target_element(
@@ -354,6 +379,124 @@ def _find_target_element(
     if scope_description:
         description = f"{description} {scope_description}"
     return _single_match(matches, target, description)
+
+
+def _resolve_target_with_ancestor_path(
+    window: Any,
+    target: UiTargetRecord,
+    ancestor_path: str,
+) -> tuple[Any | None, bool | None, str]:
+    scoped_parent, parent_found, message = _resolve_ancestor_path_scope(
+        window,
+        target,
+        ancestor_path,
+    )
+    if scoped_parent is None:
+        return None, parent_found, message
+    try:
+        elements = scoped_parent.descendants()
+    except Exception as error:
+        return (
+            None,
+            parent_found,
+            f"Unable to inspect ancestor-scoped children for UI target '{target.target_id}': {error}",
+        )
+    match, message = _find_target_element(
+        elements,
+        target,
+        scope_description="inside ancestor path",
+    )
+    if match is None:
+        return None, parent_found, message
+    return match, parent_found, "Target found."
+
+
+def _resolve_target_inside_parent_scope(
+    parent: Any,
+    target: UiTargetRecord,
+    *,
+    scope_description: str,
+    ancestor_path: str | None,
+    parent_anchor_name: str | None,
+) -> tuple[Any | None, bool | None, str]:
+    direct_match, direct_message = _find_direct_child_match(
+        parent,
+        target,
+        scope_description=scope_description,
+    )
+    if direct_match is not None:
+        return direct_match, True, "Target found."
+
+    try:
+        parent_elements = parent.descendants()
+    except Exception as error:
+        return (
+            None,
+            True,
+            f"Unable to inspect children of {scope_description}: {error}",
+        )
+
+    relaxed_match, relaxed_message = _find_target_element_by_automation_id(
+        parent_elements,
+        target,
+        scope_description=scope_description,
+    )
+    if relaxed_match is not None:
+        return relaxed_match, True, "Target found."
+
+    scoped_container = parent
+    tail_failure_message = ""
+    if ancestor_path:
+        tail_nodes = _ancestor_tail_nodes_from_anchor(ancestor_path, parent_anchor_name)
+        if tail_nodes:
+            descendant_scope, message = _resolve_descendant_path(parent, tail_nodes)
+            if descendant_scope is not None:
+                scoped_container = descendant_scope
+            else:
+                tail_failure_message = message
+
+    try:
+        elements = scoped_container.descendants()
+    except Exception as error:
+        return (
+            None,
+            True,
+            f"Unable to inspect children of {scope_description}: {error}",
+        )
+    relaxed_match, relaxed_message = _find_target_element_by_automation_id(
+        elements,
+        target,
+        scope_description=scope_description,
+    )
+    if relaxed_match is not None:
+        return relaxed_match, True, "Target found."
+
+    match, message = _find_target_element(
+        elements,
+        target,
+        scope_description=scope_description,
+    )
+    if match is not None:
+        return match, True, "Target found."
+    return None, True, relaxed_message or message or tail_failure_message
+
+
+def _find_direct_child_match(
+    scope: Any,
+    target: UiTargetRecord,
+    *,
+    scope_description: str,
+) -> tuple[Any | None, str]:
+    automation_id = _clean(target.automation_id)
+    if not automation_id:
+        return None, ""
+    try:
+        match = scope.child_window(auto_id=automation_id).wrapper_object()
+    except Exception:
+        return None, ""
+    if match is None:
+        return None, ""
+    return match, f"automation_id '{automation_id}' {scope_description}"
 
 
 def _resolve_ancestor_path_scope(
@@ -412,6 +555,66 @@ def _resolve_ancestor_path_scope(
     return None, False, last_message
 
 
+def _resolve_descendant_path(
+    scope: Any,
+    nodes: list[dict[str, str]],
+) -> tuple[Any | None, str]:
+    current_scope = scope
+    for node in nodes:
+        try:
+            elements = current_scope.descendants()
+        except Exception as error:
+            return None, f"Unable to inspect descendant scope: {error}"
+        matches = [
+            element
+            for element in elements
+            if _matches_ancestor_node(element, node)
+        ]
+        description = _describe_ancestor_node(node)
+        if not matches:
+            return None, f"Descendant {description} was not found."
+        if len(matches) > 1:
+            return None, f"Descendant {description} matched {len(matches)} elements."
+        current_scope = matches[0]
+    return current_scope, "Descendant path resolved."
+
+
+def _ancestor_tail_nodes_from_anchor(
+    ancestor_path: str,
+    anchor_name: str | None,
+) -> list[dict[str, str]]:
+    nodes = _parse_ancestor_path(ancestor_path)
+    if not nodes:
+        return []
+    if not anchor_name:
+        return []
+
+    meaningful_nodes = [node for node in nodes if not _is_noise_ancestor_node(node)]
+    anchor_index = next(
+        (
+            index
+            for index, node in enumerate(meaningful_nodes)
+            if str(node.get("name", "")).strip() == anchor_name
+        ),
+        None,
+    )
+    if anchor_index is None:
+        return []
+
+    tail_nodes = meaningful_nodes[:anchor_index]
+    normalized_tail = [
+        node
+        for node in tail_nodes
+        if str(node.get("name", "")).strip().casefold()
+        not in {"dockpanel", "pnlmain", "pnlmainback"}
+        and not str(node.get("name", "")).strip().casefold().startswith("sidepanel")
+        and not (
+            len(node) == 1 and node.get("control_type") == "Window"
+        )
+    ]
+    return list(reversed(normalized_tail))
+
+
 def _single_match(
     matches: list[Any], target: UiTargetRecord, description: str
 ) -> tuple[Any | None, str]:
@@ -423,6 +626,25 @@ def _single_match(
             f"UI target '{target.target_id}' matched {len(matches)} elements by {description}.",
         )
     return matches[0], "Target found."
+
+
+def _find_target_element_by_automation_id(
+    elements: list[Any],
+    target: UiTargetRecord,
+    scope_description: str | None = None,
+) -> tuple[Any | None, str]:
+    automation_id = _clean(target.automation_id)
+    if not automation_id:
+        return None, ""
+    matches = [
+        element
+        for element in elements
+        if _element_automation_id(element) == automation_id
+    ]
+    description = f"automation_id '{automation_id}'"
+    if scope_description:
+        description = f"{description} {scope_description}"
+    return _single_match(matches, target, description)
 
 
 def _parse_ancestor_path(ancestor_path: str) -> list[dict[str, str]]:
@@ -457,6 +679,24 @@ def _effective_ancestor_nodes(window: Any, nodes: list[dict[str, str]]) -> list[
             continue
         effective.append(node)
     return effective
+
+
+def _meaningful_ancestor_names(ancestor_path: str | None) -> list[str]:
+    if not ancestor_path:
+        return []
+    names: list[str] = []
+    for node in reversed(_parse_ancestor_path(ancestor_path)):
+        name = str(node.get("name", "")).strip()
+        if not name or name in {"[ No Parent ]", "데스크톱", "데스크톱 2"}:
+            continue
+        lowered = name.casefold()
+        if lowered in {"dockpanel", "pnlmain", "pnlmainback"}:
+            continue
+        if lowered.startswith("sidepanel"):
+            continue
+        if name not in names:
+            names.append(name)
+    return names
 
 
 def _is_noise_ancestor_node(node: dict[str, str]) -> bool:

@@ -17,6 +17,7 @@ from KaosEghis.core.uia_inspector import resolve_target_element
 from KaosEghis.db.database import connect, get_database_path
 from KaosEghis.db.repositories import (
     EmrUiTargetRecord,
+    get_emr_target_profile,
     UiTargetRecord,
     get_emr_ui_target_by_key,
     get_item,
@@ -712,6 +713,12 @@ class MacroRunner:
         connection,
         emr_target: EmrUiTargetRecord,
     ) -> UiTargetRecord:
+        profile = get_emr_target_profile(connection, emr_target.profile_id)
+        profile_main_window_automation_id = (
+            profile.main_window_automation_id
+            if profile is not None and profile.main_window_automation_id
+            else None
+        )
         parent_automation_id = None
         parent_target_key = emr_target.parent_target_key
         if parent_target_key:
@@ -722,6 +729,8 @@ class MacroRunner:
             )
             if parent_target is not None:
                 parent_automation_id = parent_target.automation_id
+        if profile_main_window_automation_id and parent_automation_id in {None, "MdiMain"}:
+            parent_automation_id = profile_main_window_automation_id
         return UiTargetRecord(
             id=emr_target.id,
             target_id=emr_target.target_key,

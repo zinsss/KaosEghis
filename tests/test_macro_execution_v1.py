@@ -507,6 +507,83 @@ def test_emr_parent_target_key_is_converted_to_parent_automation_scope(tmp_path)
     assert runtime_target.parent_automation_id == "MdiMain"
 
 
+def test_emr_profile_main_window_automation_id_is_used_as_runtime_scope(
+    tmp_path,
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_emr_target_profile, create_emr_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Production",
+            is_enabled=True,
+            is_default=True,
+            main_window_automation_id="H2OpdTreatment",
+        )
+        target = create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="noclaim",
+            label="청구안함",
+            automation_id="chkInspTargetYn",
+            control_type="CheckBox",
+            name_match="청구안함",
+        )
+        runner = MacroRunner(db_path)
+        runtime_target = runner._runtime_target_from_emr_target(connection, target)
+
+    assert runtime_target.parent_target_id is None
+    assert runtime_target.parent_automation_id == "H2OpdTreatment"
+
+
+def test_emr_profile_main_window_automation_id_overrides_generic_mdimain_scope(
+    tmp_path,
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_emr_target_profile,
+        create_emr_ui_target,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Production",
+            is_enabled=True,
+            is_default=True,
+            main_window_automation_id="H2OpdTreatment",
+        )
+        create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="eghis_main",
+            label="eghis",
+            automation_id="MdiMain",
+            name_match="이지스 전자차트 2.0",
+        )
+        target = create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="noclaim",
+            label="청구안함",
+            automation_id="chkInspTargetYn",
+            control_type="CheckBox",
+            name_match="청구안함",
+            parent_target_key="eghis_main",
+        )
+        runner = MacroRunner(db_path)
+        runtime_target = runner._runtime_target_from_emr_target(connection, target)
+
+    assert runtime_target.parent_automation_id == "H2OpdTreatment"
+
+
 def test_macro_stops_on_failed_step(monkeypatch, tmp_path) -> None:
     from KaosEghis.core.macro_models import MacroRunResult
     from KaosEghis.core.macro_runner import MacroRunner

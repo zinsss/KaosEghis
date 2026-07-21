@@ -2369,6 +2369,322 @@ def test_inspect_target_readonly_falls_back_to_win32_backend(monkeypatch) -> Non
     assert win32_window.descendants_calls == 1
 
 
+def test_inspect_target_readonly_prefers_parent_automation_scope_over_stale_ancestor_path(
+    monkeypatch,
+) -> None:
+    import json
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target_inside_parent = _FakeElement(
+        "chkInspTargetYn",
+        name="청구안함",
+        control_type="CheckBox",
+    )
+    parent = _FakeElement(
+        "H2OpdTreatment",
+        name="진료실",
+        control_type="Window",
+        children=[target_inside_parent],
+    )
+    window = _FakeWindow("Eghis", [parent])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "noclaim",
+        None,
+        "H2OpdTreatment",
+        "chkInspTargetYn",
+        "청구안함",
+        "CheckBox",
+        None,
+        "now",
+        ancestor_path=json.dumps(
+            [
+                {"name": "sidePanel1", "control_type": "Window"},
+                {"name": "진료실", "control_type": "Window"},
+            ],
+            ensure_ascii=False,
+        ),
+    )
+
+    result = inspect_target_readonly(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert parent.descendants_calls == 0
+
+
+def test_inspect_target_readonly_uses_direct_child_lookup_before_descendant_scan(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target_inside_parent = _FakeElement(
+        "chkInspTargetYn",
+        name="청구안함",
+        control_type="CheckBox",
+    )
+    parent = _FakeElement(
+        "H2OpdTreatment",
+        name="진료실",
+        control_type="Window",
+        children=[target_inside_parent],
+    )
+    window = _FakeWindow("Eghis", [parent])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "noclaim",
+        None,
+        "H2OpdTreatment",
+        "chkInspTargetYn",
+        "청구안함",
+        "CheckBox",
+        None,
+        "now",
+    )
+
+    result = inspect_target_readonly(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert parent.descendants_calls == 0
+
+
+def test_inspect_target_readonly_can_fallback_to_meaningful_ancestor_name_for_parent_scope(
+    monkeypatch,
+) -> None:
+    import json
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target_inside_parent = _FakeElement(
+        "chkInspTargetYn",
+        name="청구안함",
+        control_type="CheckBox",
+    )
+    parent = _FakeElement(
+        "unknownAutoId",
+        name="진료실",
+        control_type="Window",
+        children=[target_inside_parent],
+    )
+    window = _FakeWindow("Eghis", [parent])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "noclaim",
+        None,
+        "H2OpdTreatment",
+        "chkInspTargetYn",
+        "청구안함",
+        "CheckBox",
+        None,
+        "now",
+        ancestor_path=json.dumps(
+            [
+                {"name": "sidePanel1", "control_type": "Window"},
+                {"name": "진료실", "control_type": "Window"},
+            ],
+            ensure_ascii=False,
+        ),
+    )
+
+    result = inspect_target_readonly(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+
+
+def test_inspect_target_readonly_uses_ancestor_tail_below_parent_anchor(
+    monkeypatch,
+) -> None:
+    import json
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target_inside_treatment = _FakeElement(
+        "chkInspTargetYn",
+        name="청구안함",
+        control_type="CheckBox",
+    )
+    prescription = _FakeElement(
+        "prescriptionPane",
+        name="처방",
+        control_type="Window",
+        children=[target_inside_treatment],
+    )
+    parent = _FakeElement(
+        "H2OpdTreatment",
+        name="진료실",
+        control_type="Window",
+        children=[prescription],
+    )
+    sibling_target = _FakeElement(
+        "chkInspTargetYn",
+        name="청구안함",
+        control_type="CheckBox",
+    )
+    window = _FakeWindow("Eghis", [parent, sibling_target])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "noclaim",
+        None,
+        "H2OpdTreatment",
+        "chkInspTargetYn",
+        "청구안함",
+        "CheckBox",
+        None,
+        "now",
+        ancestor_path=json.dumps(
+            [
+                {"name": "sidePanel1", "control_type": "Window"},
+                {"name": "처방", "control_type": "Window"},
+                {"name": "진료실", "control_type": "Window"},
+                {"name": "이지스 전자차트 2.0", "control_type": "Window"},
+            ],
+            ensure_ascii=False,
+        ),
+    )
+
+    result = inspect_target_readonly(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert prescription.descendants_calls == 1
+
+
+def test_inspect_target_readonly_can_relax_to_automation_id_inside_parent_scope(
+    monkeypatch,
+) -> None:
+    import json
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target_inside_parent = _FakeElement(
+        "chkInspTargetYn",
+        name=None,
+        control_type="Window",
+    )
+    parent = _FakeElement(
+        "H2OpdTreatment",
+        name="진료실",
+        control_type="Window",
+        children=[target_inside_parent],
+    )
+    window = _FakeWindow("Eghis", [parent])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "noclaim",
+        None,
+        "H2OpdTreatment",
+        "chkInspTargetYn",
+        "청구안함",
+        "CheckBox",
+        "WindowsForms10.Window.b.app.0.2bf8098_r6_ad1",
+        "now",
+        ancestor_path=json.dumps(
+            [{"name": "진료실", "control_type": "Window"}],
+            ensure_ascii=False,
+        ),
+    )
+
+    result = inspect_target_readonly(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+
+
+def test_inspect_target_readonly_prefers_automation_id_anchor_inside_parent_scope(
+    monkeypatch,
+) -> None:
+    import json
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    automation_only_target = _FakeElement(
+        "chkInspTargetYn",
+        name=None,
+        control_type="Window",
+    )
+    stale_path_target = _FakeElement(
+        "otherControl",
+        name="청구안함",
+        control_type="CheckBox",
+    )
+    prescription = _FakeElement(
+        "prescriptionPane",
+        name="처방",
+        control_type="Window",
+        children=[stale_path_target],
+    )
+    parent = _FakeElement(
+        "H2OpdTreatment",
+        name="진료실",
+        control_type="Window",
+        children=[automation_only_target, prescription],
+    )
+    window = _FakeWindow("Eghis", [parent])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "noclaim",
+        None,
+        "H2OpdTreatment",
+        "chkInspTargetYn",
+        "청구안함",
+        "CheckBox",
+        "WindowsForms10.Window.b.app.0.2bf8098_r6_ad1",
+        "now",
+        ancestor_path=json.dumps(
+            [
+                {"name": "처방", "control_type": "Window"},
+                {"name": "진료실", "control_type": "Window"},
+            ],
+            ensure_ascii=False,
+        ),
+    )
+
+    result = inspect_target_readonly(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert result.found_name is None
+
+
 def test_inspect_target_readonly_reports_missing_parent(monkeypatch) -> None:
     from KaosEghis.core.uia_inspector import inspect_target_readonly
     from KaosEghis.db.repositories import UiTargetRecord
@@ -2515,6 +2831,14 @@ class _FakeElement:
     def descendants(self) -> list:
         self.descendants_calls += 1
         return self._children
+
+    def child_window(self, auto_id: str):
+        matches = [
+            child
+            for child in self._children
+            if child.element_info.automation_id == auto_id
+        ]
+        return _FakeChildLookup(matches)
 
     def is_enabled(self) -> bool:
         return True
