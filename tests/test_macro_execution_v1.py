@@ -584,6 +584,51 @@ def test_emr_profile_main_window_automation_id_overrides_generic_mdimain_scope(
     assert runtime_target.parent_automation_id == "H2OpdTreatment"
 
 
+def test_emr_scope_automation_id_overrides_parent_key_and_profile_scope(
+    tmp_path,
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_emr_target_profile,
+        create_emr_ui_target,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Production",
+            is_enabled=True,
+            is_default=True,
+            main_window_automation_id="H2OpdTreatment",
+        )
+        create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="eghis_main",
+            label="eghis",
+            automation_id="MdiMain",
+            name_match="이지스 전자차트 2.0",
+        )
+        target = create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="patient_name_row1",
+            label="환자명 row 1",
+            scope_automation_id="grdOpdList",
+            automation_id=None,
+            control_type="DataItem",
+            name_match="환자명 row 1",
+            parent_target_key="eghis_main",
+        )
+        runner = MacroRunner(db_path)
+        runtime_target = runner._runtime_target_from_emr_target(connection, target)
+
+    assert runtime_target.parent_automation_id == "grdOpdList"
+
+
 def test_macro_stops_on_failed_step(monkeypatch, tmp_path) -> None:
     from KaosEghis.core.macro_models import MacroRunResult
     from KaosEghis.core.macro_runner import MacroRunner
@@ -1182,6 +1227,23 @@ def test_new_macro_step_dialog_defaults_to_focus_window(monkeypatch, tmp_path) -
     assert not hasattr(dialog, "step_order")
 
 
+def test_macro_step_dialog_includes_double_click_action(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QWidget
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.eghis_assist_tab import MacroStepDialog
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    initialize_database(tmp_path / "KaosEghis.sqlite")
+
+    parent = QWidget()
+    dialog = MacroStepDialog(parent)
+
+    assert dialog.action.findText("double_click") >= 0
+
+
 def test_macro_step_dialog_selects_saved_macrotext(monkeypatch, tmp_path) -> None:
     _app()
 
@@ -1465,6 +1527,197 @@ def test_click_failure_is_sanitized(monkeypatch, tmp_path) -> None:
 
     assert result.success is False
     assert result.message == "input failed"
+
+
+def test_click_prefers_fast_direct_action(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(
+            connection,
+            target_id="button.fast",
+            automation_id="FastButton",
+            control_type="Button",
+        )
+        item = create_item(connection, "Fast Click Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "click", target_id="button.fast")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.invoked = 0
+            self.clicked_input = 0
+
+        def invoke(self) -> None:
+            self.invoked += 1
+
+        def click_input(self) -> None:
+            self.clicked_input += 1
+
+    fake_element = FakeElement()
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (fake_element, None, "resolved"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert fake_element.invoked == 1
+    assert fake_element.clicked_input == 0
+
+
+def test_click_falls_back_to_click_input_when_fast_action_is_unavailable(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(
+            connection,
+            target_id="checkbox.slow",
+            automation_id="CheckSlow",
+            control_type="CheckBox",
+        )
+        item = create_item(connection, "Fallback Click Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "click", target_id="checkbox.slow")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class _ElementInfo:
+        control_type = "CheckBox"
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.element_info = _ElementInfo()
+            self.toggle_calls = 0
+            self.click_input_calls = 0
+
+        def toggle(self) -> None:
+            self.toggle_calls += 1
+            raise RuntimeError("toggle not supported")
+
+        def click_input(self) -> None:
+            self.click_input_calls += 1
+
+    fake_element = FakeElement()
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (fake_element, None, "resolved"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert fake_element.toggle_calls == 1
+    assert fake_element.click_input_calls == 1
+
+
+def test_double_click_uses_double_click_input(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(
+            connection,
+            target_id="row.patient",
+            automation_id="PatientRow",
+            control_type="DataItem",
+        )
+        item = create_item(connection, "Double Click Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "double_click", target_id="row.patient")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.double_click_input_calls = 0
+
+        def double_click_input(self) -> None:
+            self.double_click_input_calls += 1
+
+    fake_element = FakeElement()
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (fake_element, None, "resolved"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert fake_element.double_click_input_calls == 1
+
+
+def test_double_click_falls_back_to_double_click(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(
+            connection,
+            target_id="row.patient",
+            automation_id="PatientRow",
+            control_type="DataItem",
+        )
+        item = create_item(connection, "Double Click Fallback Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "double_click", target_id="row.patient")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.double_click_calls = 0
+
+        def double_click(self) -> None:
+            self.double_click_calls += 1
+
+    fake_element = FakeElement()
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (fake_element, None, "resolved"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert fake_element.double_click_calls == 1
 
 
 def test_target_resolution_failure_is_sanitized(monkeypatch, tmp_path) -> None:

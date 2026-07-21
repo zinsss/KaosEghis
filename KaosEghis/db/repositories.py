@@ -141,6 +141,7 @@ class EmrUiTargetRecord:
     target_key: str
     label: str
     description: str | None
+    scope_automation_id: str | None
     automation_id: str | None
     control_type: str | None
     class_name: str | None
@@ -159,6 +160,7 @@ ALLOWED_MACRO_ACTIONS = {
     "wait_window",
     "wait_text_or_image",
     "click",
+    "double_click",
     "hotkey",
     "type_text",
     "paste_text",
@@ -1124,7 +1126,7 @@ def list_emr_ui_targets(
 ) -> list[EmrUiTargetRecord]:
     rows = connection.execute(
         """
-        SELECT id, profile_id, target_key, label, description, automation_id,
+        SELECT id, profile_id, target_key, label, description, scope_automation_id, automation_id,
                control_type, class_name, name_match, parent_target_key, ancestor_path,
                created_at, updated_at
         FROM emr_ui_targets
@@ -1143,7 +1145,7 @@ def get_emr_ui_target_by_key(
 ) -> EmrUiTargetRecord | None:
     row = connection.execute(
         """
-        SELECT id, profile_id, target_key, label, description, automation_id,
+        SELECT id, profile_id, target_key, label, description, scope_automation_id, automation_id,
                control_type, class_name, name_match, parent_target_key, ancestor_path,
                created_at, updated_at
         FROM emr_ui_targets
@@ -1161,7 +1163,7 @@ def get_emr_ui_target(
 ) -> EmrUiTargetRecord | None:
     row = connection.execute(
         """
-        SELECT id, profile_id, target_key, label, description, automation_id,
+        SELECT id, profile_id, target_key, label, description, scope_automation_id, automation_id,
                control_type, class_name, name_match, parent_target_key, ancestor_path,
                created_at, updated_at
         FROM emr_ui_targets
@@ -1181,6 +1183,7 @@ def create_emr_ui_target(
     target_key: str,
     label: str,
     description: str | None = None,
+    scope_automation_id: str | None = None,
     automation_id: str | None = None,
     control_type: str | None = None,
     class_name: str | None = None,
@@ -1195,6 +1198,7 @@ def create_emr_ui_target(
             target_key,
             label,
             description,
+            scope_automation_id,
             automation_id,
             control_type,
             class_name,
@@ -1202,13 +1206,14 @@ def create_emr_ui_target(
             parent_target_key,
             ancestor_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             profile_id,
             target_key.strip(),
             label.strip(),
             _blank_to_none(description),
+            _blank_to_none(scope_automation_id),
             _blank_to_none(automation_id),
             _blank_to_none(control_type),
             _blank_to_none(class_name),
@@ -1231,6 +1236,7 @@ def update_emr_ui_target(
     target_key: str,
     label: str,
     description: str | None = None,
+    scope_automation_id: str | None = None,
     automation_id: str | None = None,
     control_type: str | None = None,
     class_name: str | None = None,
@@ -1244,6 +1250,7 @@ def update_emr_ui_target(
         SET target_key = ?,
             label = ?,
             description = ?,
+            scope_automation_id = ?,
             automation_id = ?,
             control_type = ?,
             class_name = ?,
@@ -1257,6 +1264,7 @@ def update_emr_ui_target(
             target_key.strip(),
             label.strip(),
             _blank_to_none(description),
+            _blank_to_none(scope_automation_id),
             _blank_to_none(automation_id),
             _blank_to_none(control_type),
             _blank_to_none(class_name),
@@ -1548,14 +1556,15 @@ def _emr_ui_target_from_row(row: sqlite3.Row | tuple) -> EmrUiTargetRecord:
         target_key=row[2],
         label=row[3],
         description=row[4],
-        automation_id=row[5],
-        control_type=row[6],
-        class_name=row[7],
-        name_match=row[8],
-        parent_target_key=row[9],
-        created_at=row[11],
-        updated_at=row[12],
-        ancestor_path=row[10],
+        scope_automation_id=row[5],
+        automation_id=row[6],
+        control_type=row[7],
+        class_name=row[8],
+        name_match=row[9],
+        parent_target_key=row[10],
+        created_at=row[12],
+        updated_at=row[13],
+        ancestor_path=row[11],
     )
 
 

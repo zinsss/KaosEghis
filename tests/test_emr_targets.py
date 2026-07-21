@@ -28,7 +28,7 @@ def test_emr_profile_tables_are_created(tmp_path) -> None:
     assert "emr_ui_targets" in tables
 
 
-def test_emr_ui_targets_migration_adds_ancestor_path(tmp_path) -> None:
+def test_emr_ui_targets_migration_adds_scope_and_ancestor_path(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
 
     db_path = tmp_path / "KaosEghis.sqlite"
@@ -59,6 +59,7 @@ def test_emr_ui_targets_migration_adds_ancestor_path(tmp_path) -> None:
             for row in connection.execute("PRAGMA table_info(emr_ui_targets)").fetchall()
         }
 
+    assert "scope_automation_id" in columns
     assert "ancestor_path" in columns
 
 
@@ -227,6 +228,7 @@ def test_emr_ui_target_crud(tmp_path) -> None:
             profile_id=profile.id,
             target_key="patient.search",
             label="Patient Search",
+            scope_automation_id="grdOpdList",
             automation_id="SearchBox",
             control_type="Edit",
             parent_target_key="main.window",
@@ -237,6 +239,7 @@ def test_emr_ui_target_crud(tmp_path) -> None:
             target.id,
             target_key="patient.search",
             label="Patient Search Updated",
+            scope_automation_id="grdOpdListV2",
             automation_id="SearchBoxUpdated",
             control_type="Edit",
             class_name="WindowsForms10.Edit",
@@ -249,6 +252,7 @@ def test_emr_ui_target_crud(tmp_path) -> None:
 
     assert updated is not None
     assert updated.label == "Patient Search Updated"
+    assert updated.scope_automation_id == "grdOpdListV2"
     assert listed[0].automation_id == "SearchBoxUpdated"
     assert listed[0].ancestor_path is not None
     assert "Tools" in listed[0].ancestor_path
@@ -363,6 +367,7 @@ def test_parse_inspector_dump_can_match_parent_target_from_ancestors() -> None:
             target_key="tools.toolbar",
             label="Tools",
             description=None,
+            scope_automation_id=None,
             automation_id="toolsToolbar",
             control_type="ToolBar",
             class_name=None,
@@ -388,6 +393,7 @@ Ancestors:
 
     assert parsed["label"] == "PACS"
     assert parsed["control_type"] == "Button"
+    assert parsed["scope_automation_id"] == "Tools"
     assert parsed["parent_target_key"] == "tools.toolbar"
     assert '"name": "Tools"' in parsed["ancestor_path"]
     assert "Ancestors: Tools > 진료실 > 이지스 전자차트 2.0" == parsed["ancestor_summary"]
@@ -406,6 +412,7 @@ def test_emr_ui_target_dialog_can_apply_inspector_dump(monkeypatch) -> None:
             target_key="tools.toolbar",
             label="Tools",
             description=None,
+            scope_automation_id=None,
             automation_id="toolsToolbar",
             control_type="ToolBar",
             class_name=None,
@@ -434,6 +441,7 @@ Ancestors:
 
     assert dialog.target_key_input.text() == "mid_main"
     assert dialog.label_input.text() == "PACS"
+    assert dialog.scope_automation_id_input.text() == "Tools"
     assert dialog.automation_id_input.text() == "MidMain"
     assert dialog.control_type_input.text() == "Button"
     assert dialog.class_name_input.text() == "WindowsForms10.Window.8.app.0.2bf8098_r6_ad1"

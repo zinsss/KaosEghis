@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS emr_ui_targets (
     target_key TEXT NOT NULL,
     label TEXT NOT NULL,
     description TEXT,
+    scope_automation_id TEXT,
     automation_id TEXT,
     control_type TEXT,
     class_name TEXT,

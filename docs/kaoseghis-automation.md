@@ -48,15 +48,18 @@ Current lookup preference:
 
 1. direct scoped `child_window(...)` lookup when exact criteria are available
 2. parent-scoped direct lookup when `parent_target_id` or `parent_automation_id` is configured
-3. ancestor-path scoped lookup when an EMR UI target stores a parsed Inspector parent chain
-4. descendant scan fallback only when direct lookup does not resolve uniquely
+3. EMR scope-anchor lookup when an EMR UI target stores a narrowed container such as `grdOpdList`
+4. ancestor-path scoped lookup when an EMR UI target stores a parsed Inspector parent chain
+5. descendant scan fallback only when direct lookup does not resolve uniquely
 
 Ancestor-path support:
 
 - EMR UI targets can now store a normalized Inspector ancestor chain
 - the chain is parsed from pasted Inspector text and saved with the target definition
+- EMR UI targets can also store an explicit intermediate scope anchor such as `grdOpdList`
 - noisy top-level wrappers such as Desktop or duplicate outer windows are ignored
 - resolution walks from the first stable inner ancestor down to the final target
+- when a stable intermediate scope anchor exists, prefer it over a long ancestor chain
 - this is intended to improve speed and reduce false matches in deep Windows Forms trees
 
 ### Manual Explicit Write Tests

@@ -8,6 +8,7 @@ class MacroAction(str, Enum):
     WAIT_WINDOW = "wait_window"
     WAIT_TEXT_OR_IMAGE = "wait_text_or_image"
     CLICK = "click"
+    DOUBLE_CLICK = "double_click"
     HOTKEY = "hotkey"
     TYPE_TEXT = "type_text"
     PASTE_TEXT = "paste_text"

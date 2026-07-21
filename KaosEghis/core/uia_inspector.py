@@ -333,9 +333,13 @@ def _find_parent_element_from_descendants(
     if len(auto_matches) > 1:
         return None
 
-    for ancestor_name in _meaningful_ancestor_names(
+    meaningful_ancestor_names = _meaningful_ancestor_names(
         _clean(getattr(target, "ancestor_path", None))
-    ):
+    )
+    if len(meaningful_ancestor_names) != 1:
+        return None
+
+    for ancestor_name in meaningful_ancestor_names:
         name_matches = [
             element
             for element in descendants

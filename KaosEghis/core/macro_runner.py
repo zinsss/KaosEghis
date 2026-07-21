@@ -214,6 +214,8 @@ class MacroRunner:
             return MacroRunResult(False, "unsupported action", 0, None)
         if action == "click":
             return self._run_click(step, self._require_settings())
+        if action == "double_click":
+            return self._run_double_click(step, self._require_settings())
         if action in {"hotkey", "key"}:
             return self._run_hotkey(step)
         if action in {"type_text", "type_text_keyboard"}:
@@ -296,9 +298,8 @@ class MacroRunner:
         target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
         if target is None:
             return MacroRunResult(False, resolve_message, 0, None)
-        try:
-            target.click_input()
-        except Exception:
+        clicked = self._activate_target_element(target)
+        if not clicked:
             self._clear_resolved_target_cache()
             target, resolve_message = self._resolve_runtime_target(
                 settings,
@@ -307,12 +308,37 @@ class MacroRunner:
             )
             if target is None:
                 return MacroRunResult(False, resolve_message, 0, None)
-            try:
-                target.click_input()
-            except Exception:
+            clicked = self._activate_target_element(target)
+            if not clicked:
                 self._clear_resolved_target_cache()
                 return MacroRunResult(False, "input failed", 0, None)
         return MacroRunResult(True, f"Clicked target '{step.target_id}'.", 1, None)
+
+    def _run_double_click(
+        self,
+        step: MacroStep,
+        settings: dict[str, str],
+    ) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+        clicked = self._double_activate_target_element(target)
+        if not clicked:
+            self._clear_resolved_target_cache()
+            target, resolve_message = self._resolve_runtime_target(
+                settings,
+                step.target_id,
+                force_refresh=True,
+            )
+            if target is None:
+                return MacroRunResult(False, resolve_message, 0, None)
+            clicked = self._double_activate_target_element(target)
+            if not clicked:
+                self._clear_resolved_target_cache()
+                return MacroRunResult(False, "input failed", 0, None)
+        return MacroRunResult(True, f"Double-clicked target '{step.target_id}'.", 1, None)
 
     def _run_hotkey(self, step: MacroStep) -> MacroRunResult:
         key = step.options.get("key", step.value)
@@ -593,6 +619,54 @@ class MacroRunner:
         except Exception:
             return False, "target not resolved"
 
+    @staticmethod
+    def _activate_target_element(element: object) -> bool:
+        activation_methods: list[str] = []
+        if MacroRunner._looks_like_toggle_target(element):
+            activation_methods.extend(["toggle", "invoke"])
+        else:
+            activation_methods.append("invoke")
+        activation_methods.extend(["click", "click_input"])
+
+        for method_name in activation_methods:
+            method = getattr(element, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                method()
+                return True
+            except Exception:
+                continue
+        return False
+
+    @staticmethod
+    def _double_activate_target_element(element: object) -> bool:
+        for method_name in ("double_click_input", "double_click"):
+            method = getattr(element, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                method()
+                return True
+            except Exception:
+                continue
+        return False
+
+    @staticmethod
+    def _looks_like_toggle_target(element: object) -> bool:
+        element_info = getattr(element, "element_info", None)
+        control_type = str(getattr(element_info, "control_type", "") or "").casefold()
+        if control_type in {"checkbox", "radio button", "radiobutton"}:
+            return True
+        friendly_name = getattr(element, "friendly_class_name", None)
+        if callable(friendly_name):
+            try:
+                if str(friendly_name() or "").casefold() in {"checkbox", "radiobutton", "radio button"}:
+                    return True
+            except Exception:
+                return False
+        return False
+
     def _dry_run_step_line(self, step: MacroStep, index: int) -> str:
         action = self._action_name(step)
         display_order = step.options.get("step_order", index)
@@ -719,9 +793,9 @@ class MacroRunner:
             if profile is not None and profile.main_window_automation_id
             else None
         )
-        parent_automation_id = None
+        parent_automation_id = emr_target.scope_automation_id
         parent_target_key = emr_target.parent_target_key
-        if parent_target_key:
+        if parent_automation_id is None and parent_target_key:
             parent_target = get_emr_ui_target_by_key(
                 connection,
                 emr_target.profile_id,
@@ -770,7 +844,7 @@ class MacroRunner:
             return "clipboard failed"
         if "unsupported" in lowered or action == "wait_text_or_image":
             return "unsupported action"
-        if action in {"click", "hotkey", "key", "type_text", "paste_text"}:
+        if action in {"click", "double_click", "hotkey", "key", "type_text", "paste_text"}:
             if "clipboard" in lowered and action == "paste_text":
                 return "clipboard failed"
             return "input failed"

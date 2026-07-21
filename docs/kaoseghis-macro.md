@@ -74,6 +74,7 @@ Current target binding behavior:
 
 - `target_id` remains the stored step field name
 - for profile-bound macros, the editor now offers `emr_ui_targets.target_key` values from the selected EMR profile
+- EMR UI targets may store a dedicated scope anchor such as `grdOpdList` to narrow lookup before the final target match
 - legacy `ui_targets` are still tolerated for compatibility during dry-run validation and current execution
 
 Allowed stored actions in the model:
@@ -134,6 +135,7 @@ EMR targeting foundation:
 - [KaosEghis/ui/tabs/emr_targets_page.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/emr_targets_page.py)
 - lives under `KaosEghis -> EMR`
 - stores profile-level process/window identity and a profile-scoped UI target library
+- keeps Inspector paste available as a helper/fallback, while explicit scope anchors are preferred for fast known-good EMR grids and panes
 
 Editor behavior:
 

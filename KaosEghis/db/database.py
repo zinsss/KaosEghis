@@ -382,6 +382,7 @@ def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:
         return
     for name in (
         "description",
+        "scope_automation_id",
         "automation_id",
         "control_type",
         "class_name",

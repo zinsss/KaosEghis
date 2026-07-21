@@ -129,9 +129,9 @@ class EmrTargetsPage(QWidget):
         detail_controls.addWidget(self.connection_toggle)
         detail_controls.addStretch()
 
-        self.ui_targets_table = QTableWidget(0, 5)
+        self.ui_targets_table = QTableWidget(0, 6)
         self.ui_targets_table.setHorizontalHeaderLabels(
-            ["Key", "Label", "Control type", "Automation ID", "Parent key"]
+            ["Key", "Label", "Control type", "Scope anchor", "Automation ID", "Parent key"]
         )
         self.ui_targets_table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows
@@ -273,6 +273,7 @@ class EmrTargetsPage(QWidget):
                     target_key=target.target_key,
                     label=target.label,
                     description=target.description,
+                    scope_automation_id=target.scope_automation_id,
                     automation_id=target.automation_id,
                     control_type=target.control_type,
                     class_name=target.class_name,
@@ -608,10 +609,13 @@ class EmrTargetsPage(QWidget):
                 row_index, 2, QTableWidgetItem(target.control_type or "")
             )
             self.ui_targets_table.setItem(
-                row_index, 3, QTableWidgetItem(target.automation_id or "")
+                row_index, 3, QTableWidgetItem(target.scope_automation_id or "")
             )
             self.ui_targets_table.setItem(
-                row_index, 4, QTableWidgetItem(target.parent_target_key or "")
+                row_index, 4, QTableWidgetItem(target.automation_id or "")
+            )
+            self.ui_targets_table.setItem(
+                row_index, 5, QTableWidgetItem(target.parent_target_key or "")
             )
         self.ui_targets_table.resizeColumnsToContents()
 
@@ -660,6 +664,7 @@ class EmrUiTargetDialog(QDialog):
         self.target_key_input = QLineEdit()
         self.label_input = QLineEdit()
         self.description_input = QPlainTextEdit()
+        self.scope_automation_id_input = QLineEdit()
         self.automation_id_input = QLineEdit()
         self.control_type_input = QLineEdit()
         self.class_name_input = QLineEdit()
@@ -682,6 +687,7 @@ class EmrUiTargetDialog(QDialog):
         form.addRow("Key", self.target_key_input)
         form.addRow("Label", self.label_input)
         form.addRow("Description", self.description_input)
+        form.addRow("Scope automation ID", self.scope_automation_id_input)
         form.addRow("Automation ID", self.automation_id_input)
         form.addRow("Control type", self.control_type_input)
         form.addRow("Class name", self.class_name_input)
@@ -706,6 +712,7 @@ class EmrUiTargetDialog(QDialog):
             self.target_key_input.setText(target.target_key)
             self.label_input.setText(target.label)
             self.description_input.setPlainText(target.description or "")
+            self.scope_automation_id_input.setText(target.scope_automation_id or "")
             self.automation_id_input.setText(target.automation_id or "")
             self.control_type_input.setText(target.control_type or "")
             self.class_name_input.setText(target.class_name or "")
@@ -730,6 +737,7 @@ class EmrUiTargetDialog(QDialog):
             "target_key": self.target_key_input.text().strip(),
             "label": self.label_input.text().strip(),
             "description": self.description_input.toPlainText().strip(),
+            "scope_automation_id": self.scope_automation_id_input.text().strip(),
             "automation_id": self.automation_id_input.text().strip(),
             "control_type": self.control_type_input.text().strip(),
             "class_name": self.class_name_input.text().strip(),
@@ -748,6 +756,7 @@ class EmrUiTargetDialog(QDialog):
             return
 
         automation_id = parsed.get("automation_id", "")
+        scope_automation_id = parsed.get("scope_automation_id", "")
         label = parsed.get("label", "")
         name_match = parsed.get("name_match", "")
         control_type = parsed.get("control_type", "")
@@ -761,6 +770,8 @@ class EmrUiTargetDialog(QDialog):
             self.target_key_input.setText(target_key)
         if label and not self.label_input.text().strip():
             self.label_input.setText(label)
+        if scope_automation_id and not self.scope_automation_id_input.text().strip():
+            self.scope_automation_id_input.setText(scope_automation_id)
         if automation_id:
             self.automation_id_input.setText(automation_id)
         if control_type:
@@ -854,6 +865,9 @@ def parse_inspector_dump(
     if ancestor_nodes:
         parsed["ancestor_path"] = json.dumps(ancestor_nodes, ensure_ascii=False)
         parsed["ancestor_summary"] = summarize_ancestor_path(parsed["ancestor_path"])
+        scope_automation_id = _infer_scope_automation_id(ancestor_nodes)
+        if scope_automation_id:
+            parsed["scope_automation_id"] = scope_automation_id
         parent_target_key = _match_parent_target_key(ancestor_nodes, existing_targets or [])
         if parent_target_key:
             parsed["parent_target_key"] = parent_target_key
@@ -942,6 +956,19 @@ def _parse_ancestor_line(line: str) -> dict[str, str]:
     if control_type:
         node["control_type"] = control_type
     return node
+
+
+def _infer_scope_automation_id(ancestor_nodes: list[dict[str, str]]) -> str:
+    if not ancestor_nodes:
+        return ""
+    for node in ancestor_nodes:
+        automation_id = str(node.get("automation_id", "")).strip()
+        if automation_id:
+            return automation_id
+        name = str(node.get("name", "")).strip()
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", name):
+            return name
+    return ""
 
 
 def summarize_ancestor_path(ancestor_path: str | None) -> str:

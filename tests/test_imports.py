@@ -2156,7 +2156,7 @@ def test_inspect_target_readonly_scopes_lookup_to_parent(monkeypatch) -> None:
     assert result.parent_found is True
     assert result.found_class_name == "RichEditD2DPT"
     assert window.descendants_calls == 0
-    assert parent.descendants_calls == 1
+    assert parent.descendants_calls == 0
 
 
 def test_inspect_target_readonly_scopes_lookup_to_ancestor_path(monkeypatch) -> None:
@@ -2710,7 +2710,7 @@ def test_inspect_target_readonly_reports_missing_parent(monkeypatch) -> None:
     assert result.parent_found is False
     assert "Parent automation_id 'TreatmentSymp'" in result.message
     assert "was not found" in result.message
-    assert window.descendants_calls == 0
+    assert window.descendants_calls == 2
 
 
 def test_inspect_target_readonly_reports_multiple_parent_matches(monkeypatch) -> None:
@@ -2740,7 +2740,7 @@ def test_inspect_target_readonly_reports_multiple_parent_matches(monkeypatch) ->
     assert result.found is False
     assert result.parent_found is False
     assert "matched 2 elements" in result.message
-    assert window.descendants_calls == 0
+    assert window.descendants_calls == 2
 
 
 def test_inspect_target_readonly_uses_parent_target_id(monkeypatch, tmp_path) -> None:
