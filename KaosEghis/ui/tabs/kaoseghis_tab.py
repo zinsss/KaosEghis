@@ -916,7 +916,7 @@ class LauncherListWidget(QListWidget):
 
 def _create_macro_table() -> QTableWidget:
     table = QTableWidget(0, 4)
-    table.setHorizontalHeaderLabels(["id", "name", "EMR profile", "enabled"])
+    table.setHorizontalHeaderLabels(["id", "name", "EMR profile", "executable"])
     table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)

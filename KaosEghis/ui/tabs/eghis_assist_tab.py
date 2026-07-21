@@ -179,7 +179,7 @@ class MacrosTab(QWidget):
         macros_title = QLabel("Macros")
         self.macros_table = QTableWidget(0, 4)
         self.macros_table.setHorizontalHeaderLabels(
-            ["id", "name", "EMR profile", "enabled"]
+            ["id", "name", "EMR profile", "executable"]
         )
         self.macros_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.macros_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -903,7 +903,7 @@ class MacroEditorDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("Macro name", self.name)
-        form.addRow("Enabled", self.enabled)
+        form.addRow("Executable", self.enabled)
         form.addRow("Application preset", self.emr_profile)
 
         buttons = QDialogButtonBox(
