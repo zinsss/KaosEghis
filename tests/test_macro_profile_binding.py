@@ -177,7 +177,7 @@ def test_macros_page_shows_selected_emr_profile(monkeypatch, tmp_path) -> None:
 
     page = MacrosPage(db_path)
 
-    assert page.macros_table.item(0, 2).text() == "Training EMR"
+    assert page.executable_macros_table.item(0, 2).text() == "Training EMR"
 
 
 def test_macro_execution_behavior_unchanged_with_bound_profile(monkeypatch, tmp_path) -> None:

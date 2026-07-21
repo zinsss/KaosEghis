@@ -1135,6 +1135,28 @@ def test_macros_page_has_dry_run_and_run_selected_macro_buttons() -> None:
     assert page.run_macro_button.text() == "Run selected macro"
 
 
+def test_macros_page_splits_executable_and_non_executable_lists(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_item(connection, "Real Macro", "macro", True)
+        create_item(connection, "Template Macro", "macro", False)
+
+    page = MacrosPage(db_path)
+
+    assert page.executable_macros_table.rowCount() == 1
+    assert page.non_executable_macros_table.rowCount() == 1
+    assert page.executable_macros_table.item(0, 1).text() == "Real Macro"
+    assert page.non_executable_macros_table.item(0, 1).text() == "Template Macro"
+
+
 def test_new_macro_editor_seeds_focus_window_step(monkeypatch, tmp_path) -> None:
     _app()
 
@@ -1395,7 +1417,7 @@ def test_macros_page_can_copy_selected_macro(monkeypatch, tmp_path) -> None:
         )
 
     page = MacrosPage(db_path)
-    page.macros_table.selectRow(0)
+    page.executable_macros_table.selectRow(0)
     page.copy_macro()
 
     with connect(db_path) as connection:

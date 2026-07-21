@@ -417,7 +417,9 @@ class MacrosPage(QWidget):
         self.automation_summary = QLabel("Create and edit saved macros.")
         self.automation_summary.setObjectName("macroSummary")
 
-        self.macros_table = _create_macro_table()
+        self.executable_macros_table = _create_macro_table()
+        self.non_executable_macros_table = _create_macro_table()
+        self.macros_table = self.executable_macros_table
 
         self.add_macro_button = QPushButton("Add macro")
         self.add_macro_button.clicked.connect(self.add_macro)
@@ -448,10 +450,33 @@ class MacrosPage(QWidget):
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("Macro status will appear here.")
 
+        executable_column = QVBoxLayout()
+        executable_column.addWidget(QLabel("Executable macros"))
+        executable_column.addWidget(self.executable_macros_table)
+
+        non_executable_column = QVBoxLayout()
+        non_executable_column.addWidget(QLabel("Non-executable macros"))
+        non_executable_column.addWidget(self.non_executable_macros_table)
+
+        tables_row = QGridLayout()
+        tables_row.setContentsMargins(0, 0, 0, 0)
+        tables_row.setHorizontalSpacing(12)
+        tables_row.addLayout(executable_column, 0, 0)
+        tables_row.addLayout(non_executable_column, 0, 1)
+        tables_row.setColumnStretch(0, 1)
+        tables_row.setColumnStretch(1, 1)
+
+        self.executable_macros_table.itemSelectionChanged.connect(
+            lambda: self._sync_macro_selection(self.executable_macros_table)
+        )
+        self.non_executable_macros_table.itemSelectionChanged.connect(
+            lambda: self._sync_macro_selection(self.non_executable_macros_table)
+        )
+
         layout = QVBoxLayout(self)
         layout.addWidget(title)
         layout.addWidget(self.automation_summary)
-        layout.addWidget(self.macros_table)
+        layout.addLayout(tables_row)
         layout.addLayout(controls)
         layout.addWidget(self.log)
 
@@ -459,7 +484,14 @@ class MacrosPage(QWidget):
 
     def refresh_view(self) -> None:
         macros = _load_macros(self._db_path)
-        _populate_macro_table(self.macros_table, macros, self._db_path)
+        executable_macros = [macro for macro in macros if macro.is_enabled]
+        non_executable_macros = [macro for macro in macros if not macro.is_enabled]
+        _populate_macro_table(
+            self.executable_macros_table, executable_macros, self._db_path
+        )
+        _populate_macro_table(
+            self.non_executable_macros_table, non_executable_macros, self._db_path
+        )
         macro_ids = ", ".join(str(macro.id) for macro in macros) or "None"
         self.automation_summary.setText(f"Saved automation IDs: {macro_ids}")
 
@@ -610,7 +642,23 @@ class MacrosPage(QWidget):
         self.log.setPlainText("Macro deleted." if deleted else "Macro not found.")
 
     def _selected_macro_id(self) -> int | None:
-        return _selected_macro_id(self.macros_table)
+        for table in (self.executable_macros_table, self.non_executable_macros_table):
+            item_id = _selected_macro_id(table)
+            if item_id is not None:
+                return item_id
+        return None
+
+    def _sync_macro_selection(self, active_table: QTableWidget) -> None:
+        if active_table.selectedItems():
+            other_table = (
+                self.non_executable_macros_table
+                if active_table is self.executable_macros_table
+                else self.executable_macros_table
+            )
+            other_table.blockSignals(True)
+            other_table.clearSelection()
+            other_table.blockSignals(False)
+            self.macros_table = active_table
 
 
 class MacroTextsPage(QWidget):
