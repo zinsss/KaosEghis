@@ -56,6 +56,30 @@ def test_type_text_can_send_enter_after_text(monkeypatch) -> None:
     assert sent_keys == ["hello", "{ENTER}"]
 
 
+def test_type_text_can_send_enter_before_and_after_text(monkeypatch) -> None:
+    from KaosEghis.core.macro_models import MacroStep
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    sent_keys: list[str] = []
+    monkeypatch.setattr("pywinauto.keyboard.send_keys", sent_keys.append)
+
+    result = MacroRunner()._run_type_text(
+        MacroStep(
+            action="type_text",
+            value="hello",
+            options={
+                "text": "hello",
+                "press_enter_before": True,
+                "press_enter_after": True,
+            },
+        )
+    )
+
+    assert result.success is True
+    assert result.message == "Pressed Enter, typed text, and pressed Enter."
+    assert sent_keys == ["{ENTER}", "hello", "{ENTER}"]
+
+
 def test_type_text_without_enter_option_does_not_send_enter(monkeypatch) -> None:
     from KaosEghis.core.macro_models import MacroStep
     from KaosEghis.core.macro_runner import MacroRunner
@@ -105,6 +129,38 @@ def test_type_text_dry_run_shows_enter_option_without_input(
     assert result.success is True
     assert "type_text value=hello enter_after=yes" in result.message
     assert "wait_before=125ms" in result.message
+
+
+def test_paste_text_dry_run_shows_enter_before_and_after(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Paste and submit", "macro", True)
+        create_macro_step(
+            connection,
+            item.id,
+            1,
+            "paste_text",
+            value="hello",
+            press_enter_before=True,
+            press_enter_after=True,
+        )
+
+    monkeypatch.setattr(
+        "pywinauto.keyboard.send_keys",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("dry run must not send keys")
+        ),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=True)
+
+    assert result.success is True
+    assert "paste_text value=hello enter_before=yes enter_after=yes" in result.message
 
 
 def test_step_wait_runs_before_actual_action(monkeypatch) -> None:
@@ -410,6 +466,47 @@ def test_emr_profile_target_resolution_still_works_with_cache_enabled(
     assert "Cache misses: 1" in result.message
 
 
+def test_emr_parent_target_key_is_converted_to_parent_automation_scope(tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_emr_target_profile, create_emr_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Training EMR",
+            is_enabled=True,
+            is_default=False,
+        )
+        create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="eghis_main",
+            label="eghis",
+            automation_id="MdiMain",
+            name_match="이지스 전자차트 2.0",
+        )
+        child = create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="noclaim",
+            label="청구안함",
+            automation_id="chkInspTargetYn",
+            control_type="CheckBox",
+            class_name="WindowsForms10.Window.b.app.0.2bf8098_r6_ad1",
+            name_match="청구안함",
+            parent_target_key="eghis_main",
+        )
+        runner = MacroRunner(db_path)
+        runtime_target = runner._runtime_target_from_emr_target(connection, child)
+
+    assert runtime_target.target_id == "noclaim"
+    assert runtime_target.parent_target_id is None
+    assert runtime_target.parent_automation_id == "MdiMain"
+
+
 def test_macro_stops_on_failed_step(monkeypatch, tmp_path) -> None:
     from KaosEghis.core.macro_models import MacroRunResult
     from KaosEghis.core.macro_runner import MacroRunner
@@ -495,6 +592,29 @@ def test_preset_text_resolves_clipboard_item(monkeypatch, tmp_path) -> None:
         ("sleep", 0.15),
         ("restore", "hello there"),
     ]
+
+
+def test_hotkey_normalizes_braced_sequences(monkeypatch) -> None:
+    from KaosEghis.core.macro_models import MacroStep
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    sent_keys: list[str] = []
+    monkeypatch.setattr("pywinauto.keyboard.send_keys", sent_keys.append)
+
+    result = MacroRunner()._run_hotkey(
+        MacroStep(action="hotkey", value="{ENTER},{ENTER}", options={"key": "{ENTER},{ENTER}"})
+    )
+
+    assert result.success is True
+    assert sent_keys == ["{ENTER}", "{ENTER}"]
+
+    sent_keys.clear()
+    result = MacroRunner()._run_hotkey(
+        MacroStep(action="hotkey", value="{ALT}{1}", options={"key": "{ALT}{1}"})
+    )
+
+    assert result.success is True
+    assert sent_keys == ["%{1}"]
 
 
 def test_randomized_preset_selects_one_option(monkeypatch, tmp_path) -> None:
@@ -980,6 +1100,7 @@ def test_new_macro_step_dialog_defaults_to_focus_window(monkeypatch, tmp_path) -
     dialog = MacroStepDialog(parent)
 
     assert dialog.action.currentText() == "focus_window"
+    assert dialog.press_enter_before.isEnabled() is False
     assert dialog.press_enter_after.isEnabled() is False
     assert not hasattr(dialog, "step_order")
 
@@ -1092,12 +1213,16 @@ def test_macro_step_dialog_offers_enter_after_for_type_text(
             "value": "hello",
             "timeout_seconds": 5.0,
             "retries": 0,
+            "press_enter_before": True,
             "press_enter_after": True,
         },
     )
 
+    assert dialog.press_enter_before.isEnabled() is True
+    assert dialog.press_enter_before.isChecked() is True
     assert dialog.press_enter_after.isEnabled() is True
     assert dialog.press_enter_after.isChecked() is True
+    assert dialog.values()["press_enter_before"] is True
     assert dialog.values()["press_enter_after"] is True
 
     dialog.wait_before_enabled.setChecked(True)
@@ -1106,6 +1231,42 @@ def test_macro_step_dialog_offers_enter_after_for_type_text(
     values = dialog.values()
     assert values["wait_before_enabled"] is True
     assert values["wait_before_ms"] == 150
+
+
+def test_macros_page_can_copy_selected_macro(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, list_items, list_macro_steps
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Original Macro", "macro", True)
+        create_macro_step(
+            connection,
+            item.id,
+            1,
+            "type_text",
+            value="hello",
+            press_enter_before=True,
+            press_enter_after=True,
+        )
+
+    page = MacrosPage(db_path)
+    page.macros_table.selectRow(0)
+    page.copy_macro()
+
+    with connect(db_path) as connection:
+        macros = list_items(connection, "macro")
+        copied = next(macro for macro in macros if macro.name == "Original Macro Copy")
+        copied_steps = list_macro_steps(connection, copied.id)
+
+    assert len(macros) == 2
+    assert copied_steps[0].press_enter_before is True
+    assert copied_steps[0].press_enter_after is True
 
 
 def test_macro_runner_requires_manual_connection_before_real_run(tmp_path) -> None:

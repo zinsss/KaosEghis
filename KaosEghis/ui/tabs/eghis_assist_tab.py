@@ -864,7 +864,7 @@ class MacroEditorDialog(QDialog):
             self.emr_profile.setCurrentIndex(profile_index)
         self.emr_profile.currentIndexChanged.connect(self._on_profile_changed)
 
-        self.steps_table = ReorderableStepsTable(0, 9)
+        self.steps_table = ReorderableStepsTable(0, 10)
         self.steps_table.setHorizontalHeaderLabels(
             [
                 "order",
@@ -873,12 +873,13 @@ class MacroEditorDialog(QDialog):
                 "value",
                 "timeout_seconds",
                 "retries",
+                "press_enter_before",
                 "press_enter_after",
                 "wait_before_enabled",
                 "wait_before_ms",
             ]
         )
-        for column in range(6, 9):
+        for column in range(6, 10):
             self.steps_table.setColumnHidden(column, True)
         self.steps_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.steps_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -927,6 +928,7 @@ class MacroEditorDialog(QDialog):
                     "value": step.value or "",
                     "timeout_seconds": step.timeout_seconds,
                     "retries": step.retries,
+                    "press_enter_before": getattr(step, "press_enter_before", False),
                     "press_enter_after": step.press_enter_after,
                     "wait_before_enabled": step.wait_before_enabled,
                     "wait_before_ms": step.wait_before_ms,
@@ -941,6 +943,7 @@ class MacroEditorDialog(QDialog):
                     "value": "",
                     "timeout_seconds": 5.0,
                     "retries": 0,
+                    "press_enter_before": False,
                     "press_enter_after": False,
                     "wait_before_enabled": False,
                     "wait_before_ms": 100,
@@ -1001,6 +1004,7 @@ class MacroEditorDialog(QDialog):
             step.get("value", ""),
             str(step["timeout_seconds"]),
             str(step["retries"]),
+            "1" if step.get("press_enter_before", False) else "0",
             "1" if step.get("press_enter_after", False) else "0",
             "1" if step.get("wait_before_enabled", False) else "0",
             str(step.get("wait_before_ms", 100)),
@@ -1023,9 +1027,10 @@ class MacroEditorDialog(QDialog):
             "value": self.steps_table.item(row, 3).text(),
             "timeout_seconds": float(self.steps_table.item(row, 4).text()),
             "retries": int(self.steps_table.item(row, 5).text()),
-            "press_enter_after": self.steps_table.item(row, 6).text() == "1",
-            "wait_before_enabled": self.steps_table.item(row, 7).text() == "1",
-            "wait_before_ms": int(self.steps_table.item(row, 8).text()),
+            "press_enter_before": self.steps_table.item(row, 6).text() == "1",
+            "press_enter_after": self.steps_table.item(row, 7).text() == "1",
+            "wait_before_enabled": self.steps_table.item(row, 8).text() == "1",
+            "wait_before_ms": int(self.steps_table.item(row, 9).text()),
         }
 
     def _steps(self) -> list[dict]:
@@ -1079,6 +1084,11 @@ class MacroStepDialog(QDialog):
         if step and step.get("target_id", ""):
             self.target_id.setCurrentText(step.get("target_id", ""))
         self.value = QLineEdit(step.get("value", "") if step else "")
+        self.value.setPlaceholderText(
+            "{ENTER},{ENTER} or {ALT}{1} for hotkeys."
+            if self.action.currentText() in {"hotkey", "key"}
+            else ""
+        )
         self.preset_text = QComboBox()
         self._load_preset_options(step.get("value", "") if step else "")
 
@@ -1093,12 +1103,17 @@ class MacroStepDialog(QDialog):
         self.retries.setMaximum(100)
         self.retries.setValue(int(step["retries"]) if step else 0)
 
-        self.press_enter_after = QCheckBox("Send {ENTER} after typing")
+        self.press_enter_before = QCheckBox("Send {ENTER} before text")
+        self.press_enter_before.setChecked(
+            bool(step.get("press_enter_before", False)) if step else False
+        )
+        self.press_enter_after = QCheckBox("Send {ENTER} after text")
         self.press_enter_after.setChecked(
             bool(step.get("press_enter_after", False)) if step else False
         )
         self.action.currentTextChanged.connect(self._update_press_enter_option)
         self.action.currentTextChanged.connect(self._update_value_option)
+        self.action.currentTextChanged.connect(self._update_value_hint)
         self._update_press_enter_option(self.action.currentText())
 
         self.wait_before_enabled = QCheckBox("Wait before action")
@@ -1117,14 +1132,15 @@ class MacroStepDialog(QDialog):
         wait_before_row.addStretch()
 
         form = QFormLayout()
+        form.addRow("Wait before", wait_before_row)
+        form.addRow("Enter before", self.press_enter_before)
         form.addRow("action", self.action)
         form.addRow("target_id", self.target_id)
         form.addRow("value", self.value)
         form.addRow("MacroText", self.preset_text)
         form.addRow("timeout_seconds", self.timeout_seconds)
         form.addRow("retries", self.retries)
-        form.addRow("type_text option", self.press_enter_after)
-        form.addRow("Before", wait_before_row)
+        form.addRow("Enter after", self.press_enter_after)
         self._form = form
 
         buttons = QDialogButtonBox(
@@ -1154,9 +1170,16 @@ class MacroStepDialog(QDialog):
             "value": value,
             "timeout_seconds": self.timeout_seconds.value(),
             "retries": self.retries.value(),
+            "press_enter_before": (
+                self.press_enter_before.isChecked()
+                if self.action.currentText()
+                in {"type_text", "type_text_keyboard", "paste_text", "type_text_clipboard", "preset_text"}
+                else False
+            ),
             "press_enter_after": (
                 self.press_enter_after.isChecked()
-                if self.action.currentText() in {"type_text", "type_text_keyboard"}
+                if self.action.currentText()
+                in {"type_text", "type_text_keyboard", "paste_text", "type_text_clipboard", "preset_text"}
                 else False
             ),
             "wait_before_enabled": self.wait_before_enabled.isChecked(),
@@ -1172,9 +1195,15 @@ class MacroStepDialog(QDialog):
         return spin_box
 
     def _update_press_enter_option(self, action: str) -> None:
-        self.press_enter_after.setEnabled(
-            action in {"type_text", "type_text_keyboard"}
-        )
+        enabled = action in {
+            "type_text",
+            "type_text_keyboard",
+            "paste_text",
+            "type_text_clipboard",
+            "preset_text",
+        }
+        self.press_enter_before.setEnabled(enabled)
+        self.press_enter_after.setEnabled(enabled)
 
     def _update_value_option(self, action: str) -> None:
         uses_macrotext = action == "preset_text"
@@ -1186,6 +1215,12 @@ class MacroStepDialog(QDialog):
             value_label.setVisible(not uses_macrotext)
         if preset_label is not None:
             preset_label.setVisible(uses_macrotext)
+
+    def _update_value_hint(self, action: str) -> None:
+        if action in {"hotkey", "key"}:
+            self.value.setPlaceholderText("{ENTER},{ENTER} or {ALT}{1}")
+            return
+        self.value.setPlaceholderText("")
 
     def _load_target_options(self) -> None:
         self.target_id.clear()

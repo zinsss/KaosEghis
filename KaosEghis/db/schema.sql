@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS macro_steps (
     value TEXT,
     timeout_seconds REAL NOT NULL DEFAULT 5,
     retries INTEGER NOT NULL DEFAULT 0,
+    press_enter_before INTEGER NOT NULL DEFAULT 0,
     press_enter_after INTEGER NOT NULL DEFAULT 0,
     wait_before_enabled INTEGER NOT NULL DEFAULT 0,
     wait_before_ms INTEGER NOT NULL DEFAULT 100,
@@ -134,6 +135,7 @@ CREATE TABLE IF NOT EXISTS emr_ui_targets (
     class_name TEXT,
     name_match TEXT,
     parent_target_key TEXT,
+    ancestor_path TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (profile_id) REFERENCES emr_target_profiles(id)

@@ -198,6 +198,7 @@ Current non-negotiables:
 - guarded runner skeleton
 - cancellation handling
 - EMR target profile and EMR UI target local persistence
+- EMR UI target ancestor-path persistence from pasted Inspector parent chains
 
 ## Not Done
 

@@ -318,9 +318,7 @@ class MacroRunner:
         if not isinstance(key, str) or not key:
             return MacroRunResult(False, "unknown error", 0, None)
         try:
-            from pywinauto.keyboard import send_keys
-
-            send_keys(key)
+            self._send_hotkey_sequence(key)
         except Exception:
             return MacroRunResult(False, "input failed", 0, None)
         return MacroRunResult(True, f"Sent hotkey: {key}", 1, None)
@@ -335,9 +333,14 @@ class MacroRunner:
             return MacroRunResult(False, "unknown error", 0, None)
         if not self._send_text_direct(
             text,
+            press_enter_before=step.options.get("press_enter_before", False),
             press_enter_after=step.options.get("press_enter_after", False),
         ):
             return MacroRunResult(False, "input failed", 0, None)
+        if step.options.get("press_enter_before", False) and step.options.get("press_enter_after", False):
+            return MacroRunResult(True, "Pressed Enter, typed text, and pressed Enter.", 1, None)
+        if step.options.get("press_enter_before", False):
+            return MacroRunResult(True, "Pressed Enter and typed text.", 1, None)
         if step.options.get("press_enter_after", False):
             return MacroRunResult(True, "Typed text and pressed Enter.", 1, None)
         return MacroRunResult(True, "Typed text.", 1, None)
@@ -354,22 +357,29 @@ class MacroRunner:
         snapshot = None
         try:
             snapshot = copy_text(text)
-            self._send_clipboard_paste()
+            self._send_clipboard_paste(
+                press_enter_before=step.options.get("press_enter_before", False),
+                press_enter_after=step.options.get("press_enter_after", False),
+            )
         except Exception:
             if snapshot is not None:
                 try:
                     restore_clipboard(snapshot)
                 except Exception:
                     pass
-            if self._send_text_direct(text):
-                return MacroRunResult(True, "Typed text.", 1, None)
+            if self._send_text_direct(
+                text,
+                press_enter_before=step.options.get("press_enter_before", False),
+                press_enter_after=step.options.get("press_enter_after", False),
+            ):
+                return MacroRunResult(True, self._text_action_success_message(step, pasted=False), 1, None)
             return MacroRunResult(False, "input failed" if snapshot is not None else "clipboard failed", 0, None)
 
         try:
             restore_clipboard(snapshot)
         except Exception:
-            return MacroRunResult(True, "Pasted text.", 1, None)
-        return MacroRunResult(True, "Pasted text.", 1, None)
+            return MacroRunResult(True, self._text_action_success_message(step, pasted=True), 1, None)
+        return MacroRunResult(True, self._text_action_success_message(step, pasted=True), 1, None)
 
     def _run_preset_text(
         self,
@@ -390,7 +400,11 @@ class MacroRunner:
             value=text,
             timeout_seconds=step.timeout_seconds,
             retries=step.retries,
-            options={"text": text},
+            options={
+                "text": text,
+                "press_enter_before": step.options.get("press_enter_before", False),
+                "press_enter_after": step.options.get("press_enter_after", False),
+            },
         )
         return self._run_paste_text(preset_step)
 
@@ -455,28 +469,59 @@ class MacroRunner:
             return variants[0]
 
     @staticmethod
-    def _send_clipboard_paste() -> None:
+    def _send_clipboard_paste(
+        *,
+        press_enter_before: bool = False,
+        press_enter_after: bool = False,
+    ) -> None:
         from pywinauto.keyboard import send_keys
 
+        if press_enter_before:
+            send_keys("{ENTER}")
         time.sleep(0.05)
         send_keys("^v")
         time.sleep(0.15)
+        if press_enter_after:
+            send_keys("{ENTER}")
 
     @staticmethod
     def _send_text_direct(
         text: str,
         *,
+        press_enter_before: bool = False,
         press_enter_after: bool = False,
     ) -> bool:
         try:
             from pywinauto.keyboard import send_keys
 
+            if press_enter_before:
+                send_keys("{ENTER}")
             send_keys(text)
             if press_enter_after:
                 send_keys("{ENTER}")
         except Exception:
             return False
         return True
+
+    @staticmethod
+    def _send_hotkey_sequence(key: str) -> None:
+        from pywinauto.keyboard import send_keys
+
+        for segment in [part.strip() for part in key.split(",") if part.strip()]:
+            send_keys(_normalize_hotkey_segment(segment))
+
+    @staticmethod
+    def _text_action_success_message(step: MacroStep, *, pasted: bool) -> str:
+        action_word = "Pasted text" if pasted else "Typed text"
+        before = bool(step.options.get("press_enter_before", False))
+        after = bool(step.options.get("press_enter_after", False))
+        if before and after:
+            return f"Pressed Enter, {action_word.lower()}, and pressed Enter."
+        if before:
+            return f"Pressed Enter and {action_word.lower()}."
+        if after:
+            return f"{action_word} and pressed Enter."
+        return f"{action_word}."
 
     def _resolve_runtime_target(
         self, settings: dict[str, str], target_id: str, force_refresh: bool = False
@@ -503,7 +548,7 @@ class MacroRunner:
             self._clear_resolved_target_cache()
             if "timed out" in message.casefold() or "timeout" in message.casefold():
                 return None, "timeout"
-            if "window" in message.casefold():
+            if _message_indicates_window_not_ready(message):
                 return None, "window not ready"
             return None, "target not found"
         self._resolved_target_cache[cache_key] = element
@@ -577,11 +622,12 @@ class MacroRunner:
 
         value = step.options.get("text") or step.options.get("key") or step.value
         value_text = f" value={value}" if value else ""
-        enter_text = (
-            " enter_after=yes"
-            if action == "type_text" and step.options.get("press_enter_after", False)
-            else ""
-        )
+        enter_parts = []
+        if action in {"type_text", "paste_text", "preset_text"} and step.options.get("press_enter_before", False):
+            enter_parts.append("enter_before=yes")
+        if action in {"type_text", "paste_text", "preset_text"} and step.options.get("press_enter_after", False):
+            enter_parts.append("enter_after=yes")
+        enter_text = f" {' '.join(enter_parts)}" if enter_parts else ""
         return (
             f"{display_order}. {action}{target}{value_text}{enter_text}{timing_text} "
             f"timeout={step.timeout_seconds} retries={step.retries}"
@@ -679,13 +725,14 @@ class MacroRunner:
         return UiTargetRecord(
             id=emr_target.id,
             target_id=emr_target.target_key,
-            parent_target_id=parent_target_key,
+            parent_target_id=None,
             parent_automation_id=parent_automation_id,
             automation_id=emr_target.automation_id,
             name=emr_target.name_match,
             control_type=emr_target.control_type,
             class_name=emr_target.class_name,
             created_at=emr_target.created_at,
+            ancestor_path=emr_target.ancestor_path,
         )
 
     @staticmethod
@@ -748,7 +795,9 @@ def _db_macro_step_to_runtime_step(step) -> MacroStep:
         options["key"] = step.value
     if action in {"type_text", "paste_text", "type_text_keyboard", "type_text_clipboard"} and step.value is not None:
         options["text"] = step.value
-    if action in {"type_text", "type_text_keyboard"} and step.press_enter_after:
+    if action in {"type_text", "paste_text", "preset_text", "type_text_keyboard", "type_text_clipboard"} and getattr(step, "press_enter_before", False):
+        options["press_enter_before"] = True
+    if action in {"type_text", "paste_text", "preset_text", "type_text_keyboard", "type_text_clipboard"} and step.press_enter_after:
         options["press_enter_after"] = True
     if step.wait_before_enabled:
         options["wait_before_enabled"] = True
@@ -770,4 +819,43 @@ def _db_macro_step_to_runtime_step(step) -> MacroStep:
         timeout_seconds=step.timeout_seconds,
         retries=step.retries,
         options=options,
+    )
+
+
+def _normalize_hotkey_segment(segment: str) -> str:
+    normalized = segment.strip()
+    modifier_tokens = {
+        "{ALT}": "%",
+        "{CTRL}": "^",
+        "{CONTROL}": "^",
+        "{SHIFT}": "+",
+        "{WIN}": "#",
+    }
+    prefixes = ""
+    while True:
+        matched = False
+        for token, prefix in modifier_tokens.items():
+            if normalized.upper().startswith(token):
+                prefixes += prefix
+                normalized = normalized[len(token) :].lstrip()
+                matched = True
+                break
+        if not matched:
+            break
+    if prefixes:
+        return prefixes + normalized
+    return normalized
+
+
+def _message_indicates_window_not_ready(message: str) -> bool:
+    lowered = (message or "").casefold()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "eghis window containing",
+            "window title setting is empty",
+            "unable to inspect eghis window children",
+            "unable to inspect uia windows",
+            "window not available",
+        )
     )

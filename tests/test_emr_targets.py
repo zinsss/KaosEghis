@@ -28,6 +28,40 @@ def test_emr_profile_tables_are_created(tmp_path) -> None:
     assert "emr_ui_targets" in tables
 
 
+def test_emr_ui_targets_migration_adds_ancestor_path(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE emr_ui_targets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                target_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                description TEXT,
+                automation_id TEXT,
+                control_type TEXT,
+                class_name TEXT,
+                name_match TEXT,
+                parent_target_key TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(emr_ui_targets)").fetchall()
+        }
+
+    assert "ancestor_path" in columns
+
+
 def test_default_profile_is_seeded_from_existing_settings(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import get_default_emr_target_profile
@@ -196,6 +230,7 @@ def test_emr_ui_target_crud(tmp_path) -> None:
             automation_id="SearchBox",
             control_type="Edit",
             parent_target_key="main.window",
+            ancestor_path='[{"name":"진료실","control_type":"Window"}]',
         )
         updated = update_emr_ui_target(
             connection,
@@ -206,6 +241,7 @@ def test_emr_ui_target_crud(tmp_path) -> None:
             control_type="Edit",
             class_name="WindowsForms10.Edit",
             parent_target_key="main.window",
+            ancestor_path='[{"name":"진료실","control_type":"Window"},{"name":"Tools","control_type":"ToolBar"}]',
         )
         listed = list_emr_ui_targets(connection, profile.id)
         deleted = delete_emr_ui_target(connection, target.id)
@@ -214,6 +250,8 @@ def test_emr_ui_target_crud(tmp_path) -> None:
     assert updated is not None
     assert updated.label == "Patient Search Updated"
     assert listed[0].automation_id == "SearchBoxUpdated"
+    assert listed[0].ancestor_path is not None
+    assert "Tools" in listed[0].ancestor_path
     assert deleted is True
     assert after_delete == []
 
@@ -332,6 +370,7 @@ def test_parse_inspector_dump_can_match_parent_target_from_ancestors() -> None:
             parent_target_key=None,
             created_at="now",
             updated_at="now",
+            ancestor_path=None,
         )
     ]
 
@@ -350,6 +389,7 @@ Ancestors:
     assert parsed["label"] == "PACS"
     assert parsed["control_type"] == "Button"
     assert parsed["parent_target_key"] == "tools.toolbar"
+    assert '"name": "Tools"' in parsed["ancestor_path"]
     assert "Ancestors: Tools > 진료실 > 이지스 전자차트 2.0" == parsed["ancestor_summary"]
 
 
@@ -373,6 +413,7 @@ def test_emr_ui_target_dialog_can_apply_inspector_dump(monkeypatch) -> None:
             parent_target_key=None,
             created_at="now",
             updated_at="now",
+            ancestor_path=None,
         )
     ]
 
@@ -398,4 +439,5 @@ Ancestors:
     assert dialog.class_name_input.text() == "WindowsForms10.Window.8.app.0.2bf8098_r6_ad1"
     assert dialog.name_match_input.text() == "PACS"
     assert dialog.parent_target_key_input.text() == "tools.toolbar"
+    assert "Ancestors: Tools > 진료실" in dialog.ancestor_path_preview.toPlainText()
     assert "Inspector fields applied." in dialog.parse_status_label.text()

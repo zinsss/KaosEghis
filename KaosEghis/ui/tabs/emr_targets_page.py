@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from pathlib import Path
@@ -277,6 +278,7 @@ class EmrTargetsPage(QWidget):
                     class_name=target.class_name,
                     name_match=target.name_match,
                     parent_target_key=target.parent_target_key,
+                    ancestor_path=target.ancestor_path,
                 )
         self._current_profile_id = duplicate.id
         self.refresh_view()
@@ -663,6 +665,11 @@ class EmrUiTargetDialog(QDialog):
         self.class_name_input = QLineEdit()
         self.name_match_input = QLineEdit()
         self.parent_target_key_input = QLineEdit()
+        self.ancestor_path_preview = QPlainTextEdit()
+        self.ancestor_path_preview.setReadOnly(True)
+        self.ancestor_path_preview.setPlaceholderText(
+            "Parsed ancestor path will appear here."
+        )
         self.inspector_dump_input = QPlainTextEdit()
         self.inspector_dump_input.setPlaceholderText(
             "Paste Inspector.exe details here to auto-fill fields."
@@ -680,6 +687,7 @@ class EmrUiTargetDialog(QDialog):
         form.addRow("Class name", self.class_name_input)
         form.addRow("Name match", self.name_match_input)
         form.addRow("Parent key", self.parent_target_key_input)
+        form.addRow("Ancestor path", self.ancestor_path_preview)
         form.addRow("Inspector paste", self.inspector_dump_input)
         form.addRow("", self.parse_inspector_button)
         form.addRow("", self.parse_status_label)
@@ -692,6 +700,8 @@ class EmrUiTargetDialog(QDialog):
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
+        self._ancestor_path_value = ""
+
         if target is not None:
             self.target_key_input.setText(target.target_key)
             self.label_input.setText(target.label)
@@ -701,6 +711,10 @@ class EmrUiTargetDialog(QDialog):
             self.class_name_input.setText(target.class_name or "")
             self.name_match_input.setText(target.name_match or "")
             self.parent_target_key_input.setText(target.parent_target_key or "")
+            self._ancestor_path_value = target.ancestor_path or ""
+            self.ancestor_path_preview.setPlainText(
+                summarize_ancestor_path(self._ancestor_path_value)
+            )
 
     def accept(self) -> None:
         if not self.target_key_input.text().strip():
@@ -721,6 +735,7 @@ class EmrUiTargetDialog(QDialog):
             "class_name": self.class_name_input.text().strip(),
             "name_match": self.name_match_input.text().strip(),
             "parent_target_key": self.parent_target_key_input.text().strip(),
+            "ancestor_path": self._ancestor_path_value,
         }
 
     def _apply_inspector_dump(self) -> None:
@@ -739,6 +754,8 @@ class EmrUiTargetDialog(QDialog):
         class_name = parsed.get("class_name", "")
         target_key = parsed.get("target_key", "")
         parent_target_key = parsed.get("parent_target_key", "")
+        ancestor_path = parsed.get("ancestor_path", "")
+        ancestor_summary = parsed.get("ancestor_summary", "")
 
         if target_key and not self.target_key_input.text().strip():
             self.target_key_input.setText(target_key)
@@ -754,14 +771,20 @@ class EmrUiTargetDialog(QDialog):
             self.name_match_input.setText(name_match)
         if parent_target_key and not self.parent_target_key_input.text().strip():
             self.parent_target_key_input.setText(parent_target_key)
+        if ancestor_path:
+            self._ancestor_path_value = ancestor_path
+            self.ancestor_path_preview.setPlainText(
+                ancestor_summary or summarize_ancestor_path(ancestor_path)
+            )
 
-        ancestors = parsed.get("ancestor_summary", "")
-        if ancestors and not self.description_input.toPlainText().strip():
-            self.description_input.setPlainText(ancestors)
+        if ancestor_summary and not self.description_input.toPlainText().strip():
+            self.description_input.setPlainText(ancestor_summary)
 
         message_parts = ["Inspector fields applied."]
         if parent_target_key:
             message_parts.append(f"Matched parent key: {parent_target_key}")
+        if ancestor_path:
+            message_parts.append("Stored ancestor path.")
         self.parse_status_label.setText(" ".join(message_parts))
 
 
@@ -827,10 +850,11 @@ def parse_inspector_dump(
     if target_key:
         parsed["target_key"] = target_key
 
-    ancestors = _parse_ancestor_names(inspector_text)
-    if ancestors:
-        parsed["ancestor_summary"] = "Ancestors: " + " > ".join(ancestors)
-        parent_target_key = _match_parent_target_key(ancestors, existing_targets or [])
+    ancestor_nodes = _parse_ancestor_nodes(inspector_text)
+    if ancestor_nodes:
+        parsed["ancestor_path"] = json.dumps(ancestor_nodes, ensure_ascii=False)
+        parsed["ancestor_summary"] = summarize_ancestor_path(parsed["ancestor_path"])
+        parent_target_key = _match_parent_target_key(ancestor_nodes, existing_targets or [])
         if parent_target_key:
             parsed["parent_target_key"] = parent_target_key
 
@@ -871,9 +895,9 @@ def _suggest_target_key(automation_id: str | None, name_match: str | None) -> st
     return normalized
 
 
-def _parse_ancestor_names(text: str) -> list[str]:
+def _parse_ancestor_nodes(text: str) -> list[dict[str, str]]:
     lines = text.splitlines()
-    ancestors: list[str] = []
+    ancestors: list[dict[str, str]] = []
     in_ancestors = False
     for raw_line in lines:
         line = raw_line.strip()
@@ -883,17 +907,17 @@ def _parse_ancestor_names(text: str) -> list[str]:
             in_ancestors = True
             remainder = line.partition(":")[2].strip()
             if remainder.startswith('"'):
-                name = _extract_leading_quoted_value(remainder)
-                if name:
-                    ancestors.append(name)
+                node = _parse_ancestor_line(remainder)
+                if node:
+                    ancestors.append(node)
             continue
         if not in_ancestors:
             continue
         if not line.startswith('"'):
             break
-        name = _extract_leading_quoted_value(line)
-        if name:
-            ancestors.append(name)
+        node = _parse_ancestor_line(line)
+        if node:
+            ancestors.append(node)
     return ancestors
 
 
@@ -904,12 +928,52 @@ def _extract_leading_quoted_value(line: str) -> str:
     return match.group(1).strip()
 
 
+def _parse_ancestor_line(line: str) -> dict[str, str]:
+    name = _extract_leading_quoted_value(line)
+    remainder = line[len(f'"{name}"') :].strip() if name else line.strip()
+    control_type = ""
+    for korean_label, mapped in _KOREAN_CONTROL_TYPE_MAP.items():
+        if remainder.endswith(korean_label):
+            control_type = mapped
+            break
+    node: dict[str, str] = {}
+    if name:
+        node["name"] = name
+    if control_type:
+        node["control_type"] = control_type
+    return node
+
+
+def summarize_ancestor_path(ancestor_path: str | None) -> str:
+    if not ancestor_path:
+        return ""
+    try:
+        nodes = json.loads(ancestor_path)
+    except json.JSONDecodeError:
+        return ancestor_path
+    if not isinstance(nodes, list):
+        return ""
+    names = [
+        str(node.get("name", "")).strip()
+        for node in nodes
+        if isinstance(node, dict) and str(node.get("name", "")).strip()
+    ]
+    if not names:
+        return ""
+    return "Ancestors: " + " > ".join(names)
+
+
 def _match_parent_target_key(
-    ancestors: list[str],
+    ancestors: list[dict[str, str]],
     existing_targets: list[EmrUiTargetRecord],
 ) -> str:
+    ancestor_names = [
+        str(node.get("name", "")).strip()
+        for node in ancestors
+        if isinstance(node, dict)
+    ]
     meaningful_ancestors = [
-        name for name in ancestors if name and name not in {"", "데스크톱 2"}
+        name for name in ancestor_names if name and name not in {"", "데스크톱 2"}
     ]
     for ancestor_name in meaningful_ancestors:
         matches = [

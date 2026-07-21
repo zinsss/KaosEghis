@@ -1,6 +1,8 @@
+import json
 from dataclasses import dataclass
 from typing import Any
 
+from KaosEghis.core.eghis_connector import get_cached_eghis_state
 from KaosEghis.db.database import connect
 from KaosEghis.db.repositories import UiTargetRecord, get_ui_target
 
@@ -29,22 +31,54 @@ def resolve_target_element(
     settings: dict[str, str], target: UiTargetRecord
 ) -> tuple[Any | None, bool | None, str]:
     title_fragment = settings.get("eghis_window_title_contains", "").strip()
-    if not title_fragment:
-        return None, None, "Eghis window title setting is empty."
 
     try:
         from pywinauto import Desktop
     except ImportError:
         return None, None, "pywinauto is not installed; UIA inspection unavailable."
 
+    messages: list[str] = []
+    saw_empty_title = False
+    resolved_parent_found: bool | None = None
+    for backend in ("uia", "win32"):
+        match, parent_found, message = _resolve_target_element_for_backend(
+            Desktop,
+            backend,
+            title_fragment,
+            target,
+        )
+        if match is not None:
+            return match, parent_found, message
+        if parent_found is not None:
+            resolved_parent_found = parent_found
+        if message == "Eghis window title setting is empty.":
+            saw_empty_title = True
+        elif message:
+            messages.append(f"{backend}: {message}")
+
+    if saw_empty_title and not messages:
+        return None, resolved_parent_found, "Eghis window title setting is empty."
+    if messages:
+        return None, resolved_parent_found, " | ".join(messages)
+    return None, resolved_parent_found, "Target could not be resolved."
+
+
+def _resolve_target_element_for_backend(
+    desktop_type: Any,
+    backend: str,
+    title_fragment: str,
+    target: UiTargetRecord,
+) -> tuple[Any | None, bool | None, str]:
     try:
-        desktop = Desktop(backend="uia")
+        desktop = desktop_type(backend=backend)
         windows = desktop.windows()
     except Exception as error:
         return None, None, f"Unable to inspect UIA windows: {error}"
 
-    window = _find_window_by_title(windows, title_fragment)
+    window = _find_window(desktop, windows, title_fragment)
     if window is None:
+        if not title_fragment:
+            return None, None, "Eghis window title setting is empty."
         return (
             None,
             None,
@@ -113,6 +147,39 @@ def _find_window_by_title(windows: list[Any], title_fragment: str) -> Any | None
     return None
 
 
+def _find_window(desktop: Any, windows: list[Any], title_fragment: str) -> Any | None:
+    cached_state = get_cached_eghis_state()
+    cached_handle = getattr(cached_state, "window_handle", None)
+    if cached_handle is not None:
+        window = _find_window_by_cached_handle(desktop, windows, cached_handle)
+        if window is not None:
+            return window
+    if title_fragment:
+        return _find_window_by_title(windows, title_fragment)
+    return None
+
+
+def _find_window_by_cached_handle(
+    desktop: Any, windows: list[Any], window_handle: int
+) -> Any | None:
+    try:
+        specification = desktop.window(handle=window_handle)
+        window = specification.wrapper_object()
+        if _window_handle(window) == window_handle:
+            return window
+    except Exception:
+        pass
+    return _find_window_by_handle(windows, window_handle)
+
+
+def _find_window_by_handle(windows: list[Any], window_handle: int) -> Any | None:
+    for window in windows:
+        handle = _window_handle(window)
+        if handle == window_handle:
+            return window
+    return None
+
+
 def _resolve_target_element(
     window: Any, target: UiTargetRecord, visited_target_ids: set[str]
 ) -> tuple[Any | None, bool | None, str]:
@@ -158,6 +225,32 @@ def _resolve_target_element(
         return match, True, "Target found."
 
     parent_automation_id = _clean(target.parent_automation_id)
+    ancestor_path = _clean(getattr(target, "ancestor_path", None))
+    if ancestor_path:
+        scoped_parent, parent_found, message = _resolve_ancestor_path_scope(
+            window,
+            target,
+            ancestor_path,
+        )
+        if scoped_parent is None:
+            return None, parent_found, message
+        try:
+            elements = scoped_parent.descendants()
+        except Exception as error:
+            return (
+                None,
+                parent_found,
+                f"Unable to inspect ancestor-scoped children for UI target '{target.target_id}': {error}",
+            )
+        match, message = _find_target_element(
+            elements,
+            target,
+            scope_description="inside ancestor path",
+        )
+        if match is None:
+            return None, parent_found, message
+        return match, parent_found, "Target found."
+
     if parent_automation_id:
         parent, message = _find_parent_element(window, target, parent_automation_id)
         if parent is None:
@@ -263,6 +356,62 @@ def _find_target_element(
     return _single_match(matches, target, description)
 
 
+def _resolve_ancestor_path_scope(
+    window: Any,
+    target: UiTargetRecord,
+    ancestor_path: str,
+) -> tuple[Any | None, bool | None, str]:
+    nodes = _parse_ancestor_path(ancestor_path)
+    if not nodes:
+        return None, False, f"UI target '{target.target_id}' has an invalid ancestor path."
+
+    current_scope = window
+    effective_nodes = _effective_ancestor_nodes(window, nodes)
+    if not effective_nodes:
+        return window, True, "Ancestor path matched the current window."
+
+    last_message = f"Ancestor path for UI target '{target.target_id}' was not found."
+    candidate_paths: list[list[dict[str, str]]] = []
+    for start_index in range(len(effective_nodes)):
+        for end_index in range(len(effective_nodes), start_index, -1):
+            candidate_paths.append(effective_nodes[start_index:end_index])
+
+    for candidate_nodes in candidate_paths:
+        current_scope = window
+        failed = False
+        for node in candidate_nodes:
+            try:
+                elements = current_scope.descendants()
+            except Exception as error:
+                return (
+                    None,
+                    False,
+                    f"Unable to inspect ancestor scope for UI target '{target.target_id}': {error}",
+                )
+            matches = [
+                element
+                for element in elements
+                if _matches_ancestor_node(element, node)
+            ]
+            description = _describe_ancestor_node(node)
+            if not matches:
+                last_message = (
+                    f"Ancestor {description} for UI target '{target.target_id}' was not found."
+                )
+                failed = True
+                break
+            if len(matches) > 1:
+                last_message = (
+                    f"Ancestor {description} for UI target '{target.target_id}' matched {len(matches)} elements."
+                )
+                failed = True
+                break
+            current_scope = matches[0]
+        if not failed:
+            return current_scope, True, "Ancestor path resolved."
+    return None, False, last_message
+
+
 def _single_match(
     matches: list[Any], target: UiTargetRecord, description: str
 ) -> tuple[Any | None, str]:
@@ -276,6 +425,65 @@ def _single_match(
     return matches[0], "Target found."
 
 
+def _parse_ancestor_path(ancestor_path: str) -> list[dict[str, str]]:
+    try:
+        raw_nodes = json.loads(ancestor_path)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw_nodes, list):
+        return []
+    nodes: list[dict[str, str]] = []
+    for node in raw_nodes:
+        if not isinstance(node, dict):
+            continue
+        normalized = {
+            key: str(value).strip()
+            for key, value in node.items()
+            if key in {"name", "automation_id", "control_type", "class_name"}
+            and str(value).strip()
+        }
+        if normalized:
+            nodes.append(normalized)
+    return nodes
+
+
+def _effective_ancestor_nodes(window: Any, nodes: list[dict[str, str]]) -> list[dict[str, str]]:
+    meaningful = [node for node in nodes if not _is_noise_ancestor_node(node)]
+    ordered = list(reversed(meaningful))
+
+    effective: list[dict[str, str]] = []
+    for node in ordered:
+        if _matches_ancestor_node(window, node):
+            continue
+        effective.append(node)
+    return effective
+
+
+def _is_noise_ancestor_node(node: dict[str, str]) -> bool:
+    name = str(node.get("name", "")).strip()
+    if name in {"", "[ No Parent ]", "데스크톱", "데스크톱 2"}:
+        return True
+    return False
+
+
+def _matches_ancestor_node(element: Any, node: dict[str, str]) -> bool:
+    criteria = []
+    if node.get("automation_id"):
+        criteria.append(_element_automation_id(element) == node["automation_id"])
+    if node.get("name"):
+        criteria.append(_element_name(element) == node["name"])
+    if node.get("control_type"):
+        criteria.append(_element_control_type(element) == node["control_type"])
+    if node.get("class_name"):
+        criteria.append(_element_class_name(element) == node["class_name"])
+    return bool(criteria) and all(criteria)
+
+
+def _describe_ancestor_node(node: dict[str, str]) -> str:
+    parts = [f"{key} '{value}'" for key, value in node.items() if value]
+    return ", ".join(parts) if parts else "path node"
+
+
 def _window_title(window: Any) -> str:
     try:
         return window.window_text() or ""
@@ -283,15 +491,38 @@ def _window_title(window: Any) -> str:
         return ""
 
 
+def _window_handle(window: Any) -> int | None:
+    value = getattr(window, "handle", None)
+    if value is not None:
+        try:
+            return int(value)
+        except Exception:
+            return None
+    info = getattr(window, "element_info", None)
+    value = getattr(info, "handle", None)
+    if value is not None:
+        try:
+            return int(value)
+        except Exception:
+            return None
+    return None
+
+
 def _element_automation_id(element: Any) -> str | None:
     info = getattr(element, "element_info", None)
-    value = getattr(info, "automation_id", None)
+    try:
+        value = getattr(info, "automation_id", None)
+    except Exception:
+        value = None
     return str(value) if value else None
 
 
 def _element_name(element: Any) -> str | None:
     info = getattr(element, "element_info", None)
-    value = getattr(info, "name", None)
+    try:
+        value = getattr(info, "name", None)
+    except Exception:
+        value = None
     if value:
         return str(value)
     try:
@@ -303,13 +534,31 @@ def _element_name(element: Any) -> str | None:
 
 def _element_control_type(element: Any) -> str | None:
     info = getattr(element, "element_info", None)
-    value = getattr(info, "control_type", None)
+    try:
+        value = getattr(info, "control_type", None)
+    except Exception:
+        value = None
+    if value:
+        return str(value)
+    try:
+        value = element.friendly_class_name()
+    except Exception:
+        value = None
     return str(value) if value else None
 
 
 def _element_class_name(element: Any) -> str | None:
     info = getattr(element, "element_info", None)
-    value = getattr(info, "class_name", None)
+    try:
+        value = getattr(info, "class_name", None)
+    except Exception:
+        value = None
+    if value:
+        return str(value)
+    try:
+        value = element.class_name()
+    except Exception:
+        value = None
     return str(value) if value else None
 
 

@@ -408,7 +408,7 @@ def test_macro_steps_repository_crud_and_reorder(tmp_path) -> None:
         assert list_macro_steps(connection, item.id) == []
 
 
-def test_macro_step_press_enter_after_is_persisted(tmp_path) -> None:
+def test_macro_step_enter_toggles_are_persisted(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import (
         create_item,
@@ -427,10 +427,12 @@ def test_macro_step_press_enter_after_is_persisted(tmp_path) -> None:
             1,
             "type_text",
             value="hello",
+            press_enter_before=True,
             press_enter_after=True,
             wait_before_enabled=True,
             wait_before_ms=250,
         )
+        assert step.press_enter_before is True
         assert step.press_enter_after is True
         assert step.wait_before_enabled is True
         assert step.wait_before_ms == 250
@@ -441,17 +443,19 @@ def test_macro_step_press_enter_after_is_persisted(tmp_path) -> None:
             1,
             "type_text",
             value="hello again",
+            press_enter_before=False,
             press_enter_after=False,
             wait_before_enabled=False,
             wait_before_ms=125,
         )
         assert updated is not None
+        assert updated.press_enter_before is False
         assert updated.press_enter_after is False
         assert updated.wait_before_enabled is False
         assert updated.wait_before_ms == 125
 
 
-def test_macro_step_migration_adds_press_enter_after(tmp_path) -> None:
+def test_macro_step_migration_adds_enter_toggle_columns(tmp_path) -> None:
     import sqlite3
 
     from KaosEghis.db.database import initialize_database
@@ -479,6 +483,8 @@ def test_macro_step_migration_adds_press_enter_after(tmp_path) -> None:
         columns = {
             row[1]: row for row in connection.execute("PRAGMA table_info(macro_steps)")
         }
+        assert "press_enter_before" in columns
+        assert columns["press_enter_before"][4] == "0"
         assert "press_enter_after" in columns
         assert columns["press_enter_after"][4] == "0"
         assert columns["wait_before_enabled"][4] == "0"
@@ -2153,6 +2159,94 @@ def test_inspect_target_readonly_scopes_lookup_to_parent(monkeypatch) -> None:
     assert parent.descendants_calls == 1
 
 
+def test_inspect_target_readonly_scopes_lookup_to_ancestor_path(monkeypatch) -> None:
+    import json
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    child_outside_scope = _FakeElement("btnPacs", name="PACS", control_type="Button")
+    target_inside_scope = _FakeElement("btnPacs", name="PACS", control_type="Button")
+    tools = _FakeElement("toolsToolbar", name="Tools", control_type="ToolBar", children=[target_inside_scope])
+    clinic = _FakeElement("clinicPanel", name="진료실", control_type="Window", children=[tools])
+    window = _FakeWindow("Eghis", [clinic, child_outside_scope])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "pacs.button",
+        None,
+        None,
+        "btnPacs",
+        "PACS",
+        "Button",
+        None,
+        "now",
+        ancestor_path=json.dumps(
+            [
+                {"name": "Tools", "control_type": "ToolBar"},
+                {"name": "진료실", "control_type": "Window"},
+                {"name": "이지스 전자차트 2.0", "control_type": "Window"},
+            ],
+            ensure_ascii=False,
+        ),
+    )
+
+    result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert result.found_name == "PACS"
+    assert window.descendants_calls >= 1
+    assert clinic.descendants_calls == 1
+    assert tools.descendants_calls == 1
+
+
+def test_inspect_target_readonly_ancestor_path_can_skip_stale_prefix_nodes(
+    monkeypatch,
+) -> None:
+    import json
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target_inside_scope = _FakeElement("chkInspTargetYn", name="청구안함", control_type="CheckBox")
+    treatment = _FakeElement("treatmentPane", name="처방", control_type="Window", children=[target_inside_scope])
+    clinic = _FakeElement("clinicPanel", name="진료실", control_type="Window", children=[treatment])
+    window = _FakeWindow("이지스 전자차트 2.0", [clinic])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "noclaim",
+        None,
+        None,
+        "chkInspTargetYn",
+        "청구안함",
+        "CheckBox",
+        None,
+        "now",
+        ancestor_path=json.dumps(
+            [
+                {"name": "sidePanel1", "control_type": "Window"},
+                {"name": "처방", "control_type": "Window"},
+                {"name": "진료실", "control_type": "Window"},
+                {"name": "이지스 전자차트 2.0", "control_type": "Window"},
+            ],
+            ensure_ascii=False,
+        ),
+    )
+
+    result = inspect_target_readonly(
+        {"eghis_window_title_contains": "이지스 전자차트"},
+        target,
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert result.found_name == "청구안함"
+
+
 def test_inspect_target_readonly_without_parent_still_uses_window_lookup(
     monkeypatch,
 ) -> None:
@@ -2181,6 +2275,98 @@ def test_inspect_target_readonly_without_parent_still_uses_window_lookup(
     assert result.parent_found is None
     assert result.found_class_name == "RichEditD2DPT"
     assert window.descendants_calls == 1
+
+
+def test_inspect_target_readonly_prefers_cached_window_handle(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import KaosEghis.core.uia_inspector as inspector
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    child = _FakeElement("eghisRichTextBox", class_name="RichEditD2DPT")
+    connected_window = _FakeWindow("Connected Window", [child], handle=55)
+    wrong_title_window = _FakeWindow("Completely Different", [], handle=77)
+    _install_fake_pywinauto(monkeypatch, [wrong_title_window, connected_window])
+    monkeypatch.setattr(
+        inspector,
+        "get_cached_eghis_state",
+        lambda: SimpleNamespace(window_handle=55),
+    )
+
+    target = UiTargetRecord(
+        1,
+        "prescription.note",
+        None,
+        None,
+        "eghisRichTextBox",
+        None,
+        None,
+        "RichEditD2DPT",
+        "now",
+    )
+
+    result = inspector.inspect_target_readonly(
+        {"eghis_window_title_contains": "Missing Title"},
+        target,
+    )
+
+    assert result.found is True
+    assert connected_window.descendants_calls == 1
+    assert wrong_title_window.descendants_calls == 0
+
+
+def test_inspect_target_readonly_falls_back_to_win32_backend(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    child = _FakeElement("btnPacs", name="PACS", control_type="Button")
+    uia_window = _FakeWindow("Eghis", [])
+    win32_window = _FakeWindow("Eghis", [child], handle=55)
+
+    class FakeDesktop:
+        def __init__(self, backend: str) -> None:
+            self.backend = backend
+
+        def windows(self) -> list:
+            return [uia_window] if self.backend == "uia" else [win32_window]
+
+        def window(self, handle: int):
+            if self.backend == "uia":
+                raise RuntimeError("uia handle lookup unavailable")
+            if handle != 55:
+                raise RuntimeError("unexpected handle")
+            return _FakeWindowSpecification(win32_window)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto",
+        SimpleNamespace(Desktop=FakeDesktop),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.uia_inspector.get_cached_eghis_state",
+        lambda: SimpleNamespace(window_handle=55),
+    )
+
+    target = UiTargetRecord(
+        1,
+        "pacs.button",
+        None,
+        None,
+        "btnPacs",
+        "PACS",
+        "Button",
+        None,
+        "now",
+    )
+
+    result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
+
+    assert result.found is True
+    assert win32_window.descendants_calls == 1
 
 
 def test_inspect_target_readonly_reports_missing_parent(monkeypatch) -> None:
@@ -2338,10 +2524,11 @@ class _FakeElement:
 
 
 class _FakeWindow:
-    def __init__(self, title: str, children: list) -> None:
+    def __init__(self, title: str, children: list, handle: int | None = None) -> None:
         self._title = title
         self._children = children
         self.descendants_calls = 0
+        self.handle = handle
 
     def window_text(self) -> str:
         return self._title
@@ -2396,3 +2583,11 @@ def _install_fake_pywinauto(monkeypatch, windows: list) -> None:
         "pywinauto",
         SimpleNamespace(Desktop=FakeDesktop),
     )
+
+
+class _FakeWindowSpecification:
+    def __init__(self, window) -> None:
+        self._window = window
+
+    def wrapper_object(self):
+        return self._window

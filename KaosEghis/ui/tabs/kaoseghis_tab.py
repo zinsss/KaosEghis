@@ -421,6 +421,8 @@ class MacrosPage(QWidget):
 
         self.add_macro_button = QPushButton("Add macro")
         self.add_macro_button.clicked.connect(self.add_macro)
+        self.copy_macro_button = QPushButton("Copy selected macro")
+        self.copy_macro_button.clicked.connect(self.copy_macro)
         self.edit_macro_button = QPushButton("Edit selected macro")
         self.edit_macro_button.clicked.connect(self.edit_macro)
         self.dry_run_button = QPushButton("Dry run")
@@ -434,6 +436,7 @@ class MacrosPage(QWidget):
 
         controls = QHBoxLayout()
         controls.addWidget(self.add_macro_button)
+        controls.addWidget(self.copy_macro_button)
         controls.addWidget(self.edit_macro_button)
         controls.addWidget(self.dry_run_button)
         controls.addWidget(self.run_macro_button)
@@ -514,6 +517,43 @@ class MacrosPage(QWidget):
             reorder_macro_steps(connection, item_id)
         self.refresh_view()
         self.log.setPlainText("Macro updated.")
+
+    def copy_macro(self) -> None:
+        item_id = self._selected_macro_id()
+        if item_id is None:
+            self.log.setPlainText("Select a macro to copy.")
+            return
+
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            item = _get_required_item(connection, item_id)
+            steps = list_macro_steps(connection, item_id)
+            copied = create_item(
+                connection,
+                _next_macro_copy_name(connection, item.name),
+                "macro",
+                item.is_enabled,
+                item.emr_target_profile_id,
+                launcher_section=item.launcher_section,
+            )
+            for step in steps:
+                create_macro_step(
+                    connection,
+                    copied.id,
+                    step.step_order,
+                    step.action,
+                    target_id=step.target_id,
+                    value=step.value,
+                    timeout_seconds=step.timeout_seconds,
+                    retries=step.retries,
+                    press_enter_before=getattr(step, "press_enter_before", False),
+                    press_enter_after=step.press_enter_after,
+                    wait_before_enabled=step.wait_before_enabled,
+                    wait_before_ms=step.wait_before_ms,
+                )
+            reorder_macro_steps(connection, copied.id)
+        self.refresh_view()
+        self.log.setPlainText("Macro copied.")
 
     def dry_run_macro(self) -> None:
         item_id = self._selected_macro_id()
@@ -957,6 +997,21 @@ def _get_required_item(connection, item_id: int):
     if item is not None:
         return item
     raise RuntimeError("Item not found.")
+
+
+def _next_macro_copy_name(connection, base_name: str) -> str:
+    existing_names = {
+        item.name
+        for item in list_items(connection, "macro")
+    }
+    if f"{base_name} Copy" not in existing_names:
+        return f"{base_name} Copy"
+    index = 2
+    while True:
+        candidate = f"{base_name} Copy {index}"
+        if candidate not in existing_names:
+            return candidate
+        index += 1
 
 
 def _yes_no(value: bool) -> str:

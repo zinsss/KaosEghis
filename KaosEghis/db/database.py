@@ -110,6 +110,11 @@ def _migrate_macro_steps(connection: sqlite3.Connection) -> None:
     columns = {
         row[1] for row in connection.execute("PRAGMA table_info(macro_steps)").fetchall()
     }
+    if "press_enter_before" not in columns:
+        connection.execute(
+            "ALTER TABLE macro_steps "
+            "ADD COLUMN press_enter_before INTEGER NOT NULL DEFAULT 0"
+        )
     if "press_enter_after" not in columns:
         connection.execute(
             "ALTER TABLE macro_steps "
@@ -382,6 +387,7 @@ def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:
         "class_name",
         "name_match",
         "parent_target_key",
+        "ancestor_path",
     ):
         if name not in columns:
             connection.execute(f"ALTER TABLE emr_ui_targets ADD COLUMN {name} TEXT")

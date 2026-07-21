@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ class UiTargetRecord:
     control_type: str | None
     class_name: str | None
     created_at: str
+    ancestor_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,7 @@ class MacroStepRecord:
     value: str | None
     timeout_seconds: float
     retries: int
+    press_enter_before: bool
     press_enter_after: bool
     wait_before_enabled: bool
     wait_before_ms: int
@@ -145,6 +148,7 @@ class EmrUiTargetRecord:
     parent_target_key: str | None
     created_at: str
     updated_at: str
+    ancestor_path: str | None = None
 
 
 SUPPORTED_ITEM_TYPES = {"clipboard", "randomized_clipboard", "macro", "workflow"}
@@ -453,7 +457,7 @@ def list_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[Macro
     rows = connection.execute(
         """
         SELECT id, item_id, step_order, action, target_id, value, timeout_seconds,
-               retries, press_enter_after, wait_before_enabled, wait_before_ms
+               retries, press_enter_before, press_enter_after, wait_before_enabled, wait_before_ms
         FROM macro_steps
         WHERE item_id = ?
         ORDER BY step_order, id
@@ -476,6 +480,7 @@ def create_macro_step(
     value: str | None = None,
     timeout_seconds: float = 5.0,
     retries: int = 0,
+    press_enter_before: bool = False,
     press_enter_after: bool = False,
     wait_before_enabled: bool = False,
     wait_before_ms: int = 100,
@@ -485,8 +490,8 @@ def create_macro_step(
         """
         INSERT INTO macro_steps
             (item_id, step_order, action, target_id, value, timeout_seconds, retries,
-             press_enter_after, wait_before_enabled, wait_before_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             press_enter_before, press_enter_after, wait_before_enabled, wait_before_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             item_id,
@@ -496,6 +501,7 @@ def create_macro_step(
             _blank_to_none(value),
             timeout_seconds,
             retries,
+            int(press_enter_before),
             int(press_enter_after),
             int(wait_before_enabled),
             max(int(wait_before_ms), 0),
@@ -517,6 +523,7 @@ def update_macro_step(
     value: str | None = None,
     timeout_seconds: float = 5.0,
     retries: int = 0,
+    press_enter_before: bool = False,
     press_enter_after: bool = False,
     wait_before_enabled: bool = False,
     wait_before_ms: int = 100,
@@ -531,6 +538,7 @@ def update_macro_step(
             value = ?,
             timeout_seconds = ?,
             retries = ?,
+            press_enter_before = ?,
             press_enter_after = ?,
             wait_before_enabled = ?,
             wait_before_ms = ?
@@ -543,6 +551,7 @@ def update_macro_step(
             _blank_to_none(value),
             timeout_seconds,
             retries,
+            int(press_enter_before),
             int(press_enter_after),
             int(wait_before_enabled),
             max(int(wait_before_ms), 0),
@@ -1116,7 +1125,7 @@ def list_emr_ui_targets(
     rows = connection.execute(
         """
         SELECT id, profile_id, target_key, label, description, automation_id,
-               control_type, class_name, name_match, parent_target_key,
+               control_type, class_name, name_match, parent_target_key, ancestor_path,
                created_at, updated_at
         FROM emr_ui_targets
         WHERE profile_id = ?
@@ -1135,7 +1144,7 @@ def get_emr_ui_target_by_key(
     row = connection.execute(
         """
         SELECT id, profile_id, target_key, label, description, automation_id,
-               control_type, class_name, name_match, parent_target_key,
+               control_type, class_name, name_match, parent_target_key, ancestor_path,
                created_at, updated_at
         FROM emr_ui_targets
         WHERE profile_id = ? AND target_key = ?
@@ -1153,7 +1162,7 @@ def get_emr_ui_target(
     row = connection.execute(
         """
         SELECT id, profile_id, target_key, label, description, automation_id,
-               control_type, class_name, name_match, parent_target_key,
+               control_type, class_name, name_match, parent_target_key, ancestor_path,
                created_at, updated_at
         FROM emr_ui_targets
         WHERE id = ?
@@ -1177,6 +1186,7 @@ def create_emr_ui_target(
     class_name: str | None = None,
     name_match: str | None = None,
     parent_target_key: str | None = None,
+    ancestor_path: str | None = None,
 ) -> EmrUiTargetRecord:
     cursor = connection.execute(
         """
@@ -1189,9 +1199,10 @@ def create_emr_ui_target(
             control_type,
             class_name,
             name_match,
-            parent_target_key
+            parent_target_key,
+            ancestor_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             profile_id,
@@ -1203,6 +1214,7 @@ def create_emr_ui_target(
             _blank_to_none(class_name),
             _blank_to_none(name_match),
             _blank_to_none(parent_target_key),
+            _normalize_ancestor_path(ancestor_path),
         ),
     )
     connection.commit()
@@ -1224,6 +1236,7 @@ def update_emr_ui_target(
     class_name: str | None = None,
     name_match: str | None = None,
     parent_target_key: str | None = None,
+    ancestor_path: str | None = None,
 ) -> EmrUiTargetRecord | None:
     connection.execute(
         """
@@ -1236,6 +1249,7 @@ def update_emr_ui_target(
             class_name = ?,
             name_match = ?,
             parent_target_key = ?,
+            ancestor_path = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
@@ -1248,6 +1262,7 @@ def update_emr_ui_target(
             _blank_to_none(class_name),
             _blank_to_none(name_match),
             _blank_to_none(parent_target_key),
+            _normalize_ancestor_path(ancestor_path),
             ui_target_id,
         ),
     )
@@ -1457,9 +1472,10 @@ def _macro_step_from_row(row: sqlite3.Row | tuple) -> MacroStepRecord:
         value=row[5],
         timeout_seconds=row[6],
         retries=row[7],
-        press_enter_after=bool(row[8]),
-        wait_before_enabled=bool(row[9]),
-        wait_before_ms=int(row[10]),
+        press_enter_before=bool(row[8]),
+        press_enter_after=bool(row[9]),
+        wait_before_enabled=bool(row[10]),
+        wait_before_ms=int(row[11]),
     )
 
 
@@ -1537,8 +1553,9 @@ def _emr_ui_target_from_row(row: sqlite3.Row | tuple) -> EmrUiTargetRecord:
         class_name=row[7],
         name_match=row[8],
         parent_target_key=row[9],
-        created_at=row[10],
-        updated_at=row[11],
+        created_at=row[11],
+        updated_at=row[12],
+        ancestor_path=row[10],
     )
 
 
@@ -1548,7 +1565,7 @@ def _get_macro_step_by_id(
     row = connection.execute(
         """
         SELECT id, item_id, step_order, action, target_id, value, timeout_seconds,
-               retries, press_enter_after, wait_before_enabled, wait_before_ms
+               retries, press_enter_before, press_enter_after, wait_before_enabled, wait_before_ms
         FROM macro_steps
         WHERE id = ?
         """,
@@ -1564,6 +1581,33 @@ def _blank_to_none(value: str | None) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _normalize_ancestor_path(value: str | None) -> str | None:
+    stripped = _blank_to_none(value)
+    if stripped is None:
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return stripped
+    if not isinstance(parsed, list):
+        return None
+    normalized: list[dict[str, str]] = []
+    for node in parsed:
+        if not isinstance(node, dict):
+            continue
+        normalized_node = {
+            key: str(raw_value).strip()
+            for key, raw_value in node.items()
+            if key in {"name", "automation_id", "control_type", "class_name"}
+            and str(raw_value).strip()
+        }
+        if normalized_node:
+            normalized.append(normalized_node)
+    if not normalized:
+        return None
+    return json.dumps(normalized, ensure_ascii=False)
 
 
 def _validate_item_type(item_type: str) -> None:
