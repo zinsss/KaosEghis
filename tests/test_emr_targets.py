@@ -336,6 +336,53 @@ def test_emr_targets_page_connection_toggle_updates_status(
     assert "Connected and active" in page.connection_status_label.text()
 
 
+def test_emr_targets_page_shows_capture_result_and_copies_details(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+
+    from KaosEghis.core.ui_capture import PointInspectionResult
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+    copied: list[str] = []
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: False,
+    )
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.copy_text",
+        lambda text: copied.append(text),
+    )
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = EmrTargetsPage(db_path)
+    page._handle_capture_ready(
+        PointInspectionResult(
+            success=True,
+            x=120,
+            y=340,
+            backend="uia",
+            handle=100,
+            name="환자명",
+            automation_id="grdOpdList",
+            control_type="DataItem",
+            class_name="WindowsForms10.Window",
+            text_value="홍길동",
+            ancestor_summary="진료실 (Window)",
+            message="UI control captured.",
+        )
+    )
+
+    assert "Coordinate: (120, 340)" in page.capture_result.toPlainText()
+    assert "Value: 홍길동" in page.capture_result.toPlainText()
+    assert copied
+    assert "copied to clipboard" in page.capture_status_label.text().casefold()
+
+
 def test_parse_inspector_dump_maps_basic_fields() -> None:
     from KaosEghis.ui.tabs.emr_targets_page import parse_inspector_dump
 

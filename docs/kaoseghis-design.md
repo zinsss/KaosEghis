@@ -51,6 +51,8 @@ Primary daily-use tab.
   - `MacroTexts`
   - `EMR`
 - `EMR` now hosts the EMR target profile foundation rather than a simple summary view
+- `EMR` also includes a click-capture helper for probing a live control by hotkey or
+  manual arm, then copying the resolved UI metadata/value summary to the clipboard
 - `Launcher` is the daily-use macro launcher surface; double-click or its run button
   executes immediately with an in-page `Running '<macro name>'...` status instead of
   a confirmation dialog

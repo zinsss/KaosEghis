@@ -4,4 +4,5 @@ psutil>=5.9
 pygetwindow>=0.0.9
 psycopg2-binary>=2.9
 pywinauto>=0.6.8
+pynput>=1.7
 pytest>=8

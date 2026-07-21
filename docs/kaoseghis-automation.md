@@ -43,6 +43,8 @@ Responsibilities:
 - inspect enabled/visible/text state
 - wait on conditions without changing UI state
 - expose a local timing helper for target-resolution troubleshooting
+- inspect the control under a clicked screen coordinate and extract the best available
+  name/value metadata for operator troubleshooting
 
 Current lookup preference:
 
@@ -61,6 +63,17 @@ Ancestor-path support:
 - resolution walks from the first stable inner ancestor down to the final target
 - when a stable intermediate scope anchor exists, prefer it over a long ancestor chain
 - this is intended to improve speed and reduce false matches in deep Windows Forms trees
+
+Screen capture support:
+
+- the EMR page includes a global click-capture helper
+- default hotkey: `Ctrl+Shift+F8`
+- the next mouse click inspects the control under that coordinate
+- captured details include coordinate, backend, handle, automation ID, control type,
+  class name, best available value, and ancestor summary
+- captured details are copied to the clipboard for quick reuse in target setup or
+  debugging
+- if global hotkeys are unavailable, the same flow can still be armed from the EMR page
 
 ### Manual Explicit Write Tests
 

@@ -68,6 +68,7 @@ def test_detector_and_clipboard_imports() -> None:
         eghis_key_paste_test,
         emr_detector,
         paste_test,
+        ui_capture,
         write_test,
     )
 
@@ -83,8 +84,72 @@ def test_detector_and_clipboard_imports() -> None:
     )
     assert callable(clipboard_service.copy_text)
     assert callable(paste_test.paste_text_to_target_for_test)
+    assert callable(ui_capture.inspect_ui_at_point)
+    assert callable(ui_capture.format_capture_result)
     assert callable(write_test.set_value_to_target_for_test)
     assert callable(write_test.set_edit_text_to_target_for_test)
+
+
+def test_inspect_ui_at_point_reads_value_and_metadata(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    from KaosEghis.core import ui_capture
+
+    class FakeParent:
+        def __init__(self) -> None:
+            self.element_info = SimpleNamespace(
+                name="진료실",
+                automation_id="H2OpdTreatment",
+                control_type="Window",
+                class_name="WindowsForms10.Window",
+                handle=321,
+            )
+
+        def parent(self):
+            return None
+
+        def window_text(self):
+            return "진료실"
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.element_info = SimpleNamespace(
+                name="환자명",
+                automation_id="grdOpdList",
+                control_type="DataItem",
+                class_name="WindowsForms10.Window",
+                handle=123,
+            )
+            self.iface_value = SimpleNamespace(CurrentValue="홍길동")
+            self._parent = FakeParent()
+
+        def parent(self):
+            return self._parent
+
+        def window_text(self):
+            return "환자명"
+
+    class FakeDesktop:
+        def __init__(self, backend: str) -> None:
+            self.backend = backend
+
+        def from_point(self, x: int, y: int):
+            assert (x, y) == (10, 20)
+            return FakeElement()
+
+    monkeypatch.setitem(sys.modules, "pywinauto", SimpleNamespace(Desktop=FakeDesktop))
+
+    result = ui_capture.inspect_ui_at_point(10, 20)
+
+    assert result.success is True
+    assert result.backend == "uia"
+    assert result.handle == 123
+    assert result.name == "환자명"
+    assert result.automation_id == "grdOpdList"
+    assert result.control_type == "DataItem"
+    assert result.text_value == "홍길동"
+    assert "진료실" in (result.ancestor_summary or "")
 
 
 def test_clipboard_service_retries_until_text_is_applied(monkeypatch) -> None:

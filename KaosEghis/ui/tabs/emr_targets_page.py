@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from KaosEghis.core.clipboard_service import copy_text
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     EmrUiTargetRecord,
@@ -49,6 +50,11 @@ from KaosEghis.core.eghis_connector import (
     get_cached_eghis_state,
     refresh_cached_eghis_state,
 )
+from KaosEghis.core.ui_capture import (
+    GlobalClickCaptureController,
+    PointInspectionResult,
+    format_capture_result,
+)
 from KaosEghis.db.repositories import get_settings
 
 
@@ -58,6 +64,7 @@ class EmrTargetsPage(QWidget):
         self._db_path = db_path
         self._current_profile_id: int | None = None
         self._current_ui_targets: list[EmrUiTargetRecord] = []
+        self._capture_controller = GlobalClickCaptureController(self)
 
         title = QLabel("EMR")
         title.setObjectName("pageTitle")
@@ -149,6 +156,17 @@ class EmrTargetsPage(QWidget):
         self.edit_target_button.clicked.connect(self.edit_ui_target)
         self.delete_target_button = QPushButton("Delete target")
         self.delete_target_button.clicked.connect(self.delete_ui_target)
+        self.capture_button = QPushButton("Capture next click")
+        self.capture_button.clicked.connect(self.arm_capture)
+        self.copy_capture_button = QPushButton("Copy capture details")
+        self.copy_capture_button.clicked.connect(self.copy_capture_details)
+        self.capture_hotkey_label = QLabel()
+        self.capture_status_label = QLabel("Capture idle.")
+        self.capture_result = QPlainTextEdit()
+        self.capture_result.setReadOnly(True)
+        self.capture_result.setPlaceholderText(
+            "Captured UI details and value will appear here."
+        )
 
         target_controls = QHBoxLayout()
         target_controls.addWidget(self.add_target_button)
@@ -174,6 +192,15 @@ class EmrTargetsPage(QWidget):
         right_column.addWidget(QLabel("UI targets"))
         right_column.addWidget(self.ui_targets_table, 1)
         right_column.addLayout(target_controls)
+        right_column.addWidget(QLabel("Capture from screen"))
+        right_column.addWidget(self.capture_hotkey_label)
+        capture_controls = QHBoxLayout()
+        capture_controls.addWidget(self.capture_button)
+        capture_controls.addWidget(self.copy_capture_button)
+        capture_controls.addStretch()
+        right_column.addLayout(capture_controls)
+        right_column.addWidget(self.capture_status_label)
+        right_column.addWidget(self.capture_result)
 
         content_grid = QGridLayout()
         content_grid.setContentsMargins(0, 0, 0, 0)
@@ -185,6 +212,16 @@ class EmrTargetsPage(QWidget):
 
         layout.addLayout(content_grid, 1)
         layout.addWidget(self.status_label)
+
+        self._capture_controller.armed_changed.connect(self._on_capture_armed_changed)
+        self._capture_controller.capture_ready.connect(self._handle_capture_ready)
+        self._capture_controller.capture_failed.connect(self._handle_capture_failed)
+        hotkey_started = self._capture_controller.start_hotkey_listener()
+        self.capture_hotkey_label.setText(
+            "Global capture hotkey: Ctrl+Shift+F8"
+            if hotkey_started
+            else "Global capture hotkey unavailable. Use the button."
+        )
 
         self.refresh_view()
 
@@ -648,6 +685,53 @@ class EmrTargetsPage(QWidget):
             if candidate not in existing_names:
                 return candidate
             index += 1
+
+    def arm_capture(self) -> None:
+        if self._capture_controller.arm_capture():
+            self.capture_status_label.setText(
+                "Capture armed. Click any EMR control to inspect it."
+            )
+        else:
+            self.capture_status_label.setText("Capture is unavailable.")
+
+    def copy_capture_details(self) -> None:
+        text = self.capture_result.toPlainText().strip()
+        if not text:
+            self.capture_status_label.setText("No capture details to copy yet.")
+            return
+        try:
+            copy_text(text)
+        except Exception:
+            self.capture_status_label.setText("Capture details could not be copied.")
+            return
+        self.capture_status_label.setText("Capture details copied to clipboard.")
+
+    def _on_capture_armed_changed(self, armed: bool) -> None:
+        if armed:
+            self.capture_button.setText("Capture armed...")
+            return
+        self.capture_button.setText("Capture next click")
+
+    def _handle_capture_ready(self, result: PointInspectionResult) -> None:
+        details = format_capture_result(result)
+        self.capture_result.setPlainText(details)
+        try:
+            copy_text(details)
+            copied = True
+        except Exception:
+            copied = False
+        if result.success:
+            suffix = " Details copied to clipboard." if copied else ""
+            self.capture_status_label.setText(f"{result.message}{suffix}")
+        else:
+            self.capture_status_label.setText(result.message)
+
+    def _handle_capture_failed(self, message: str) -> None:
+        self.capture_status_label.setText(message)
+
+    def closeEvent(self, event) -> None:
+        self._capture_controller.stop()
+        super().closeEvent(event)
 
 
 class EmrUiTargetDialog(QDialog):
