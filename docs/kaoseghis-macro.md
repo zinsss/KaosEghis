@@ -52,7 +52,9 @@ Supported item types:
 They share one source of truth:
 
 - a `clipboard` MacroText stores one fixed body
-- a `randomized_clipboard` MacroText stores multiple options and chooses one per use
+- a `randomized_clipboard` MacroText stores multiple options separated by `---` on
+  its own line; each option may span multiple lines and one complete option is chosen
+  per use
 - the Launcher `Comments` column copies the resolved body to the clipboard
 - a macro `preset_text` step selects the same item by its stable item ID and pastes
   the resolved body through the guarded macro runner

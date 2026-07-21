@@ -16,7 +16,8 @@ Visible surfaces:
 Current behavior:
 
 - fixed MacroText copies its complete body, including multiple lines
-- randomized MacroText stores one option per line and copies one option per use
+- randomized MacroText separates options with `---` on its own line, preserves
+  multiline content inside each option, and copies one complete option per use
 - double-clicking a MacroText in `Comments` copies only; it does not paste or run EMR automation
 - macro `preset_text` steps select and reuse the same saved MacroText
 

@@ -752,7 +752,9 @@ class MacroTextDialog(QDialog):
         )
         self.content = QPlainTextEdit()
         self.content.setPlaceholderText("Enter text to copy.")
-        self.content.setPlainText(self._display_content(bodies or []))
+        self.content.setPlainText(
+            self._display_content(bodies or [], self.randomized.isChecked())
+        )
         self.randomized.toggled.connect(self._update_content_hint)
         self._update_content_hint(self.randomized.isChecked())
 
@@ -776,7 +778,7 @@ class MacroTextDialog(QDialog):
     def values(self) -> dict:
         content = self.content.toPlainText().strip()
         if self.randomized.isChecked():
-            bodies = [line.strip() for line in content.splitlines() if line.strip()]
+            bodies = self._randomized_bodies(content)
             item_type = "randomized_clipboard"
         else:
             bodies = [content] if content else []
@@ -787,12 +789,29 @@ class MacroTextDialog(QDialog):
             "bodies": bodies,
         }
 
-    def _display_content(self, bodies: list[str]) -> str:
-        return "\n".join(bodies)
+    def _display_content(self, bodies: list[str], randomized: bool) -> str:
+        return ("\n---\n" if randomized else "\n").join(bodies)
+
+    def _randomized_bodies(self, content: str) -> list[str]:
+        bodies: list[str] = []
+        current_lines: list[str] = []
+        for line in content.splitlines():
+            if line.strip() == "---":
+                body = "\n".join(current_lines).strip()
+                if body:
+                    bodies.append(body)
+                current_lines = []
+                continue
+            current_lines.append(line)
+
+        body = "\n".join(current_lines).strip()
+        if body:
+            bodies.append(body)
+        return bodies
 
     def _update_content_hint(self, randomized: bool) -> None:
         self.content.setPlaceholderText(
-            "Enter one option per line."
+            "Separate options with --- on its own line. Options may be multiline."
             if randomized
             else "Enter the text to copy. Multiline text is supported."
         )

@@ -64,6 +64,8 @@ Primary daily-use tab.
 - `Builder` is the macro add/edit surface
 - `MacroTexts` creates and edits fixed or randomized reusable text; the same item can
   be selected by a macro `preset_text` step or copied directly from `Comments`
+- randomized MacroText options use `---` on its own line as the separator, allowing
+  each randomly selected comment to preserve multiple lines
 
 ### `Settings`
 

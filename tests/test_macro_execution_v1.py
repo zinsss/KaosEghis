@@ -887,8 +887,34 @@ def test_macrotext_dialog_supports_simple_and_randomized_content() -> None:
     }
 
     dialog.randomized.setChecked(True)
+    dialog.content.setPlainText(
+        "first comment line 1\nfirst comment line 2\n---\n"
+        "second comment line 1\nsecond comment line 2"
+    )
     assert dialog.values()["item_type"] == "randomized_clipboard"
-    assert dialog.values()["bodies"] == ["first line", "second line"]
+    assert dialog.values()["bodies"] == [
+        "first comment line 1\nfirst comment line 2",
+        "second comment line 1\nsecond comment line 2",
+    ]
+
+
+def test_macrotext_randomized_editor_uses_separator_and_ignores_empty_sections() -> None:
+    _app()
+
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QWidget
+
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacroTextDialog
+
+    item = SimpleNamespace(name="Comments", item_type="randomized_clipboard")
+    parent = QWidget()
+    dialog = MacroTextDialog(parent, item, ["first\ncomment", "second\ncomment"])
+
+    assert dialog.content.toPlainText() == "first\ncomment\n---\nsecond\ncomment"
+
+    dialog.content.setPlainText("\n---\nfirst\ncomment\n---\n\n---\nsecond\n")
+    assert dialog.values()["bodies"] == ["first\ncomment", "second"]
 
 
 def test_macro_step_dialog_offers_enter_after_for_type_text(
