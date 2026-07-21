@@ -2796,6 +2796,68 @@ def test_inspect_target_readonly_uses_parent_target_id(monkeypatch, tmp_path) ->
     assert parent.descendants_calls == 1
 
 
+def test_inspect_target_readonly_can_resolve_grid_row_target_from_ancestor_scope(
+    monkeypatch,
+) -> None:
+    import json
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    grid_body = _FakeElement(
+        "gridBody",
+        control_type="Pane",
+        rect=(10, 30, 310, 250),
+    )
+    outpatient_list = _FakeElement(
+        "grdOpdList",
+        name="외래리스트",
+        control_type="WindowsForms10.Window.8.app.0.2bf8098_r6_ad1",
+        children=[grid_body],
+        rect=(0, 0, 320, 280),
+    )
+    clinic = _FakeElement(
+        "H2OpdTreatment",
+        name="진료실",
+        control_type="Window",
+        children=[outpatient_list],
+        rect=(0, 0, 640, 480),
+    )
+    window = _FakeWindow("Eghis", [clinic, outpatient_list])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "patient_name_row1",
+        None,
+        "grdOpdList",
+        None,
+        "환자명 row 1",
+        "DataItem",
+        None,
+        "now",
+        ancestor_path=json.dumps(
+            [
+                {"name": "Row 1"},
+                {"name": "Data Panel"},
+                {"name": "MainView"},
+                {"name": "외래리스트", "control_type": "Window"},
+                {"name": "진료실", "control_type": "Window"},
+            ],
+            ensure_ascii=False,
+        ),
+    )
+
+    result = inspect_target_readonly(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert "row 1" in result.message.casefold()
+
+
 class _FakeElementInfo:
     def __init__(
         self,
@@ -2818,6 +2880,7 @@ class _FakeElement:
         control_type: str | None = "Edit",
         class_name: str | None = None,
         children: list | None = None,
+        rect: tuple[int, int, int, int] | None = None,
     ) -> None:
         self.element_info = _FakeElementInfo(
             automation_id,
@@ -2827,9 +2890,13 @@ class _FakeElement:
         )
         self._children = children or []
         self.descendants_calls = 0
+        self._rect = rect or (0, 0, 200, 200)
 
     def descendants(self) -> list:
         self.descendants_calls += 1
+        return self._children
+
+    def children(self) -> list:
         return self._children
 
     def child_window(self, auto_id: str):
@@ -2845,6 +2912,14 @@ class _FakeElement:
 
     def is_visible(self) -> bool:
         return True
+
+    def rectangle(self):
+        left, top, right, bottom = self._rect
+        return type(
+            "_FakeRect",
+            (),
+            {"left": left, "top": top, "right": right, "bottom": bottom},
+        )()
 
 
 class _FakeWindow:

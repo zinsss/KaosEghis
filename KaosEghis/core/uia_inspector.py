@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from KaosEghis.core.eghis_connector import get_cached_eghis_state
@@ -25,6 +26,43 @@ class UiaInspectionResult:
     is_enabled: bool | None
     is_visible: bool | None
     text_value: str | None
+
+
+@dataclass(frozen=True)
+class _GridRowProxy:
+    scope_element: Any
+    row_index: int
+
+    def rectangle(self):
+        return self.scope_element.rectangle()
+
+    def set_focus(self) -> None:
+        try:
+            self.scope_element.set_focus()
+        except Exception:
+            return None
+
+    def click_input(self) -> None:
+        self._click(double=False)
+
+    def double_click_input(self) -> None:
+        self._click(double=True)
+
+    def _click(self, *, double: bool) -> None:
+        from pywinauto import mouse
+
+        left, top, right, bottom = _rect_edges(self.scope_element.rectangle())
+        width = max(right - left, 1)
+        body_top, body_bottom = _grid_body_vertical_bounds(self.scope_element)
+        row_height = _estimate_grid_row_height(self.scope_element)
+        x = left + min(max(int(width * 0.08), 24), 120)
+        y = int(body_top + ((self.row_index - 0.5) * row_height))
+        y = max(body_top + 1, min(y, body_bottom - 1))
+        coords = (x, y)
+        if double:
+            mouse.double_click(button="left", coords=coords)
+        else:
+            mouse.click(button="left", coords=coords)
 
 
 def resolve_target_element(
@@ -102,9 +140,13 @@ def inspect_target_readonly(
     if match is None:
         return _not_found(target, message, parent_found=parent_found)
 
+    success_message = message or "Target found by read-only UIA inspection."
+    if success_message == "Target found.":
+        success_message = "Target found by read-only UIA inspection."
+
     return UiaInspectionResult(
         found=True,
-        message="Target found by read-only UIA inspection.",
+        message=success_message,
         target_id=target.target_id,
         parent_target_id=target.parent_target_id,
         parent_automation_id=target.parent_automation_id,
@@ -237,18 +279,53 @@ def _resolve_target_element(
         parent, message = _find_parent_element(window, target, parent_automation_id)
         if parent is None:
             if ancestor_path:
-                return _resolve_target_with_ancestor_path(window, target, ancestor_path)
+                match, parent_found, fallback_message = _resolve_target_with_ancestor_path(
+                    window, target, ancestor_path
+                )
+                if match is not None:
+                    return match, parent_found, fallback_message
+                grid_match, grid_parent_found, grid_message = _resolve_grid_row_target(
+                    window,
+                    target,
+                    ancestor_path,
+                )
+                if grid_match is not None:
+                    return grid_match, grid_parent_found, grid_message
+                return None, parent_found, fallback_message
             return None, False, message
-        return _resolve_target_inside_parent_scope(
+        match, parent_found, scoped_message = _resolve_target_inside_parent_scope(
             parent,
             target,
             scope_description=f"inside parent automation_id '{parent_automation_id}'",
             ancestor_path=ancestor_path,
             parent_anchor_name=_element_name(parent),
         )
+        if match is not None:
+            return match, parent_found, scoped_message
+        grid_match, grid_parent_found, grid_message = _resolve_grid_row_target_in_scope(
+            parent,
+            target,
+            ancestor_path,
+            parent_found=True,
+        )
+        if grid_match is not None:
+            return grid_match, grid_parent_found, grid_message
+        return None, parent_found, scoped_message
 
     if ancestor_path:
-        return _resolve_target_with_ancestor_path(window, target, ancestor_path)
+        match, parent_found, message = _resolve_target_with_ancestor_path(
+            window, target, ancestor_path
+        )
+        if match is not None:
+            return match, parent_found, message
+        grid_match, grid_parent_found, grid_message = _resolve_grid_row_target(
+            window,
+            target,
+            ancestor_path,
+        )
+        if grid_match is not None:
+            return grid_match, grid_parent_found, grid_message
+        return None, parent_found, message
 
     try:
         elements = window.descendants()
@@ -649,6 +726,147 @@ def _find_target_element_by_automation_id(
     if scope_description:
         description = f"{description} {scope_description}"
     return _single_match(matches, target, description)
+
+
+def _resolve_grid_row_target(
+    window: Any,
+    target: UiTargetRecord,
+    ancestor_path: str | None,
+) -> tuple[Any | None, bool | None, str]:
+    if not ancestor_path:
+        return None, False, ""
+    scope = _resolve_grid_scope_from_ancestor_path(window, ancestor_path)
+    if scope is None:
+        return None, False, ""
+    return _resolve_grid_row_target_in_scope(
+        scope,
+        target,
+        ancestor_path,
+        parent_found=True,
+    )
+
+
+def _resolve_grid_row_target_in_scope(
+    scope: Any,
+    target: UiTargetRecord,
+    ancestor_path: str | None,
+    *,
+    parent_found: bool,
+) -> tuple[Any | None, bool | None, str]:
+    if not _is_grid_row_target(target):
+        return None, parent_found, ""
+    row_index = _grid_row_index(target, ancestor_path)
+    if row_index is None:
+        return None, parent_found, ""
+    return (
+        _GridRowProxy(scope, row_index),
+        parent_found,
+        f"Grid row target '{target.target_id}' resolved to row {row_index}.",
+    )
+
+
+def _is_grid_row_target(target: UiTargetRecord) -> bool:
+    control_type = (_clean(target.control_type) or "").casefold()
+    if control_type not in {"dataitem", "listitem"}:
+        return False
+    return _grid_row_index(target, _clean(getattr(target, "ancestor_path", None))) is not None
+
+
+def _grid_row_index(target: UiTargetRecord, ancestor_path: str | None) -> int | None:
+    candidates = [
+        _clean(target.name) or "",
+        *[
+            str(node.get("name", "")).strip()
+            for node in _parse_ancestor_path(ancestor_path or "")
+            if str(node.get("name", "")).strip()
+        ],
+    ]
+    for candidate in candidates:
+        match = re.search(r"\brow\s+(\d+)\b", candidate, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _resolve_grid_scope_from_ancestor_path(window: Any, ancestor_path: str) -> Any | None:
+    nodes = _parse_ancestor_path(ancestor_path)
+    for node in nodes:
+        name = str(node.get("name", "")).strip()
+        if not name:
+            continue
+        lowered = name.casefold()
+        if "list" in lowered or "리스트" in name:
+            return _resolve_single_ancestor_node(window, node)
+    for node in nodes:
+        name = str(node.get("name", "")).strip()
+        if name in {"MainView", "Data Panel"}:
+            return _resolve_single_ancestor_node(window, node)
+    return None
+
+
+def _resolve_single_ancestor_node(window: Any, node: dict[str, str]) -> Any | None:
+    try:
+        elements = window.descendants()
+    except Exception:
+        return None
+    matches = [
+        element
+        for element in elements
+        if _matches_ancestor_node(element, node)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches and node.get("name"):
+        name = str(node.get("name", "")).strip()
+        name_matches = [
+            element
+            for element in elements
+            if _element_name(element) == name
+        ]
+        if len(name_matches) == 1:
+            return name_matches[0]
+    return None
+
+
+def _rect_edges(rect: Any) -> tuple[int, int, int, int]:
+    left = int(getattr(rect, "left", getattr(rect, "L", 0)))
+    top = int(getattr(rect, "top", getattr(rect, "T", 0)))
+    right = int(getattr(rect, "right", getattr(rect, "R", left)))
+    bottom = int(getattr(rect, "bottom", getattr(rect, "B", top)))
+    return left, top, right, bottom
+
+
+def _grid_body_vertical_bounds(scope_element: Any) -> tuple[int, int]:
+    left, top, right, bottom = _rect_edges(scope_element.rectangle())
+    width = max(right - left, 1)
+    body_top = top + 28
+    body_bottom = bottom - 4
+    try:
+        children = scope_element.children()
+    except Exception:
+        children = []
+    body_candidates: list[tuple[int, int]] = []
+    for child in children:
+        try:
+            child_left, child_top, child_right, child_bottom = _rect_edges(child.rectangle())
+        except Exception:
+            continue
+        child_width = child_right - child_left
+        child_height = child_bottom - child_top
+        if child_width >= width * 0.75 and child_height >= 80:
+            body_candidates.append((child_top, child_bottom))
+    if body_candidates:
+        body_top = min(candidate[0] for candidate in body_candidates)
+        body_bottom = max(candidate[1] for candidate in body_candidates)
+    if body_bottom <= body_top:
+        body_bottom = max(bottom - 4, body_top + 20)
+    return body_top, body_bottom
+
+
+def _estimate_grid_row_height(scope_element: Any) -> int:
+    body_top, body_bottom = _grid_body_vertical_bounds(scope_element)
+    visible_height = max(body_bottom - body_top, 1)
+    return max(18, min(26, int(round(visible_height / 24))))
 
 
 def _parse_ancestor_path(ancestor_path: str) -> list[dict[str, str]]:
