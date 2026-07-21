@@ -58,6 +58,8 @@ Primary daily-use tab.
 - the Launcher EMR toggle uses a dedicated green accent when connected and an
   orange warning accent when manual reconnection is required
 - the Launcher columns are `Favorite`, `Macro`, and `Comments`
+- cross-column drag/drop placement is saved after Qt finalizes the move, so a macro
+  moved into `Favorite` remains there after refresh or restart
 - existing `Eghis` entries migrate to `Macro`, `ETC` entries migrate to `Favorite`,
   and the former `Medical Documents` category migrates to `Comments` without
   deleting entries

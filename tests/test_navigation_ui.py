@@ -137,6 +137,36 @@ def test_launcher_page_places_macros_into_three_columns(tmp_path, monkeypatch) -
     assert page.launcher_lists["Favorite"].item(0).text() == "Misc Action"
 
 
+def test_launcher_cross_column_move_persists_after_reload(tmp_path, monkeypatch) -> None:
+    _app()
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, get_item
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        macro = create_item(connection, "Move Me", "macro", True)
+
+    page = LauncherPage(db_path)
+    source = page.launcher_lists["Macro"]
+    destination = page.launcher_lists["Favorite"]
+    destination.addItem(source.takeItem(0))
+    page.persist_launcher_layout()
+
+    with connect(db_path) as connection:
+        saved = get_item(connection, macro.id)
+    assert saved is not None
+    assert saved.launcher_section == "Favorite"
+    assert saved.launcher_position == 1
+
+    reloaded = LauncherPage(db_path)
+    assert reloaded.launcher_lists["Macro"].count() == 0
+    assert reloaded.launcher_lists["Favorite"].item(0).text() == "Move Me"
+
+
 def test_launcher_comments_copy_simple_and_random_macrotexts(
     tmp_path,
     monkeypatch,

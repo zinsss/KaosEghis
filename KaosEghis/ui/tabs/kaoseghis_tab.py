@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, Qt
+from PySide6.QtCore import QEventLoop, QTimer, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -870,7 +870,8 @@ class LauncherListWidget(QListWidget):
                 event.ignore()
                 return
         super().dropEvent(event)
-        self.launcher_page.persist_launcher_layout()
+        if event.isAccepted():
+            QTimer.singleShot(0, self.launcher_page.persist_launcher_layout)
 
 
 def _create_macro_table() -> QTableWidget:
