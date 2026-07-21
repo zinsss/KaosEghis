@@ -297,6 +297,49 @@ def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate(tmp_path, monkeypa
     ]
 
 
+def test_kaosgdd_profile_persists_cookies_and_cache(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    import KaosEghis.ui.tabs.kaosgdd_tab as tab_module
+
+    class FakeProfile:
+        class PersistentCookiesPolicy:
+            ForcePersistentCookies = "force-cookies"
+
+        class HttpCacheType:
+            DiskHttpCache = "disk-cache"
+
+        def __init__(self) -> None:
+            self.storage_path = None
+            self.cache_path = None
+            self.cookies_policy = None
+            self.cache_type = None
+
+        def setPersistentStoragePath(self, value) -> None:
+            self.storage_path = value
+
+        def setCachePath(self, value) -> None:
+            self.cache_path = value
+
+        def setPersistentCookiesPolicy(self, value) -> None:
+            self.cookies_policy = value
+
+        def setHttpCacheType(self, value) -> None:
+            self.cache_type = value
+
+    monkeypatch.setattr(tab_module, "QWebEngineProfile", FakeProfile)
+    profile = FakeProfile()
+
+    tab_module._configure_persistent_profile(profile)
+
+    assert profile.storage_path == str(tmp_path / "web" / "kaosgdd" / "storage")
+    assert profile.cache_path == str(tmp_path / "web" / "kaosgdd" / "cache")
+    assert profile.cookies_policy == "force-cookies"
+    assert profile.cache_type == "disk-cache"
+    assert (tmp_path / "web" / "kaosgdd" / "storage").is_dir()
+    assert (tmp_path / "web" / "kaosgdd" / "cache").is_dir()
+
+
 def test_vaccine_tab_placeholder_text() -> None:
     _app()
 

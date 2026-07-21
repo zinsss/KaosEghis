@@ -78,6 +78,10 @@ Dedicated top-level settings tab.
 Embedded KaosGDD browser surface.
 
 - uses Qt WebEngine when available
+- uses a named persistent WebEngine profile so login cookies and browser storage
+  survive normal application restarts
+- stores the profile under `<KaosEghis data directory>/web/kaosgdd/`, separately
+  from SQLite, and does not write browser session data to application logs
 - falls back to a plain label when WebEngine is unavailable
 
 ### `Vaccine`
