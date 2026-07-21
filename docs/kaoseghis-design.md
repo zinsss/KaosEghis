@@ -55,6 +55,8 @@ Primary daily-use tab.
   executes immediately with an in-page `Running '<macro name>'...` status instead of
   a confirmation dialog
 - the Launcher does not repeat saved macro names above its three columns
+- the Launcher EMR toggle uses a dedicated green accent when connected and an
+  orange warning accent when manual reconnection is required
 - the Launcher columns are `Favorite`, `Macro`, and `Comments`
 - existing `Eghis` entries migrate to `Macro`, `ETC` entries migrate to `Favorite`,
   and the former `Medical Documents` category migrates to `Comments` without

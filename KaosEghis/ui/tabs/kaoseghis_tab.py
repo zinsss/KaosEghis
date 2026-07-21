@@ -225,6 +225,7 @@ class LauncherPage(QWidget):
                 f"EMR: disconnected{f' ({profile_name})' if profile_name else ''}."
             )
             self.connection_toggle.setText("Connect EMR")
+            self._set_connection_visual_state("disconnected")
             self._set_toggle_checked(False)
             return
         if settings is not None:
@@ -245,6 +246,7 @@ class LauncherPage(QWidget):
                     f"EMR: reconnect required{f' ({profile_name})' if profile_name else ''}."
                 )
                 self.connection_toggle.setText("Reconnect EMR")
+                self._set_connection_visual_state("stale")
                 self._set_toggle_checked(False)
                 return
         self.connection_status_label.setText(
@@ -252,8 +254,10 @@ class LauncherPage(QWidget):
         )
         if state.status in {"green", "yellow"}:
             self.connection_toggle.setText("EMR Connected")
+            self._set_connection_visual_state("connected")
         else:
             self.connection_toggle.setText("Reconnect EMR")
+            self._set_connection_visual_state("stale")
         self._set_toggle_checked(state.status in {"green", "yellow"})
 
     def _active_profile_name(self) -> str | None:
@@ -268,6 +272,13 @@ class LauncherPage(QWidget):
         self.connection_toggle.blockSignals(True)
         self.connection_toggle.setChecked(checked)
         self.connection_toggle.blockSignals(False)
+
+    def _set_connection_visual_state(self, state: str) -> None:
+        self.connection_toggle.setProperty("emrConnectionState", state)
+        style = self.connection_toggle.style()
+        style.unpolish(self.connection_toggle)
+        style.polish(self.connection_toggle)
+        self.connection_toggle.update()
 
     def dry_run_macro(self) -> None:
         item_id = self._selected_macro_id()

@@ -124,6 +124,28 @@ QToolButton:checked {
     border-color: #8fbcbb;
 }
 
+QPushButton[emrConnectionState="connected"] {
+    background-color: #a3be8c;
+    color: #2e3440;
+    border-color: #8fbcbb;
+}
+
+QPushButton[emrConnectionState="connected"]:hover {
+    background-color: #b4cfa0;
+    border-color: #a3be8c;
+}
+
+QPushButton[emrConnectionState="stale"] {
+    background-color: #d08770;
+    color: #2e3440;
+    border-color: #bf616a;
+}
+
+QPushButton[emrConnectionState="stale"]:hover {
+    background-color: #dca08e;
+    border-color: #d08770;
+}
+
 QPushButton:disabled,
 QToolButton:disabled {
     background-color: #2e3440;

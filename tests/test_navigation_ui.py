@@ -257,7 +257,17 @@ def test_launcher_page_has_emr_connection_toggle(tmp_path, monkeypatch) -> None:
 
     assert page.connection_toggle.text() == "EMR Connected"
     assert page.connection_toggle.isChecked() is True
+    assert page.connection_toggle.property("emrConnectionState") == "connected"
     assert "Connected and active" in page.connection_status_label.text()
+
+
+def test_launcher_emr_connection_has_distinct_theme_states() -> None:
+    from KaosEghis.ui.theme import NORD_QSS
+
+    assert 'QPushButton[emrConnectionState="connected"]' in NORD_QSS
+    assert "background-color: #a3be8c;" in NORD_QSS
+    assert 'QPushButton[emrConnectionState="stale"]' in NORD_QSS
+    assert "background-color: #d08770;" in NORD_QSS
 
 
 def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate(tmp_path, monkeypatch) -> None:
