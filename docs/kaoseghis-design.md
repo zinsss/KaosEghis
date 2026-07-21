@@ -26,8 +26,8 @@ Main window:
 - [KaosEghis/ui/main_window.py](/E:/Kaos/KaosEghis/KaosEghis/ui/main_window.py)
 - fixed-size `QMainWindow`
 - global Nord stylesheet, including themed vertical and horizontal scrollbars
-- shared button sizing reserves enough vertical space for bold selected-state text,
-  including Korean glyphs, without clipping
+- shared buttons keep stable font metrics across normal and selected states; selection
+  uses accent color without a late bold-weight change that can clip Korean or Latin text
 - the optional KaosEghis-PACS patient-context listener follows the desktop app
   lifecycle; it starts from saved settings and closes with the application
 - top-level tabs:
@@ -54,6 +54,7 @@ Primary daily-use tab.
 - `Launcher` is the daily-use macro launcher surface; double-click or its run button
   executes immediately with an in-page `Running '<macro name>'...` status instead of
   a confirmation dialog
+- the Launcher does not repeat saved macro names above its three columns
 - the Launcher columns are `Favorite`, `Macro`, and `Comments`
 - existing `Eghis` entries migrate to `Macro`, `ETC` entries migrate to `Favorite`,
   and the former `Medical Documents` category migrates to `Comments` without

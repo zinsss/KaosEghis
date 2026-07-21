@@ -1,6 +1,6 @@
 # KaosEghis-scan
 
-Last updated: 2026-07-16
+Last updated: 2026-07-21
 
 ## Purpose
 
@@ -71,6 +71,8 @@ The implemented plugin surface contains:
 - scan command and acquisition status
 - list of completed PDFs in the `ready` spool
 - selected-document PDF preview
+- a fixed narrow file column beside a wide preview; there is no operator-resizable
+  splitter because the preview is the primary working area
 - a clear drag handle or draggable document row
 - `View folder`
 - `Delete selected`

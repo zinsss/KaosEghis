@@ -120,7 +120,7 @@ def test_scan_tab_instantiates_with_controls_and_running_cleanup_timer(
     assert tab.file_list.dragEnabled() is True
 
 
-def test_scan_preview_starts_wider_than_file_list(tmp_path) -> None:
+def test_scan_uses_fixed_file_list_and_non_resizable_preview_layout(tmp_path) -> None:
     app = _app()
 
     from KaosEghis.ui.tabs.scan_tab import ScanTab
@@ -130,10 +130,10 @@ def test_scan_preview_starts_wider_than_file_list(tmp_path) -> None:
     tab.show()
     app.processEvents()
 
-    file_width, preview_width = tab.content_splitter.sizes()
-
-    assert file_width <= 300
-    assert preview_width > file_width * 2
+    assert not hasattr(tab, "content_splitter")
+    assert tab.file_list.parentWidget().minimumWidth() == 260
+    assert tab.file_list.parentWidget().maximumWidth() == 260
+    assert tab.preview_container.width() > tab.file_list.parentWidget().width() * 2
 
 
 def test_cleanup_interval_is_loaded_and_persisted(tmp_path) -> None:

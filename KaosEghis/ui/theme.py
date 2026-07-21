@@ -99,7 +99,7 @@ QToolButton {
     color: #eceff4;
     border: 1px solid #4c566a;
     border-radius: 4px;
-    min-height: 20px;
+    min-height: 24px;
     padding: 8px 12px;
 }
 
@@ -122,7 +122,6 @@ QToolButton:checked {
     background-color: #88c0d0;
     color: #2e3440;
     border-color: #8fbcbb;
-    font-weight: 700;
 }
 
 QPushButton:disabled,

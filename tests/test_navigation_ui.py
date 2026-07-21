@@ -10,11 +10,12 @@ def _app():
     return app if app is not None else QApplication([])
 
 
-def test_theme_leaves_room_for_bold_button_text() -> None:
+def test_theme_keeps_selected_button_text_from_changing_size() -> None:
     from KaosEghis.ui.theme import NORD_QSS
 
-    assert "min-height: 20px;" in NORD_QSS
+    assert "min-height: 24px;" in NORD_QSS
     assert "padding: 8px 12px;" in NORD_QSS
+    assert "font-weight: 700;" not in NORD_QSS
 
 
 def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
@@ -85,6 +86,7 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
         "Macro",
         "Comments",
     ]
+    assert not hasattr(tab.launcher_page, "summary_label")
 
 
 def test_kaoseghis_top_nav_pages_are_reachable() -> None:

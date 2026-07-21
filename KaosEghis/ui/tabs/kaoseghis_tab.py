@@ -121,11 +121,6 @@ class LauncherPage(QWidget):
         title = QLabel("Launcher")
         title.setObjectName("pageTitle")
 
-        self.summary_label = QLabel(
-            "Double-click a macro to run it or a MacroText to copy it."
-        )
-        self.summary_label.setObjectName("macroSummary")
-
         self.connection_toggle = QPushButton("Connect EMR")
         self.connection_toggle.setCheckable(True)
         self.connection_toggle.toggled.connect(self.toggle_connection)
@@ -173,7 +168,6 @@ class LauncherPage(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(title)
         layout.addLayout(connection_row)
-        layout.addWidget(self.summary_label)
         layout.addLayout(columns, 1)
         layout.addLayout(controls)
         layout.addWidget(self.log)
@@ -184,13 +178,6 @@ class LauncherPage(QWidget):
         launcher_items = _load_launcher_items(self._db_path)
         self._populate_launcher_lists(launcher_items)
         self._refresh_connection_status()
-        macros = [item for item in launcher_items if item.item_type == "macro"]
-        macro_names = ", ".join(item.name for item in macros[:6])
-        if len(macros) > 6:
-            macro_names += ", ..."
-        self.summary_label.setText(
-            macro_names if macro_names else "No saved macros available."
-        )
 
     def toggle_connection(self, checked: bool) -> None:
         if checked:

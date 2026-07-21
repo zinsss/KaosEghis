@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSpinBox,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -118,8 +117,7 @@ class ScanTab(QWidget):
         self.file_list.drag_activity_changed.connect(self._set_drag_in_progress)
 
         file_panel = QWidget()
-        file_panel.setMinimumWidth(220)
-        file_panel.setMaximumWidth(320)
+        file_panel.setFixedWidth(260)
         file_layout = QVBoxLayout(file_panel)
         file_layout.setContentsMargins(0, 0, 0, 0)
         file_layout.addWidget(QLabel("Scanned PDFs - drag a file into the browser"))
@@ -135,14 +133,12 @@ class ScanTab(QWidget):
         self.preview_fallback = None
         self._build_pdf_preview()
 
-        self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.content_splitter.addWidget(file_panel)
-        self.content_splitter.addWidget(self.preview_container)
-        self.content_splitter.setCollapsible(0, False)
-        self.content_splitter.setCollapsible(1, False)
-        self.content_splitter.setStretchFactor(0, 0)
-        self.content_splitter.setStretchFactor(1, 1)
-        self.content_splitter.setSizes([260, 940])
+        self.content_area = QWidget()
+        content_layout = QHBoxLayout(self.content_area)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+        content_layout.addWidget(file_panel)
+        content_layout.addWidget(self.preview_container, 1)
 
         self.status_label = QLabel("Ready to scan.")
         self.status_label.setWordWrap(True)
@@ -152,7 +148,7 @@ class ScanTab(QWidget):
         layout.addWidget(self.folder_label)
         layout.addLayout(action_row)
         layout.addLayout(cleanup_row)
-        layout.addWidget(self.content_splitter, 1)
+        layout.addWidget(self.content_area, 1)
         layout.addWidget(self.status_label)
 
         self.scan_process = QProcess(self)
