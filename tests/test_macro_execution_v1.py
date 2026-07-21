@@ -475,6 +475,10 @@ def test_preset_text_resolves_clipboard_item(monkeypatch, tmp_path) -> None:
         "KaosEghis.core.macro_runner.restore_clipboard",
         lambda snapshot: calls.append(("restore", snapshot.text)),
     )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.time.sleep",
+        lambda seconds: calls.append(("sleep", seconds)),
+    )
     monkeypatch.setitem(
         __import__("sys").modules,
         "pywinauto.keyboard",
@@ -484,8 +488,13 @@ def test_preset_text_resolves_clipboard_item(monkeypatch, tmp_path) -> None:
     result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
 
     assert result.success is True
-    assert ("copy", "hello there") in calls
-    assert ("send", "^v") in calls
+    assert calls == [
+        ("copy", "hello there"),
+        ("sleep", 0.05),
+        ("send", "^v"),
+        ("sleep", 0.15),
+        ("restore", "hello there"),
+    ]
 
 
 def test_randomized_preset_selects_one_option(monkeypatch, tmp_path) -> None:
@@ -540,6 +549,149 @@ def test_randomized_preset_selects_one_option(monkeypatch, tmp_path) -> None:
 
     assert result.success is True
     assert copied == ["beta"]
+
+
+def test_paste_text_falls_back_to_direct_type_when_clipboard_copy_fails(
+    monkeypatch, tmp_path
+) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Fallback Paste Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "paste_text", value="hello")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    events = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda _text: (_ for _ in ()).throw(RuntimeError("clipboard busy")),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda keys: events.append(keys))})(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert events == ["hello"]
+
+
+def test_paste_text_restore_failure_does_not_fail_macro(monkeypatch, tmp_path) -> None:
+    import sys
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Restore Failure Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "paste_text", value="hello")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda text: type("Snapshot", (), {"text": text})(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.restore_clipboard",
+        lambda _snapshot: (_ for _ in ()).throw(RuntimeError("restore failed")),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.time.sleep",
+        lambda _seconds: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda _keys: None)})(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert result.message.startswith("Macro execution completed.")
+
+
+def test_preset_text_can_resolve_saved_display_label(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        preset = create_item(connection, "Random Greeting", "randomized_clipboard", True)
+        connection.execute(
+            "INSERT INTO clipboard_variants (item_id, label, body) VALUES (?, ?, ?)",
+            (preset.id, "one", "alpha"),
+        )
+        connection.execute(
+            "INSERT INTO clipboard_variants (item_id, label, body) VALUES (?, ?, ?)",
+            (preset.id, "two", "beta"),
+        )
+        item = create_item(connection, "Label Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "preset_text", value="Random Greeting (random)")
+        connection.commit()
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    copied = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.random.choice",
+        lambda values: values[0],
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda text: copied.append(text) or type("Snapshot", (), {"text": text})(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.restore_clipboard",
+        lambda _snapshot: None,
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.time.sleep",
+        lambda _seconds: None,
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda _keys: None)})(),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert copied == ["alpha"]
 
 
 def test_delay_ms_is_represented_in_dry_run(tmp_path) -> None:
@@ -1142,6 +1294,8 @@ def test_hotkey_failure_is_sanitized(monkeypatch, tmp_path) -> None:
 
 
 def test_clipboard_failures_are_sanitized(monkeypatch, tmp_path) -> None:
+    import sys
+
     from KaosEghis.core.macro_runner import MacroRunner
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import create_item, create_macro_step
@@ -1164,8 +1318,14 @@ def test_clipboard_failures_are_sanitized(monkeypatch, tmp_path) -> None:
         "KaosEghis.core.macro_runner.copy_text",
         lambda _text: (_ for _ in ()).throw(RuntimeError("raw clipboard failure")),
     )
+    events = []
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto.keyboard",
+        type("Keyboard", (), {"send_keys": staticmethod(lambda keys: events.append(keys))})(),
+    )
 
     result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
 
-    assert result.success is False
-    assert result.message == "clipboard failed"
+    assert result.success is True
+    assert events == ["hello"]

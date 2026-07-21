@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -157,17 +159,31 @@ class EmrTargetsPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
-        layout.addWidget(QLabel("Profiles"))
-        layout.addWidget(self.profile_list)
-        layout.addLayout(profile_controls)
-        layout.addLayout(detail_form)
-        layout.addLayout(detail_controls)
-        layout.addWidget(self.connection_status_label)
-        layout.addWidget(QLabel("UI targets"))
-        layout.addWidget(self.ui_targets_table)
-        layout.addLayout(target_controls)
+
+        left_column = QVBoxLayout()
+        left_column.addWidget(QLabel("Profiles"))
+        left_column.addWidget(self.profile_list)
+        left_column.addLayout(profile_controls)
+        left_column.addLayout(detail_form)
+        left_column.addLayout(detail_controls)
+        left_column.addWidget(self.connection_status_label)
+        left_column.addStretch()
+
+        right_column = QVBoxLayout()
+        right_column.addWidget(QLabel("UI targets"))
+        right_column.addWidget(self.ui_targets_table, 1)
+        right_column.addLayout(target_controls)
+
+        content_grid = QGridLayout()
+        content_grid.setContentsMargins(0, 0, 0, 0)
+        content_grid.setHorizontalSpacing(16)
+        content_grid.addLayout(left_column, 0, 0)
+        content_grid.addLayout(right_column, 0, 1)
+        content_grid.setColumnStretch(0, 1)
+        content_grid.setColumnStretch(1, 1)
+
+        layout.addLayout(content_grid, 1)
         layout.addWidget(self.status_label)
-        layout.addStretch()
 
         self.refresh_view()
 
@@ -354,7 +370,7 @@ class EmrTargetsPage(QWidget):
         if self._current_profile_id is None:
             self.status_label.setText("Select a profile before adding UI targets.")
             return
-        dialog = EmrUiTargetDialog(self)
+        dialog = EmrUiTargetDialog(self, existing_targets=self._current_ui_targets)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         values = dialog.values()
@@ -385,7 +401,11 @@ class EmrTargetsPage(QWidget):
             self.status_label.setText("Selected UI target was not found.")
             return
 
-        dialog = EmrUiTargetDialog(self, target)
+        dialog = EmrUiTargetDialog(
+            self,
+            target,
+            existing_targets=self._current_ui_targets,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         values = dialog.values()
@@ -629,9 +649,11 @@ class EmrUiTargetDialog(QDialog):
         self,
         parent: QWidget | None = None,
         target: EmrUiTargetRecord | None = None,
+        existing_targets: list[EmrUiTargetRecord] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("EMR UI Target")
+        self._existing_targets = existing_targets or []
 
         self.target_key_input = QLineEdit()
         self.label_input = QLineEdit()
@@ -641,6 +663,13 @@ class EmrUiTargetDialog(QDialog):
         self.class_name_input = QLineEdit()
         self.name_match_input = QLineEdit()
         self.parent_target_key_input = QLineEdit()
+        self.inspector_dump_input = QPlainTextEdit()
+        self.inspector_dump_input.setPlaceholderText(
+            "Paste Inspector.exe details here to auto-fill fields."
+        )
+        self.parse_inspector_button = QPushButton("Parse Inspector text")
+        self.parse_inspector_button.clicked.connect(self._apply_inspector_dump)
+        self.parse_status_label = QLabel("")
 
         form = QFormLayout(self)
         form.addRow("Key", self.target_key_input)
@@ -651,6 +680,9 @@ class EmrUiTargetDialog(QDialog):
         form.addRow("Class name", self.class_name_input)
         form.addRow("Name match", self.name_match_input)
         form.addRow("Parent key", self.parent_target_key_input)
+        form.addRow("Inspector paste", self.inspector_dump_input)
+        form.addRow("", self.parse_inspector_button)
+        form.addRow("", self.parse_status_label)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -690,3 +722,206 @@ class EmrUiTargetDialog(QDialog):
             "name_match": self.name_match_input.text().strip(),
             "parent_target_key": self.parent_target_key_input.text().strip(),
         }
+
+    def _apply_inspector_dump(self) -> None:
+        parsed = parse_inspector_dump(
+            self.inspector_dump_input.toPlainText(),
+            self._existing_targets,
+        )
+        if not parsed:
+            self.parse_status_label.setText("Inspector text could not be parsed.")
+            return
+
+        automation_id = parsed.get("automation_id", "")
+        label = parsed.get("label", "")
+        name_match = parsed.get("name_match", "")
+        control_type = parsed.get("control_type", "")
+        class_name = parsed.get("class_name", "")
+        target_key = parsed.get("target_key", "")
+        parent_target_key = parsed.get("parent_target_key", "")
+
+        if target_key and not self.target_key_input.text().strip():
+            self.target_key_input.setText(target_key)
+        if label and not self.label_input.text().strip():
+            self.label_input.setText(label)
+        if automation_id:
+            self.automation_id_input.setText(automation_id)
+        if control_type:
+            self.control_type_input.setText(control_type)
+        if class_name:
+            self.class_name_input.setText(class_name)
+        if name_match:
+            self.name_match_input.setText(name_match)
+        if parent_target_key and not self.parent_target_key_input.text().strip():
+            self.parent_target_key_input.setText(parent_target_key)
+
+        ancestors = parsed.get("ancestor_summary", "")
+        if ancestors and not self.description_input.toPlainText().strip():
+            self.description_input.setPlainText(ancestors)
+
+        message_parts = ["Inspector fields applied."]
+        if parent_target_key:
+            message_parts.append(f"Matched parent key: {parent_target_key}")
+        self.parse_status_label.setText(" ".join(message_parts))
+
+
+_QUOTED_VALUE_PATTERNS = {
+    "automation_id": (
+        re.compile(r"automationid\s*[:=]\s*\"([^\"]+)\"", re.IGNORECASE),
+        re.compile(r"automation id\s*[:=]\s*\"([^\"]+)\"", re.IGNORECASE),
+    ),
+    "class_name": (
+        re.compile(r"classname\s*[:=]\s*\"([^\"]+)\"", re.IGNORECASE),
+        re.compile(r"class name\s*[:=]\s*\"([^\"]+)\"", re.IGNORECASE),
+    ),
+    "name_match": (
+        re.compile(r"name\s*[:=]\s*\"([^\"]+)\"", re.IGNORECASE),
+    ),
+}
+
+_CONTROL_TYPE_PATTERNS = (
+    re.compile(r"controltype\s*[:=]\s*uia_([a-z0-9]+)controltypeid", re.IGNORECASE),
+    re.compile(r"control type\s*[:=]\s*uia_([a-z0-9]+)controltypeid", re.IGNORECASE),
+)
+
+_KOREAN_CONTROL_TYPE_MAP = {
+    "도구 모음": "ToolBar",
+    "그룹": "Group",
+    "창": "Window",
+    "단추": "Button",
+    "버튼": "Button",
+    "편집": "Edit",
+    "문서": "Document",
+    "목록": "List",
+    "테이블": "Table",
+    "콤보 상자": "ComboBox",
+    "탭": "Tab",
+    "탭 항목": "TabItem",
+    "텍스트": "Text",
+    "창틀": "Pane",
+}
+
+
+def parse_inspector_dump(
+    text: str,
+    existing_targets: list[EmrUiTargetRecord] | None = None,
+) -> dict[str, str]:
+    inspector_text = text.strip()
+    if not inspector_text:
+        return {}
+
+    parsed: dict[str, str] = {}
+    for key, patterns in _QUOTED_VALUE_PATTERNS.items():
+        value = _first_match(inspector_text, patterns)
+        if value:
+            parsed[key] = value
+
+    control_type = _parse_control_type(inspector_text)
+    if control_type:
+        parsed["control_type"] = control_type
+
+    label = parsed.get("name_match") or parsed.get("automation_id") or ""
+    if label:
+        parsed["label"] = label
+    target_key = _suggest_target_key(parsed.get("automation_id"), parsed.get("name_match"))
+    if target_key:
+        parsed["target_key"] = target_key
+
+    ancestors = _parse_ancestor_names(inspector_text)
+    if ancestors:
+        parsed["ancestor_summary"] = "Ancestors: " + " > ".join(ancestors)
+        parent_target_key = _match_parent_target_key(ancestors, existing_targets or [])
+        if parent_target_key:
+            parsed["parent_target_key"] = parent_target_key
+
+    return parsed
+
+
+def _first_match(text: str, patterns: tuple[re.Pattern[str], ...]) -> str:
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _parse_control_type(text: str) -> str:
+    for pattern in _CONTROL_TYPE_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            token = match.group(1).strip()
+            return token[:1].upper() + token[1:]
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line.startswith('"'):
+            continue
+        for korean_label, control_type in _KOREAN_CONTROL_TYPE_MAP.items():
+            if line.endswith(korean_label):
+                return control_type
+    return ""
+
+
+def _suggest_target_key(automation_id: str | None, name_match: str | None) -> str:
+    source = (automation_id or name_match or "").strip()
+    if not source:
+        return ""
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", source)
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", normalized).strip("_").lower()
+    return normalized
+
+
+def _parse_ancestor_names(text: str) -> list[str]:
+    lines = text.splitlines()
+    ancestors: list[str] = []
+    in_ancestors = False
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("ancestors:"):
+            in_ancestors = True
+            remainder = line.partition(":")[2].strip()
+            if remainder.startswith('"'):
+                name = _extract_leading_quoted_value(remainder)
+                if name:
+                    ancestors.append(name)
+            continue
+        if not in_ancestors:
+            continue
+        if not line.startswith('"'):
+            break
+        name = _extract_leading_quoted_value(line)
+        if name:
+            ancestors.append(name)
+    return ancestors
+
+
+def _extract_leading_quoted_value(line: str) -> str:
+    match = re.match(r'"([^\"]*)"', line)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def _match_parent_target_key(
+    ancestors: list[str],
+    existing_targets: list[EmrUiTargetRecord],
+) -> str:
+    meaningful_ancestors = [
+        name for name in ancestors if name and name not in {"", "데스크톱 2"}
+    ]
+    for ancestor_name in meaningful_ancestors:
+        matches = [
+            target.target_key
+            for target in existing_targets
+            if ancestor_name.casefold()
+            in {
+                (target.label or "").casefold(),
+                (target.name_match or "").casefold(),
+                (target.automation_id or "").casefold(),
+            }
+        ]
+        if len(matches) == 1:
+            return matches[0]
+    return ""

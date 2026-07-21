@@ -782,11 +782,18 @@ class ReorderableStepsTable(QTableWidget):
 
     def dropEvent(self, event) -> None:
         selected_rows = sorted({index.row() for index in self.selectedIndexes()})
-        if event.source() is not self or len(selected_rows) != 1:
+        if event.source() is not self:
             super().dropEvent(event)
             return
 
-        source_row = selected_rows[0]
+        if len(selected_rows) == 1:
+            source_row = selected_rows[0]
+        else:
+            source_row = self.currentRow()
+        if source_row < 0:
+            event.ignore()
+            return
+
         target_index = self.indexAt(event.position().toPoint())
         if target_index.isValid():
             insertion_row = target_index.row()
@@ -809,12 +816,16 @@ class ReorderableStepsTable(QTableWidget):
         if source_row == destination_row:
             return
 
-        items = [self.takeItem(source_row, column) for column in range(self.columnCount())]
+        row_values = [
+            self.item(source_row, column).text()
+            if self.item(source_row, column) is not None
+            else ""
+            for column in range(self.columnCount())
+        ]
         self.removeRow(source_row)
         self.insertRow(destination_row)
-        for column, item in enumerate(items):
-            if item is not None:
-                self.setItem(destination_row, column, item)
+        for column, value in enumerate(row_values):
+            self.setItem(destination_row, column, QTableWidgetItem(value))
         self.selectRow(destination_row)
         self.rows_reordered.emit()
 

@@ -235,6 +235,29 @@ def test_emr_targets_page_instantiates_and_shows_default_profile(tmp_path, monke
     assert page.default_status_label.text() == "[default]"
 
 
+def test_emr_targets_page_uses_two_column_layout(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QGridLayout
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = EmrTargetsPage(db_path)
+    grid_layouts = page.findChildren(QGridLayout)
+
+    assert grid_layouts
+    content_grid = grid_layouts[0]
+    assert content_grid.itemAtPosition(0, 0) is not None
+    assert content_grid.itemAtPosition(0, 1) is not None
+    assert page.profile_list.parentWidget() is page
+    assert page.ui_targets_table.parentWidget() is page
+
+
 def test_emr_targets_page_connection_toggle_updates_status(
     tmp_path, monkeypatch
 ) -> None:
@@ -269,3 +292,110 @@ def test_emr_targets_page_connection_toggle_updates_status(
 
     assert page.connection_toggle.isChecked() is True
     assert "Connected and active" in page.connection_status_label.text()
+
+
+def test_parse_inspector_dump_maps_basic_fields() -> None:
+    from KaosEghis.ui.tabs.emr_targets_page import parse_inspector_dump
+
+    parsed = parse_inspector_dump(
+        """
+Name: "PACS"
+AutomationId: "MidMain"
+ClassName: "WindowsForms10.Window.8.app.0.2bf8098_r6_ad1"
+ControlType: UIA_ButtonControlTypeId
+"""
+    )
+
+    assert parsed["label"] == "PACS"
+    assert parsed["name_match"] == "PACS"
+    assert parsed["automation_id"] == "MidMain"
+    assert parsed["class_name"] == "WindowsForms10.Window.8.app.0.2bf8098_r6_ad1"
+    assert parsed["control_type"] == "Button"
+    assert parsed["target_key"] == "mid_main"
+
+
+def test_parse_inspector_dump_can_match_parent_target_from_ancestors() -> None:
+    from KaosEghis.db.repositories import EmrUiTargetRecord
+    from KaosEghis.ui.tabs.emr_targets_page import parse_inspector_dump
+
+    existing_targets = [
+        EmrUiTargetRecord(
+            id=1,
+            profile_id=1,
+            target_key="tools.toolbar",
+            label="Tools",
+            description=None,
+            automation_id="toolsToolbar",
+            control_type="ToolBar",
+            class_name=None,
+            name_match="Tools",
+            parent_target_key=None,
+            created_at="now",
+            updated_at="now",
+        )
+    ]
+
+    parsed = parse_inspector_dump(
+        """
+Name: "PACS"
+ControlType: UIA_ButtonControlTypeId
+Ancestors:
+    "Tools" 도구 모음
+    "진료실" 창
+    "이지스 전자차트 2.0" 창
+""",
+        existing_targets,
+    )
+
+    assert parsed["label"] == "PACS"
+    assert parsed["control_type"] == "Button"
+    assert parsed["parent_target_key"] == "tools.toolbar"
+    assert "Ancestors: Tools > 진료실 > 이지스 전자차트 2.0" == parsed["ancestor_summary"]
+
+
+def test_emr_ui_target_dialog_can_apply_inspector_dump(monkeypatch) -> None:
+    _app()
+
+    from KaosEghis.db.repositories import EmrUiTargetRecord
+    from KaosEghis.ui.tabs.emr_targets_page import EmrUiTargetDialog
+
+    existing_targets = [
+        EmrUiTargetRecord(
+            id=1,
+            profile_id=1,
+            target_key="tools.toolbar",
+            label="Tools",
+            description=None,
+            automation_id="toolsToolbar",
+            control_type="ToolBar",
+            class_name=None,
+            name_match="Tools",
+            parent_target_key=None,
+            created_at="now",
+            updated_at="now",
+        )
+    ]
+
+    dialog = EmrUiTargetDialog(existing_targets=existing_targets)
+    dialog.inspector_dump_input.setPlainText(
+        """
+Name: "PACS"
+AutomationId: "MidMain"
+ControlType: UIA_ButtonControlTypeId
+ClassName: "WindowsForms10.Window.8.app.0.2bf8098_r6_ad1"
+Ancestors:
+    "Tools" 도구 모음
+    "진료실" 창
+"""
+    )
+
+    dialog._apply_inspector_dump()
+
+    assert dialog.target_key_input.text() == "mid_main"
+    assert dialog.label_input.text() == "PACS"
+    assert dialog.automation_id_input.text() == "MidMain"
+    assert dialog.control_type_input.text() == "Button"
+    assert dialog.class_name_input.text() == "WindowsForms10.Window.8.app.0.2bf8098_r6_ad1"
+    assert dialog.name_match_input.text() == "PACS"
+    assert dialog.parent_target_key_input.text() == "tools.toolbar"
+    assert "Inspector fields applied." in dialog.parse_status_label.text()

@@ -333,13 +333,10 @@ class MacroRunner:
         text = step.options.get("text", step.value)
         if not isinstance(text, str) or not text:
             return MacroRunResult(False, "unknown error", 0, None)
-        try:
-            from pywinauto.keyboard import send_keys
-
-            send_keys(text)
-            if step.options.get("press_enter_after", False):
-                send_keys("{ENTER}")
-        except Exception:
+        if not self._send_text_direct(
+            text,
+            press_enter_after=step.options.get("press_enter_after", False),
+        ):
             return MacroRunResult(False, "input failed", 0, None)
         if step.options.get("press_enter_after", False):
             return MacroRunResult(True, "Typed text and pressed Enter.", 1, None)
@@ -357,22 +354,21 @@ class MacroRunner:
         snapshot = None
         try:
             snapshot = copy_text(text)
-            from pywinauto.keyboard import send_keys
-
-            send_keys("^v")
-            time.sleep(0.15)
+            self._send_clipboard_paste()
         except Exception:
             if snapshot is not None:
                 try:
                     restore_clipboard(snapshot)
                 except Exception:
                     pass
+            if self._send_text_direct(text):
+                return MacroRunResult(True, "Typed text.", 1, None)
             return MacroRunResult(False, "input failed" if snapshot is not None else "clipboard failed", 0, None)
 
         try:
             restore_clipboard(snapshot)
         except Exception:
-            return MacroRunResult(False, "clipboard failed", 0, None)
+            return MacroRunResult(True, "Pasted text.", 1, None)
         return MacroRunResult(True, "Pasted text.", 1, None)
 
     def _run_preset_text(
@@ -419,6 +415,24 @@ class MacroRunner:
                     """,
                     (reference,),
                 ).fetchone()
+            if row is None and reference.endswith(" (random)"):
+                row = connection.execute(
+                    """
+                    SELECT id, name, item_type
+                    FROM items
+                    WHERE name = ? AND item_type = 'randomized_clipboard'
+                    """,
+                    (reference.removesuffix(" (random)").strip(),),
+                ).fetchone()
+            if row is None and reference.endswith(" (copy)"):
+                row = connection.execute(
+                    """
+                    SELECT id, name, item_type
+                    FROM items
+                    WHERE name = ? AND item_type = 'clipboard'
+                    """,
+                    (reference.removesuffix(" (copy)").strip(),),
+                ).fetchone()
             if row is None:
                 return None
 
@@ -439,6 +453,30 @@ class MacroRunner:
             if row[2] == "randomized_clipboard":
                 return random.choice(variants)
             return variants[0]
+
+    @staticmethod
+    def _send_clipboard_paste() -> None:
+        from pywinauto.keyboard import send_keys
+
+        time.sleep(0.05)
+        send_keys("^v")
+        time.sleep(0.15)
+
+    @staticmethod
+    def _send_text_direct(
+        text: str,
+        *,
+        press_enter_after: bool = False,
+    ) -> bool:
+        try:
+            from pywinauto.keyboard import send_keys
+
+            send_keys(text)
+            if press_enter_after:
+                send_keys("{ENTER}")
+        except Exception:
+            return False
+        return True
 
     def _resolve_runtime_target(
         self, settings: dict[str, str], target_id: str, force_refresh: bool = False

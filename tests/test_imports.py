@@ -87,6 +87,58 @@ def test_detector_and_clipboard_imports() -> None:
     assert callable(write_test.set_edit_text_to_target_for_test)
 
 
+def test_clipboard_service_retries_until_text_is_applied(monkeypatch) -> None:
+    import KaosEghis.core.clipboard_service as clipboard_service
+
+    events: list[str] = []
+    state = {"text": "old", "calls": 0}
+
+    def fake_read() -> str:
+        return state["text"]
+
+    def fake_write(value: str) -> None:
+        state["calls"] += 1
+        events.append(f"set:{state['calls']}")
+        if state["calls"] >= 3:
+            state["text"] = value
+
+    monkeypatch.setattr(clipboard_service, "_read_clipboard_text", fake_read)
+    monkeypatch.setattr(clipboard_service, "_write_clipboard_text", fake_write)
+    monkeypatch.setattr(
+        clipboard_service.time,
+        "sleep",
+        lambda seconds: events.append(f"sleep:{seconds}"),
+    )
+
+    snapshot = clipboard_service.copy_text("hello")
+
+    assert snapshot.text == "old"
+    assert state["text"] == "hello"
+    assert state["calls"] == 3
+    assert events == [
+        "set:1",
+        "sleep:0.05",
+        "set:2",
+        "sleep:0.05",
+        "set:3",
+    ]
+
+
+def test_clipboard_service_raises_when_clipboard_stays_busy(monkeypatch) -> None:
+    import pytest
+    import KaosEghis.core.clipboard_service as clipboard_service
+    monkeypatch.setattr(clipboard_service, "_read_clipboard_text", lambda: "old")
+    monkeypatch.setattr(clipboard_service, "_write_clipboard_text", lambda _value: None)
+    monkeypatch.setattr(
+        clipboard_service.time,
+        "sleep",
+        lambda _seconds: None,
+    )
+
+    with pytest.raises(RuntimeError, match="Clipboard is busy."):
+        clipboard_service.copy_text("hello")
+
+
 def test_ui_targets_repository_crud(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import (
@@ -1798,7 +1850,14 @@ def test_macro_runner_runs_wait_key_and_paste_text(monkeypatch) -> None:
     assert wait_events
     assert max(wait_events) <= 0.05
     assert abs(sum(wait_events) - 0.25) < 0.001
-    assert events[enter_index:] == [("send", "{ENTER}"), ("copy", "hello"), ("send", "^v"), ("sleep", 0.15), ("restore", "hello")]
+    assert events[enter_index:] == [
+        ("send", "{ENTER}"),
+        ("copy", "hello"),
+        ("sleep", 0.05),
+        ("send", "^v"),
+        ("sleep", 0.15),
+        ("restore", "hello"),
+    ]
 
 
 def test_macro_runner_blocks_invalid_action(monkeypatch) -> None:
