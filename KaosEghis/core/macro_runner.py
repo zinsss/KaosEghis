@@ -42,6 +42,7 @@ class MacroRunner:
         self._current_settings: dict[str, str] | None = None
         self._current_profile_name: str | None = None
         self._current_profile_id: int | None = None
+        self._connection_ready_confirmed = False
         self._resolved_target_cache: dict[tuple[int | None, str, str | None], object] = {}
         self._resolved_target_aliases: dict[str, tuple[int | None, str, str | None]] = {}
         self._run_metrics = _RunMetrics()
@@ -116,6 +117,7 @@ class MacroRunner:
 
         executed_steps = 0
         self._current_settings = settings
+        self._connection_ready_confirmed = True
         for step in steps:
             if self._cancel_requested:
                 self._clear_resolved_target_cache()
@@ -267,10 +269,13 @@ class MacroRunner:
         )
 
     def _run_focus_window(self, settings: dict[str, str]) -> MacroRunResult:
+        if self._connection_ready_confirmed and self._current_settings == settings:
+            return MacroRunResult(True, "Focused configured Eghis window.", 1, None)
         state = ensure_cached_connection_ready(settings)
         if state.status != "green":
             self._clear_resolved_target_cache()
             return MacroRunResult(False, state.message or "window not ready", 0, None)
+        self._connection_ready_confirmed = True
         return MacroRunResult(True, "Focused configured Eghis window.", 1, None)
 
     def _run_wait_window(
@@ -727,6 +732,7 @@ class MacroRunner:
 
     def _start_run_state(self) -> None:
         self._clear_resolved_target_cache()
+        self._connection_ready_confirmed = False
         self._run_metrics = _RunMetrics()
 
     def _clear_resolved_target_cache(self) -> None:
