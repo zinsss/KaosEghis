@@ -13,7 +13,8 @@ from KaosEghis.core.eghis_connector import (
     refresh_cached_eghis_state,
 )
 from KaosEghis.core.macro_models import MacroRunResult, MacroStep
-from KaosEghis.core.uia_inspector import resolve_target_element
+from KaosEghis.core.uia_inspector import resolve_target_element, resolve_target_scope_element
+from KaosEghis.core.wait_engine import WaitCondition, wait_for_target_condition
 from KaosEghis.db.database import connect, get_database_path
 from KaosEghis.db.repositories import (
     EmrUiTargetRecord,
@@ -212,8 +213,12 @@ class MacroRunner:
             return self._run_focus_window(self._require_settings())
         if action == "wait_window":
             return self._run_wait_window(step, self._require_settings())
+        if action == "when_ready":
+            return self._run_when_ready(step, self._require_settings())
         if action == "wait_text_or_image":
             return MacroRunResult(False, "unsupported action", 0, None)
+        if action == "select":
+            return self._run_select(step, self._require_settings())
         if action == "click":
             return self._run_click(step, self._require_settings())
         if action == "double_click":
@@ -224,6 +229,10 @@ class MacroRunner:
             return self._run_type_text(step)
         if action in {"paste_text", "type_text_clipboard"}:
             return self._run_paste_text(step)
+        if action == "set_text_uia":
+            return self._run_set_text_uia(step, self._require_settings())
+        if action == "set_edit_text":
+            return self._run_set_edit_text(step, self._require_settings())
         if action == "preset_text":
             return self._run_preset_text(step, self._require_settings())
         return MacroRunResult(False, "unsupported action", 0, None)
@@ -297,6 +306,38 @@ class MacroRunner:
                 return MacroRunResult(False, "timeout", 0, None)
             time.sleep(0.05)
 
+    def _run_when_ready(
+        self,
+        step: MacroStep,
+        settings: dict[str, str],
+    ) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        with connect(self._db_path or get_database_path()) as connection:
+            target_record, _cache_key = self._load_runtime_target_record(
+                connection, step.target_id
+            )
+        if target_record is None:
+            return MacroRunResult(False, "target not found", 0, None)
+
+        result = wait_for_target_condition(
+            settings,
+            target_record,
+            WaitCondition.KEYBOARD_FOCUS,
+            timeout_ms=max(0, int(float(step.timeout_seconds or 0.0) * 1000)),
+            poll_ms=100,
+        )
+        if not result.success:
+            if "timed out" in result.message.casefold():
+                return MacroRunResult(False, "timeout", 0, None)
+            return MacroRunResult(False, "window not ready", 0, None)
+        return MacroRunResult(
+            True,
+            f"Target '{step.target_id}' is ready.",
+            1,
+            None,
+        )
+
     def _run_click(self, step: MacroStep, settings: dict[str, str]) -> MacroRunResult:
         if not step.target_id:
             return MacroRunResult(False, "target not found", 0, None)
@@ -318,6 +359,36 @@ class MacroRunner:
                 self._clear_resolved_target_cache()
                 return MacroRunResult(False, "input failed", 0, None)
         return MacroRunResult(True, f"Clicked target '{step.target_id}'.", 1, None)
+
+    def _run_select(self, step: MacroStep, settings: dict[str, str]) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        with connect(self._db_path or get_database_path()) as connection:
+            target_record, _cache_key = self._load_runtime_target_record(
+                connection, step.target_id
+            )
+        if target_record is not None:
+            fast_selected = self._select_from_parent_scope(settings, target_record)
+            if fast_selected:
+                return MacroRunResult(True, f"Selected target '{step.target_id}'.", 1, None)
+        target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+        selected = self._select_target_element(target)
+        if not selected:
+            self._clear_resolved_target_cache()
+            target, resolve_message = self._resolve_runtime_target(
+                settings,
+                step.target_id,
+                force_refresh=True,
+            )
+            if target is None:
+                return MacroRunResult(False, resolve_message, 0, None)
+            selected = self._select_target_element(target)
+            if not selected:
+                self._clear_resolved_target_cache()
+                return MacroRunResult(False, "input failed", 0, None)
+        return MacroRunResult(True, f"Selected target '{step.target_id}'.", 1, None)
 
     def _run_double_click(
         self,
@@ -440,6 +511,78 @@ class MacroRunner:
         )
         return self._run_paste_text(preset_step)
 
+    def _run_set_text_uia(
+        self,
+        step: MacroStep,
+        settings: dict[str, str],
+    ) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        text = step.options.get("text", step.value)
+        if not isinstance(text, str) or not text:
+            return MacroRunResult(False, "input failed", 0, None)
+
+        target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+
+        if self._set_text_uia_on_element(target, text):
+            return MacroRunResult(True, f"Set text on target '{step.target_id}'.", 1, None)
+
+        self._clear_resolved_target_cache()
+        target, resolve_message = self._resolve_runtime_target(
+            settings,
+            step.target_id,
+            force_refresh=True,
+        )
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+        if not self._set_text_uia_on_element(target, text):
+            self._clear_resolved_target_cache()
+            return MacroRunResult(False, "input failed", 0, None)
+        return MacroRunResult(True, f"Set text on target '{step.target_id}'.", 1, None)
+
+    def _run_set_edit_text(
+        self,
+        step: MacroStep,
+        settings: dict[str, str],
+    ) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        text = step.options.get("text", step.value)
+        if not isinstance(text, str) or not text:
+            return MacroRunResult(False, "input failed", 0, None)
+
+        target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+
+        if self._set_edit_text_on_element(
+            target,
+            text,
+            press_enter_before=step.options.get("press_enter_before", False),
+            press_enter_after=step.options.get("press_enter_after", False),
+        ):
+            return MacroRunResult(True, f"Set edit text on target '{step.target_id}'.", 1, None)
+
+        self._clear_resolved_target_cache()
+        target, resolve_message = self._resolve_runtime_target(
+            settings,
+            step.target_id,
+            force_refresh=True,
+        )
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+        if not self._set_edit_text_on_element(
+            target,
+            text,
+            press_enter_before=step.options.get("press_enter_before", False),
+            press_enter_after=step.options.get("press_enter_after", False),
+        ):
+            self._clear_resolved_target_cache()
+            return MacroRunResult(False, "input failed", 0, None)
+        return MacroRunResult(True, f"Set edit text on target '{step.target_id}'.", 1, None)
+
     def _resolve_preset_text(self, reference: str) -> str | None:
         with connect(self._db_path or get_database_path()) as connection:
             row = None
@@ -536,6 +679,52 @@ class MacroRunner:
         return True
 
     @staticmethod
+    def _set_text_uia_on_element(element: object, text: str) -> bool:
+        try:
+            iface_value = element.iface_value
+        except Exception:
+            return False
+        if iface_value is None:
+            return False
+        try:
+            is_read_only = getattr(iface_value, "CurrentIsReadOnly", None)
+        except Exception:
+            is_read_only = None
+        if is_read_only is True:
+            return False
+        try:
+            iface_value.SetValue(text)
+        except Exception:
+            return False
+        return True
+
+    @staticmethod
+    def _set_edit_text_on_element(
+        element: object,
+        text: str,
+        *,
+        press_enter_before: bool = False,
+        press_enter_after: bool = False,
+    ) -> bool:
+        try:
+            element.set_focus()
+        except Exception:
+            pass
+        try:
+            if press_enter_before:
+                from pywinauto.keyboard import send_keys
+
+                send_keys("{ENTER}")
+            element.set_edit_text(text)
+            if press_enter_after:
+                from pywinauto.keyboard import send_keys
+
+                send_keys("{ENTER}")
+        except Exception:
+            return False
+        return True
+
+    @staticmethod
     def _send_hotkey_sequence(key: str) -> None:
         from pywinauto.keyboard import send_keys
 
@@ -626,12 +815,17 @@ class MacroRunner:
 
     @staticmethod
     def _activate_target_element(element: object) -> bool:
+        if MacroRunner._looks_like_tab_target(element):
+            if MacroRunner._select_tab_target(element):
+                return True
+            if MacroRunner._click_element_center(element):
+                return True
+
         activation_methods: list[str] = []
         if MacroRunner._looks_like_toggle_target(element):
-            activation_methods.extend(["toggle", "invoke"])
+            activation_methods.extend(["click_input", "click", "toggle", "invoke"])
         else:
-            activation_methods.append("invoke")
-        activation_methods.extend(["click", "click_input"])
+            activation_methods.extend(["click_input", "click", "invoke"])
 
         for method_name in activation_methods:
             method = getattr(element, method_name, None)
@@ -646,6 +840,11 @@ class MacroRunner:
 
     @staticmethod
     def _double_activate_target_element(element: object) -> bool:
+        if MacroRunner._looks_like_tab_target(element):
+            if MacroRunner._select_tab_target(element):
+                return True
+            if MacroRunner._double_click_element_center(element):
+                return True
         for method_name in ("double_click_input", "double_click"):
             method = getattr(element, method_name, None)
             if not callable(method):
@@ -656,6 +855,98 @@ class MacroRunner:
             except Exception:
                 continue
         return False
+
+    @staticmethod
+    def _select_target_element(element: object) -> bool:
+        if MacroRunner._select_tab_target(element):
+            return True
+
+        for method_name in ("select", "Select"):
+            method = getattr(element, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                method()
+                return True
+            except Exception:
+                continue
+        return False
+
+    def _select_from_parent_scope(
+        self,
+        settings: dict[str, str],
+        target_record: UiTargetRecord,
+    ) -> bool:
+        if not self._is_parent_scoped_name_target(target_record):
+            return False
+        scope, _message = resolve_target_scope_element(settings, target_record)
+        if scope is None:
+            return False
+        child = self._find_named_child_in_scope(scope, target_record.name)
+        if child is None:
+            return False
+        if self._select_target_element(child):
+            return True
+        child_name = str(getattr(getattr(child, "element_info", None), "name", "") or "").strip()
+        if child_name:
+            for method_name in ("_select", "select", "Select"):
+                method = getattr(scope, method_name, None)
+                if not callable(method):
+                    continue
+                try:
+                    method(child_name)
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    @staticmethod
+    def _is_parent_scoped_name_target(target_record: UiTargetRecord) -> bool:
+        return bool(
+            target_record.parent_automation_id
+            and target_record.name
+            and not target_record.automation_id
+        )
+
+    @staticmethod
+    def _find_named_child_in_scope(scope: object, expected_name: str | None) -> object | None:
+        if not expected_name:
+            return None
+        try:
+            children = list(scope.children())
+        except Exception:
+            try:
+                children = list(scope.descendants())
+            except Exception:
+                return None
+        for child in children:
+            actual_name = str(
+                getattr(getattr(child, "element_info", None), "name", "") or ""
+            ).strip()
+            if MacroRunner._matches_name_pattern(actual_name, expected_name):
+                return child
+        return None
+
+    @staticmethod
+    def _matches_name_pattern(actual_name: str | None, expected_name: str) -> bool:
+        actual = (actual_name or "").strip()
+        expected = (expected_name or "").strip()
+        if not actual or not expected:
+            return False
+        expected_lower = expected.casefold()
+        actual_lower = actual.casefold()
+        if expected_lower.startswith("prefix:"):
+            prefix = expected[7:].strip()
+            return bool(prefix) and actual_lower.startswith(prefix.casefold())
+        if expected_lower.startswith("contains:"):
+            needle = expected[9:].strip()
+            return bool(needle) and needle.casefold() in actual_lower
+        if "*" in expected:
+            import re
+
+            wildcard_pattern = "^" + re.escape(expected).replace(r"\*", ".*") + "$"
+            return re.match(wildcard_pattern, actual, flags=re.IGNORECASE) is not None
+        return actual_lower == expected_lower
 
     @staticmethod
     def _looks_like_toggle_target(element: object) -> bool:
@@ -671,6 +962,137 @@ class MacroRunner:
             except Exception:
                 return False
         return False
+
+    @staticmethod
+    def _looks_like_tab_target(element: object) -> bool:
+        element_info = getattr(element, "element_info", None)
+        control_type = str(getattr(element_info, "control_type", "") or "").casefold()
+        if control_type in {"tabitem", "tab item"}:
+            return True
+        friendly_name = getattr(element, "friendly_class_name", None)
+        if callable(friendly_name):
+            try:
+                if str(friendly_name() or "").casefold() in {"tabitem", "tab item"}:
+                    return True
+            except Exception:
+                return False
+        return False
+
+    @staticmethod
+    def _select_tab_target(element: object) -> bool:
+        selection_item = getattr(element, "iface_selection_item", None)
+        if selection_item is not None:
+            for method_name in ("Select", "select"):
+                method = getattr(selection_item, method_name, None)
+                if not callable(method):
+                    continue
+                try:
+                    method()
+                    return True
+                except Exception:
+                    continue
+
+        for method_name in ("select", "Select"):
+            method = getattr(element, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                method()
+                return True
+            except Exception:
+                continue
+
+        parent = None
+        try:
+            parent = element.parent()
+        except Exception:
+            parent = None
+        if parent is not None:
+            element_name = str(
+                getattr(getattr(element, "element_info", None), "name", "") or ""
+            ).strip()
+            if element_name:
+                for method_name in ("_select", "select", "Select"):
+                    method = getattr(parent, method_name, None)
+                    if not callable(method):
+                        continue
+                    try:
+                        method(element_name)
+                        return True
+                    except Exception:
+                        continue
+        return False
+
+    @staticmethod
+    def _click_element_center(element: object) -> bool:
+        coords = MacroRunner._preferred_click_coords(element)
+        if coords is None:
+            return False
+        try:
+            from pywinauto import mouse
+
+            mouse.click(button="left", coords=coords)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _double_click_element_center(element: object) -> bool:
+        coords = MacroRunner._preferred_click_coords(element)
+        if coords is None:
+            return False
+        try:
+            from pywinauto import mouse
+
+            mouse.double_click(button="left", coords=coords)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _element_center_coords(element: object) -> tuple[int, int] | None:
+        rectangle = getattr(element, "rectangle", None)
+        if not callable(rectangle):
+            return None
+        try:
+            rect = rectangle()
+        except Exception:
+            return None
+
+        left = int(getattr(rect, "left", getattr(rect, "L", 0)))
+        top = int(getattr(rect, "top", getattr(rect, "T", 0)))
+        right = int(getattr(rect, "right", getattr(rect, "R", left)))
+        bottom = int(getattr(rect, "bottom", getattr(rect, "B", top)))
+        if right <= left or bottom <= top:
+            return None
+        return ((left + right) // 2, (top + bottom) // 2)
+
+    @staticmethod
+    def _preferred_click_coords(element: object) -> tuple[int, int] | None:
+        rectangle = getattr(element, "rectangle", None)
+        if not callable(rectangle):
+            return None
+        try:
+            rect = rectangle()
+        except Exception:
+            return None
+
+        left = int(getattr(rect, "left", getattr(rect, "L", 0)))
+        top = int(getattr(rect, "top", getattr(rect, "T", 0)))
+        right = int(getattr(rect, "right", getattr(rect, "R", left)))
+        bottom = int(getattr(rect, "bottom", getattr(rect, "B", top)))
+        if right <= left or bottom <= top:
+            return None
+
+        if MacroRunner._looks_like_tab_target(element):
+            width = right - left
+            height = bottom - top
+            x = left + (width // 2)
+            y = top + max(4, min(8, max(1, height // 3)))
+            y = min(y, bottom - 2)
+            return (x, y)
+
+        return ((left + right) // 2, (top + bottom) // 2)
 
     def _dry_run_step_line(self, step: MacroStep, index: int) -> str:
         action = self._action_name(step)
@@ -699,13 +1121,19 @@ class MacroRunner:
                 f"{display_order}. wait_window timeout={step.timeout_seconds} "
                 f"retries={step.retries}{timing_text} (dry run only)"
             )
+        if action == "when_ready":
+            return (
+                f"{display_order}. when_ready{target} timeout={step.timeout_seconds} "
+                f"retries={step.retries}{timing_text} "
+                "(wait for keyboard focus/caret, dry run only)"
+            )
 
         value = step.options.get("text") or step.options.get("key") or step.value
         value_text = f" value={value}" if value else ""
         enter_parts = []
-        if action in {"type_text", "paste_text", "preset_text"} and step.options.get("press_enter_before", False):
+        if action in {"type_text", "paste_text", "preset_text", "set_text_uia", "set_edit_text"} and step.options.get("press_enter_before", False):
             enter_parts.append("enter_before=yes")
-        if action in {"type_text", "paste_text", "preset_text"} and step.options.get("press_enter_after", False):
+        if action in {"type_text", "paste_text", "preset_text", "set_text_uia", "set_edit_text"} and step.options.get("press_enter_after", False):
             enter_parts.append("enter_after=yes")
         enter_text = f" {' '.join(enter_parts)}" if enter_parts else ""
         return (
@@ -871,6 +1299,21 @@ class MacroRunner:
             executable_path=profile.executable_path or base_settings.get("eghis_executable_path"),
             main_window_automation_id=profile.main_window_automation_id
             or base_settings.get("eghis_main_window_automation_id"),
+            patient_status_tab_automation_id=profile.patient_status_tab_automation_id
+            or base_settings.get("eghis_patient_status_tab_automation_id")
+            or "tabProc",
+            prescription_grid_automation_id=profile.prescription_grid_automation_id
+            or base_settings.get("eghis_prescription_grid_automation_id")
+            or "tree처방",
+            symptom_grid_automation_id=profile.symptom_grid_automation_id
+            or base_settings.get("eghis_symptom_grid_automation_id")
+            or "grdSymp",
+            diagnosis_grid_automation_id=profile.diagnosis_grid_automation_id
+            or base_settings.get("eghis_diagnosis_grid_automation_id")
+            or "tree상병",
+            patient_list_grid_automation_id=profile.patient_list_grid_automation_id
+            or base_settings.get("eghis_patient_list_grid_automation_id")
+            or "grdOpdList",
         )
 
 
@@ -884,11 +1327,11 @@ def _db_macro_step_to_runtime_step(step) -> MacroStep:
             options["ms"] = step.value
     if action in {"hotkey", "key"} and step.value is not None:
         options["key"] = step.value
-    if action in {"type_text", "paste_text", "type_text_keyboard", "type_text_clipboard"} and step.value is not None:
-        options["text"] = step.value
-    if action in {"type_text", "paste_text", "preset_text", "type_text_keyboard", "type_text_clipboard"} and getattr(step, "press_enter_before", False):
+        if action in {"type_text", "paste_text", "type_text_keyboard", "type_text_clipboard", "set_text_uia", "set_edit_text"} and step.value is not None:
+            options["text"] = step.value
+    if action in {"type_text", "paste_text", "preset_text", "type_text_keyboard", "type_text_clipboard", "set_text_uia", "set_edit_text"} and getattr(step, "press_enter_before", False):
         options["press_enter_before"] = True
-    if action in {"type_text", "paste_text", "preset_text", "type_text_keyboard", "type_text_clipboard"} and step.press_enter_after:
+    if action in {"type_text", "paste_text", "preset_text", "type_text_keyboard", "type_text_clipboard", "set_text_uia", "set_edit_text"} and step.press_enter_after:
         options["press_enter_after"] = True
     if step.wait_before_enabled:
         options["wait_before_enabled"] = True

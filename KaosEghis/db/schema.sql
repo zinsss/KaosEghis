@@ -118,8 +118,13 @@ CREATE TABLE IF NOT EXISTS emr_target_profiles (
     window_class TEXT,
     root_automation_id TEXT,
     main_window_automation_id TEXT,
+    patient_status_tab_automation_id TEXT,
     login_window_automation_id TEXT,
     patient_search_automation_id TEXT,
+    prescription_grid_automation_id TEXT,
+    symptom_grid_automation_id TEXT,
+    diagnosis_grid_automation_id TEXT,
+    patient_list_grid_automation_id TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

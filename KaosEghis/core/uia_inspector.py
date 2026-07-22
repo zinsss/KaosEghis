@@ -26,6 +26,7 @@ class UiaInspectionResult:
     is_enabled: bool | None
     is_visible: bool | None
     text_value: str | None
+    has_keyboard_focus: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -102,10 +103,74 @@ def resolve_target_element(
     return None, resolved_parent_found, "Target could not be resolved."
 
 
+def resolve_target_scope_element(
+    settings: dict[str, str], target: UiTargetRecord
+) -> tuple[Any | None, str]:
+    title_fragment = settings.get("eghis_window_title_contains", "").strip()
+
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return None, "pywinauto is not installed; UIA inspection unavailable."
+
+    messages: list[str] = []
+    for backend in _preferred_backend_order(target):
+        scope, message = _resolve_target_scope_element_for_backend(
+            Desktop,
+            backend,
+            title_fragment,
+            target,
+        )
+        if scope is not None:
+            return scope, message
+        if message:
+            messages.append(f"{backend}: {message}")
+    return None, " | ".join(messages) if messages else "Target scope could not be resolved."
+
+
 def _preferred_backend_order(target: UiTargetRecord) -> tuple[str, ...]:
+    has_parent_scope = bool(
+        _clean(target.parent_automation_id) or _clean(getattr(target, "ancestor_path", None))
+    )
+    has_automation_id = bool(_clean(target.automation_id))
+    has_name_pattern = bool(_clean(target.name))
+    if has_parent_scope and not has_automation_id and has_name_pattern:
+        return ("uia", "win32")
     if _clean(target.parent_automation_id) or _clean(getattr(target, "ancestor_path", None)):
         return ("win32", "uia")
     return ("uia", "win32")
+
+
+def _resolve_target_scope_element_for_backend(
+    desktop_type: Any,
+    backend: str,
+    title_fragment: str,
+    target: UiTargetRecord,
+) -> tuple[Any | None, str]:
+    try:
+        desktop = desktop_type(backend=backend)
+        windows = desktop.windows()
+    except Exception as error:
+        return None, f"Unable to inspect UI windows: {error}"
+
+    window = _find_window(desktop, windows, title_fragment)
+    if window is None:
+        if not title_fragment:
+            return None, "Eghis window title setting is empty."
+        return None, f"Eghis window containing '{title_fragment}' was not found."
+
+    parent_automation_id = _clean(target.parent_automation_id)
+    if parent_automation_id:
+        parent, message = _find_parent_element(
+            window,
+            target,
+            parent_automation_id,
+            backend=backend,
+        )
+        if parent is not None:
+            return parent, message
+        return None, message
+    return window, "Window found."
 
 
 def _resolve_target_element_for_backend(
@@ -161,6 +226,7 @@ def inspect_target_readonly(
         is_enabled=_safe_bool(match, "is_enabled"),
         is_visible=_safe_bool(match, "is_visible"),
         text_value=_safe_text_value(match),
+        has_keyboard_focus=_safe_bool(match, "has_keyboard_focus"),
     )
 
 
@@ -184,6 +250,7 @@ def _not_found(
         is_enabled=None,
         is_visible=None,
         text_value=None,
+        has_keyboard_focus=None,
     )
 
 
@@ -276,7 +343,12 @@ def _resolve_target_element(
     parent_automation_id = _clean(target.parent_automation_id)
     ancestor_path = _clean(getattr(target, "ancestor_path", None))
     if parent_automation_id:
-        parent, message = _find_parent_element(window, target, parent_automation_id)
+        parent, message = _find_parent_element(
+            window,
+            target,
+            parent_automation_id,
+            backend=_guess_window_backend(window),
+        )
         if parent is None:
             if ancestor_path:
                 match, parent_found, fallback_message = _resolve_target_with_ancestor_path(
@@ -343,8 +415,18 @@ def _load_parent_target(parent_target_id: str) -> UiTargetRecord | None:
 
 
 def _find_parent_element(
-    window: Any, target: UiTargetRecord, parent_automation_id: str
+    window: Any,
+    target: UiTargetRecord,
+    parent_automation_id: str,
+    *,
+    backend: str | None = None,
 ) -> tuple[Any | None, str]:
+    cached_parent = _find_parent_element_from_cached_handle(
+        parent_automation_id,
+        preferred_backend=backend,
+    )
+    if cached_parent is not None:
+        return cached_parent, "Parent found."
     try:
         parent = window.child_window(auto_id=parent_automation_id).wrapper_object()
     except Exception as error:
@@ -375,7 +457,7 @@ def _find_parent_element(
 
 def _parent_lookup_error_message(
     target: UiTargetRecord, parent_automation_id: str, error: Exception
-) -> str:
+    ) -> str:
     error_name = type(error).__name__
     count = getattr(error, "match_count", None)
     if error_name in {"ElementAmbiguousError", "MatchError"} or count is not None:
@@ -388,6 +470,59 @@ def _parent_lookup_error_message(
         f"Parent automation_id '{parent_automation_id}' for UI target "
         f"'{target.target_id}' was not found."
     )
+
+
+def _find_parent_element_from_cached_handle(
+    parent_automation_id: str,
+    *,
+    preferred_backend: str | None = None,
+) -> Any | None:
+    cached_state = get_cached_eghis_state()
+    cached_handles = getattr(cached_state, "cached_grid_handles", None) or {}
+    cached_handle = cached_handles.get(parent_automation_id)
+    if cached_handle is None:
+        return None
+
+    backend_order = _backend_order_from_preference(preferred_backend)
+    for backend in backend_order:
+        parent = _wrapper_from_handle(cached_handle, backend)
+        if parent is not None:
+            return parent
+    return None
+
+
+def _backend_order_from_preference(preferred_backend: str | None) -> tuple[str, ...]:
+    normalized = (preferred_backend or "").strip().casefold()
+    if normalized == "uia":
+        return ("uia", "win32")
+    if normalized == "win32":
+        return ("win32", "uia")
+    return ("win32", "uia")
+
+
+def _guess_window_backend(window: Any) -> str | None:
+    element_info = getattr(window, "element_info", None)
+    backend_name = getattr(element_info, "backend_name", None)
+    if isinstance(backend_name, str) and backend_name.strip():
+        return backend_name.strip()
+    if getattr(element_info, "__class__", None).__name__ == "UIAElementInfo":
+        return "uia"
+    if getattr(element_info, "__class__", None).__name__ == "HwndElementInfo":
+        return "win32"
+    return None
+
+
+def _wrapper_from_handle(handle: int, backend: str) -> Any | None:
+    try:
+        from pywinauto import Desktop
+
+        specification = Desktop(backend=backend).window(handle=handle)
+        wrapper = specification.wrapper_object()
+    except Exception:
+        return None
+    if _window_handle(wrapper) == handle:
+        return wrapper
+    return None
 
 
 def _find_parent_element_from_descendants(
@@ -454,12 +589,54 @@ def _find_target_element(
     matches = [
         element
         for element in elements
-        if all(reader(element) == expected for _, expected, reader in criteria)
+        if all(_criterion_matches(reader(element), field, expected) for field, expected, reader in criteria)
     ]
     description = ", ".join(f"{field} '{value}'" for field, value, _ in criteria)
     if scope_description:
         description = f"{description} {scope_description}"
     return _single_match(matches, target, description)
+
+
+def _criterion_matches(actual: str | None, field: str, expected: str) -> bool:
+    if field == "name":
+        return _matches_text_pattern(actual, expected)
+    return actual == expected
+
+
+def _matches_text_pattern(actual: str | None, expected: str) -> bool:
+    actual_text = _clean(actual)
+    expected_text = _clean(expected)
+    if actual_text is None or expected_text is None:
+        return actual_text == expected_text
+
+    pattern_prefixes = ("regex:", "re:", "contains:", "prefix:")
+    actual_folded = actual_text.casefold()
+    expected_folded = expected_text.casefold()
+
+    if expected_folded.startswith("regex:"):
+        return _regex_text_match(actual_text, expected_text[6:])
+    if expected_folded.startswith("re:"):
+        return _regex_text_match(actual_text, expected_text[3:])
+    if expected_folded.startswith("contains:"):
+        needle = _clean(expected_text[9:])
+        return bool(needle) and needle.casefold() in actual_folded
+    if expected_folded.startswith("prefix:"):
+        prefix = _clean(expected_text[7:])
+        return bool(prefix) and actual_folded.startswith(prefix.casefold())
+    if "*" in expected_text and not expected_folded.startswith(pattern_prefixes):
+        wildcard_pattern = "^" + re.escape(expected_text).replace(r"\*", ".*") + "$"
+        return re.match(wildcard_pattern, actual_text, flags=re.IGNORECASE) is not None
+    return actual_folded == expected_folded
+
+
+def _regex_text_match(actual: str, pattern: str) -> bool:
+    compiled_pattern = _clean(pattern)
+    if not compiled_pattern:
+        return False
+    try:
+        return re.search(compiled_pattern, actual, flags=re.IGNORECASE) is not None
+    except re.error:
+        return False
 
 
 def _resolve_target_with_ancestor_path(

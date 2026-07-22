@@ -130,6 +130,13 @@ def _migrate_macro_steps(connection: sqlite3.Connection) -> None:
             "ALTER TABLE macro_steps "
             "ADD COLUMN wait_before_ms INTEGER NOT NULL DEFAULT 100"
         )
+    connection.execute(
+        """
+        UPDATE macro_steps
+        SET action = 'click'
+        WHERE action = 'mouse_click'
+        """
+    )
 
 
 def _normalize_launcher_positions(connection: sqlite3.Connection) -> None:
@@ -357,8 +364,13 @@ def _migrate_emr_target_profiles(connection: sqlite3.Connection) -> None:
         "window_class",
         "root_automation_id",
         "main_window_automation_id",
+        "patient_status_tab_automation_id",
         "login_window_automation_id",
         "patient_search_automation_id",
+        "prescription_grid_automation_id",
+        "symptom_grid_automation_id",
+        "diagnosis_grid_automation_id",
+        "patient_list_grid_automation_id",
     ):
         if name not in columns:
             connection.execute(
@@ -418,9 +430,14 @@ def _seed_default_emr_target_profile(connection: sqlite3.Connection) -> None:
             is_default,
             process_name,
             executable_path,
-            window_title_contains
+            window_title_contains,
+            patient_status_tab_automation_id,
+            prescription_grid_automation_id,
+            symptom_grid_automation_id,
+            diagnosis_grid_automation_id,
+            patient_list_grid_automation_id
         )
-        VALUES (?, ?, 1, 1, ?, ?, ?)
+        VALUES (?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "eGHIS Production",
@@ -428,5 +445,10 @@ def _seed_default_emr_target_profile(connection: sqlite3.Connection) -> None:
             settings.get("eghis_process_name", "").strip() or None,
             settings.get("eghis_executable_path", "").strip() or None,
             settings.get("eghis_window_title_contains", "").strip() or None,
+            settings.get("eghis_patient_status_tab_automation_id", "").strip() or "tabProc",
+            "tree처방",
+            "grdSymp",
+            "tree상병",
+            "grdOpdList",
         ),
     )

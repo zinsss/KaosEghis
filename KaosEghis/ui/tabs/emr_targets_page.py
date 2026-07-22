@@ -98,8 +98,13 @@ class EmrTargetsPage(QWidget):
         self.window_class_input = QLineEdit()
         self.root_automation_id_input = QLineEdit()
         self.main_window_automation_id_input = QLineEdit()
+        self.patient_status_tab_automation_id_input = QLineEdit()
         self.login_window_automation_id_input = QLineEdit()
         self.patient_search_automation_id_input = QLineEdit()
+        self.prescription_grid_automation_id_input = QLineEdit()
+        self.symptom_grid_automation_id_input = QLineEdit()
+        self.diagnosis_grid_automation_id_input = QLineEdit()
+        self.patient_list_grid_automation_id_input = QLineEdit()
         self.default_status_label = QLabel()
 
         detail_form = QFormLayout()
@@ -115,10 +120,25 @@ class EmrTargetsPage(QWidget):
             "Main window automation ID", self.main_window_automation_id_input
         )
         detail_form.addRow(
+            "환자상태 tab automation ID", self.patient_status_tab_automation_id_input
+        )
+        detail_form.addRow(
             "Login window automation ID", self.login_window_automation_id_input
         )
         detail_form.addRow(
             "Patient search automation ID", self.patient_search_automation_id_input
+        )
+        detail_form.addRow(
+            "처방목록 grid automation ID", self.prescription_grid_automation_id_input
+        )
+        detail_form.addRow(
+            "증상목록 grid automation ID", self.symptom_grid_automation_id_input
+        )
+        detail_form.addRow(
+            "상병목록 grid automation ID", self.diagnosis_grid_automation_id_input
+        )
+        detail_form.addRow(
+            "환자리스트 grid automation ID", self.patient_list_grid_automation_id_input
         )
         detail_form.addRow("Default profile", self.default_status_label)
 
@@ -308,8 +328,13 @@ class EmrTargetsPage(QWidget):
                 window_class=profile.window_class,
                 root_automation_id=profile.root_automation_id,
                 main_window_automation_id=profile.main_window_automation_id,
+                patient_status_tab_automation_id=profile.patient_status_tab_automation_id,
                 login_window_automation_id=profile.login_window_automation_id,
                 patient_search_automation_id=profile.patient_search_automation_id,
+                prescription_grid_automation_id=profile.prescription_grid_automation_id,
+                symptom_grid_automation_id=profile.symptom_grid_automation_id,
+                diagnosis_grid_automation_id=profile.diagnosis_grid_automation_id,
+                patient_list_grid_automation_id=profile.patient_list_grid_automation_id,
             )
             for target in list_emr_ui_targets(connection, profile.id):
                 create_emr_ui_target(
@@ -397,8 +422,13 @@ class EmrTargetsPage(QWidget):
                     window_class=self.window_class_input.text(),
                     root_automation_id=self.root_automation_id_input.text(),
                     main_window_automation_id=self.main_window_automation_id_input.text(),
+                    patient_status_tab_automation_id=self.patient_status_tab_automation_id_input.text(),
                     login_window_automation_id=self.login_window_automation_id_input.text(),
                     patient_search_automation_id=self.patient_search_automation_id_input.text(),
+                    prescription_grid_automation_id=self.prescription_grid_automation_id_input.text(),
+                    symptom_grid_automation_id=self.symptom_grid_automation_id_input.text(),
+                    diagnosis_grid_automation_id=self.diagnosis_grid_automation_id_input.text(),
+                    patient_list_grid_automation_id=self.patient_list_grid_automation_id_input.text(),
                 )
         except sqlite3.IntegrityError:
             self.status_label.setText("Profile name must be unique.")
@@ -534,8 +564,13 @@ class EmrTargetsPage(QWidget):
             self.window_class_input.clear()
             self.root_automation_id_input.clear()
             self.main_window_automation_id_input.clear()
+            self.patient_status_tab_automation_id_input.clear()
             self.login_window_automation_id_input.clear()
             self.patient_search_automation_id_input.clear()
+            self.prescription_grid_automation_id_input.clear()
+            self.symptom_grid_automation_id_input.clear()
+            self.diagnosis_grid_automation_id_input.clear()
+            self.patient_list_grid_automation_id_input.clear()
             self.default_status_label.setText("")
             return
 
@@ -550,11 +585,26 @@ class EmrTargetsPage(QWidget):
         self.main_window_automation_id_input.setText(
             profile.main_window_automation_id or ""
         )
+        self.patient_status_tab_automation_id_input.setText(
+            profile.patient_status_tab_automation_id or ""
+        )
         self.login_window_automation_id_input.setText(
             profile.login_window_automation_id or ""
         )
         self.patient_search_automation_id_input.setText(
             profile.patient_search_automation_id or ""
+        )
+        self.prescription_grid_automation_id_input.setText(
+            profile.prescription_grid_automation_id or ""
+        )
+        self.symptom_grid_automation_id_input.setText(
+            profile.symptom_grid_automation_id or ""
+        )
+        self.diagnosis_grid_automation_id_input.setText(
+            profile.diagnosis_grid_automation_id or ""
+        )
+        self.patient_list_grid_automation_id_input.setText(
+            profile.patient_list_grid_automation_id or ""
         )
         self.default_status_label.setText(
             "[default]" if profile.is_default else "No"
@@ -604,6 +654,21 @@ class EmrTargetsPage(QWidget):
             executable_path=profile.executable_path or settings.get("eghis_executable_path"),
             main_window_automation_id=profile.main_window_automation_id
             or settings.get("eghis_main_window_automation_id"),
+            patient_status_tab_automation_id=profile.patient_status_tab_automation_id
+            or settings.get("eghis_patient_status_tab_automation_id")
+            or "tabProc",
+            prescription_grid_automation_id=profile.prescription_grid_automation_id
+            or settings.get("eghis_prescription_grid_automation_id")
+            or "tree처방",
+            symptom_grid_automation_id=profile.symptom_grid_automation_id
+            or settings.get("eghis_symptom_grid_automation_id")
+            or "grdSymp",
+            diagnosis_grid_automation_id=profile.diagnosis_grid_automation_id
+            or settings.get("eghis_diagnosis_grid_automation_id")
+            or "tree상병",
+            patient_list_grid_automation_id=profile.patient_list_grid_automation_id
+            or settings.get("eghis_patient_list_grid_automation_id")
+            or "grdOpdList",
         )
 
     def _refresh_connection_status(self) -> None:
@@ -725,13 +790,20 @@ class EmrTargetsPage(QWidget):
     def _handle_capture_ready(self, result: PointInspectionResult) -> None:
         details = format_capture_result(result)
         self.capture_result.setPlainText(details)
+        clipboard_payload = (result.text_value or result.name or "").strip() or details
         try:
-            copy_text(details)
+            copy_text(clipboard_payload)
             copied = True
         except Exception:
             copied = False
         if result.success:
-            suffix = " Details copied to clipboard." if copied else ""
+            if copied:
+                if clipboard_payload == details:
+                    suffix = " Details copied to clipboard."
+                else:
+                    suffix = " Value copied to clipboard."
+            else:
+                suffix = ""
             self.capture_status_label.setText(f"{result.message}{suffix}")
         else:
             self.capture_status_label.setText(result.message)

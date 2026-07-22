@@ -10,6 +10,7 @@ DEFAULT_SETTINGS = {
     "eghis_process_name": "Eghis.exe",
     "eghis_executable_path": "",
     "eghis_window_title_contains": "Eghis",
+    "eghis_patient_status_tab_automation_id": "tabProc",
     "kaosgdd_url": "https://kaosgdd.net",
     "credential_reference_name": "default",
     "eghis_db_connection_string": "",
@@ -128,8 +129,13 @@ class EmrTargetProfileRecord:
     window_class: str | None
     root_automation_id: str | None
     main_window_automation_id: str | None
+    patient_status_tab_automation_id: str | None
     login_window_automation_id: str | None
     patient_search_automation_id: str | None
+    prescription_grid_automation_id: str | None
+    symptom_grid_automation_id: str | None
+    diagnosis_grid_automation_id: str | None
+    patient_list_grid_automation_id: str | None
     created_at: str
     updated_at: str
 
@@ -158,13 +164,16 @@ LAUNCHER_ITEM_TYPES = ("macro", "clipboard", "randomized_clipboard")
 ALLOWED_MACRO_ACTIONS = {
     "focus_window",
     "wait_window",
+    "when_ready",
     "wait_text_or_image",
+    "select",
     "click",
     "double_click",
     "hotkey",
     "type_text",
     "paste_text",
     "preset_text",
+    "set_edit_text",
     "delay_ms",
     # Legacy actions kept for existing saved definitions and older dry-run tests.
     "check_process",
@@ -173,7 +182,6 @@ ALLOWED_MACRO_ACTIONS = {
     "type_text_keyboard",
     "type_text_clipboard",
     "set_text_uia",
-    "mouse_click",
     "wait_ms",
 }
 
@@ -356,24 +364,30 @@ def list_launcher_items(
     connection: sqlite3.Connection,
     launcher_section: str | None = None,
 ) -> list[ItemRecord]:
+    launcher_filter = """
+        (
+            item_type IN ('clipboard', 'randomized_clipboard')
+            OR (item_type = 'macro' AND is_enabled = 1)
+        )
+    """
     if launcher_section is None:
         rows = connection.execute(
-            """
+            f"""
             SELECT id, name, item_type, is_enabled, emr_target_profile_id,
                    launcher_section, launcher_position, created_at, updated_at
             FROM items
-            WHERE item_type IN ('macro', 'clipboard', 'randomized_clipboard')
+            WHERE {launcher_filter}
             ORDER BY launcher_section, launcher_position, id
             """
         )
     else:
         normalized_launcher_section = _normalize_launcher_section(launcher_section)
         rows = connection.execute(
-            """
+            f"""
             SELECT id, name, item_type, is_enabled, emr_target_profile_id,
                    launcher_section, launcher_position, created_at, updated_at
             FROM items
-            WHERE item_type IN ('macro', 'clipboard', 'randomized_clipboard')
+            WHERE {launcher_filter}
               AND launcher_section = ?
             ORDER BY launcher_position, id
             """,
@@ -885,8 +899,10 @@ def list_emr_target_profiles(
         """
         SELECT id, name, description, is_enabled, is_default, process_name,
                executable_path, window_title_contains, window_class,
-               root_automation_id, main_window_automation_id,
+               root_automation_id, main_window_automation_id, patient_status_tab_automation_id,
                login_window_automation_id, patient_search_automation_id,
+               prescription_grid_automation_id, symptom_grid_automation_id,
+               diagnosis_grid_automation_id, patient_list_grid_automation_id,
                created_at, updated_at
         FROM emr_target_profiles
         ORDER BY is_default DESC, is_enabled DESC, name
@@ -902,8 +918,10 @@ def get_emr_target_profile(
         """
         SELECT id, name, description, is_enabled, is_default, process_name,
                executable_path, window_title_contains, window_class,
-               root_automation_id, main_window_automation_id,
+               root_automation_id, main_window_automation_id, patient_status_tab_automation_id,
                login_window_automation_id, patient_search_automation_id,
+               prescription_grid_automation_id, symptom_grid_automation_id,
+               diagnosis_grid_automation_id, patient_list_grid_automation_id,
                created_at, updated_at
         FROM emr_target_profiles
         WHERE id = ?
@@ -922,8 +940,10 @@ def get_default_emr_target_profile(
         """
         SELECT id, name, description, is_enabled, is_default, process_name,
                executable_path, window_title_contains, window_class,
-               root_automation_id, main_window_automation_id,
+               root_automation_id, main_window_automation_id, patient_status_tab_automation_id,
                login_window_automation_id, patient_search_automation_id,
+               prescription_grid_automation_id, symptom_grid_automation_id,
+               diagnosis_grid_automation_id, patient_list_grid_automation_id,
                created_at, updated_at
         FROM emr_target_profiles
         WHERE is_default = 1
@@ -946,8 +966,10 @@ def get_active_emr_target_profile(
         """
         SELECT id, name, description, is_enabled, is_default, process_name,
                executable_path, window_title_contains, window_class,
-               root_automation_id, main_window_automation_id,
+               root_automation_id, main_window_automation_id, patient_status_tab_automation_id,
                login_window_automation_id, patient_search_automation_id,
+               prescription_grid_automation_id, symptom_grid_automation_id,
+               diagnosis_grid_automation_id, patient_list_grid_automation_id,
                created_at, updated_at
         FROM emr_target_profiles
         WHERE is_enabled = 1
@@ -973,8 +995,13 @@ def create_emr_target_profile(
     window_class: str | None = None,
     root_automation_id: str | None = None,
     main_window_automation_id: str | None = None,
+    patient_status_tab_automation_id: str | None = None,
     login_window_automation_id: str | None = None,
     patient_search_automation_id: str | None = None,
+    prescription_grid_automation_id: str | None = None,
+    symptom_grid_automation_id: str | None = None,
+    diagnosis_grid_automation_id: str | None = None,
+    patient_list_grid_automation_id: str | None = None,
 ) -> EmrTargetProfileRecord:
     cursor = connection.execute(
         """
@@ -989,10 +1016,15 @@ def create_emr_target_profile(
             window_class,
             root_automation_id,
             main_window_automation_id,
+            patient_status_tab_automation_id,
             login_window_automation_id,
-            patient_search_automation_id
+            patient_search_automation_id,
+            prescription_grid_automation_id,
+            symptom_grid_automation_id,
+            diagnosis_grid_automation_id,
+            patient_list_grid_automation_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             name.strip(),
@@ -1005,8 +1037,13 @@ def create_emr_target_profile(
             _blank_to_none(window_class),
             _blank_to_none(root_automation_id),
             _blank_to_none(main_window_automation_id),
+            _blank_to_none(patient_status_tab_automation_id),
             _blank_to_none(login_window_automation_id),
             _blank_to_none(patient_search_automation_id),
+            _blank_to_none(prescription_grid_automation_id),
+            _blank_to_none(symptom_grid_automation_id),
+            _blank_to_none(diagnosis_grid_automation_id),
+            _blank_to_none(patient_list_grid_automation_id),
         ),
     )
     if is_default:
@@ -1034,8 +1071,13 @@ def update_emr_target_profile(
     window_class: str | None = None,
     root_automation_id: str | None = None,
     main_window_automation_id: str | None = None,
+    patient_status_tab_automation_id: str | None = None,
     login_window_automation_id: str | None = None,
     patient_search_automation_id: str | None = None,
+    prescription_grid_automation_id: str | None = None,
+    symptom_grid_automation_id: str | None = None,
+    diagnosis_grid_automation_id: str | None = None,
+    patient_list_grid_automation_id: str | None = None,
 ) -> EmrTargetProfileRecord | None:
     current = get_emr_target_profile(connection, profile_id)
     if current is None:
@@ -1053,8 +1095,13 @@ def update_emr_target_profile(
             window_class = ?,
             root_automation_id = ?,
             main_window_automation_id = ?,
+            patient_status_tab_automation_id = ?,
             login_window_automation_id = ?,
             patient_search_automation_id = ?,
+            prescription_grid_automation_id = ?,
+            symptom_grid_automation_id = ?,
+            diagnosis_grid_automation_id = ?,
+            patient_list_grid_automation_id = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
@@ -1069,8 +1116,13 @@ def update_emr_target_profile(
             _blank_to_none(window_class),
             _blank_to_none(root_automation_id),
             _blank_to_none(main_window_automation_id),
+            _blank_to_none(patient_status_tab_automation_id),
             _blank_to_none(login_window_automation_id),
             _blank_to_none(patient_search_automation_id),
+            _blank_to_none(prescription_grid_automation_id),
+            _blank_to_none(symptom_grid_automation_id),
+            _blank_to_none(diagnosis_grid_automation_id),
+            _blank_to_none(patient_list_grid_automation_id),
             profile_id,
         ),
     )
@@ -1542,10 +1594,15 @@ def _emr_target_profile_from_row(
         window_class=row[8],
         root_automation_id=row[9],
         main_window_automation_id=row[10],
-        login_window_automation_id=row[11],
-        patient_search_automation_id=row[12],
-        created_at=row[13],
-        updated_at=row[14],
+        patient_status_tab_automation_id=row[11],
+        login_window_automation_id=row[12],
+        patient_search_automation_id=row[13],
+        prescription_grid_automation_id=row[14],
+        symptom_grid_automation_id=row[15],
+        diagnosis_grid_automation_id=row[16],
+        patient_list_grid_automation_id=row[17],
+        created_at=row[18],
+        updated_at=row[19],
     )
 
 

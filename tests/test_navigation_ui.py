@@ -206,6 +206,39 @@ def test_launcher_comments_copy_simple_and_random_macrotexts(
     assert page.log.toPlainText() == "Copied 'Greeting' to clipboard."
 
 
+def test_launcher_hides_non_executable_macros_but_keeps_macrotexts(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_item(connection, "Executable Macro", "macro", True, launcher_section="Macro")
+        create_item(connection, "Template Macro", "macro", False, launcher_section="Macro")
+        create_item(connection, "MacroText", "clipboard", False, launcher_section="Comments")
+
+    page = LauncherPage(db_path)
+
+    macro_items = [
+        page.launcher_lists["Macro"].item(index).text()
+        for index in range(page.launcher_lists["Macro"].count())
+    ]
+    comment_items = [
+        page.launcher_lists["Comments"].item(index).text()
+        for index in range(page.launcher_lists["Comments"].count())
+    ]
+
+    assert macro_items == ["Executable Macro"]
+    assert comment_items == ["MacroText"]
+
+
 def test_launcher_runs_without_confirmation_and_shows_running_status(
     tmp_path,
     monkeypatch,

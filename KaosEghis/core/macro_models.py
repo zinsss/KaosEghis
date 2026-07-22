@@ -6,12 +6,16 @@ from typing import Any
 class MacroAction(str, Enum):
     FOCUS_WINDOW = "focus_window"
     WAIT_WINDOW = "wait_window"
+    WHEN_READY = "when_ready"
     WAIT_TEXT_OR_IMAGE = "wait_text_or_image"
+    SELECT = "select"
     CLICK = "click"
     DOUBLE_CLICK = "double_click"
     HOTKEY = "hotkey"
     TYPE_TEXT = "type_text"
     PASTE_TEXT = "paste_text"
+    SET_TEXT_UIA = "set_text_uia"
+    SET_EDIT_TEXT = "set_edit_text"
     PRESET_TEXT = "preset_text"
     DELAY_MS = "delay_ms"
 

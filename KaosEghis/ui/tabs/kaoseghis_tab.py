@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import random
 from pathlib import Path
 
@@ -57,6 +58,9 @@ from KaosEghis.db.repositories import (
 )
 from KaosEghis.ui.tabs.eghis_assist_tab import MacroEditorDialog
 from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+
+DYNAMIC_CURRENT_DATE_MACROTEXT_ID = -1
 
 
 class KaosEghisTab(QWidget):
@@ -216,8 +220,23 @@ class LauncherPage(QWidget):
             window_title_contains=profile.window_title_contains
             or settings.get("eghis_window_title_contains"),
             executable_path=profile.executable_path or settings.get("eghis_executable_path"),
-            main_window_automation_id=profile.main_window_automation_id
+            main_window_automation_id=getattr(profile, "main_window_automation_id", None)
             or settings.get("eghis_main_window_automation_id"),
+            patient_status_tab_automation_id=getattr(profile, "patient_status_tab_automation_id", None)
+            or settings.get("eghis_patient_status_tab_automation_id")
+            or "tabProc",
+            prescription_grid_automation_id=getattr(profile, "prescription_grid_automation_id", None)
+            or settings.get("eghis_prescription_grid_automation_id")
+            or "tree처방",
+            symptom_grid_automation_id=getattr(profile, "symptom_grid_automation_id", None)
+            or settings.get("eghis_symptom_grid_automation_id")
+            or "grdSymp",
+            diagnosis_grid_automation_id=getattr(profile, "diagnosis_grid_automation_id", None)
+            or settings.get("eghis_diagnosis_grid_automation_id")
+            or "tree상병",
+            patient_list_grid_automation_id=getattr(profile, "patient_list_grid_automation_id", None)
+            or settings.get("eghis_patient_list_grid_automation_id")
+            or "grdOpdList",
         )
 
     def _refresh_connection_status(self) -> None:
@@ -730,8 +749,26 @@ class MacroTextsPage(QWidget):
                 for item in preset_items
             }
 
-        self.presets_table.setRowCount(len(preset_items))
-        for row_index, item in enumerate(preset_items):
+        all_rows = [("dynamic_current_date", None)] + [
+            ("db_item", item) for item in preset_items
+        ]
+
+        self.presets_table.setRowCount(len(all_rows))
+        for row_index, (row_type, item) in enumerate(all_rows):
+            if row_type == "dynamic_current_date":
+                self.presets_table.setItem(
+                    row_index, 0, QTableWidgetItem(str(DYNAMIC_CURRENT_DATE_MACROTEXT_ID))
+                )
+                self.presets_table.setItem(
+                    row_index, 1, QTableWidgetItem("Current Date")
+                )
+                self.presets_table.setItem(
+                    row_index, 2, QTableWidgetItem("Dynamic")
+                )
+                self.presets_table.setItem(
+                    row_index, 3, QTableWidgetItem("Live")
+                )
+                continue
             self.presets_table.setItem(row_index, 0, QTableWidgetItem(str(item.id)))
             self.presets_table.setItem(row_index, 1, QTableWidgetItem(item.name))
             mode = (
@@ -744,7 +781,7 @@ class MacroTextsPage(QWidget):
                 row_index, 3, QTableWidgetItem(str(variant_counts[item.id]))
             )
         self.presets_table.resizeColumnsToContents()
-        has_presets = bool(preset_items)
+        has_presets = bool(all_rows)
         self.empty_state.setVisible(not has_presets)
         self.presets_table.setVisible(has_presets)
 
@@ -996,6 +1033,14 @@ def _load_launcher_macros(db_path: Path | None) -> list:
 
 
 def _copy_macrotext(db_path: Path | None, item_id: int) -> tuple[bool, str]:
+    if item_id == DYNAMIC_CURRENT_DATE_MACROTEXT_ID:
+        text = _format_current_date_macrotext()
+        try:
+            copy_text(text)
+        except Exception:
+            return False, "Clipboard copy failed."
+        return True, "Copied current date to clipboard."
+
     initialize_database(db_path)
     with connect(db_path) as connection:
         item = get_item(connection, item_id)
@@ -1014,6 +1059,12 @@ def _copy_macrotext(db_path: Path | None, item_id: int) -> tuple[bool, str]:
     except Exception:
         return False, "Clipboard copy failed."
     return True, f"Copied '{item.name}' to clipboard."
+
+
+def _format_current_date_macrotext(now: datetime | None = None) -> str:
+    current = now or datetime.now()
+    meridiem = "오전" if current.hour < 12 else "오후"
+    return f"{current.year:04d}년 {current.month:02d}월 {current.day:02d}일 {meridiem}"
 
 
 def _populate_macro_table(

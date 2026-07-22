@@ -107,7 +107,54 @@ def test_default_profile_is_seeded_from_existing_settings(tmp_path) -> None:
     assert profile.name == "eGHIS Production"
     assert profile.process_name == "SeededEghis.exe"
     assert profile.window_title_contains == "Seeded Eghis"
+    assert profile.prescription_grid_automation_id == "tree처방"
+    assert profile.symptom_grid_automation_id == "grdSymp"
+    assert profile.diagnosis_grid_automation_id == "tree상병"
+    assert profile.patient_list_grid_automation_id == "grdOpdList"
+    assert profile.patient_status_tab_automation_id == "tabProc"
     assert "super-secret-ref" not in row
+
+
+def test_emr_target_profile_migration_adds_grid_automation_columns(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE emr_target_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                is_enabled INTEGER NOT NULL DEFAULT 1,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                process_name TEXT,
+                executable_path TEXT,
+                window_title_contains TEXT,
+                window_class TEXT,
+                root_automation_id TEXT,
+                main_window_automation_id TEXT,
+                patient_status_tab_automation_id TEXT,
+                login_window_automation_id TEXT,
+                patient_search_automation_id TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(emr_target_profiles)").fetchall()
+        }
+
+    assert "prescription_grid_automation_id" in columns
+    assert "symptom_grid_automation_id" in columns
+    assert "diagnosis_grid_automation_id" in columns
+    assert "patient_list_grid_automation_id" in columns
+    assert "patient_status_tab_automation_id" in columns
 
 
 def test_emr_target_profile_crud_and_single_default(tmp_path) -> None:
@@ -135,6 +182,11 @@ def test_emr_target_profile_crud_and_single_default(tmp_path) -> None:
             is_default=True,
             process_name="Training.exe",
             window_title_contains="Training Window",
+            patient_status_tab_automation_id="tabProc_new",
+            prescription_grid_automation_id="tree처방_new",
+            symptom_grid_automation_id="grdSymp_new",
+            diagnosis_grid_automation_id="tree상병_new",
+            patient_list_grid_automation_id="grdOpdList_new",
         )
         updated = update_emr_target_profile(
             connection,
@@ -145,6 +197,11 @@ def test_emr_target_profile_crud_and_single_default(tmp_path) -> None:
             is_default=True,
             process_name="TrainingUpdated.exe",
             window_title_contains="Training Updated",
+            patient_status_tab_automation_id="tabProc_v2",
+            prescription_grid_automation_id="tree처방_v2",
+            symptom_grid_automation_id="grdSymp_v2",
+            diagnosis_grid_automation_id="tree상병_v2",
+            patient_list_grid_automation_id="grdOpdList_v2",
         )
         set_default_emr_target_profile(connection, seeded.id)
         profiles = list_emr_target_profiles(connection)
@@ -154,6 +211,11 @@ def test_emr_target_profile_crud_and_single_default(tmp_path) -> None:
     assert updated is not None
     assert updated.name == "Training EMR Updated"
     assert updated.process_name == "TrainingUpdated.exe"
+    assert updated.patient_status_tab_automation_id == "tabProc_v2"
+    assert updated.prescription_grid_automation_id == "tree처방_v2"
+    assert updated.symptom_grid_automation_id == "grdSymp_v2"
+    assert updated.diagnosis_grid_automation_id == "tree상병_v2"
+    assert updated.patient_list_grid_automation_id == "grdOpdList_v2"
     assert fetched is not None
     assert fetched.name == "Training EMR Updated"
     assert len(defaults) == 1
@@ -279,6 +341,11 @@ def test_emr_targets_page_instantiates_and_shows_default_profile(tmp_path, monke
     assert page.profile_list.count() >= 1
     assert page.name_input.text() == "eGHIS Production"
     assert page.default_status_label.text() == "[default]"
+    assert page.prescription_grid_automation_id_input.text() == "tree처방"
+    assert page.symptom_grid_automation_id_input.text() == "grdSymp"
+    assert page.diagnosis_grid_automation_id_input.text() == "tree상병"
+    assert page.patient_list_grid_automation_id_input.text() == "grdOpdList"
+    assert page.patient_status_tab_automation_id_input.text() == "tabProc"
 
 
 def test_emr_targets_page_uses_two_column_layout(tmp_path, monkeypatch) -> None:
@@ -420,8 +487,59 @@ def test_emr_targets_page_shows_capture_result_and_copies_details(
 
     assert "Coordinate: (120, 340)" in page.capture_result.toPlainText()
     assert "Value: 홍길동" in page.capture_result.toPlainText()
-    assert copied
-    assert "copied to clipboard" in page.capture_status_label.text().casefold()
+    assert copied == ["홍길동"]
+    assert "value copied to clipboard" in page.capture_status_label.text().casefold()
+
+
+def test_global_capture_controller_defers_inspection_to_qt_signal() -> None:
+    _app()
+
+    from KaosEghis.core.ui_capture import GlobalClickCaptureController
+
+    controller = GlobalClickCaptureController()
+    events: list[object] = []
+    controller.capture_ready.connect(events.append)
+    controller.capture_failed.connect(events.append)
+
+    import KaosEghis.core.ui_capture as ui_capture
+
+    original = ui_capture.inspect_ui_at_point
+    try:
+        ui_capture.inspect_ui_at_point = lambda x, y: ("captured", x, y)
+        controller._inspect_captured_point(120, 340)
+    finally:
+        ui_capture.inspect_ui_at_point = original
+
+    assert events == [("captured", 120, 340)]
+
+
+def test_global_capture_controller_windows_hotkey_listener_start_stop(monkeypatch) -> None:
+    _app()
+
+    import KaosEghis.core.ui_capture as ui_capture
+
+    events: list[str] = []
+
+    class FakeListener:
+        def __init__(self, callback) -> None:
+            self.callback = callback
+
+        def start(self) -> bool:
+            events.append("start")
+            return True
+
+        def stop(self) -> None:
+            events.append("stop")
+
+    monkeypatch.setattr(ui_capture, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(ui_capture, "_WindowsGlobalHotkeyListener", FakeListener)
+
+    controller = ui_capture.GlobalClickCaptureController()
+
+    assert controller.start_hotkey_listener() is True
+    controller.stop()
+
+    assert events == ["start", "stop"]
 
 
 def test_parse_inspector_dump_maps_basic_fields() -> None:

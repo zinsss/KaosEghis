@@ -556,6 +556,45 @@ def test_macro_step_migration_adds_enter_toggle_columns(tmp_path) -> None:
         assert columns["wait_before_ms"][4] == "100"
 
 
+def test_macro_step_migration_converts_mouse_click_to_click(tmp_path) -> None:
+    import sqlite3
+
+    from KaosEghis.db.database import connect, initialize_database
+
+    db_path = tmp_path / "legacy.sqlite"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE macro_steps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER NOT NULL,
+                step_order INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                target_id TEXT,
+                value TEXT,
+                timeout_seconds REAL NOT NULL DEFAULT 5,
+                retries INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO macro_steps (item_id, step_order, action, target_id)
+            VALUES (1, 1, 'mouse_click', 'target.old')
+            """
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        action = connection.execute(
+            "SELECT action FROM macro_steps WHERE item_id = 1"
+        ).fetchone()[0]
+
+    assert action == "click"
+
+
 def test_macro_dry_run_validation_reports_missing_target(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import (
@@ -674,6 +713,34 @@ def test_wait_condition_evaluation() -> None:
     assert is_condition_satisfied(inspection, "visible") is True
     assert is_condition_satisfied(inspection, "enabled") is True
     assert is_condition_satisfied(inspection, "text_non_empty") is True
+    assert is_condition_satisfied(inspection, "keyboard_focus") is False
+
+
+def test_wait_condition_keyboard_focus_evaluation() -> None:
+    from KaosEghis.core.uia_inspector import UiaInspectionResult
+    from KaosEghis.core.wait_engine import is_condition_satisfied
+
+    inspection = UiaInspectionResult(
+        found=True,
+        message="focused",
+        target_id="symptom.text",
+        parent_target_id=None,
+        parent_automation_id=None,
+        parent_found=None,
+        automation_id="eghisRichTextBox",
+        name=None,
+        control_type="Edit",
+        class_name=None,
+        found_name=None,
+        found_control_type="Edit",
+        found_class_name=None,
+        is_enabled=True,
+        is_visible=True,
+        text_value="ready",
+        has_keyboard_focus=True,
+    )
+
+    assert is_condition_satisfied(inspection, "keyboard_focus") is True
 
 
 def test_wait_for_target_condition_timeout(monkeypatch) -> None:
@@ -1787,6 +1854,8 @@ def test_ensure_ready_for_macro_retries_focus_before_succeeding(monkeypatch) -> 
         "Eghis EMR",
         55,
         12,
+        None,
+        None,
         False,
         "2026-06-19T12:00:00",
         "cached",
@@ -1827,8 +1896,8 @@ def test_ensure_ready_for_macro_retries_focus_before_succeeding(monkeypatch) -> 
 def test_cached_state_with_changed_window_owner_pid_forces_rediscovery(monkeypatch) -> None:
     import KaosEghis.core.eghis_connector as connector
 
-    stale = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 54, 12, False, "2026-06-19T12:00:00", "cached")
-    fresh = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, False, "2026-06-19T12:00:02", "fresh")
+    stale = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 54, 12, None, None, False, "2026-06-19T12:00:00", "cached")
+    fresh = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, None, None, False, "2026-06-19T12:00:02", "fresh")
     monkeypatch.setattr(connector, "_CACHED_STATE", stale)
     monkeypatch.setattr(connector, "_is_state_stale", lambda _state: False)
     monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
@@ -1851,8 +1920,8 @@ def test_cached_state_with_changed_window_owner_pid_forces_rediscovery(monkeypat
 def test_rediscovery_with_window_owner_pid_mismatch_blocks(monkeypatch) -> None:
     import KaosEghis.core.eghis_connector as connector
 
-    stale = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, False, "2026-06-19T12:00:00", "cached")
-    mismatch = connector.EghisConnectorState("red", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 99, False, "2026-06-19T12:00:02", "window process mismatch")
+    stale = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, None, None, False, "2026-06-19T12:00:00", "cached")
+    mismatch = connector.EghisConnectorState("red", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 99, None, None, False, "2026-06-19T12:00:02", "window process mismatch")
     monkeypatch.setattr(connector, "_CACHED_STATE", stale)
     monkeypatch.setattr(connector, "_is_state_stale", lambda _state: True)
     monkeypatch.setattr(connector, "refresh_cached_eghis_state", lambda _settings: mismatch)
@@ -2197,6 +2266,72 @@ def test_uia_target_matching_uses_automation_id_and_class_name() -> None:
     assert message == "Target found."
 
 
+def test_uia_target_matching_supports_wildcard_name_pattern() -> None:
+    from types import SimpleNamespace
+
+    from KaosEghis.core.uia_inspector import _find_target_element
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    element = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="completedTab",
+            name="완료(17)",
+            control_type="TabItem",
+            class_name="WindowsForms10.SysTabControl32.app.0.2bf8098_r6_ad1",
+        )
+    )
+
+    target = UiTargetRecord(
+        1,
+        "completed.tab",
+        None,
+        None,
+        "completedTab",
+        "완료(*)",
+        "TabItem",
+        None,
+        "now",
+    )
+
+    match, message = _find_target_element([element], target)
+
+    assert match is not None
+    assert message == "Target found."
+
+
+def test_uia_target_matching_supports_prefix_name_pattern() -> None:
+    from types import SimpleNamespace
+
+    from KaosEghis.core.uia_inspector import _find_target_element
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    element = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="completedTab",
+            name="완료(4)",
+            control_type="TabItem",
+            class_name="WindowsForms10.SysTabControl32.app.0.2bf8098_r6_ad1",
+        )
+    )
+
+    target = UiTargetRecord(
+        1,
+        "completed.tab",
+        None,
+        None,
+        "completedTab",
+        "prefix:완료(",
+        "TabItem",
+        None,
+        "now",
+    )
+
+    match, message = _find_target_element([element], target)
+
+    assert match is not None
+    assert message == "Target found."
+
+
 def test_inspect_target_readonly_scopes_lookup_to_parent(monkeypatch) -> None:
     from KaosEghis.core.uia_inspector import inspect_target_readonly
     from KaosEghis.db.repositories import UiTargetRecord
@@ -2438,6 +2573,92 @@ def test_inspect_target_readonly_falls_back_to_win32_backend(monkeypatch) -> Non
     assert win32_window.descendants_calls == 1
 
 
+def test_parent_scoped_name_pattern_prefers_uia_backend(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target_tab = _FakeElement("", name="완료 (30)", control_type="TabItem")
+    uia_parent = _FakeElement("tabProc", name="", control_type="Tab", children=[target_tab])
+    uia_window = _FakeWindow("Eghis", [uia_parent], handle=55)
+    win32_window = _FakeWindow("Eghis", [], handle=55)
+
+    class FakeDesktop:
+        def __init__(self, backend: str) -> None:
+            self.backend = backend
+
+        def windows(self) -> list:
+            return [uia_window] if self.backend == "uia" else [win32_window]
+
+        def window(self, handle: int):
+            if handle != 55:
+                raise RuntimeError("unexpected handle")
+            window = uia_window if self.backend == "uia" else win32_window
+            return _FakeWindowSpecification(window)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto",
+        SimpleNamespace(Desktop=FakeDesktop),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.uia_inspector.get_cached_eghis_state",
+        lambda: SimpleNamespace(window_handle=55),
+    )
+
+    target = UiTargetRecord(
+        1,
+        "donePt",
+        None,
+        "tabProc",
+        None,
+        "prefix:완료 (",
+        None,
+        None,
+        "now",
+    )
+
+    result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
+
+    assert result.found is True
+    assert uia_parent.descendants_calls >= 1
+    assert win32_window.descendants_calls == 0
+
+
+def test_parent_scoped_cached_handle_respects_uia_backend_preference(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from KaosEghis.core.uia_inspector import _find_parent_element_from_cached_handle
+
+    backend_calls: list[str] = []
+
+    def fake_wrapper_from_handle(handle: int, backend: str):
+        assert handle == 55
+        backend_calls.append(backend)
+        if backend == "uia":
+            return object()
+        return None
+
+    monkeypatch.setattr(
+        "KaosEghis.core.uia_inspector.get_cached_eghis_state",
+        lambda: SimpleNamespace(cached_grid_handles={"tabProc": 55}),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.uia_inspector._wrapper_from_handle",
+        fake_wrapper_from_handle,
+    )
+
+    parent = _find_parent_element_from_cached_handle(
+        "tabProc",
+        preferred_backend="uia",
+    )
+
+    assert parent is not None
+    assert backend_calls == ["uia"]
+
+
 def test_inspect_target_readonly_prefers_parent_automation_scope_over_stale_ancestor_path(
     monkeypatch,
 ) -> None:
@@ -2529,6 +2750,79 @@ def test_inspect_target_readonly_uses_direct_child_lookup_before_descendant_scan
     assert result.found is True
     assert result.parent_found is True
     assert parent.descendants_calls == 0
+
+
+def test_inspect_target_readonly_uses_cached_grid_handle_before_window_scan(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    target_inside_parent = _FakeElement(
+        "chkInspTargetYn",
+        name="청구안함",
+        control_type="CheckBox",
+    )
+    cached_parent = _FakeElement(
+        "grdSymp",
+        name="증상목록",
+        control_type="Pane",
+        children=[target_inside_parent],
+    )
+    cached_parent.handle = 88
+    window = _FakeWindow("Eghis", [], handle=55)
+
+    class FakeDesktop:
+        def __init__(self, backend: str) -> None:
+            self.backend = backend
+
+        def windows(self) -> list:
+            return [window]
+
+        def window(self, handle: int):
+            if handle == 55:
+                return _FakeWindowSpecification(window)
+            if handle == 88:
+                return _FakeWindowSpecification(cached_parent)
+            raise RuntimeError(f"unexpected handle {handle}")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pywinauto",
+        SimpleNamespace(Desktop=FakeDesktop),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.uia_inspector.get_cached_eghis_state",
+        lambda: SimpleNamespace(
+            window_handle=55,
+            cached_grid_handles={"grdSymp": 88},
+        ),
+    )
+
+    target = UiTargetRecord(
+        1,
+        "noclaim",
+        None,
+        "grdSymp",
+        "chkInspTargetYn",
+        "청구안함",
+        "CheckBox",
+        None,
+        "now",
+    )
+
+    result = inspect_target_readonly(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert window.descendants_calls == 0
+    assert cached_parent.descendants_calls == 0
 
 
 def test_inspect_target_readonly_can_fallback_to_meaningful_ancestor_name_for_parent_scope(

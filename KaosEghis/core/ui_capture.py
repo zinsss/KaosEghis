@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ctypes
+import ctypes.wintypes
+import threading
 import time
 from typing import Any
 
@@ -27,6 +30,8 @@ class GlobalClickCaptureController(QObject):
     armed_changed = Signal(bool)
     capture_ready = Signal(object)
     capture_failed = Signal(str)
+    _arm_requested = Signal()
+    _point_captured = Signal(int, int)
 
     def __init__(self, parent: QObject | None = None, hotkey: str = "<ctrl>+<shift>+<f8>") -> None:
         super().__init__(parent)
@@ -34,6 +39,8 @@ class GlobalClickCaptureController(QObject):
         self._hotkey_listener: Any | None = None
         self._mouse_listener: Any | None = None
         self._armed_at = 0.0
+        self._arm_requested.connect(self.arm_capture)
+        self._point_captured.connect(self._inspect_captured_point)
 
     @property
     def hotkey(self) -> str:
@@ -42,13 +49,24 @@ class GlobalClickCaptureController(QObject):
     def start_hotkey_listener(self) -> bool:
         if self._hotkey_listener is not None:
             return True
+        if _is_windows_platform():
+            listener = _WindowsGlobalHotkeyListener(self._queue_arm_capture)
+            if listener.start():
+                self._hotkey_listener = listener
+                return True
         try:
             from pynput import keyboard
         except Exception:
             return False
 
-        self._hotkey_listener = keyboard.GlobalHotKeys({self._hotkey: self.arm_capture})
-        self._hotkey_listener.start()
+        try:
+            self._hotkey_listener = keyboard.GlobalHotKeys(
+                {self._hotkey: self._queue_arm_capture}
+            )
+            self._hotkey_listener.start()
+        except Exception:
+            self._hotkey_listener = None
+            return False
         return True
 
     def arm_capture(self) -> bool:
@@ -91,13 +109,89 @@ class GlobalClickCaptureController(QObject):
         if time.monotonic() - self._armed_at < 0.25:
             return True
         self._stop_mouse_listener()
+        self._point_captured.emit(int(x), int(y))
+        return False
+
+    def _queue_arm_capture(self) -> None:
+        self._arm_requested.emit()
+
+    def _inspect_captured_point(self, x: int, y: int) -> None:
         try:
             result = inspect_ui_at_point(x, y)
         except Exception as error:
             self.capture_failed.emit(f"Capture failed: {error}")
-            return False
+            return
         self.capture_ready.emit(result)
-        return False
+
+
+class _WindowsGlobalHotkeyListener:
+    HOTKEY_ID = 0x4B45
+    MOD_ALT = 0x0001
+    MOD_CONTROL = 0x0002
+    MOD_SHIFT = 0x0004
+    MOD_WIN = 0x0008
+    VK_F8 = 0x77
+    WM_HOTKEY = 0x0312
+    WM_QUIT = 0x0012
+
+    def __init__(self, callback) -> None:
+        self._callback = callback
+        self._thread: threading.Thread | None = None
+        self._thread_id: int | None = None
+        self._started = threading.Event()
+        self._registered = False
+        self._user32 = ctypes.windll.user32 if _is_windows_platform() else None
+        self._kernel32 = ctypes.windll.kernel32 if _is_windows_platform() else None
+
+    def start(self) -> bool:
+        if self._thread is not None:
+            return True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        self._started.wait(timeout=1.5)
+        return self._registered
+
+    def stop(self) -> None:
+        if self._thread_id is None or self._user32 is None:
+            return
+        try:
+            self._user32.PostThreadMessageW(self._thread_id, self.WM_QUIT, 0, 0)
+        except Exception:
+            pass
+
+    def _run(self) -> None:
+        if self._user32 is None or self._kernel32 is None:
+            self._started.set()
+            return
+
+        self._thread_id = self._kernel32.GetCurrentThreadId()
+        registered = False
+        try:
+            registered = bool(
+                self._user32.RegisterHotKey(
+                    None,
+                    self.HOTKEY_ID,
+                    self.MOD_CONTROL | self.MOD_SHIFT,
+                    self.VK_F8,
+                )
+            )
+            self._registered = registered
+            self._started.set()
+            if not registered:
+                return
+
+            msg = ctypes.wintypes.MSG()
+            while self._user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+                if msg.message == self.WM_HOTKEY and msg.wParam == self.HOTKEY_ID:
+                    self._callback()
+        finally:
+            if registered:
+                try:
+                    self._user32.UnregisterHotKey(None, self.HOTKEY_ID)
+                except Exception:
+                    pass
+            if not self._started.is_set():
+                self._started.set()
 
 
 def inspect_ui_at_point(x: int, y: int) -> PointInspectionResult:
@@ -287,3 +381,10 @@ def _ancestor_summary(element: Any, max_depth: int = 8) -> str | None:
         node = f"{name} ({control_type})".strip()
         nodes.append(node)
     return " > ".join(nodes) if nodes else None
+
+
+def _is_windows_platform() -> bool:
+    try:
+        return hasattr(ctypes, "windll")
+    except Exception:
+        return False

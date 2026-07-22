@@ -163,6 +163,72 @@ def test_paste_text_dry_run_shows_enter_before_and_after(monkeypatch, tmp_path) 
     assert "paste_text value=hello enter_before=yes enter_after=yes" in result.message
 
 
+def test_set_text_uia_dry_run_shows_step_without_os_input(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Set UIA Macro", "macro", True)
+        create_macro_step(
+            connection,
+            item.id,
+            1,
+            "set_text_uia",
+            target_id="sx",
+            value="hello",
+            press_enter_before=True,
+            press_enter_after=True,
+        )
+
+    monkeypatch.setattr(
+        "pywinauto.keyboard.send_keys",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("dry run must not send keys")
+        ),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=True)
+
+    assert result.success is True
+    assert "set_text_uia target_id=sx value=hello enter_before=yes enter_after=yes" in result.message
+
+
+def test_set_edit_text_dry_run_shows_step_without_os_input(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Set Edit Text Macro", "macro", True)
+        create_macro_step(
+            connection,
+            item.id,
+            1,
+            "set_edit_text",
+            target_id="sx",
+            value="hello",
+            press_enter_before=True,
+            press_enter_after=True,
+        )
+
+    monkeypatch.setattr(
+        "pywinauto.keyboard.send_keys",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("dry run must not send keys")
+        ),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=True)
+
+    assert result.success is True
+    assert "set_edit_text target_id=sx value=hello enter_before=yes enter_after=yes" in result.message
+
+
 def test_step_wait_runs_before_actual_action(monkeypatch) -> None:
     from KaosEghis.core.macro_models import MacroRunResult, MacroStep
     from KaosEghis.core.macro_runner import MacroRunner
@@ -257,6 +323,218 @@ def test_paste_text_with_target_requires_resolved_target(monkeypatch, tmp_path) 
     assert result.success is False
     assert result.executed_steps == 0
     assert result.message == "target not found"
+
+
+def test_set_text_uia_calls_value_pattern(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="SymptomBox")
+        item = create_item(connection, "Set UIA Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "set_text_uia", target_id="sx", value="hello")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeValuePattern:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.CurrentIsReadOnly = False
+
+        def SetValue(self, text: str) -> None:
+            self.calls.append(text)
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.iface_value = FakeValuePattern()
+
+    fake_element = FakeElement()
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (fake_element, None, "resolved"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert fake_element.iface_value.calls == ["hello"]
+
+
+def test_set_text_uia_returns_input_failed_when_value_pattern_is_unavailable(
+    monkeypatch, tmp_path
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="SymptomBox")
+        item = create_item(connection, "Set UIA Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "set_text_uia", target_id="sx", value="hello")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        @property
+        def iface_value(self):
+            raise RuntimeError("pattern missing")
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "resolved"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.message == "input failed"
+
+
+def test_set_edit_text_calls_element_set_edit_text(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="SymptomBox")
+        item = create_item(connection, "Set Edit Text Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "set_edit_text", target_id="sx", value="hello")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.focus_calls = 0
+            self.values: list[str] = []
+
+        def set_focus(self) -> None:
+            self.focus_calls += 1
+
+        def set_edit_text(self, text: str) -> None:
+            self.values.append(text)
+
+    fake_element = FakeElement()
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (fake_element, None, "resolved"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert fake_element.focus_calls == 1
+    assert fake_element.values == ["hello"]
+
+
+def test_when_ready_uses_keyboard_focus_wait(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.core.wait_engine import WaitResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="symptom.text", automation_id="eghisRichTextBox")
+        item = create_item(connection, "When Ready Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "when_ready", target_id="symptom.text", timeout_seconds=2.0)
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+
+    def fake_wait(settings, target, condition, timeout_ms=0, poll_ms=0):
+        captured["target_id"] = target.target_id
+        captured["condition"] = getattr(condition, "value", condition)
+        captured["timeout_ms"] = timeout_ms
+        return WaitResult(
+            success=True,
+            message="Condition satisfied: keyboard_focus.",
+            target_id=target.target_id,
+            condition="keyboard_focus",
+            elapsed_ms=50,
+            attempts=1,
+        )
+
+    monkeypatch.setattr("KaosEghis.core.macro_runner.wait_for_target_condition", fake_wait)
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert captured["target_id"] == "symptom.text"
+    assert captured["condition"] == "keyboard_focus"
+    assert captured["timeout_ms"] == 2000
+
+
+def test_when_ready_times_out_when_keyboard_focus_never_arrives(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.core.wait_engine import WaitResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="symptom.text", automation_id="eghisRichTextBox")
+        item = create_item(connection, "When Ready Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "when_ready", target_id="symptom.text", timeout_seconds=1.0)
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.wait_for_target_condition",
+        lambda settings, target, condition, timeout_ms=0, poll_ms=0: WaitResult(
+            success=False,
+            message="Timed out waiting for keyboard_focus.",
+            target_id=target.target_id,
+            condition="keyboard_focus",
+            elapsed_ms=1000,
+            attempts=10,
+        ),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.message == "timeout"
 
 
 def test_paste_text_focuses_resolved_target_before_paste(monkeypatch, tmp_path) -> None:
@@ -1264,6 +1542,190 @@ def test_macro_step_dialog_includes_double_click_action(monkeypatch, tmp_path) -
     dialog = MacroStepDialog(parent)
 
     assert dialog.action.findText("double_click") >= 0
+    assert dialog.action.findText("select") >= 0
+
+
+def test_select_uses_selection_interface_for_tab_target(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(
+            connection,
+            target_id="tab.completed",
+            name="완료(*)",
+            control_type="TabItem",
+        )
+        item = create_item(connection, "Tab Select Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "select", target_id="tab.completed")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeSelectionItem:
+        def __init__(self) -> None:
+            self.select_calls = 0
+
+        def Select(self) -> None:
+            self.select_calls += 1
+
+    selection_item = FakeSelectionItem()
+
+    class _ElementInfo:
+        control_type = "TabItem"
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.element_info = _ElementInfo()
+            self.iface_selection_item = selection_item
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "resolved"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert selection_item.select_calls == 1
+
+
+def test_select_tab_falls_back_to_parent_tab_control_selection(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(
+            connection,
+            target_id="tab.completed",
+            name="완료(*)",
+            control_type="TabItem",
+        )
+        item = create_item(connection, "Tab Parent Select Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "select", target_id="tab.completed")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeParentTab:
+        def __init__(self) -> None:
+            self.selected_names: list[str] = []
+
+        def _select(self, name: str) -> None:
+            self.selected_names.append(name)
+
+    parent_tab = FakeParentTab()
+
+    class _ElementInfo:
+        control_type = "TabItem"
+        name = "완료 (30)"
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.element_info = _ElementInfo()
+            self.iface_selection_item = None
+
+        def parent(self):
+            return parent_tab
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "resolved"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert parent_tab.selected_names == ["완료 (30)"]
+
+
+def test_select_prefers_parent_scope_name_match_for_tab_like_target(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_emr_target_profile, create_emr_ui_target, create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Production",
+            is_enabled=True,
+            is_default=True,
+            main_window_automation_id="H2OpdTreatment",
+            patient_status_tab_automation_id="tabProc",
+        )
+        create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="donePt",
+            label="완료목록",
+            scope_automation_id="tabProc",
+            name_match="prefix:완료 (",
+        )
+        item = create_item(connection, "click test", "macro", True, emr_target_profile_id=profile.id)
+        create_macro_step(connection, item.id, 1, "focus_window")
+        create_macro_step(connection, item.id, 2, "select", target_id="donePt")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeSelectionItem:
+        def __init__(self) -> None:
+            self.select_calls = 0
+
+        def Select(self) -> None:
+            self.select_calls += 1
+
+    selection_item = FakeSelectionItem()
+
+    class ChildInfo:
+        name = "완료 (30)"
+        control_type = "TabItem"
+
+    class ChildElement:
+        def __init__(self) -> None:
+            self.element_info = ChildInfo()
+            self.iface_selection_item = selection_item
+
+    class ScopeElement:
+        def children(self):
+            return [ChildElement()]
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_scope_element",
+        lambda _settings, _target: (ScopeElement(), "Parent found."),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (_ for _ in ()).throw(AssertionError("generic child resolution should not run first")),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert selection_item.select_calls == 1
 
 
 def test_macro_step_dialog_selects_saved_macrotext(monkeypatch, tmp_path) -> None:
@@ -1330,6 +1792,56 @@ def test_macrotext_dialog_supports_simple_and_randomized_content() -> None:
         "first comment line 1\nfirst comment line 2",
         "second comment line 1\nsecond comment line 2",
     ]
+
+
+def test_format_current_date_macrotext_uses_korean_date_and_meridiem() -> None:
+    from datetime import datetime
+
+    from KaosEghis.ui.tabs.kaoseghis_tab import _format_current_date_macrotext
+
+    morning = _format_current_date_macrotext(datetime(2026, 7, 22, 9, 30))
+    afternoon = _format_current_date_macrotext(datetime(2026, 7, 22, 15, 45))
+
+    assert morning == "2026년 07월 22일 오전"
+    assert afternoon == "2026년 07월 22일 오후"
+
+
+def test_macrotexts_page_includes_dynamic_current_date_row_and_copies_it(
+    monkeypatch, tmp_path
+) -> None:
+    _app()
+
+    from datetime import datetime
+
+    from KaosEghis.db.database import initialize_database
+    import KaosEghis.ui.tabs.kaoseghis_tab as kaoseghis_tab
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacroTextsPage
+
+    copied: list[str] = []
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        kaoseghis_tab,
+        "_format_current_date_macrotext",
+        lambda now=None: "2026년 07월 22일 오후",
+    )
+    monkeypatch.setattr(
+        kaoseghis_tab,
+        "copy_text",
+        lambda text: copied.append(text),
+    )
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = MacroTextsPage(db_path)
+
+    assert page.presets_table.item(0, 1).text() == "Current Date"
+    assert page.presets_table.item(0, 2).text() == "Dynamic"
+
+    page.presets_table.selectRow(0)
+    page.copy_macrotext()
+
+    assert copied == ["2026년 07월 22일 오후"]
+    assert page.status_label.text() == "Copied current date to clipboard."
 
 
 def test_macrotext_randomized_editor_uses_separator_and_ignores_empty_sections() -> None:
@@ -1469,6 +1981,10 @@ def test_macro_runner_uses_selected_profile_for_connection_settings(
             executable_path="C:\\Windows\\System32\\notepad.exe",
             window_title_contains="Notepad",
             main_window_automation_id="H2OpdTreatment",
+            prescription_grid_automation_id="tree처방_custom",
+            symptom_grid_automation_id="grdSymp_custom",
+            diagnosis_grid_automation_id="tree상병_custom",
+            patient_list_grid_automation_id="grdOpdList_custom",
         )
         item = create_item(connection, "Profile Macro", "macro", True, profile.id)
         create_macro_step(connection, item.id, 1, "focus_window")
@@ -1495,6 +2011,10 @@ def test_macro_runner_uses_selected_profile_for_connection_settings(
     assert captured_settings["eghis_window_title_contains"] == "Notepad"
     assert captured_settings["eghis_executable_path"] == "C:\\Windows\\System32\\notepad.exe"
     assert captured_settings["eghis_main_window_automation_id"] == "H2OpdTreatment"
+    assert captured_settings["eghis_prescription_grid_automation_id"] == "tree처방_custom"
+    assert captured_settings["eghis_symptom_grid_automation_id"] == "grdSymp_custom"
+    assert captured_settings["eghis_diagnosis_grid_automation_id"] == "tree상병_custom"
+    assert captured_settings["eghis_patient_list_grid_automation_id"] == "grdOpdList_custom"
 
 
 def test_app_startup_does_not_execute_macro(monkeypatch, tmp_path) -> None:
@@ -1553,7 +2073,7 @@ def test_click_failure_is_sanitized(monkeypatch, tmp_path) -> None:
     assert result.message == "input failed"
 
 
-def test_click_prefers_fast_direct_action(monkeypatch, tmp_path) -> None:
+def test_click_prefers_physical_click_before_invoke(monkeypatch, tmp_path) -> None:
     from KaosEghis.core.macro_runner import MacroRunner
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
@@ -1598,8 +2118,8 @@ def test_click_prefers_fast_direct_action(monkeypatch, tmp_path) -> None:
     result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
 
     assert result.success is True
-    assert fake_element.invoked == 1
-    assert fake_element.clicked_input == 0
+    assert fake_element.invoked == 0
+    assert fake_element.clicked_input == 1
 
 
 def test_click_falls_back_to_click_input_when_fast_action_is_unavailable(monkeypatch, tmp_path) -> None:
@@ -1652,7 +2172,7 @@ def test_click_falls_back_to_click_input_when_fast_action_is_unavailable(monkeyp
     result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
 
     assert result.success is True
-    assert fake_element.toggle_calls == 1
+    assert fake_element.toggle_calls == 0
     assert fake_element.click_input_calls == 1
 
 
@@ -1742,6 +2262,80 @@ def test_double_click_falls_back_to_double_click(monkeypatch, tmp_path) -> None:
 
     assert result.success is True
     assert fake_element.double_click_calls == 1
+
+
+def test_click_targets_tabitem_by_header_area(monkeypatch, tmp_path) -> None:
+    from types import SimpleNamespace
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(
+            connection,
+            target_id="tab.completed",
+            name="완료(*)",
+            control_type="TabItem",
+        )
+        item = create_item(connection, "Tab Click Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "click", target_id="tab.completed")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class _Rect:
+        left = 1988
+        top = 194
+        right = 2066
+        bottom = 219
+
+    class _ElementInfo:
+        control_type = "TabItem"
+
+    selection_item = None
+
+    class FakeSelectionItem:
+        def __init__(self) -> None:
+            self.select_calls = 0
+
+        def Select(self) -> None:
+            self.select_calls += 1
+
+    class FakeElement:
+        def __init__(self) -> None:
+            nonlocal selection_item
+            self.element_info = _ElementInfo()
+            self.iface_selection_item = FakeSelectionItem()
+            selection_item = self.iface_selection_item
+
+        def rectangle(self):
+            return _Rect()
+
+    clicked: list[tuple[int, int]] = []
+    fake_mouse = SimpleNamespace(
+        click=lambda *, button, coords: clicked.append(coords),
+    )
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "resolved"),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "pywinauto", SimpleNamespace(mouse=fake_mouse))
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert selection_item is not None
+    assert selection_item.select_calls == 1
+    assert clicked == []
 
 
 def test_target_resolution_failure_is_sanitized(monkeypatch, tmp_path) -> None:

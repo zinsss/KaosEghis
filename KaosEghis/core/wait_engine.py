@@ -11,6 +11,7 @@ class WaitCondition(str, Enum):
     VISIBLE = "visible"
     ENABLED = "enabled"
     TEXT_NON_EMPTY = "text_non_empty"
+    KEYBOARD_FOCUS = "keyboard_focus"
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,8 @@ def is_condition_satisfied(
         return inspection.found is True and inspection.is_enabled is True
     if condition_value == WaitCondition.TEXT_NON_EMPTY.value:
         return inspection.found is True and bool((inspection.text_value or "").strip())
+    if condition_value == WaitCondition.KEYBOARD_FOCUS.value:
+        return inspection.found is True and inspection.has_keyboard_focus is True
     raise ValueError(f"Unsupported wait condition: {condition_value}")
 
 
