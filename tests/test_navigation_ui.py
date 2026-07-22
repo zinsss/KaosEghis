@@ -130,10 +130,11 @@ def test_launcher_page_places_macros_into_three_columns(tmp_path, monkeypatch) -
     page = LauncherPage(db_path)
 
     assert page.launcher_lists["Macro"].count() == 1
-    assert page.launcher_lists["Comments"].count() == 1
+    assert page.launcher_lists["Comments"].count() == 2
     assert page.launcher_lists["Favorite"].count() == 1
     assert page.launcher_lists["Macro"].item(0).text() == "Open Chart"
-    assert page.launcher_lists["Comments"].item(0).text() == "Print Referral"
+    assert page.launcher_lists["Comments"].item(0).text() == "Current Date"
+    assert page.launcher_lists["Comments"].item(1).text() == "Print Referral"
     assert page.launcher_lists["Favorite"].item(0).text() == "Misc Action"
 
 
@@ -189,21 +190,67 @@ def test_launcher_comments_copy_simple_and_random_macrotexts(
         replace_clipboard_variants(connection, randomized.id, ["one", "two"])
 
     copied: list[str] = []
+    monkeypatch.setattr(
+        tab_module,
+        "_format_current_date_macrotext",
+        lambda now=None: "2026년 07월 22일 오후",
+    )
     monkeypatch.setattr(tab_module, "copy_text", lambda text: copied.append(text))
     monkeypatch.setattr(tab_module.random, "choice", lambda values: values[1])
 
     page = tab_module.LauncherPage(db_path)
     comments = page.launcher_lists["Comments"]
     assert [comments.item(index).text() for index in range(comments.count())] == [
+        "Current Date",
         "Referral comment",
         "Greeting",
     ]
 
     page.activate_launcher_item(comments, comments.item(0))
     page.activate_launcher_item(comments, comments.item(1))
+    page.activate_launcher_item(comments, comments.item(2))
 
-    assert copied == ["fixed text", "two"]
+    assert copied == ["2026년 07월 22일 오후", "fixed text", "two"]
     assert page.log.toPlainText() == "Copied 'Greeting' to clipboard."
+
+
+def test_launcher_comments_include_dynamic_current_date(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, replace_clipboard_variants
+    import KaosEghis.ui.tabs.kaoseghis_tab as tab_module
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        fixed = create_item(connection, "Referral comment", "clipboard", True)
+        replace_clipboard_variants(connection, fixed.id, ["fixed text"])
+
+    copied: list[str] = []
+    monkeypatch.setattr(
+        tab_module,
+        "_format_current_date_macrotext",
+        lambda now=None: "2026년 07월 22일 오후",
+    )
+    monkeypatch.setattr(tab_module, "copy_text", lambda text: copied.append(text))
+
+    page = tab_module.LauncherPage(db_path)
+    comments = page.launcher_lists["Comments"]
+
+    assert [comments.item(index).text() for index in range(comments.count())] == [
+        "Current Date",
+        "Referral comment",
+    ]
+
+    page.activate_launcher_item(comments, comments.item(0))
+
+    assert copied == ["2026년 07월 22일 오후"]
+    assert page.log.toPlainText() == "Copied current date to clipboard."
 
 
 def test_launcher_hides_non_executable_macros_but_keeps_macrotexts(
@@ -236,7 +283,7 @@ def test_launcher_hides_non_executable_macros_but_keeps_macrotexts(
     ]
 
     assert macro_items == ["Executable Macro"]
-    assert comment_items == ["MacroText"]
+    assert comment_items == ["Current Date", "MacroText"]
 
 
 def test_launcher_runs_without_confirmation_and_shows_running_status(
@@ -324,6 +371,54 @@ def test_launcher_page_has_emr_connection_toggle(tmp_path, monkeypatch) -> None:
     assert "Connected and active" in page.connection_status_label.text()
 
 
+def test_launcher_auto_connect_runs_once_on_startup_and_does_not_retry_after_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+
+    class _State:
+        status = "red"
+        pid = None
+        message = "Eghis not found"
+        process_name = None
+        exe_path = None
+
+    class _Profile:
+        id = 1
+        name = "eGHIS Production"
+        process_name = "eGhis.exe"
+        window_title_contains = "이지스 전자차트 2.0"
+        executable_path = r"C:\eghis\eGhis.exe"
+
+    import KaosEghis.ui.tabs.kaoseghis_tab as tab_module
+
+    calls: list[str] = []
+    monkeypatch.setattr(tab_module, "get_active_emr_target_profile", lambda connection: _Profile())
+    monkeypatch.setattr(tab_module, "get_settings", lambda connection: {})
+    monkeypatch.setattr(
+        tab_module,
+        "refresh_cached_eghis_state",
+        lambda settings: calls.append("refresh") or _State(),
+    )
+    monkeypatch.setattr(tab_module, "get_cached_eghis_state", lambda: None)
+
+    page = LauncherPage(db_path)
+
+    assert calls == ["refresh"]
+
+    page.refresh_view()
+
+    assert calls == ["refresh"]
+    assert page.connection_toggle.isChecked() is False
+
+
 def test_launcher_emr_connection_has_distinct_theme_states() -> None:
     from KaosEghis.ui.theme import NORD_QSS
 
@@ -338,7 +433,7 @@ def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate(tmp_path, monkeypa
 
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
-    from PySide6.QtWidgets import QLabel
+    from PySide6.QtWidgets import QLabel, QTableWidget
 
     from KaosEghis.ui.plugins.flu_panel import FluPanel
     from KaosEghis.ui.plugins.pacs_panel import PacsPanel
@@ -358,6 +453,11 @@ def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate(tmp_path, monkeypa
     assert "KaosEghis-flu Report" in [
         label.text() for label in flu_report_tab.findChildren(QLabel)
     ]
+    flu_panel = flu_report_tab.findChild(FluPanel)
+    assert flu_panel is not None
+    assert flu_panel.findChild(QTableWidget) is flu_panel.report_table
+    assert flu_panel.report_table.columnCount() == 3
+    assert flu_panel.status_label.text() == "Not loaded yet."
 
 
 def test_kaosgdd_profile_persists_cookies_and_cache(tmp_path, monkeypatch) -> None:

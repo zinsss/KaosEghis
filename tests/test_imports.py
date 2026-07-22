@@ -155,6 +155,8 @@ def test_inspect_ui_at_point_reads_value_and_metadata(monkeypatch) -> None:
 def test_clipboard_service_retries_until_text_is_applied(monkeypatch) -> None:
     import KaosEghis.core.clipboard_service as clipboard_service
 
+    monkeypatch.setattr(clipboard_service.os, "name", "posix", raising=False)
+
     events: list[str] = []
     state = {"text": "old", "calls": 0}
 
@@ -192,6 +194,9 @@ def test_clipboard_service_retries_until_text_is_applied(monkeypatch) -> None:
 def test_clipboard_service_raises_when_clipboard_stays_busy(monkeypatch) -> None:
     import pytest
     import KaosEghis.core.clipboard_service as clipboard_service
+
+    monkeypatch.setattr(clipboard_service.os, "name", "posix", raising=False)
+
     monkeypatch.setattr(clipboard_service, "_read_clipboard_text", lambda: "old")
     monkeypatch.setattr(clipboard_service, "_write_clipboard_text", lambda _value: None)
     monkeypatch.setattr(
@@ -202,6 +207,29 @@ def test_clipboard_service_raises_when_clipboard_stays_busy(monkeypatch) -> None
 
     with pytest.raises(RuntimeError, match="Clipboard is busy."):
         clipboard_service.copy_text("hello")
+
+
+def test_clipboard_service_windows_snapshot_is_best_effort(monkeypatch) -> None:
+    import KaosEghis.core.clipboard_service as clipboard_service
+
+    monkeypatch.setattr(clipboard_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(
+        clipboard_service,
+        "_read_clipboard_text",
+        lambda: (_ for _ in ()).throw(RuntimeError("busy")),
+    )
+
+    written: list[str] = []
+    monkeypatch.setattr(
+        clipboard_service,
+        "_write_clipboard_text",
+        lambda value: written.append(value),
+    )
+
+    snapshot = clipboard_service.copy_text("hello")
+
+    assert snapshot.text == ""
+    assert written == ["hello"]
 
 
 def test_ui_targets_repository_crud(tmp_path) -> None:
@@ -1740,6 +1768,77 @@ def test_manual_cached_connection_refocuses_on_each_later_macro_run(
     assert focus_calls == [55, 55]
 
 
+def test_manual_cached_connection_reuses_valid_main_and_grid_handles(
+    monkeypatch,
+) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    cached = connector.EghisConnectorState(
+        "green",
+        True,
+        "Eghis.exe",
+        12,
+        "C:/Eghis.exe",
+        True,
+        "Eghis EMR",
+        55,
+        12,
+        "MdiMain",
+        77,
+        True,
+        "2026-06-19T12:00:00",
+        "Connected and active",
+        {
+            "tabProc": 101,
+            "tree처방": 102,
+            "grdSymp": 103,
+            "tree상병": 104,
+            "grdOpdList": 105,
+        },
+    )
+    monkeypatch.setattr(connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(
+        connector, "_process_identity_matches_state", lambda _state, _settings: True
+    )
+    monkeypatch.setattr(connector, "_window_handle_is_valid", lambda _hwnd: True)
+    monkeypatch.setattr(connector, "_get_window_owner_pid", lambda _hwnd: 12)
+    monkeypatch.setattr(
+        connector, "_has_blocking_modal_dialog", lambda _state, _settings: False
+    )
+    monkeypatch.setattr(
+        connector,
+        "_get_foreground_window_info",
+        lambda: {"window_handle": 55, "window_title": "Eghis EMR"},
+    )
+    monkeypatch.setattr(connector, "_timestamp_now", lambda: "2026-06-19T12:01:00")
+    monkeypatch.setattr(
+        connector,
+        "_refresh_cached_main_window_handle",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("valid cached main window handle should be reused")
+        ),
+    )
+    monkeypatch.setattr(
+        connector,
+        "_resolve_cached_grid_handles",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("valid cached grid handles should be reused")
+        ),
+    )
+
+    state = connector.ensure_cached_connection_ready(
+        {
+            "eghis_process_name": "Eghis.exe",
+            "eghis_window_title_contains": "Eghis",
+        }
+    )
+
+    assert state.status == "green"
+    assert state.main_window_handle == 77
+    assert state.cached_grid_handles == cached.cached_grid_handles
+
+
 def test_ensure_ready_for_macro_uses_cached_state_but_still_confirms_focus(monkeypatch) -> None:
     import KaosEghis.core.eghis_connector as connector
 
@@ -2518,6 +2617,67 @@ def test_inspect_target_readonly_prefers_cached_window_handle(monkeypatch) -> No
     assert result.found is True
     assert connected_window.descendants_calls == 1
     assert wrong_title_window.descendants_calls == 0
+
+
+def test_inspect_target_readonly_cached_window_handle_skips_window_enumeration(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    import KaosEghis.core.uia_inspector as inspector
+
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    child = _FakeElement("eghisRichTextBox", name="Search Box", control_type="Edit")
+    connected_window = _FakeWindow("Connected Window", [child], handle=55)
+
+    class _FailDesktop:
+        def __init__(self, backend="uia") -> None:
+            self.backend = backend
+
+        def window(self, handle=None, **_kwargs):
+            assert handle == 55
+            return type(
+                "Spec",
+                (),
+                {"wrapper_object": lambda _self: connected_window},
+            )()
+
+        def windows(self):
+            raise AssertionError(
+                "desktop.windows() should not be called when cached hwnd is valid"
+            )
+
+    monkeypatch.setattr(
+        inspector,
+        "get_cached_eghis_state",
+        lambda: SimpleNamespace(window_handle=55),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pywinauto",
+        type("Pywinauto", (), {"Desktop": _FailDesktop})(),
+    )
+
+    target = UiTargetRecord(
+        1,
+        "prescription.note",
+        None,
+        None,
+        "eghisRichTextBox",
+        None,
+        "Edit",
+        None,
+        "now",
+    )
+
+    result = inspector.inspect_target_readonly(
+        {"eghis_window_title_contains": "Missing Title"},
+        target,
+    )
+
+    assert result.found is True
+    assert connected_window.descendants_calls == 1
 
 
 def test_inspect_target_readonly_falls_back_to_win32_backend(monkeypatch) -> None:

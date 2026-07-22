@@ -13,7 +13,11 @@ from KaosEghis.core.eghis_connector import (
     refresh_cached_eghis_state,
 )
 from KaosEghis.core.macro_models import MacroRunResult, MacroStep
-from KaosEghis.core.uia_inspector import resolve_target_element, resolve_target_scope_element
+from KaosEghis.core.uia_inspector import (
+    inspect_target_readonly,
+    resolve_target_element,
+    resolve_target_scope_element,
+)
 from KaosEghis.core.wait_engine import WaitCondition, wait_for_target_condition
 from KaosEghis.db.database import connect, get_database_path
 from KaosEghis.db.repositories import (
@@ -215,6 +219,8 @@ class MacroRunner:
             return self._run_wait_window(step, self._require_settings())
         if action == "when_ready":
             return self._run_when_ready(step, self._require_settings())
+        if action == "read_text_uia":
+            return self._run_read_text_uia(step, self._require_settings())
         if action == "wait_text_or_image":
             return MacroRunResult(False, "unsupported action", 0, None)
         if action == "select":
@@ -337,6 +343,41 @@ class MacroRunner:
             1,
             None,
         )
+
+    def _run_read_text_uia(
+        self,
+        step: MacroStep,
+        settings: dict[str, str],
+    ) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        with connect(self._db_path or get_database_path()) as connection:
+            target_record, _cache_key = self._load_runtime_target_record(
+                connection, step.target_id
+            )
+        if target_record is None:
+            return MacroRunResult(False, "target not found", 0, None)
+
+        inspection = inspect_target_readonly(settings, target_record)
+        if not inspection.found:
+            if "timed out" in inspection.message.casefold() or "timeout" in inspection.message.casefold():
+                return MacroRunResult(False, "timeout", 0, None)
+            if _message_indicates_window_not_ready(inspection.message):
+                return MacroRunResult(False, "window not ready", 0, None)
+            return MacroRunResult(False, "target not found", 0, None)
+
+        expected_text = str(step.options.get("text") or step.value or "").strip()
+        actual_text = (inspection.text_value or "").strip()
+        if not expected_text:
+            return MacroRunResult(True, "Read UIA text.", 1, None)
+        if expected_text in actual_text:
+            return MacroRunResult(
+                True,
+                f"Read UIA text matched '{expected_text}'.",
+                1,
+                None,
+            )
+        return MacroRunResult(False, "text not matched", 0, None)
 
     def _run_click(self, step: MacroStep, settings: dict[str, str]) -> MacroRunResult:
         if not step.target_id:
@@ -807,6 +848,15 @@ class MacroRunner:
             return True, "Target focused."
         except Exception:
             pass
+        for method_name in ("click", "invoke"):
+            method = getattr(element, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                method()
+                return True, "Target activated."
+            except Exception:
+                continue
         try:
             element.click_input()
             return True, "Target clicked."
@@ -823,9 +873,9 @@ class MacroRunner:
 
         activation_methods: list[str] = []
         if MacroRunner._looks_like_toggle_target(element):
-            activation_methods.extend(["click_input", "click", "toggle", "invoke"])
+            activation_methods.extend(["click", "toggle", "invoke", "click_input"])
         else:
-            activation_methods.extend(["click_input", "click", "invoke"])
+            activation_methods.extend(["click", "invoke", "click_input"])
 
         for method_name in activation_methods:
             method = getattr(element, method_name, None)
@@ -1127,6 +1177,13 @@ class MacroRunner:
                 f"retries={step.retries}{timing_text} "
                 "(wait for keyboard focus/caret, dry run only)"
             )
+        if action == "read_text_uia":
+            return (
+                f"{display_order}. read_text_uia{target}"
+                f"{f' value={step.value}' if step.value else ''}{timing_text} "
+                f"timeout={step.timeout_seconds} retries={step.retries} "
+                "(read-only text check)"
+            )
 
         value = step.options.get("text") or step.options.get("key") or step.value
         value_text = f" value={value}" if value else ""
@@ -1257,6 +1314,7 @@ class MacroRunner:
         lowered = (message or "").strip().casefold()
         if lowered in {
             "target not found",
+            "text not matched",
             "input failed",
             "clipboard failed",
             "window not ready",

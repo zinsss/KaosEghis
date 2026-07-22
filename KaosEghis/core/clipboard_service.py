@@ -13,7 +13,7 @@ class ClipboardSnapshot:
 
 
 def copy_text(text: str) -> ClipboardSnapshot:
-    snapshot = ClipboardSnapshot(_read_clipboard_text())
+    snapshot = ClipboardSnapshot(_best_effort_read_clipboard_text())
     _write_clipboard_text_with_retry(text)
     return snapshot
 
@@ -30,11 +30,20 @@ def _read_clipboard_text() -> str:
     return QGuiApplication.clipboard().text()
 
 
+def _best_effort_read_clipboard_text() -> str:
+    try:
+        return _read_clipboard_text()
+    except Exception:
+        return ""
+
+
 def _write_clipboard_text_with_retry(text: str) -> None:
     last_error: Exception | None = None
     for _attempt in range(10):
         try:
             _write_clipboard_text(text)
+            if os.name == "nt":
+                return
             if _read_clipboard_text() == text:
                 return
         except Exception as error:
@@ -55,12 +64,10 @@ def _write_clipboard_text(text: str) -> None:
 
 
 def _read_windows_clipboard_text() -> str:
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
+    user32, kernel32 = _windows_clipboard_api()
     cf_unicode_text = 13
 
-    if not user32.OpenClipboard(None):
-        raise RuntimeError("OpenClipboard failed.")
+    _open_windows_clipboard_with_retry(user32)
     try:
         handle = user32.GetClipboardData(cf_unicode_text)
         if not handle:
@@ -77,16 +84,14 @@ def _read_windows_clipboard_text() -> str:
 
 
 def _write_windows_clipboard_text(text: str) -> None:
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
+    user32, kernel32 = _windows_clipboard_api()
     cf_unicode_text = 13
     gmem_moveable = 0x0002
 
     data = text + "\0"
     size = len(data) * ctypes.sizeof(ctypes.c_wchar)
 
-    if not user32.OpenClipboard(None):
-        raise RuntimeError("OpenClipboard failed.")
+    _open_windows_clipboard_with_retry(user32)
     handle = None
     try:
         if not user32.EmptyClipboard():
@@ -108,3 +113,38 @@ def _write_windows_clipboard_text(text: str) -> None:
         if handle:
             kernel32.GlobalFree(handle)
         user32.CloseClipboard()
+
+
+def _open_windows_clipboard_with_retry(user32: ctypes.WinDLL) -> None:
+    for _attempt in range(20):
+        if user32.OpenClipboard(None):
+            return
+        time.sleep(0.02)
+    raise RuntimeError("OpenClipboard failed.")
+
+
+def _windows_clipboard_api() -> tuple[ctypes.WinDLL, ctypes.WinDLL]:
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+
+    user32.OpenClipboard.argtypes = [wintypes.HWND]
+    user32.OpenClipboard.restype = wintypes.BOOL
+    user32.CloseClipboard.argtypes = []
+    user32.CloseClipboard.restype = wintypes.BOOL
+    user32.EmptyClipboard.argtypes = []
+    user32.EmptyClipboard.restype = wintypes.BOOL
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    user32.SetClipboardData.restype = wintypes.HANDLE
+
+    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+    kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalLock.restype = wintypes.LPVOID
+    kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalUnlock.restype = wintypes.BOOL
+    kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalFree.restype = wintypes.HGLOBAL
+
+    return user32, kernel32

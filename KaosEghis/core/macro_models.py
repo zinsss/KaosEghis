@@ -7,6 +7,7 @@ class MacroAction(str, Enum):
     FOCUS_WINDOW = "focus_window"
     WAIT_WINDOW = "wait_window"
     WHEN_READY = "when_ready"
+    READ_TEXT_UIA = "read_text_uia"
     WAIT_TEXT_OR_IMAGE = "wait_text_or_image"
     SELECT = "select"
     CLICK = "click"

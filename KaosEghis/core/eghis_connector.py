@@ -303,18 +303,21 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
         _CACHED_STATE = blocked
         return blocked
 
+    main_window_handle = _main_window_handle_for_state(state, settings)
+    cached_grid_handles = _grid_handles_for_state(
+        state,
+        settings,
+        scope_handle=main_window_handle or state.window_handle,
+    )
     ready = replace(
         state,
         status="green",
         is_active=True,
         window_owner_pid=owner_pid,
-        main_window_handle=_refresh_cached_main_window_handle(state, settings),
+        main_window_handle=main_window_handle,
         last_seen_at=_timestamp_now(),
         message="Connected and active",
-        cached_grid_handles=_resolve_cached_grid_handles(
-            _refresh_cached_main_window_handle(state, settings) or state.window_handle,
-            _grid_automation_ids_from_settings(settings),
-        ),
+        cached_grid_handles=cached_grid_handles,
     )
     _CACHED_STATE = ready
     return ready
@@ -390,18 +393,21 @@ def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
         _CACHED_STATE = blocked
         return blocked
 
+    main_window_handle = _main_window_handle_for_state(state, settings)
+    cached_grid_handles = _grid_handles_for_state(
+        state,
+        settings,
+        scope_handle=main_window_handle or state.window_handle,
+    )
     ready = replace(
         state,
         status="green",
         is_active=True,
         window_owner_pid=owner_pid,
-        main_window_handle=_refresh_cached_main_window_handle(state, settings),
+        main_window_handle=main_window_handle,
         last_seen_at=_timestamp_now(),
         message="Connected and active",
-        cached_grid_handles=_resolve_cached_grid_handles(
-            _refresh_cached_main_window_handle(state, settings) or state.window_handle,
-            _grid_automation_ids_from_settings(settings),
-        ),
+        cached_grid_handles=cached_grid_handles,
     )
     _CACHED_STATE = ready
     return ready
@@ -641,6 +647,16 @@ def _refresh_cached_main_window_handle(
     return _resolve_main_window_handle(state.window_handle, automation_id)
 
 
+def _main_window_handle_for_state(
+    state: EghisConnectorState,
+    settings: dict[str, str],
+) -> int | None:
+    cached_handle = state.main_window_handle
+    if cached_handle is not None and _window_handle_is_valid(cached_handle):
+        return cached_handle
+    return _refresh_cached_main_window_handle(state, settings)
+
+
 def _resolve_main_window_handle(
     window_handle: int | None,
     automation_id: str | None,
@@ -675,6 +691,36 @@ def _resolve_cached_grid_handles(
         if handles:
             return handles
     return None
+
+
+def _grid_handles_for_state(
+    state: EghisConnectorState,
+    settings: dict[str, str],
+    *,
+    scope_handle: int | None,
+) -> dict[str, int] | None:
+    configured_ids = _grid_automation_ids_from_settings(settings)
+    cached_handles = state.cached_grid_handles or {}
+    if _cached_grid_handles_cover_ids(cached_handles, configured_ids):
+        return {
+            automation_id: handle
+            for automation_id, handle in cached_handles.items()
+            if automation_id in configured_ids and _window_handle_is_valid(handle)
+        }
+    return _resolve_cached_grid_handles(scope_handle, configured_ids)
+
+
+def _cached_grid_handles_cover_ids(
+    cached_handles: dict[str, int],
+    required_ids: tuple[str, ...],
+) -> bool:
+    if not cached_handles:
+        return False
+    for automation_id in required_ids:
+        handle = cached_handles.get(automation_id)
+        if handle is None or not _window_handle_is_valid(handle):
+            return False
+    return True
 
 
 def _resolve_cached_grid_handles_for_backend(

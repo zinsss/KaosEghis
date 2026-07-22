@@ -21,7 +21,8 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         self.tabs = tabs
-        tabs.addTab(KaosEghisTab(), "Macros")
+        self.kaoseghis_tab = KaosEghisTab()
+        tabs.addTab(self.kaoseghis_tab, "Macros")
         tabs.addTab(KaosGddTab(), "KaosGdd")
         tabs.addTab(VaccineTab(), "Vaccine")
         self.pacs_panel = PacsPanel()

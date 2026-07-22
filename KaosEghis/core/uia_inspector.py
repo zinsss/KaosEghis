@@ -149,11 +149,10 @@ def _resolve_target_scope_element_for_backend(
 ) -> tuple[Any | None, str]:
     try:
         desktop = desktop_type(backend=backend)
-        windows = desktop.windows()
     except Exception as error:
         return None, f"Unable to inspect UI windows: {error}"
 
-    window = _find_window(desktop, windows, title_fragment)
+    window = _find_window_from_desktop(desktop, title_fragment)
     if window is None:
         if not title_fragment:
             return None, "Eghis window title setting is empty."
@@ -181,11 +180,10 @@ def _resolve_target_element_for_backend(
 ) -> tuple[Any | None, bool | None, str]:
     try:
         desktop = desktop_type(backend=backend)
-        windows = desktop.windows()
     except Exception as error:
         return None, None, f"Unable to inspect UIA windows: {error}"
 
-    window = _find_window(desktop, windows, title_fragment)
+    window = _find_window_from_desktop(desktop, title_fragment)
     if window is None:
         if not title_fragment:
             return None, None, "Eghis window title setting is empty."
@@ -268,6 +266,31 @@ def _find_window(desktop: Any, windows: list[Any], title_fragment: str) -> Any |
     cached_handle = getattr(cached_state, "window_handle", None)
     if cached_handle is not None:
         window = _find_window_by_cached_handle(desktop, windows, cached_handle)
+        if window is not None:
+            return window
+    if title_fragment:
+        return _find_window_by_title(windows, title_fragment)
+    return None
+
+
+def _find_window_from_desktop(desktop: Any, title_fragment: str) -> Any | None:
+    cached_state = get_cached_eghis_state()
+    cached_handle = getattr(cached_state, "window_handle", None)
+    if cached_handle is not None:
+        try:
+            specification = desktop.window(handle=cached_handle)
+            window = specification.wrapper_object()
+            if _window_handle(window) == cached_handle:
+                return window
+        except Exception:
+            pass
+
+    try:
+        windows = desktop.windows()
+    except Exception:
+        return None
+    if cached_handle is not None:
+        window = _find_window_by_handle(windows, cached_handle)
         if window is not None:
             return window
     if title_fragment:

@@ -1,5 +1,7 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -770,26 +772,75 @@ class UiTargetDialog(QDialog):
 
 class ReorderableStepsTable(QTableWidget):
     rows_reordered = Signal()
+    MIME_TYPE = "application/x-kaoseghis-step-row"
 
     def __init__(self, rows: int, columns: int, parent: QWidget | None = None) -> None:
         super().__init__(rows, columns, parent)
+        self._drag_start_pos: QPoint | None = None
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
         self.setDragDropOverwriteMode(False)
 
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if (
+            self._drag_start_pos is None
+            or not (event.buttons() & Qt.MouseButton.LeftButton)
+            or (
+                event.position().toPoint() - self._drag_start_pos
+            ).manhattanLength()
+            < QApplication.startDragDistance()
+        ):
+            super().mouseMoveEvent(event)
+            return
+
+        source_row = self.currentRow()
+        if source_row < 0:
+            source_row = self.rowAt(self._drag_start_pos.y())
+        if source_row < 0:
+            self._drag_start_pos = None
+            return
+
+        from PySide6.QtCore import QMimeData
+
+        mime_data = QMimeData()
+        mime_data.setData(self.MIME_TYPE, str(source_row).encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        drag.exec(Qt.DropAction.CopyAction)
+        self._drag_start_pos = None
+
+    def dragEnterEvent(self, event) -> None:
+        if event.source() is self and event.mimeData().hasFormat(self.MIME_TYPE):
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.source() is self and event.mimeData().hasFormat(self.MIME_TYPE):
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        super().dragMoveEvent(event)
+
     def dropEvent(self, event) -> None:
-        selected_rows = sorted({index.row() for index in self.selectedIndexes()})
-        if event.source() is not self:
+        if event.source() is not self or not event.mimeData().hasFormat(self.MIME_TYPE):
             super().dropEvent(event)
             return
 
-        if len(selected_rows) == 1:
-            source_row = selected_rows[0]
-        else:
-            source_row = self.currentRow()
+        try:
+            source_row = int(bytes(event.mimeData().data(self.MIME_TYPE)).decode("utf-8"))
+        except Exception:
+            event.ignore()
+            return
         if source_row < 0:
             event.ignore()
             return
@@ -807,7 +858,8 @@ class ReorderableStepsTable(QTableWidget):
 
         final_row = insertion_row - (1 if insertion_row > source_row else 0)
         self.move_row(source_row, final_row)
-        event.acceptProposedAction()
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
 
     def move_row(self, source_row: int, destination_row: int) -> None:
         if not 0 <= source_row < self.rowCount():

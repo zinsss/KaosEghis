@@ -537,6 +537,95 @@ def test_when_ready_times_out_when_keyboard_focus_never_arrives(monkeypatch, tmp
     assert result.message == "timeout"
 
 
+def test_read_text_uia_matches_expected_text(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_models import MacroStep
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.core.uia_inspector import UiaInspectionResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="symptom_text", parent_automation_id="TreatmentSymp", automation_id="eghisRichTextBox")
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.inspect_target_readonly",
+        lambda _settings, _target: UiaInspectionResult(
+            found=True,
+            message="Target found.",
+            target_id="symptom_text",
+            parent_target_id=None,
+            parent_automation_id="TreatmentSymp",
+            parent_found=True,
+            automation_id="eghisRichTextBox",
+            name=None,
+            control_type="Edit",
+            class_name=None,
+            found_name=None,
+            found_control_type="Edit",
+            found_class_name=None,
+            is_enabled=True,
+            is_visible=True,
+            text_value="non-covered treatment note",
+            has_keyboard_focus=False,
+        ),
+    )
+
+    runner = MacroRunner(db_path)
+    result = runner._run_read_text_uia(
+        MacroStep(action="read_text_uia", target_id="symptom_text", value="non-covered"),
+        {"eghis_window_title_contains": "Eghis"},
+    )
+
+    assert result.success is True
+    assert "matched 'non-covered'" in result.message
+
+
+def test_read_text_uia_fails_when_expected_text_missing(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_models import MacroStep
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.core.uia_inspector import UiaInspectionResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="symptom_text", parent_automation_id="TreatmentSymp", automation_id="eghisRichTextBox")
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.inspect_target_readonly",
+        lambda _settings, _target: UiaInspectionResult(
+            found=True,
+            message="Target found.",
+            target_id="symptom_text",
+            parent_target_id=None,
+            parent_automation_id="TreatmentSymp",
+            parent_found=True,
+            automation_id="eghisRichTextBox",
+            name=None,
+            control_type="Edit",
+            class_name=None,
+            found_name=None,
+            found_control_type="Edit",
+            found_class_name=None,
+            is_enabled=True,
+            is_visible=True,
+            text_value="no special marker here",
+            has_keyboard_focus=False,
+        ),
+    )
+
+    runner = MacroRunner(db_path)
+    result = runner._run_read_text_uia(
+        MacroStep(action="read_text_uia", target_id="symptom_text", value="non-covered"),
+        {"eghis_window_title_contains": "Eghis"},
+    )
+
+    assert result.success is False
+    assert result.message == "text not matched"
+
+
 def test_paste_text_focuses_resolved_target_before_paste(monkeypatch, tmp_path) -> None:
     import sys
 
@@ -1456,6 +1545,7 @@ def test_new_macro_editor_seeds_focus_window_step(monkeypatch, tmp_path) -> None
 def test_macro_editor_reorders_complete_steps_by_drag_order(monkeypatch, tmp_path) -> None:
     _app()
 
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QAbstractItemView, QWidget
 
     from KaosEghis.db.database import initialize_database
@@ -1466,6 +1556,7 @@ def test_macro_editor_reorders_complete_steps_by_drag_order(monkeypatch, tmp_pat
 
     parent = QWidget()
     dialog = MacroEditorDialog(parent)
+    assert dialog.steps_table.defaultDropAction() == Qt.DropAction.CopyAction
     dialog._append_step(
         {
             "step_order": 2,
@@ -1493,12 +1584,13 @@ def test_macro_editor_reorders_complete_steps_by_drag_order(monkeypatch, tmp_pat
 
     assert (
         dialog.steps_table.dragDropMode()
-        == QAbstractItemView.DragDropMode.InternalMove
+        == QAbstractItemView.DragDropMode.DragDrop
     )
 
     dialog.steps_table.move_row(2, 0)
     steps = dialog.values()["steps"]
 
+    assert dialog.steps_table.rowCount() == 3
     assert [step["action"] for step in steps] == ["click", "focus_window", "hotkey"]
     assert [step["step_order"] for step in steps] == [1, 2, 3]
     assert steps[0]["wait_before_enabled"] is True
@@ -2118,8 +2210,60 @@ def test_click_prefers_physical_click_before_invoke(monkeypatch, tmp_path) -> No
     result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
 
     assert result.success is True
-    assert fake_element.invoked == 0
-    assert fake_element.clicked_input == 1
+    assert fake_element.invoked == 1
+    assert fake_element.clicked_input == 0
+
+
+def test_click_prefers_fast_direct_action_before_click_input(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(
+            connection,
+            target_id="checkbox.fast",
+            automation_id="CheckFast",
+            control_type="CheckBox",
+        )
+        item = create_item(connection, "Fast Click Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "click", target_id="checkbox.fast")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class _ElementInfo:
+        control_type = "CheckBox"
+
+    class FakeElement:
+        def __init__(self) -> None:
+            self.click_calls = 0
+            self.click_input_calls = 0
+
+        def click(self) -> None:
+            self.click_calls += 1
+
+        def click_input(self) -> None:
+            self.click_input_calls += 1
+
+    fake_element = FakeElement()
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (fake_element, None, "resolved"),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert fake_element.click_calls == 1
+    assert fake_element.click_input_calls == 0
 
 
 def test_click_falls_back_to_click_input_when_fast_action_is_unavailable(monkeypatch, tmp_path) -> None:
@@ -2148,9 +2292,14 @@ def test_click_falls_back_to_click_input_when_fast_action_is_unavailable(monkeyp
 
     class FakeElement:
         def __init__(self) -> None:
+            self.click_calls = 0
             self.element_info = _ElementInfo()
             self.toggle_calls = 0
             self.click_input_calls = 0
+
+        def click(self) -> None:
+            self.click_calls += 1
+            raise RuntimeError("click not supported")
 
         def toggle(self) -> None:
             self.toggle_calls += 1
@@ -2172,7 +2321,8 @@ def test_click_falls_back_to_click_input_when_fast_action_is_unavailable(monkeyp
     result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
 
     assert result.success is True
-    assert fake_element.toggle_calls == 0
+    assert fake_element.click_calls == 1
+    assert fake_element.toggle_calls == 1
     assert fake_element.click_input_calls == 1
 
 

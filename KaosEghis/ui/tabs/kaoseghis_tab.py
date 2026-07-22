@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 import random
 from pathlib import Path
+from types import SimpleNamespace
 
-from PySide6.QtCore import QEventLoop, QTimer, Qt
+from PySide6.QtCore import QEventLoop, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -123,6 +124,7 @@ class LauncherPage(QWidget):
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
         self._db_path = db_path
+        self._startup_auto_connect_attempted = False
 
         title = QLabel("Launcher")
         title.setObjectName("pageTitle")
@@ -179,6 +181,7 @@ class LauncherPage(QWidget):
         layout.addWidget(self.log)
 
         self.refresh_view()
+        self._attempt_startup_auto_connect()
 
     def refresh_view(self) -> None:
         launcher_items = _load_launcher_items(self._db_path)
@@ -193,19 +196,36 @@ class LauncherPage(QWidget):
         self._refresh_connection_status()
         self.log.setPlainText("EMR disconnected.")
 
-    def connect_active_profile(self) -> None:
+    def connect_active_profile(self, *, silent: bool = False) -> bool:
         settings = self._active_profile_connector_settings()
         if settings is None:
             self._set_toggle_checked(False)
-            self.log.setPlainText("No enabled EMR profile is available.")
+            if not silent:
+                self.log.setPlainText("No enabled EMR profile is available.")
             self._refresh_connection_status()
-            return
+            return False
 
         state = refresh_cached_eghis_state(settings)
         connected = state.status in {"green", "yellow"} and state.pid is not None
         self._set_toggle_checked(connected)
         self._refresh_connection_status()
-        self.log.setPlainText(state.message)
+        if not silent or connected:
+            self.log.setPlainText(state.message)
+        return connected
+
+    def _attempt_startup_auto_connect(self) -> None:
+        if self._startup_auto_connect_attempted:
+            return
+        self._startup_auto_connect_attempted = True
+        state = get_cached_eghis_state()
+        if state is not None and state.status in {"green", "yellow"} and state.pid is not None:
+            self._refresh_connection_status()
+            return
+        try:
+            self.connect_active_profile(silent=True)
+        except Exception:
+            self._set_toggle_checked(False)
+            self._refresh_connection_status()
 
     def _active_profile_connector_settings(self) -> dict[str, str] | None:
         initialize_database(self._db_path)
@@ -1023,7 +1043,21 @@ def _load_macros(db_path: Path | None) -> list:
 def _load_launcher_items(db_path: Path | None) -> list:
     initialize_database(db_path)
     with connect(db_path) as connection:
-        return list_launcher_items(connection)
+        items = list_launcher_items(connection)
+    return [
+        SimpleNamespace(
+            id=DYNAMIC_CURRENT_DATE_MACROTEXT_ID,
+            name="Current Date",
+            item_type="clipboard",
+            is_enabled=True,
+            emr_target_profile_id=None,
+            launcher_section="Comments",
+            launcher_position=0,
+            created_at="",
+            updated_at="",
+        ),
+        *items,
+    ]
 
 
 def _load_launcher_macros(db_path: Path | None) -> list:

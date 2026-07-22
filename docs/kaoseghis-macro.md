@@ -1,6 +1,6 @@
 # KaosEghis Macro
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 ## Purpose
 
@@ -87,6 +87,14 @@ Allowed stored actions in the model:
 - `set_text_uia`
 - `mouse_click`
 - `wait_ms`
+
+Current real runner support also includes:
+
+- `read_text_uia`
+  - reads target text through read-only UIA inspection
+  - when the step `value` is non-empty, the step succeeds only if the target text
+    contains that value
+  - example: `read_text_uia target_id=symptom_text value=non-covered`
 
 `type_text`/`type_text_keyboard` steps can optionally send one `{ENTER}` after the
 configured text. The option is off by default, including for existing saved macros.

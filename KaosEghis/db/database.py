@@ -417,11 +417,13 @@ def _seed_default_emr_target_profile(connection: sqlite3.Connection) -> None:
     existing = connection.execute(
         "SELECT COUNT(*) FROM emr_target_profiles"
     ).fetchone()
-    if existing is None or existing[0] > 0:
+    if existing is None:
+        return
+    if existing[0] > 0:
         return
 
     settings = get_settings(connection)
-    connection.execute(
+    cursor = connection.execute(
         """
         INSERT INTO emr_target_profiles (
             name,
