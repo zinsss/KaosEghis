@@ -65,6 +65,7 @@ class EmrTargetsPage(QWidget):
         self._current_profile_id: int | None = None
         self._current_ui_targets: list[EmrUiTargetRecord] = []
         self._capture_controller = GlobalClickCaptureController(self)
+        self._capture_hotkey_started = False
 
         title = QLabel("EMR")
         title.setObjectName("pageTitle")
@@ -216,14 +217,21 @@ class EmrTargetsPage(QWidget):
         self._capture_controller.armed_changed.connect(self._on_capture_armed_changed)
         self._capture_controller.capture_ready.connect(self._handle_capture_ready)
         self._capture_controller.capture_failed.connect(self._handle_capture_failed)
-        hotkey_started = self._capture_controller.start_hotkey_listener()
         self.capture_hotkey_label.setText(
-            "Global capture hotkey: Ctrl+Shift+F8"
-            if hotkey_started
-            else "Global capture hotkey unavailable. Use the button."
+            "Global capture hotkey: Ctrl+Shift+F8 (starts when EMR page opens)"
         )
 
         self.refresh_view()
+
+    def activate_page(self) -> None:
+        if self._capture_hotkey_started:
+            return
+        self._capture_hotkey_started = self._capture_controller.start_hotkey_listener()
+        self.capture_hotkey_label.setText(
+            "Global capture hotkey: Ctrl+Shift+F8"
+            if self._capture_hotkey_started
+            else "Global capture hotkey unavailable. Use the button."
+        )
 
     def refresh_view(self) -> None:
         initialize_database(self._db_path)

@@ -109,6 +109,8 @@ class KaosEghisTab(QWidget):
             self.nav_buttons[name].setChecked(button_index == index)
 
         current_widget = self.stacked_widget.currentWidget()
+        if hasattr(current_widget, "activate_page"):
+            current_widget.activate_page()
         if hasattr(current_widget, "refresh_view"):
             current_widget.refresh_view()
 

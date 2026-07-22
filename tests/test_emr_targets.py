@@ -269,6 +269,10 @@ def test_emr_targets_page_instantiates_and_shows_default_profile(tmp_path, monke
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: False,
+    )
 
     page = EmrTargetsPage(db_path)
 
@@ -288,6 +292,10 @@ def test_emr_targets_page_uses_two_column_layout(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: False,
+    )
 
     page = EmrTargetsPage(db_path)
     grid_layouts = page.findChildren(QGridLayout)
@@ -321,6 +329,10 @@ def test_emr_targets_page_connection_toggle_updates_status(
     initialize_database(db_path)
     clear_cached_eghis_state()
     monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: False,
+    )
+    monkeypatch.setattr(
         "KaosEghis.ui.tabs.emr_targets_page.refresh_cached_eghis_state",
         lambda _settings: FakeState(),
     )
@@ -334,6 +346,35 @@ def test_emr_targets_page_connection_toggle_updates_status(
 
     assert page.connection_toggle.isChecked() is True
     assert "Connected and active" in page.connection_status_label.text()
+
+
+def test_emr_targets_page_does_not_start_capture_hotkey_on_init(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+    calls: list[str] = []
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: calls.append("started") or True,
+    )
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = EmrTargetsPage(db_path)
+
+    assert calls == []
+    assert "starts when EMR page opens" in page.capture_hotkey_label.text()
+
+    page.activate_page()
+
+    assert calls == ["started"]
+    assert page.capture_hotkey_label.text() == "Global capture hotkey: Ctrl+Shift+F8"
 
 
 def test_emr_targets_page_shows_capture_result_and_copies_details(
