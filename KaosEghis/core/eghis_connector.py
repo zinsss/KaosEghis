@@ -468,8 +468,12 @@ def _get_window_owner_pid(window_handle: int | None) -> int | None:
 def _window_handle_is_valid(window_handle: int) -> bool:
     if window_handle is None:
         return False
-    windows = _windows_from_pygetwindow() + _windows_from_pywinauto()
-    return any(window.get("window_handle") == window_handle for window in windows)
+    try:
+        user32 = ctypes.windll.user32
+        return bool(user32.IsWindow(wintypes.HWND(window_handle)))
+    except Exception:
+        windows = _windows_from_pygetwindow() + _windows_from_pywinauto()
+        return any(window.get("window_handle") == window_handle for window in windows)
 
 
 def _focus_window_handle(window_handle: int) -> bool:
