@@ -1,6 +1,6 @@
 # KaosEghis Plans
 
-Last updated: 2026-07-15
+Last updated: 2026-07-22
 
 ## Current Working State
 
@@ -41,12 +41,18 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 
 ### KaosEghis-inj
 
-- future injection-order track
+- planned injection-room worklist track with a detailed architecture specification
 - read-only eGHIS DB polling for `ord_type='07'` and `proc_dept_cd='INJ'`
-- KaosEghis-side authoritative INJ worklist
-- Raspberry Pi receives reload signal only
-- Raspberry Pi pulls current worklist from KaosEghis-inj
-- no Raspberry Pi durable PHI storage by default
+- stable order-key reconciliation for new, changed, cancelled, deleted, and restored
+  source orders
+- date-scoped KaosEghis-owned worklist with `active`, `done`, and `cancelled` states
+- Raspberry Pi kiosk receives a non-PHI reload signal and pulls a complete generation
+  snapshot into memory
+- staff may scroll and confirm Done/Undo; state is persisted only in KaosEghis
+- Done rows remain visible, move below Active rows, and are struck through
+- Raspberry Pi OS Lite kiosk with no mouse exit, automatic recovery, and scheduled
+  display wake/sleep
+- no Raspberry Pi durable PHI storage
 
 ### KaosEghis-scan
 
@@ -102,7 +108,8 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - keep PACS deployment checklist and production-readiness docs current
 - keep PACS dry-run behavior explicit and safe
 - refine flu reporting UX and export/report format
-- define KaosEghis-inj ownership and API boundary before implementation
+- validate the KaosEghis-inj live source query, cancellation behavior, and minimum
+  display fields before implementing its local worklist milestone
 - validate KaosEghis-scan behavior with representative multi-page feeder documents
 
 ### Medium Priority
@@ -110,7 +117,9 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - unify macro configuration surfaces with current tab architecture
 - define final home for KaosClip
 - improve plugin naming consistency
-- design Raspberry Pi reload/fetch protocol for KaosEghis-inj
+- implement KaosEghis-inj only in the staged order documented in
+  `docs/kaoseghis-inj.md`: source verification, local worklist, API, kiosk, then
+  appliance hardening
 - consider scanner settings UI only after the fixed NAPS2 profile workflow is proven in daily use
 
 ### Deferred
