@@ -1572,6 +1572,8 @@ def test_manual_cached_connection_revalidates_after_ttl_without_reconnect(
         "Eghis EMR",
         55,
         12,
+        None,
+        None,
         True,
         "2026-06-19T12:00:00",
         "Connected and active",
@@ -1628,6 +1630,8 @@ def test_manual_cached_connection_refocuses_on_each_later_macro_run(
         "Eghis EMR",
         55,
         12,
+        None,
+        None,
         True,
         "2026-06-19T12:00:00",
         "Connected and active",
@@ -1672,7 +1676,7 @@ def test_manual_cached_connection_refocuses_on_each_later_macro_run(
 def test_ensure_ready_for_macro_uses_cached_state_but_still_confirms_focus(monkeypatch) -> None:
     import KaosEghis.core.eghis_connector as connector
 
-    cached = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, False, "2026-06-19T12:00:00", "cached")
+    cached = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, None, None, False, "2026-06-19T12:00:00", "cached")
     monkeypatch.setattr(connector, "_CACHED_STATE", cached)
     monkeypatch.setattr(connector, "_is_state_stale", lambda _state: False)
     monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
@@ -1695,8 +1699,8 @@ def test_ensure_ready_for_macro_uses_cached_state_but_still_confirms_focus(monke
 def test_ensure_ready_for_macro_rediscover_once_if_cached_hwnd_stale(monkeypatch) -> None:
     import KaosEghis.core.eghis_connector as connector
 
-    stale = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 1, 12, False, "2026-06-19T12:00:00", "stale")
-    fresh = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, False, "2026-06-19T12:00:02", "fresh")
+    stale = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 1, 12, None, None, False, "2026-06-19T12:00:00", "stale")
+    fresh = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, None, None, False, "2026-06-19T12:00:02", "fresh")
     monkeypatch.setattr(connector, "_CACHED_STATE", stale)
     monkeypatch.setattr(connector, "_is_state_stale", lambda _state: False)
     monkeypatch.setattr(connector, "_window_handle_is_valid", lambda hwnd: hwnd == 55)
@@ -1719,8 +1723,8 @@ def test_ensure_ready_for_macro_rediscover_once_if_cached_hwnd_stale(monkeypatch
 def test_ensure_ready_for_macro_blocks_when_rediscovery_fails(monkeypatch) -> None:
     import KaosEghis.core.eghis_connector as connector
 
-    stale = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 1, 12, False, "2026-06-19T12:00:00", "stale")
-    failed = connector.EghisConnectorState("red", False, None, None, None, False, None, None, None, False, None, "Eghis not found")
+    stale = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 1, 12, None, None, False, "2026-06-19T12:00:00", "stale")
+    failed = connector.EghisConnectorState("red", False, None, None, None, False, None, None, None, None, None, False, None, "Eghis not found")
     monkeypatch.setattr(connector, "_CACHED_STATE", stale)
     monkeypatch.setattr(connector, "_is_state_stale", lambda _state: True)
     monkeypatch.setattr(connector, "refresh_cached_eghis_state", lambda _settings: failed)
@@ -1734,7 +1738,7 @@ def test_ensure_ready_for_macro_blocks_when_rediscovery_fails(monkeypatch) -> No
 def test_ensure_ready_for_macro_blocks_when_modal_dialog_present(monkeypatch) -> None:
     import KaosEghis.core.eghis_connector as connector
 
-    cached = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, False, "2026-06-19T12:00:00", "cached")
+    cached = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, None, None, False, "2026-06-19T12:00:00", "cached")
     monkeypatch.setattr(connector, "_CACHED_STATE", cached)
     monkeypatch.setattr(connector, "_is_state_stale", lambda _state: False)
     monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
@@ -1752,7 +1756,7 @@ def test_ensure_ready_for_macro_blocks_when_modal_dialog_present(monkeypatch) ->
 def test_ensure_ready_for_macro_blocks_on_wrong_foreground_after_focus(monkeypatch) -> None:
     import KaosEghis.core.eghis_connector as connector
 
-    cached = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, False, "2026-06-19T12:00:00", "cached")
+    cached = connector.EghisConnectorState("yellow", True, "Eghis.exe", 12, "C:/Eghis.exe", True, "Eghis EMR", 55, 12, None, None, False, "2026-06-19T12:00:00", "cached")
     monkeypatch.setattr(connector, "_CACHED_STATE", cached)
     monkeypatch.setattr(connector, "_is_state_stale", lambda _state: False)
     monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)

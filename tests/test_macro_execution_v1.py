@@ -1468,6 +1468,7 @@ def test_macro_runner_uses_selected_profile_for_connection_settings(
             process_name="notepad.exe",
             executable_path="C:\\Windows\\System32\\notepad.exe",
             window_title_contains="Notepad",
+            main_window_automation_id="H2OpdTreatment",
         )
         item = create_item(connection, "Profile Macro", "macro", True, profile.id)
         create_macro_step(connection, item.id, 1, "focus_window")
@@ -1493,6 +1494,7 @@ def test_macro_runner_uses_selected_profile_for_connection_settings(
     assert captured_settings["eghis_process_name"] == "notepad.exe"
     assert captured_settings["eghis_window_title_contains"] == "Notepad"
     assert captured_settings["eghis_executable_path"] == "C:\\Windows\\System32\\notepad.exe"
+    assert captured_settings["eghis_main_window_automation_id"] == "H2OpdTreatment"
 
 
 def test_app_startup_does_not_execute_macro(monkeypatch, tmp_path) -> None:

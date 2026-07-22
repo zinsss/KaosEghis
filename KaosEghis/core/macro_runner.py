@@ -869,6 +869,8 @@ class MacroRunner:
             window_title_contains=profile.window_title_contains
             or base_settings.get("eghis_window_title_contains"),
             executable_path=profile.executable_path or base_settings.get("eghis_executable_path"),
+            main_window_automation_id=profile.main_window_automation_id
+            or base_settings.get("eghis_main_window_automation_id"),
         )
 
 

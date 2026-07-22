@@ -20,6 +20,8 @@ class EghisConnectorState:
     window_title: str | None
     window_handle: int | None
     window_owner_pid: int | None
+    main_window_automation_id: str | None
+    main_window_handle: int | None
     is_active: bool
     last_seen_at: str | None
     message: str
@@ -34,6 +36,7 @@ def build_connector_settings(
     process_name: str | None = None,
     window_title_contains: str | None = None,
     executable_path: str | None = None,
+    main_window_automation_id: str | None = None,
 ) -> dict[str, str]:
     settings = dict(base_settings)
     if process_name is not None:
@@ -42,16 +45,25 @@ def build_connector_settings(
         settings["eghis_window_title_contains"] = window_title_contains
     if executable_path is not None:
         settings["eghis_executable_path"] = executable_path
+    if main_window_automation_id is not None:
+        settings["eghis_main_window_automation_id"] = main_window_automation_id
     return settings
 
 
 def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
     configured_process_name = settings.get("eghis_process_name", "")
     configured_window_title = settings.get("eghis_window_title_contains", "")
+    configured_main_window_automation_id = (
+        settings.get("eghis_main_window_automation_id", "") or ""
+    ).strip()
     process_info = _discover_process_info(configured_process_name)
     window_info = _discover_window_info(configured_window_title)
     window_handle = None if window_info is None else window_info.get("window_handle")
     window_owner_pid = _get_window_owner_pid(window_handle) if window_handle is not None else None
+    main_window_handle = _resolve_main_window_handle(
+        window_handle,
+        configured_main_window_automation_id,
+    )
     is_active = bool(window_handle is not None and _foreground_handle_matches(window_handle))
     last_seen_at = _timestamp_now() if process_info or window_info else None
 
@@ -69,6 +81,8 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
             window_owner_pid=window_owner_pid,
+            main_window_automation_id=configured_main_window_automation_id or None,
+            main_window_handle=main_window_handle,
             is_active=is_active,
             last_seen_at=last_seen_at,
             message="window process mismatch",
@@ -84,6 +98,8 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
             window_owner_pid=window_owner_pid,
+            main_window_automation_id=configured_main_window_automation_id or None,
+            main_window_handle=main_window_handle,
             is_active=True,
             last_seen_at=last_seen_at,
             message="Connected and active",
@@ -99,6 +115,8 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
             window_owner_pid=window_owner_pid,
+            main_window_automation_id=configured_main_window_automation_id or None,
+            main_window_handle=main_window_handle,
             is_active=False,
             last_seen_at=last_seen_at,
             message="Eghis found but not active",
@@ -114,6 +132,8 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_title=None,
             window_handle=None,
             window_owner_pid=None,
+            main_window_automation_id=configured_main_window_automation_id or None,
+            main_window_handle=None,
             is_active=False,
             last_seen_at=last_seen_at,
             message="Eghis process found but window missing",
@@ -129,6 +149,8 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
             window_owner_pid=window_owner_pid,
+            main_window_automation_id=configured_main_window_automation_id or None,
+            main_window_handle=main_window_handle,
             is_active=is_active,
             last_seen_at=last_seen_at,
             message="Eghis window found but process mismatch",
@@ -143,6 +165,8 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
         window_title=None,
         window_handle=None,
         window_owner_pid=None,
+        main_window_automation_id=configured_main_window_automation_id or None,
+        main_window_handle=None,
         is_active=False,
         last_seen_at=None,
         message="Eghis not found",
@@ -208,10 +232,14 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
         )
         _CACHED_STATE = blocked
         return blocked
+    focus_handle = state.main_window_handle or state.window_handle
     foreground = _get_foreground_window_info()
-    if foreground is None or foreground.get("window_handle") != state.window_handle:
+    if foreground is None or foreground.get("window_handle") not in {
+        state.window_handle,
+        state.main_window_handle,
+    }:
         focus_succeeded, _focus_reason = _focus_and_confirm_window(
-            state.window_handle,
+            focus_handle,
             state,
             settings,
         )
@@ -223,7 +251,10 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
             _CACHED_STATE = blocked
             return blocked
         foreground = _get_foreground_window_info()
-    if foreground is None or foreground.get("window_handle") != state.window_handle:
+    if foreground is None or foreground.get("window_handle") not in {
+        state.window_handle,
+        state.main_window_handle,
+    }:
         blocked = _manual_reconnect_required(
             state,
             "Application not focusable. Reconnect manually and retry.",
@@ -236,6 +267,7 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
         status="green",
         is_active=True,
         window_owner_pid=owner_pid,
+        main_window_handle=_refresh_cached_main_window_handle(state, settings),
         last_seen_at=_timestamp_now(),
         message="Connected and active",
     )
@@ -284,25 +316,44 @@ def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
         _CACHED_STATE = blocked
         return blocked
 
+    focus_handle = state.main_window_handle or state.window_handle
     if not state.is_active:
         focus_succeeded, focus_reason = _focus_and_confirm_window(
-            state.window_handle,
+            focus_handle,
             state,
             settings,
         )
         if not focus_succeeded:
-            blocked = replace(state, status="red", is_active=False, message=focus_reason)
+            blocked = replace(
+                state,
+                status="red",
+                is_active=False,
+                message=focus_reason,
+            )
+            clear_cached_eghis_state()
             _CACHED_STATE = blocked
             return blocked
 
     foreground = _get_foreground_window_info()
-    if foreground is None or foreground.get("window_handle") != state.window_handle:
+    if foreground is None or foreground.get("window_handle") not in {
+        state.window_handle,
+        state.main_window_handle,
+    }:
         reason = "modal/popup detected" if _foreground_looks_like_modal(foreground, state, settings) else "foreground mismatch"
         blocked = replace(state, status="red", is_active=False, message=reason)
+        clear_cached_eghis_state()
         _CACHED_STATE = blocked
         return blocked
 
-    ready = replace(state, status="green", is_active=True, window_owner_pid=owner_pid, last_seen_at=_timestamp_now(), message="Connected and active")
+    ready = replace(
+        state,
+        status="green",
+        is_active=True,
+        window_owner_pid=owner_pid,
+        main_window_handle=_refresh_cached_main_window_handle(state, settings),
+        last_seen_at=_timestamp_now(),
+        message="Connected and active",
+    )
     _CACHED_STATE = ready
     return ready
 
@@ -512,7 +563,11 @@ def _focus_and_confirm_window(
 
     for attempt in range(FOCUS_RETRY_ATTEMPTS):
         foreground = _get_foreground_window_info()
-        if foreground is not None and foreground.get("window_handle") == window_handle:
+        if foreground is not None and foreground.get("window_handle") in {
+            window_handle,
+            state.window_handle,
+            state.main_window_handle,
+        }:
             return True, "Connected and active"
         if _foreground_looks_like_modal(foreground, state, settings):
             return False, "modal/popup detected"
@@ -521,6 +576,39 @@ def _focus_and_confirm_window(
             _focus_window_handle(window_handle)
 
     return False, "foreground mismatch"
+
+
+def _refresh_cached_main_window_handle(
+    state: EghisConnectorState,
+    settings: dict[str, str],
+) -> int | None:
+    automation_id = (
+        settings.get("eghis_main_window_automation_id")
+        or state.main_window_automation_id
+        or ""
+    ).strip()
+    if not automation_id:
+        return None
+    return _resolve_main_window_handle(state.window_handle, automation_id)
+
+
+def _resolve_main_window_handle(
+    window_handle: int | None,
+    automation_id: str | None,
+) -> int | None:
+    if window_handle is None or not automation_id:
+        return None
+    try:
+        from pywinauto import Desktop
+
+        window = Desktop(backend="win32").window(handle=window_handle).wrapper_object()
+        target = window.child_window(auto_id=automation_id).wrapper_object()
+        handle = getattr(target, "handle", None)
+        if handle is not None:
+            return int(handle)
+        return getattr(getattr(target, "element_info", None), "handle", None)
+    except Exception:
+        return None
 
 
 def _has_blocking_modal_dialog(state: EghisConnectorState, settings: dict[str, str]) -> bool:
@@ -583,6 +671,8 @@ def _manual_reconnect_required(
             window_title=None,
             window_handle=None,
             window_owner_pid=None,
+            main_window_automation_id=None,
+            main_window_handle=None,
             is_active=False,
             last_seen_at=None,
             message=message,
