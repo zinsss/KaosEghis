@@ -1,6 +1,6 @@
 # KaosEghis Automation
 
-Last updated: 2026-07-21
+Last updated: 2026-07-23
 
 ## Purpose
 
@@ -148,6 +148,21 @@ Responsibilities:
 ### Not Present
 
 - scheduler-driven production automation
+
+## Planned Scheduler Boundary
+
+`KaosEghis-scheduler` is documented as a planned plugin in
+`docs/kaoseghis-scheduler.md`. It does not currently execute scheduled jobs.
+
+The plan distinguishes:
+
+- background copying of completed backup artifacts
+- interactive connector-gated eGHIS close/backup UI automation
+- claim-day statistical preparation that remains planning/dry-run only
+
+The scheduler must not become a path around connector, target-resolution, macro, or
+modal-dialog safety. Any implementation that changes those shared automation layers is
+a core change and requires explicit approval before action.
 - hidden background macro service
 - generic recorder
 - unconstrained mouse automation

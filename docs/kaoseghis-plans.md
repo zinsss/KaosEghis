@@ -1,6 +1,6 @@
 # KaosEghis Plans
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 ## Current Working State
 
@@ -68,6 +68,21 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - explicit `Clean now` control
 - no patient identifiers in spool filenames or routine logs
 
+### KaosEghis-scheduler
+
+- planned plugin; no scheduler implementation is active
+- initial background workflow: copy completed backup artifacts to one or more approved
+  destinations, including an optionally Dropbox-synchronized folder
+- initial interactive workflow: guarded eGHIS close, backup confirmation, and optional
+  `shutdown after backup` checkbox, with every action step independently toggleable
+- claim-day statistical preparation remains early planning and dry-run/manual-review
+  only
+- scheduled jobs are disabled by default and use explicit missed-run policies
+- interactive jobs require a visible logged-in desktop, connector identity, known UI
+  targets, countdown, cancellation, and strict stop-on-failure behavior
+- arbitrary commands, forced process termination, and claim submission are non-goals
+- detailed plan: `docs/kaoseghis-scheduler.md`
+
 ### KaosClip
 
 - redesign into KaosEghis plugin/capability
@@ -111,6 +126,8 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - validate the KaosEghis-inj live source query, cancellation behavior, and minimum
   display fields before implementing its local worklist milestone
 - validate KaosEghis-scan behavior with representative multi-page feeder documents
+- verify the scheduler's real backup artifact paths and eGHIS close/backup dialog
+  sequence before any implementation
 
 ### Medium Priority
 
@@ -121,12 +138,14 @@ The project has moved beyond scaffold-only status and now contains real guarded 
   `docs/kaoseghis-inj.md`: source verification, local worklist, API, kiosk, then
   appliance hardening
 - consider scanner settings UI only after the fixed NAPS2 profile workflow is proven in daily use
+- keep KaosEghis-scheduler at documentation/dry-run design stage until its background
+  and interactive execution boundaries receive separate approval
 
 ### Deferred
 
 - KaosPACS push
 - MWL/DICOM write paths
-- scheduler
+- unattended general-purpose scheduler or arbitrary scheduled macros
 - broad macro recorder
 
 ## Known Mismatches to Reconcile Later
