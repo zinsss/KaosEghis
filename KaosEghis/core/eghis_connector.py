@@ -94,11 +94,7 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
         window_handle,
         configured_main_window_automation_id,
     )
-    cached_grid_handles = _resolve_cached_grid_handles(
-        main_window_handle or window_handle
-        ,
-        _grid_automation_ids_from_settings(settings),
-    )
+    cached_grid_handles = None
     is_active = bool(window_handle is not None and _foreground_handle_matches(window_handle))
     last_seen_at = _timestamp_now() if process_info or window_info else None
 
@@ -700,14 +696,27 @@ def _grid_handles_for_state(
     scope_handle: int | None,
 ) -> dict[str, int] | None:
     configured_ids = _grid_automation_ids_from_settings(settings)
-    cached_handles = state.cached_grid_handles or {}
-    if _cached_grid_handles_cover_ids(cached_handles, configured_ids):
-        return {
-            automation_id: handle
-            for automation_id, handle in cached_handles.items()
-            if automation_id in configured_ids and _window_handle_is_valid(handle)
-        }
-    return _resolve_cached_grid_handles(scope_handle, configured_ids)
+    cached_handles = _valid_cached_grid_handles(
+        state.cached_grid_handles or {},
+        configured_ids,
+    )
+    if cached_handles:
+        return cached_handles
+    return None
+
+
+def _valid_cached_grid_handles(
+    cached_handles: dict[str, int],
+    required_ids: tuple[str, ...],
+) -> dict[str, int]:
+    if not cached_handles:
+        return {}
+    valid: dict[str, int] = {}
+    for automation_id in required_ids:
+        handle = cached_handles.get(automation_id)
+        if handle is not None and _window_handle_is_valid(handle):
+            valid[automation_id] = handle
+    return valid
 
 
 def _cached_grid_handles_cover_ids(

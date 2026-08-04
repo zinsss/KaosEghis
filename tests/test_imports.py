@@ -1839,6 +1839,63 @@ def test_manual_cached_connection_reuses_valid_main_and_grid_handles(
     assert state.cached_grid_handles == cached.cached_grid_handles
 
 
+def test_manual_cached_connection_does_not_scan_for_grid_handles_during_readiness(
+    monkeypatch,
+) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    cached = connector.EghisConnectorState(
+        "green",
+        True,
+        "Eghis.exe",
+        12,
+        "C:/Eghis.exe",
+        True,
+        "Eghis EMR",
+        55,
+        12,
+        "MdiMain",
+        77,
+        True,
+        "2026-06-19T12:00:00",
+        "Connected and active",
+        None,
+    )
+    monkeypatch.setattr(connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(connector, "_pid_exists", lambda _pid: True)
+    monkeypatch.setattr(
+        connector, "_process_identity_matches_state", lambda _state, _settings: True
+    )
+    monkeypatch.setattr(connector, "_window_handle_is_valid", lambda _hwnd: True)
+    monkeypatch.setattr(connector, "_get_window_owner_pid", lambda _hwnd: 12)
+    monkeypatch.setattr(
+        connector, "_has_blocking_modal_dialog", lambda _state, _settings: False
+    )
+    monkeypatch.setattr(
+        connector,
+        "_get_foreground_window_info",
+        lambda: {"window_handle": 55, "window_title": "Eghis EMR"},
+    )
+    monkeypatch.setattr(connector, "_timestamp_now", lambda: "2026-06-19T12:01:00")
+    monkeypatch.setattr(
+        connector,
+        "_resolve_cached_grid_handles",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("grid handle scan should stay lazy during readiness")
+        ),
+    )
+
+    state = connector.ensure_cached_connection_ready(
+        {
+            "eghis_process_name": "Eghis.exe",
+            "eghis_window_title_contains": "Eghis",
+        }
+    )
+
+    assert state.status == "green"
+    assert state.cached_grid_handles is None
+
+
 def test_ensure_ready_for_macro_uses_cached_state_but_still_confirms_focus(monkeypatch) -> None:
     import KaosEghis.core.eghis_connector as connector
 
