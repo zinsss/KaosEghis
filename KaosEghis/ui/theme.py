@@ -1,3 +1,20 @@
+from PySide6.QtWidgets import QApplication, QProxyStyle, QStyle
+
+
+class KaosEghisProxyStyle(QProxyStyle):
+    """Provide consistent layout spacing that Qt style sheets cannot express."""
+
+    LAYOUT_SPACING = 8
+
+    def pixelMetric(self, metric, option=None, widget=None):
+        if metric in {
+            QStyle.PixelMetric.PM_LayoutHorizontalSpacing,
+            QStyle.PixelMetric.PM_LayoutVerticalSpacing,
+        }:
+            return self.LAYOUT_SPACING
+        return super().pixelMetric(metric, option, widget)
+
+
 NORD_QSS = """
 QMainWindow,
 QDialog,
@@ -35,6 +52,36 @@ QTabBar::tab:selected {
 QTabBar::tab:hover:!selected {
     background-color: #4c566a;
     color: #eceff4;
+}
+
+QWidget#appNotificationArea {
+    background-color: transparent;
+}
+
+QLabel#appNotificationDot,
+QLabel#appNotificationText {
+    background-color: transparent;
+    color: #a3b1c2;
+}
+
+QLabel#appNotificationDot[notificationTone="info"],
+QLabel#appNotificationText[notificationTone="info"] {
+    color: #88c0d0;
+}
+
+QLabel#appNotificationDot[notificationTone="success"],
+QLabel#appNotificationText[notificationTone="success"] {
+    color: #a3be8c;
+}
+
+QLabel#appNotificationDot[notificationTone="warning"],
+QLabel#appNotificationText[notificationTone="warning"] {
+    color: #ebcb8b;
+}
+
+QLabel#appNotificationDot[notificationTone="error"],
+QLabel#appNotificationText[notificationTone="error"] {
+    color: #bf616a;
 }
 
 QLineEdit,
@@ -75,6 +122,37 @@ QDateEdit:disabled {
     background-color: #2e3440;
     color: #4c566a;
     border-color: #3b4252;
+}
+
+QAbstractSpinBox::up-button,
+QAbstractSpinBox::down-button {
+    background-color: transparent;
+    border: none;
+    width: 16px;
+    subcontrol-origin: border;
+}
+
+QAbstractSpinBox::up-button {
+    subcontrol-position: top right;
+    border-left: 1px solid #434c5e;
+    border-bottom: 1px solid #434c5e;
+    border-top-right-radius: 4px;
+}
+
+QAbstractSpinBox::down-button {
+    subcontrol-position: bottom right;
+    border-left: 1px solid #434c5e;
+    border-bottom-right-radius: 4px;
+}
+
+QAbstractSpinBox::up-button:hover,
+QAbstractSpinBox::down-button:hover {
+    background-color: #434c5e;
+}
+
+QAbstractSpinBox::up-button:pressed,
+QAbstractSpinBox::down-button:pressed {
+    background-color: #4c566a;
 }
 
 QComboBox::drop-down {
@@ -371,3 +449,8 @@ QAbstractScrollArea::corner {
 
 def nord_stylesheet() -> str:
     return NORD_QSS
+
+
+def apply_nord_theme(application: QApplication) -> None:
+    application.setStyle(KaosEghisProxyStyle())
+    application.setStyleSheet(nord_stylesheet())

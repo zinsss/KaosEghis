@@ -18,6 +18,15 @@ def test_theme_keeps_selected_button_text_from_changing_size() -> None:
     assert "font-weight: 700;" not in NORD_QSS
 
 
+def test_theme_flattens_spinbox_stepper_buttons() -> None:
+    from KaosEghis.ui.theme import NORD_QSS
+
+    assert "QAbstractSpinBox::up-button" in NORD_QSS
+    assert "QAbstractSpinBox::down-button" in NORD_QSS
+    assert "background-color: transparent;" in NORD_QSS
+    assert "border: none;" in NORD_QSS
+
+
 def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
     _app()
 
@@ -39,6 +48,7 @@ def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
         "PACS",
         "Flu-Report",
         "Scan",
+        "Scheduler",
         "Settings",
     ]
     assert window.width() == 1438
@@ -86,6 +96,7 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
         "Macro",
         "Comments",
     ]
+    assert tab.launcher_page.quick_notes_label.text() == "Quick Notes"
     assert not hasattr(tab.launcher_page, "summary_label")
 
 
@@ -136,6 +147,25 @@ def test_launcher_page_places_macros_into_three_columns(tmp_path, monkeypatch) -
     assert page.launcher_lists["Comments"].item(0).text() == "Current Date"
     assert page.launcher_lists["Comments"].item(1).text() == "Print Referral"
     assert page.launcher_lists["Favorite"].item(0).text() == "Misc Action"
+    assert page.quick_notes_editor.toPlainText() == ""
+
+
+def test_launcher_quick_notes_persist_after_reload(tmp_path, monkeypatch) -> None:
+    _app()
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = LauncherPage(db_path)
+    page.quick_notes_editor.setPlainText("Call ortho\nCheck lab result")
+
+    reloaded = LauncherPage(db_path)
+
+    assert reloaded.quick_notes_editor.toPlainText() == "Call ortho\nCheck lab result"
 
 
 def test_launcher_cross_column_move_persists_after_reload(tmp_path, monkeypatch) -> None:

@@ -3,11 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import ctypes
 import ctypes.wintypes
-import threading
 import time
 from typing import Any
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication, QObject, Signal
 
 
 @dataclass(frozen=True)
@@ -33,7 +32,7 @@ class GlobalClickCaptureController(QObject):
     _arm_requested = Signal()
     _point_captured = Signal(int, int)
 
-    def __init__(self, parent: QObject | None = None, hotkey: str = "<ctrl>+<shift>+<f8>") -> None:
+    def __init__(self, parent: QObject | None = None, hotkey: str = "<ctrl>+<shift>+<f9>") -> None:
         super().__init__(parent)
         self._hotkey = hotkey
         self._hotkey_listener: Any | None = None
@@ -54,6 +53,7 @@ class GlobalClickCaptureController(QObject):
             if listener.start():
                 self._hotkey_listener = listener
                 return True
+            return False
         try:
             from pynput import keyboard
         except Exception:
@@ -124,74 +124,77 @@ class GlobalClickCaptureController(QObject):
         self.capture_ready.emit(result)
 
 
-class _WindowsGlobalHotkeyListener:
+class _WindowsGlobalHotkeyListener(QAbstractNativeEventFilter):
     HOTKEY_ID = 0x4B45
     MOD_ALT = 0x0001
     MOD_CONTROL = 0x0002
     MOD_SHIFT = 0x0004
     MOD_WIN = 0x0008
-    VK_F8 = 0x77
+    MOD_NOREPEAT = 0x4000
+    VK_F9 = 0x78
     WM_HOTKEY = 0x0312
-    WM_QUIT = 0x0012
 
-    def __init__(self, callback) -> None:
+    def __init__(self, callback, *, application=None, user32=None) -> None:
+        super().__init__()
         self._callback = callback
-        self._thread: threading.Thread | None = None
-        self._thread_id: int | None = None
-        self._started = threading.Event()
+        self._application = application
+        self._user32 = user32
+        self._filter_installed = False
         self._registered = False
-        self._user32 = ctypes.windll.user32 if _is_windows_platform() else None
-        self._kernel32 = ctypes.windll.kernel32 if _is_windows_platform() else None
 
     def start(self) -> bool:
-        if self._thread is not None:
+        if self._registered:
             return True
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-        self._started.wait(timeout=1.5)
-        return self._registered
+        application = self._application or QCoreApplication.instance()
+        user32 = self._user32
+        if user32 is None and _is_windows_platform():
+            user32 = ctypes.windll.user32
+        if application is None or user32 is None:
+            return False
+
+        application.installNativeEventFilter(self)
+        self._filter_installed = True
+        registered = bool(
+            user32.RegisterHotKey(
+                None,
+                self.HOTKEY_ID,
+                self.MOD_CONTROL | self.MOD_SHIFT | self.MOD_NOREPEAT,
+                self.VK_F9,
+            )
+        )
+        if not registered:
+            application.removeNativeEventFilter(self)
+            self._filter_installed = False
+            return False
+
+        self._application = application
+        self._user32 = user32
+        self._registered = True
+        return True
 
     def stop(self) -> None:
-        if self._thread_id is None or self._user32 is None:
-            return
+        if self._registered and self._user32 is not None:
+            try:
+                self._user32.UnregisterHotKey(None, self.HOTKEY_ID)
+            except Exception:
+                pass
+        self._registered = False
+        if self._filter_installed and self._application is not None:
+            try:
+                self._application.removeNativeEventFilter(self)
+            except Exception:
+                pass
+        self._filter_installed = False
+
+    def nativeEventFilter(self, _event_type, message):
         try:
-            self._user32.PostThreadMessageW(self._thread_id, self.WM_QUIT, 0, 0)
-        except Exception:
-            pass
-
-    def _run(self) -> None:
-        if self._user32 is None or self._kernel32 is None:
-            self._started.set()
-            return
-
-        self._thread_id = self._kernel32.GetCurrentThreadId()
-        registered = False
-        try:
-            registered = bool(
-                self._user32.RegisterHotKey(
-                    None,
-                    self.HOTKEY_ID,
-                    self.MOD_CONTROL | self.MOD_SHIFT,
-                    self.VK_F8,
-                )
-            )
-            self._registered = registered
-            self._started.set()
-            if not registered:
-                return
-
-            msg = ctypes.wintypes.MSG()
-            while self._user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-                if msg.message == self.WM_HOTKEY and msg.wParam == self.HOTKEY_ID:
-                    self._callback()
-        finally:
-            if registered:
-                try:
-                    self._user32.UnregisterHotKey(None, self.HOTKEY_ID)
-                except Exception:
-                    pass
-            if not self._started.is_set():
-                self._started.set()
+            msg = ctypes.wintypes.MSG.from_address(int(message))
+        except (TypeError, ValueError):
+            return False, 0
+        if msg.message != self.WM_HOTKEY or int(msg.wParam) != self.HOTKEY_ID:
+            return False, 0
+        self._callback()
+        return True, 0
 
 
 def inspect_ui_at_point(x: int, y: int) -> PointInspectionResult:

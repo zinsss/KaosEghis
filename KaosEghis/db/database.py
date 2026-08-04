@@ -45,6 +45,7 @@ def initialize_database(path: Path | None = None) -> None:
     with connect(path) as connection:
         connection.executescript(schema_path.read_text(encoding="utf-8"))
         _migrate_items(connection)
+        _migrate_launcher_collections(connection)
         _migrate_macro_steps(connection)
         _migrate_ui_targets_columns(connection)
         _migrate_pacs_worklist(connection)
@@ -104,6 +105,34 @@ def _migrate_items(connection: sqlite3.Connection) -> None:
         """
     )
     _normalize_launcher_positions(connection)
+
+
+def _migrate_launcher_collections(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS launcher_collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            launcher_section TEXT NOT NULL DEFAULT 'Macro',
+            launcher_position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS launcher_collection_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            collection_id INTEGER NOT NULL,
+            macro_item_id INTEGER NOT NULL UNIQUE,
+            sort_order INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (collection_id) REFERENCES launcher_collections(id),
+            FOREIGN KEY (macro_item_id) REFERENCES items(id)
+        )
+        """
+    )
 
 
 def _migrate_macro_steps(connection: sqlite3.Connection) -> None:

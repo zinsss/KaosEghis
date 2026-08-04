@@ -1,6 +1,6 @@
 # KaosEghis Plans
 
-Last updated: 2026-07-23
+Last updated: 2026-08-03
 
 ## Current Working State
 
@@ -23,6 +23,7 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - keep daily-use macro access simple
 - preserve strict automation safety boundaries
 - improve top-level navigation and coherence
+- add launcher collections without losing direct-run speed for simple macros
 
 ### KaosEghis-pacs
 
@@ -39,9 +40,18 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - weekly practice-count/statistics backend
 - no export-grade workflow yet
 
+### KaosEghis-vaccine
+
+- next planned plugin implementation priority
+- reuse the proven label formats and printing workflow from the former Labeler module
+- preserve and verify influenza-vaccine eligibility rules, including age/date limits and
+  the daily cap, before enabling operational use
+- implementation must remain separate from the existing Flu-Report statistics workflow
+
 ### KaosEghis-inj
 
-- planned injection-room worklist track with a detailed architecture specification
+- planned immediately after KaosEghis-vaccine
+- injection-room worklist track with a detailed architecture specification
 - read-only eGHIS DB polling for `ord_type='07'` and `proc_dept_cd='INJ'`
 - stable order-key reconciliation for new, changed, cancelled, deleted, and restored
   source orders
@@ -70,7 +80,13 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 
 ### KaosEghis-scheduler
 
-- planned plugin; no scheduler implementation is active
+- scheduler foundation implemented as a top-level in-process tab
+- saved macros can be bound to one local time and selected weekdays
+- jobs are disabled by default and run only while KaosEghis is open
+- startup advances schedules to a future occurrence and never executes an old missed job
+- automatic runs use a 10-second countdown, cancellation, sanitized history, and the
+  existing MacroRunner safety gate
+- the backup-copy macro itself is still under preparation and is not implemented
 - initial background workflow: copy completed backup artifacts to one or more approved
   destinations, including an optionally Dropbox-synchronized folder
 - initial interactive workflow: guarded eGHIS close, backup confirmation, and optional
@@ -87,6 +103,16 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 
 - redesign into KaosEghis plugin/capability
 - no standalone app direction
+
+## Explicit Ownership Decisions
+
+### Supplies
+
+- `KaosEghis-supplies` has been removed from the product plan
+- supplies remains served and presented from the KaosGDD side
+- KaosEghis will not add a Supplies tab, supplies API client, local supplies storage,
+  or supplies settings
+- KaosSupplies service ownership and persistence remain outside KaosEghis
 
 ## Completed Milestone Areas
 
@@ -120,32 +146,35 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 ### High Priority
 
 - keep PR documentation and repo docs current
+- implement in this order: KaosEghis-vaccine, then KaosEghis-inj
 - keep PACS deployment checklist and production-readiness docs current
 - keep PACS dry-run behavior explicit and safe
 - refine flu reporting UX and export/report format
 - validate the KaosEghis-inj live source query, cancellation behavior, and minimum
   display fields before implementing its local worklist milestone
 - validate KaosEghis-scan behavior with representative multi-page feeder documents
-- verify the scheduler's real backup artifact paths and eGHIS close/backup dialog
-  sequence before any implementation
+- verify the scheduler's real backup artifact paths before implementing the backup
+  macro, and capture the eGHIS close/backup dialog before that later macro is built
 
 ### Medium Priority
 
 - unify macro configuration surfaces with current tab architecture
+- refine launcher collection behavior in the staged order documented in
+  `docs/kaoseghis-launcher-plan.md`
 - define final home for KaosClip
 - improve plugin naming consistency
 - implement KaosEghis-inj only in the staged order documented in
   `docs/kaoseghis-inj.md`: source verification, local worklist, API, kiosk, then
   appliance hardening
 - consider scanner settings UI only after the fixed NAPS2 profile workflow is proven in daily use
-- keep KaosEghis-scheduler at documentation/dry-run design stage until its background
-  and interactive execution boundaries receive separate approval
+- test the Scheduler foundation with disabled and harmless macros before enabling a
+  production backup schedule
 
 ### Deferred
 
 - KaosPACS push
 - MWL/DICOM write paths
-- unattended general-purpose scheduler or arbitrary scheduled macros
+- arbitrary shell commands or an unattended scheduler service outside the visible app
 - broad macro recorder
 
 ## Known Mismatches to Reconcile Later

@@ -3,13 +3,13 @@ from PySide6.QtWidgets import QApplication
 from KaosEghis.db.database import initialize_database
 from KaosEghis.service.kaospacs_api import start_server_in_thread
 from KaosEghis.ui.main_window import MainWindow
-from KaosEghis.ui.theme import nord_stylesheet
+from KaosEghis.ui.theme import apply_nord_theme
 
 
 def run() -> int:
     initialize_database()
     app = QApplication.instance() or QApplication([])
-    app.setStyleSheet(nord_stylesheet())
+    apply_nord_theme(app)
     patient_context_runtime = None
     try:
         patient_context_runtime = start_server_in_thread()

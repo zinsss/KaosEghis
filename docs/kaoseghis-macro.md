@@ -1,6 +1,6 @@
 # KaosEghis Macro
 
-Last updated: 2026-07-22
+Last updated: 2026-08-03
 
 ## Purpose
 
@@ -124,8 +124,11 @@ Important:
 Daily-use macro access:
 
 - [KaosEghis/ui/tabs/kaoseghis_tab.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/kaoseghis_tab.py)
-- shows saved macros in the three Launcher columns
-- double-click and `Run selected macro` start the selected Launcher macro immediately
+- shows saved executable macros in the three Launcher columns as direct launcher
+  items unless they belong to a launcher collection
+- direct launcher macros still run immediately on double-click
+- launcher collections open a chooser dialog on double-click
+- right-clicking a launcher collection shows its member macros directly for fast run
 - shows `Running '<macro name>'...` while the macro is executing
 - does not show a per-run confirmation in Launcher; the EMR connection and runtime
   safety gates still block stale, mismatched, or unavailable targets
@@ -134,6 +137,8 @@ Daily-use macro access:
 - uses the three columns `Favorite`, `Macro`, and `Comments`; new macros default to
   `Macro`, favorite macros can be dragged into `Favorite`, and `Comments` can contain
   both macros and directly copied MacroTexts
+- launcher collections now exist in first-version form; see
+  `docs/kaoseghis-launcher-plan.md`
 
 The Builder remains the configuration/testing surface and keeps confirmation before
 its explicit real-run action.
@@ -216,6 +221,8 @@ Current non-negotiables:
 - recorder
 - scheduler-driven macro execution
 - broad UIA/mouse-driven step support
+- advanced launcher collection features such as multi-collection membership and
+  nested collections remain planned, not implemented
 
 ## Maintenance Triggers
 

@@ -67,7 +67,9 @@ Ancestor-path support:
 Screen capture support:
 
 - the EMR page includes a global click-capture helper
-- default hotkey: `Ctrl+Shift+F8`
+- default hotkey: `Ctrl+Shift+F9`
+- Windows dispatches the registered hotkey through Qt's native event filter, so
+  KaosEghis does not need to be the foreground application
 - the next mouse click inspects the control under that coordinate
 - captured details include coordinate, backend, handle, automation ID, control type,
   class name, best available value, and ancestor summary
@@ -145,24 +147,17 @@ Responsibilities:
 - not all stored macro actions are executable
 - no broad unattended runner
 
-### Not Present
+## Scheduler Boundary
 
-- scheduler-driven production automation
+`KaosEghis-scheduler` now binds saved macros to a local time and selected weekdays.
+It runs only inside the visible KaosEghis process, keeps jobs disabled by default,
+uses a countdown, and records sanitized history. Startup calculates future times and
+does not replay missed work.
 
-## Planned Scheduler Boundary
-
-`KaosEghis-scheduler` is documented as a planned plugin in
-`docs/kaoseghis-scheduler.md`. It does not currently execute scheduled jobs.
-
-The plan distinguishes:
-
-- background copying of completed backup artifacts
-- interactive connector-gated eGHIS close/backup UI automation
-- claim-day statistical preparation that remains planning/dry-run only
-
-The scheduler must not become a path around connector, target-resolution, macro, or
-modal-dialog safety. Any implementation that changes those shared automation layers is
-a core change and requires explicit approval before action.
+Scheduled real execution uses the same `MacroRunner` path as manual execution. It
+therefore cannot bypass connector, target-resolution, modal-dialog, supported-action,
+or single-execution safety. The backup-copy and eGHIS close/backup macros are not yet
+implemented, and claim-day work remains planning-only.
 - hidden background macro service
 - generic recorder
 - unconstrained mouse automation

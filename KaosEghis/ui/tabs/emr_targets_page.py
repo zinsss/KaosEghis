@@ -5,7 +5,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -59,6 +59,8 @@ from KaosEghis.db.repositories import get_settings
 
 
 class EmrTargetsPage(QWidget):
+    app_notification = Signal(str, str)
+
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
         self._db_path = db_path
@@ -238,20 +240,25 @@ class EmrTargetsPage(QWidget):
         self._capture_controller.capture_ready.connect(self._handle_capture_ready)
         self._capture_controller.capture_failed.connect(self._handle_capture_failed)
         self.capture_hotkey_label.setText(
-            "Global capture hotkey: Ctrl+Shift+F8 (starts when EMR page opens)"
+            "Global capture hotkey: Ctrl+Shift+F9 (starts when EMR page opens)"
         )
 
         self.refresh_view()
 
     def activate_page(self) -> None:
+        self._ensure_capture_hotkey_listener()
+
+    def _ensure_capture_hotkey_listener(self) -> bool:
         if self._capture_hotkey_started:
-            return
+            self.capture_hotkey_label.setText("Global capture hotkey: Ctrl+Shift+F9")
+            return True
         self._capture_hotkey_started = self._capture_controller.start_hotkey_listener()
         self.capture_hotkey_label.setText(
-            "Global capture hotkey: Ctrl+Shift+F8"
+            "Global capture hotkey: Ctrl+Shift+F9"
             if self._capture_hotkey_started
             else "Global capture hotkey unavailable. Use the button."
         )
+        return self._capture_hotkey_started
 
     def refresh_view(self) -> None:
         initialize_database(self._db_path)
@@ -762,6 +769,7 @@ class EmrTargetsPage(QWidget):
             index += 1
 
     def arm_capture(self) -> None:
+        self._ensure_capture_hotkey_listener()
         if self._capture_controller.arm_capture():
             self.capture_status_label.setText(
                 "Capture armed. Click any EMR control to inspect it."
@@ -784,6 +792,10 @@ class EmrTargetsPage(QWidget):
     def _on_capture_armed_changed(self, armed: bool) -> None:
         if armed:
             self.capture_button.setText("Capture armed...")
+            self.capture_status_label.setText(
+                "Capture armed. Click any EMR control to inspect it."
+            )
+            self.app_notification.emit("Capture armed", "info")
             return
         self.capture_button.setText("Capture next click")
 
@@ -802,14 +814,22 @@ class EmrTargetsPage(QWidget):
                     suffix = " Details copied to clipboard."
                 else:
                     suffix = " Value copied to clipboard."
+                self.capture_button.setText("Captured and copied")
+                self.app_notification.emit("Captured and copied", "success")
             else:
-                suffix = ""
+                suffix = " Clipboard copy failed."
+                self.capture_button.setText("Captured - copy failed")
+                self.app_notification.emit("Capture copy failed", "error")
             self.capture_status_label.setText(f"{result.message}{suffix}")
         else:
+            self.capture_button.setText("Capture failed")
             self.capture_status_label.setText(result.message)
+            self.app_notification.emit("Capture failed", "error")
 
     def _handle_capture_failed(self, message: str) -> None:
         self.capture_status_label.setText(message)
+        self.capture_button.setText("Capture failed")
+        self.app_notification.emit("Capture failed", "error")
 
     def closeEvent(self, event) -> None:
         self._capture_controller.stop()

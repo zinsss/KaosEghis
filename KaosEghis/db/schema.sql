@@ -17,6 +17,25 @@ CREATE TABLE IF NOT EXISTS items (
     FOREIGN KEY (emr_target_profile_id) REFERENCES emr_target_profiles(id)
 );
 
+CREATE TABLE IF NOT EXISTS launcher_collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    launcher_section TEXT NOT NULL DEFAULT 'Macro',
+    launcher_position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS launcher_collection_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id INTEGER NOT NULL,
+    macro_item_id INTEGER NOT NULL UNIQUE,
+    sort_order INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (collection_id) REFERENCES launcher_collections(id),
+    FOREIGN KEY (macro_item_id) REFERENCES items(id)
+);
+
 CREATE TABLE IF NOT EXISTS clipboard_variants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     item_id INTEGER NOT NULL,
@@ -73,6 +92,45 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (item_id) REFERENCES items(id)
 );
+
+CREATE TABLE IF NOT EXISTS scheduler_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    macro_item_id INTEGER NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 0,
+    schedule_time TEXT NOT NULL,
+    weekdays TEXT NOT NULL DEFAULT '0,1,2,3,4',
+    missed_run_policy TEXT NOT NULL DEFAULT 'skip'
+        CHECK (missed_run_policy IN ('skip', 'prompt')),
+    next_run_at TEXT,
+    last_run_at TEXT,
+    last_status TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (macro_item_id) REFERENCES items(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduler_jobs_due
+    ON scheduler_jobs(is_enabled, next_run_at);
+
+CREATE TABLE IF NOT EXISTS scheduler_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    macro_item_id INTEGER NOT NULL,
+    trigger TEXT NOT NULL CHECK (trigger IN ('scheduled', 'manual')),
+    scheduled_for TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    executed_steps INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (job_id) REFERENCES scheduler_jobs(id),
+    FOREIGN KEY (macro_item_id) REFERENCES items(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduler_runs_job_created
+    ON scheduler_runs(job_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS pacs_worklist_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

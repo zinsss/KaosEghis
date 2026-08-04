@@ -11,6 +11,7 @@ DEFAULT_SETTINGS = {
     "eghis_executable_path": "",
     "eghis_window_title_contains": "Eghis",
     "eghis_patient_status_tab_automation_id": "tabProc",
+    "launcher_quick_notes": "",
     "kaosgdd_url": "https://kaosgdd.net",
     "credential_reference_name": "default",
     "eghis_db_connection_string": "",
@@ -58,6 +59,36 @@ class ItemRecord:
 
 
 @dataclass(frozen=True)
+class LauncherCollectionRecord:
+    id: int
+    name: str
+    launcher_section: str
+    launcher_position: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class LauncherCollectionMemberRecord:
+    id: int
+    collection_id: int
+    macro_item_id: int
+    sort_order: int
+    created_at: str
+
+
+@dataclass(frozen=True)
+class LauncherEntryRecord:
+    entry_id: int
+    entry_type: str
+    name: str
+    launcher_section: str
+    launcher_position: int
+    macro_item_id: int | None = None
+    item_type: str | None = None
+
+
+@dataclass(frozen=True)
 class ClipboardVariantRecord:
     id: int
     item_id: int
@@ -80,6 +111,37 @@ class MacroStepRecord:
     press_enter_after: bool
     wait_before_enabled: bool
     wait_before_ms: int
+
+
+@dataclass(frozen=True)
+class SchedulerJobRecord:
+    id: int
+    name: str
+    macro_item_id: int
+    is_enabled: bool
+    schedule_time: str
+    weekdays: tuple[int, ...]
+    missed_run_policy: str
+    next_run_at: str | None
+    last_run_at: str | None
+    last_status: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class SchedulerRunRecord:
+    id: int
+    job_id: int
+    macro_item_id: int
+    trigger: str
+    scheduled_for: str
+    started_at: str | None
+    finished_at: str | None
+    status: str
+    executed_steps: int
+    summary: str
+    created_at: str
 
 
 @dataclass(frozen=True)
@@ -184,6 +246,8 @@ ALLOWED_MACRO_ACTIONS = {
     "set_text_uia",
     "wait_ms",
 }
+ALLOWED_SCHEDULER_MISSED_RUN_POLICIES = {"skip", "prompt"}
+ALLOWED_SCHEDULER_RUN_TRIGGERS = {"scheduled", "manual"}
 
 LEGACY_PACS_WORKLIST_STATUS_ALIASES = {
     "done": "completed",
@@ -367,7 +431,14 @@ def list_launcher_items(
     launcher_filter = """
         (
             item_type IN ('clipboard', 'randomized_clipboard')
-            OR (item_type = 'macro' AND is_enabled = 1)
+            OR (
+                item_type = 'macro'
+                AND is_enabled = 1
+                AND id NOT IN (
+                    SELECT macro_item_id
+                    FROM launcher_collection_members
+                )
+            )
         )
     """
     if launcher_section is None:
@@ -394,6 +465,282 @@ def list_launcher_items(
             (normalized_launcher_section,),
         )
     return [_item_from_row(row) for row in rows]
+
+
+def list_launcher_collections(
+    connection: sqlite3.Connection,
+    launcher_section: str | None = None,
+) -> list[LauncherCollectionRecord]:
+    if launcher_section is None:
+        rows = connection.execute(
+            """
+            SELECT id, name, launcher_section, launcher_position, created_at, updated_at
+            FROM launcher_collections
+            ORDER BY launcher_section, launcher_position, id
+            """
+        )
+    else:
+        normalized_section = _normalize_launcher_section(launcher_section)
+        rows = connection.execute(
+            """
+            SELECT id, name, launcher_section, launcher_position, created_at, updated_at
+            FROM launcher_collections
+            WHERE launcher_section = ?
+            ORDER BY launcher_position, id
+            """,
+            (normalized_section,),
+        )
+    return [_launcher_collection_from_row(row) for row in rows]
+
+
+def get_launcher_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+) -> LauncherCollectionRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, name, launcher_section, launcher_position, created_at, updated_at
+        FROM launcher_collections
+        WHERE id = ?
+        """,
+        (collection_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _launcher_collection_from_row(row)
+
+
+def create_launcher_collection(
+    connection: sqlite3.Connection,
+    name: str,
+    launcher_section: str,
+    launcher_position: int | None = None,
+) -> LauncherCollectionRecord:
+    normalized_section = _normalize_launcher_section(launcher_section)
+    position = launcher_position or _next_launcher_position(connection, normalized_section)
+    cursor = connection.execute(
+        """
+        INSERT INTO launcher_collections (
+            name, launcher_section, launcher_position
+        )
+        VALUES (?, ?, ?)
+        """,
+        (name.strip(), normalized_section, position),
+    )
+    connection.commit()
+    created = get_launcher_collection(connection, cursor.lastrowid)
+    if created is None:
+        raise RuntimeError("Failed to create launcher collection.")
+    return created
+
+
+def rename_launcher_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    name: str,
+) -> LauncherCollectionRecord | None:
+    connection.execute(
+        """
+        UPDATE launcher_collections
+        SET name = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (name.strip(), collection_id),
+    )
+    connection.commit()
+    return get_launcher_collection(connection, collection_id)
+
+
+def update_launcher_collection_placement(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    launcher_section: str,
+    launcher_position: int,
+) -> LauncherCollectionRecord | None:
+    normalized_section = _normalize_launcher_section(launcher_section)
+    connection.execute(
+        """
+        UPDATE launcher_collections
+        SET launcher_section = ?,
+            launcher_position = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (normalized_section, launcher_position, collection_id),
+    )
+    connection.commit()
+    return get_launcher_collection(connection, collection_id)
+
+
+def delete_launcher_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+) -> bool:
+    connection.execute(
+        "DELETE FROM launcher_collection_members WHERE collection_id = ?",
+        (collection_id,),
+    )
+    cursor = connection.execute(
+        "DELETE FROM launcher_collections WHERE id = ?",
+        (collection_id,),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def list_launcher_collection_members(
+    connection: sqlite3.Connection,
+    collection_id: int,
+) -> list[LauncherCollectionMemberRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, collection_id, macro_item_id, sort_order, created_at
+        FROM launcher_collection_members
+        WHERE collection_id = ?
+        ORDER BY sort_order, id
+        """,
+        (collection_id,),
+    )
+    return [_launcher_collection_member_from_row(row) for row in rows]
+
+
+def get_launcher_collection_for_macro(
+    connection: sqlite3.Connection,
+    macro_item_id: int,
+) -> LauncherCollectionRecord | None:
+    row = connection.execute(
+        """
+        SELECT c.id, c.name, c.launcher_section, c.launcher_position, c.created_at, c.updated_at
+        FROM launcher_collection_members m
+        JOIN launcher_collections c ON c.id = m.collection_id
+        WHERE m.macro_item_id = ?
+        """,
+        (macro_item_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _launcher_collection_from_row(row)
+
+
+def add_macro_to_launcher_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    macro_item_id: int,
+) -> LauncherCollectionMemberRecord:
+    item = get_item(connection, macro_item_id)
+    if item is None or item.item_type != "macro":
+        raise ValueError("Only macro items can be added to a launcher collection.")
+    existing_collection = get_launcher_collection_for_macro(connection, macro_item_id)
+    if existing_collection is not None:
+        raise ValueError("Macro already belongs to a launcher collection.")
+    sort_order = _next_launcher_collection_member_order(connection, collection_id)
+    cursor = connection.execute(
+        """
+        INSERT INTO launcher_collection_members (
+            collection_id, macro_item_id, sort_order
+        )
+        VALUES (?, ?, ?)
+        """,
+        (collection_id, macro_item_id, sort_order),
+    )
+    connection.commit()
+    member = connection.execute(
+        """
+        SELECT id, collection_id, macro_item_id, sort_order, created_at
+        FROM launcher_collection_members
+        WHERE id = ?
+        """,
+        (cursor.lastrowid,),
+    ).fetchone()
+    if member is None:
+        raise RuntimeError("Failed to add macro to launcher collection.")
+    return _launcher_collection_member_from_row(member)
+
+
+def remove_macro_from_launcher_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    macro_item_id: int,
+) -> tuple[bool, int | None]:
+    cursor = connection.execute(
+        """
+        DELETE FROM launcher_collection_members
+        WHERE collection_id = ?
+          AND macro_item_id = ?
+        """,
+        (collection_id, macro_item_id),
+    )
+    if cursor.rowcount <= 0:
+        connection.commit()
+        return False, None
+    remaining = list_launcher_collection_members(connection, collection_id)
+    collapsed_macro_id: int | None = None
+    if len(remaining) == 1:
+        collapsed_macro_id = remaining[0].macro_item_id
+        connection.execute(
+            "DELETE FROM launcher_collection_members WHERE collection_id = ?",
+            (collection_id,),
+        )
+        connection.execute(
+            "DELETE FROM launcher_collections WHERE id = ?",
+            (collection_id,),
+        )
+    connection.commit()
+    return True, collapsed_macro_id
+
+
+def reorder_launcher_collection_members(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    macro_item_ids: list[int],
+) -> None:
+    for index, macro_item_id in enumerate(macro_item_ids, start=1):
+        connection.execute(
+            """
+            UPDATE launcher_collection_members
+            SET sort_order = ?
+            WHERE collection_id = ?
+              AND macro_item_id = ?
+            """,
+            (index, collection_id, macro_item_id),
+        )
+    connection.commit()
+
+
+def list_launcher_entries(
+    connection: sqlite3.Connection,
+    launcher_section: str | None = None,
+) -> list[LauncherEntryRecord]:
+    by_section = launcher_section is None
+    items = list_launcher_items(connection, launcher_section)
+    collections = list_launcher_collections(connection, launcher_section)
+    entries = [
+        LauncherEntryRecord(
+            entry_id=item.id,
+            entry_type="item",
+            name=item.name,
+            launcher_section=item.launcher_section,
+            launcher_position=item.launcher_position,
+            macro_item_id=item.id if item.item_type == "macro" else None,
+            item_type=item.item_type,
+        )
+        for item in items
+    ] + [
+        LauncherEntryRecord(
+            entry_id=collection.id,
+            entry_type="collection",
+            name=collection.name,
+            launcher_section=collection.launcher_section,
+            launcher_position=collection.launcher_position,
+        )
+        for collection in collections
+    ]
+    if by_section:
+        entries.sort(key=lambda entry: (entry.launcher_section, entry.launcher_position, entry.entry_type, entry.entry_id))
+    else:
+        entries.sort(key=lambda entry: (entry.launcher_position, entry.entry_type, entry.entry_id))
+    return entries
 
 
 def list_clipboard_variants(
@@ -462,11 +809,337 @@ def update_item_launcher_placement(
 
 
 def delete_item(connection: sqlite3.Connection, item_id: int) -> bool:
+    collection = get_launcher_collection_for_macro(connection, item_id)
+    if collection is not None:
+        removed, collapsed_macro_id = remove_macro_from_launcher_collection(
+            connection,
+            collection.id,
+            item_id,
+        )
+        if removed and collapsed_macro_id is not None:
+            update_item_launcher_placement(
+                connection,
+                collapsed_macro_id,
+                collection.launcher_section,
+                collection.launcher_position,
+            )
+    scheduler_job_ids = [
+        row[0]
+        for row in connection.execute(
+            "SELECT id FROM scheduler_jobs WHERE macro_item_id = ?",
+            (item_id,),
+        ).fetchall()
+    ]
+    for scheduler_job_id in scheduler_job_ids:
+        connection.execute(
+            "DELETE FROM scheduler_runs WHERE job_id = ?",
+            (scheduler_job_id,),
+        )
+    connection.execute(
+        "DELETE FROM scheduler_jobs WHERE macro_item_id = ?",
+        (item_id,),
+    )
     delete_macro_steps_for_item(connection, item_id)
     connection.execute("DELETE FROM clipboard_variants WHERE item_id = ?", (item_id,))
     cursor = connection.execute("DELETE FROM items WHERE id = ?", (item_id,))
     connection.commit()
     return cursor.rowcount > 0
+
+
+def list_scheduler_jobs(connection: sqlite3.Connection) -> list[SchedulerJobRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, name, macro_item_id, is_enabled, schedule_time, weekdays,
+               missed_run_policy, next_run_at, last_run_at, last_status,
+               created_at, updated_at
+        FROM scheduler_jobs
+        ORDER BY name, id
+        """
+    )
+    return [_scheduler_job_from_row(row) for row in rows]
+
+
+def get_scheduler_job(
+    connection: sqlite3.Connection,
+    job_id: int,
+) -> SchedulerJobRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, name, macro_item_id, is_enabled, schedule_time, weekdays,
+               missed_run_policy, next_run_at, last_run_at, last_status,
+               created_at, updated_at
+        FROM scheduler_jobs
+        WHERE id = ?
+        """,
+        (job_id,),
+    ).fetchone()
+    return _scheduler_job_from_row(row) if row is not None else None
+
+
+def create_scheduler_job(
+    connection: sqlite3.Connection,
+    name: str,
+    macro_item_id: int,
+    schedule_time: str,
+    weekdays: Iterable[int],
+    is_enabled: bool = False,
+    missed_run_policy: str = "skip",
+    next_run_at: str | None = None,
+) -> SchedulerJobRecord:
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("Scheduler job name is required.")
+    _validate_scheduler_macro(connection, macro_item_id)
+    normalized_time = _normalize_scheduler_time(schedule_time)
+    normalized_weekdays = _normalize_scheduler_weekdays(weekdays)
+    _validate_scheduler_missed_run_policy(missed_run_policy)
+    cursor = connection.execute(
+        """
+        INSERT INTO scheduler_jobs (
+            name, macro_item_id, is_enabled, schedule_time, weekdays,
+            missed_run_policy, next_run_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            normalized_name,
+            macro_item_id,
+            int(is_enabled),
+            normalized_time,
+            _scheduler_weekdays_to_text(normalized_weekdays),
+            missed_run_policy,
+            _blank_to_none(next_run_at),
+        ),
+    )
+    connection.commit()
+    created = get_scheduler_job(connection, cursor.lastrowid)
+    if created is None:
+        raise RuntimeError("Failed to create scheduler job.")
+    return created
+
+
+def update_scheduler_job(
+    connection: sqlite3.Connection,
+    job_id: int,
+    name: str,
+    macro_item_id: int,
+    schedule_time: str,
+    weekdays: Iterable[int],
+    is_enabled: bool,
+    missed_run_policy: str = "skip",
+    next_run_at: str | None = None,
+) -> SchedulerJobRecord | None:
+    if get_scheduler_job(connection, job_id) is None:
+        return None
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("Scheduler job name is required.")
+    _validate_scheduler_macro(connection, macro_item_id)
+    normalized_time = _normalize_scheduler_time(schedule_time)
+    normalized_weekdays = _normalize_scheduler_weekdays(weekdays)
+    _validate_scheduler_missed_run_policy(missed_run_policy)
+    connection.execute(
+        """
+        UPDATE scheduler_jobs
+        SET name = ?,
+            macro_item_id = ?,
+            is_enabled = ?,
+            schedule_time = ?,
+            weekdays = ?,
+            missed_run_policy = ?,
+            next_run_at = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            normalized_name,
+            macro_item_id,
+            int(is_enabled),
+            normalized_time,
+            _scheduler_weekdays_to_text(normalized_weekdays),
+            missed_run_policy,
+            _blank_to_none(next_run_at),
+            job_id,
+        ),
+    )
+    connection.commit()
+    return get_scheduler_job(connection, job_id)
+
+
+def delete_scheduler_job(connection: sqlite3.Connection, job_id: int) -> bool:
+    connection.execute("DELETE FROM scheduler_runs WHERE job_id = ?", (job_id,))
+    cursor = connection.execute("DELETE FROM scheduler_jobs WHERE id = ?", (job_id,))
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def list_due_scheduler_jobs(
+    connection: sqlite3.Connection,
+    due_at: str,
+) -> list[SchedulerJobRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, name, macro_item_id, is_enabled, schedule_time, weekdays,
+               missed_run_policy, next_run_at, last_run_at, last_status,
+               created_at, updated_at
+        FROM scheduler_jobs
+        WHERE is_enabled = 1
+          AND next_run_at IS NOT NULL
+          AND next_run_at <= ?
+        ORDER BY next_run_at, id
+        """,
+        (due_at,),
+    )
+    return [_scheduler_job_from_row(row) for row in rows]
+
+
+def update_scheduler_job_runtime(
+    connection: sqlite3.Connection,
+    job_id: int,
+    *,
+    next_run_at: str | None,
+    last_run_at: str | None = None,
+    last_status: str | None = None,
+) -> SchedulerJobRecord | None:
+    connection.execute(
+        """
+        UPDATE scheduler_jobs
+        SET next_run_at = ?,
+            last_run_at = COALESCE(?, last_run_at),
+            last_status = COALESCE(?, last_status),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            _blank_to_none(next_run_at),
+            _blank_to_none(last_run_at),
+            _blank_to_none(last_status),
+            job_id,
+        ),
+    )
+    connection.commit()
+    return get_scheduler_job(connection, job_id)
+
+
+def create_scheduler_run(
+    connection: sqlite3.Connection,
+    job_id: int,
+    macro_item_id: int,
+    trigger: str,
+    scheduled_for: str,
+    status: str = "countdown",
+) -> SchedulerRunRecord:
+    if trigger not in ALLOWED_SCHEDULER_RUN_TRIGGERS:
+        raise ValueError(f"Unsupported scheduler run trigger: {trigger}")
+    cursor = connection.execute(
+        """
+        INSERT INTO scheduler_runs (
+            job_id, macro_item_id, trigger, scheduled_for, status
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (job_id, macro_item_id, trigger, scheduled_for, status),
+    )
+    connection.commit()
+    created = get_scheduler_run(connection, cursor.lastrowid)
+    if created is None:
+        raise RuntimeError("Failed to create scheduler run.")
+    return created
+
+
+def get_scheduler_run(
+    connection: sqlite3.Connection,
+    run_id: int,
+) -> SchedulerRunRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, job_id, macro_item_id, trigger, scheduled_for, started_at,
+               finished_at, status, executed_steps, summary, created_at
+        FROM scheduler_runs
+        WHERE id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    return _scheduler_run_from_row(row) if row is not None else None
+
+
+def list_scheduler_runs(
+    connection: sqlite3.Connection,
+    job_id: int | None = None,
+    limit: int = 100,
+) -> list[SchedulerRunRecord]:
+    normalized_limit = max(1, min(int(limit), 500))
+    if job_id is None:
+        rows = connection.execute(
+            """
+            SELECT id, job_id, macro_item_id, trigger, scheduled_for, started_at,
+                   finished_at, status, executed_steps, summary, created_at
+            FROM scheduler_runs
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (normalized_limit,),
+        )
+    else:
+        rows = connection.execute(
+            """
+            SELECT id, job_id, macro_item_id, trigger, scheduled_for, started_at,
+                   finished_at, status, executed_steps, summary, created_at
+            FROM scheduler_runs
+            WHERE job_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (job_id, normalized_limit),
+        )
+    return [_scheduler_run_from_row(row) for row in rows]
+
+
+def start_scheduler_run(
+    connection: sqlite3.Connection,
+    run_id: int,
+    started_at: str,
+) -> SchedulerRunRecord | None:
+    connection.execute(
+        """
+        UPDATE scheduler_runs
+        SET status = 'running',
+            started_at = ?
+        WHERE id = ?
+        """,
+        (started_at, run_id),
+    )
+    connection.commit()
+    return get_scheduler_run(connection, run_id)
+
+
+def finish_scheduler_run(
+    connection: sqlite3.Connection,
+    run_id: int,
+    status: str,
+    finished_at: str,
+    executed_steps: int,
+    summary: str,
+) -> SchedulerRunRecord | None:
+    connection.execute(
+        """
+        UPDATE scheduler_runs
+        SET status = ?,
+            finished_at = ?,
+            executed_steps = ?,
+            summary = ?
+        WHERE id = ?
+        """,
+        (
+            status.strip(),
+            finished_at,
+            max(int(executed_steps), 0),
+            summary.strip(),
+            run_id,
+        ),
+    )
+    connection.commit()
+    return get_scheduler_run(connection, run_id)
 
 
 def list_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[MacroStepRecord]:
@@ -1508,6 +2181,31 @@ def _ui_target_from_row(row: sqlite3.Row | tuple) -> UiTargetRecord:
     )
 
 
+def _launcher_collection_from_row(
+    row: sqlite3.Row | tuple,
+) -> LauncherCollectionRecord:
+    return LauncherCollectionRecord(
+        id=row[0],
+        name=row[1],
+        launcher_section=row[2] or "Macro",
+        launcher_position=int(row[3] or 0),
+        created_at=row[4],
+        updated_at=row[5],
+    )
+
+
+def _launcher_collection_member_from_row(
+    row: sqlite3.Row | tuple,
+) -> LauncherCollectionMemberRecord:
+    return LauncherCollectionMemberRecord(
+        id=row[0],
+        collection_id=row[1],
+        macro_item_id=row[2],
+        sort_order=int(row[3] or 0),
+        created_at=row[4],
+    )
+
+
 def _item_from_row(row: sqlite3.Row | tuple) -> ItemRecord:
     return ItemRecord(
         id=row[0],
@@ -1536,6 +2234,39 @@ def _macro_step_from_row(row: sqlite3.Row | tuple) -> MacroStepRecord:
         press_enter_after=bool(row[9]),
         wait_before_enabled=bool(row[10]),
         wait_before_ms=int(row[11]),
+    )
+
+
+def _scheduler_job_from_row(row: sqlite3.Row | tuple) -> SchedulerJobRecord:
+    return SchedulerJobRecord(
+        id=row[0],
+        name=row[1],
+        macro_item_id=row[2],
+        is_enabled=bool(row[3]),
+        schedule_time=row[4],
+        weekdays=_scheduler_weekdays_from_text(row[5]),
+        missed_run_policy=row[6],
+        next_run_at=row[7],
+        last_run_at=row[8],
+        last_status=row[9],
+        created_at=row[10],
+        updated_at=row[11],
+    )
+
+
+def _scheduler_run_from_row(row: sqlite3.Row | tuple) -> SchedulerRunRecord:
+    return SchedulerRunRecord(
+        id=row[0],
+        job_id=row[1],
+        macro_item_id=row[2],
+        trigger=row[3],
+        scheduled_for=row[4],
+        started_at=row[5],
+        finished_at=row[6],
+        status=row[7],
+        executed_steps=int(row[8] or 0),
+        summary=row[9],
+        created_at=row[10],
     )
 
 
@@ -1681,6 +2412,54 @@ def _validate_item_type(item_type: str) -> None:
         raise ValueError(f"Unsupported item_type: {item_type}")
 
 
+def _validate_scheduler_macro(
+    connection: sqlite3.Connection,
+    macro_item_id: int,
+) -> None:
+    item = get_item(connection, macro_item_id)
+    if item is None or item.item_type != "macro":
+        raise ValueError("Scheduler jobs must reference a macro item.")
+
+
+def _normalize_scheduler_time(value: str) -> str:
+    parts = value.strip().split(":")
+    if len(parts) != 2:
+        raise ValueError("Schedule time must use HH:MM.")
+    try:
+        hour, minute = (int(part) for part in parts)
+    except ValueError as error:
+        raise ValueError("Schedule time must use HH:MM.") from error
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        raise ValueError("Schedule time must use HH:MM.")
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _normalize_scheduler_weekdays(values: Iterable[int]) -> tuple[int, ...]:
+    normalized = tuple(sorted({int(value) for value in values}))
+    if not normalized or any(value < 0 or value > 6 for value in normalized):
+        raise ValueError("Select at least one valid scheduler weekday.")
+    return normalized
+
+
+def _scheduler_weekdays_to_text(values: Iterable[int]) -> str:
+    return ",".join(str(value) for value in values)
+
+
+def _scheduler_weekdays_from_text(value: str | None) -> tuple[int, ...]:
+    if not value:
+        return ()
+    return tuple(
+        int(part)
+        for part in value.split(",")
+        if part.strip().isdigit() and 0 <= int(part) <= 6
+    )
+
+
+def _validate_scheduler_missed_run_policy(value: str) -> None:
+    if value not in ALLOWED_SCHEDULER_MISSED_RUN_POLICIES:
+        raise ValueError(f"Unsupported scheduler missed-run policy: {value}")
+
+
 def _normalize_launcher_section(launcher_section: str | None) -> str:
     normalized = (launcher_section or "Macro").strip()
     if normalized == "Medical Documents":
@@ -1698,14 +2477,44 @@ def _next_launcher_position(
     connection: sqlite3.Connection,
     launcher_section: str,
 ) -> int:
-    row = connection.execute(
+    direct_row = connection.execute(
         """
         SELECT COALESCE(MAX(launcher_position), 0)
         FROM items
         WHERE item_type IN ('macro', 'clipboard', 'randomized_clipboard')
+          AND (
+              item_type IN ('clipboard', 'randomized_clipboard')
+              OR id NOT IN (
+                  SELECT macro_item_id
+                  FROM launcher_collection_members
+              )
+          )
           AND launcher_section = ?
         """,
         (launcher_section,),
+    ).fetchone()
+    collection_row = connection.execute(
+        """
+        SELECT COALESCE(MAX(launcher_position), 0)
+        FROM launcher_collections
+        WHERE launcher_section = ?
+        """,
+        (launcher_section,),
+    ).fetchone()
+    return max(int(direct_row[0] or 0), int(collection_row[0] or 0)) + 1
+
+
+def _next_launcher_collection_member_order(
+    connection: sqlite3.Connection,
+    collection_id: int,
+) -> int:
+    row = connection.execute(
+        """
+        SELECT COALESCE(MAX(sort_order), 0)
+        FROM launcher_collection_members
+        WHERE collection_id = ?
+        """,
+        (collection_id,),
     ).fetchone()
     return int(row[0] or 0) + 1
 

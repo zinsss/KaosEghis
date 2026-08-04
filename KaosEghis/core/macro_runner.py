@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 import random
+import threading
 import time
 
 from KaosEghis.core.clipboard_service import copy_text, restore_clipboard
@@ -40,6 +41,9 @@ class _RunMetrics:
     resolved_targets: int = 0
 
 
+_MACRO_EXECUTION_LOCK = threading.Lock()
+
+
 class MacroRunner:
     def __init__(self, db_path: Path | None = None) -> None:
         self._cancel_requested = False
@@ -66,29 +70,48 @@ class MacroRunner:
         settings: dict[str, str] | None = None,
     ) -> MacroRunResult:
         self.reset_cancel()
-        with connect(self._db_path or get_database_path()) as connection:
-            item = get_item(connection, item_id)
-            if item is None:
-                return MacroRunResult(False, "Macro not found.", 0, None)
-            profile = resolve_macro_emr_target_profile(connection, item)
+        lock_acquired = False
+        if not dry_run:
+            lock_acquired = _MACRO_EXECUTION_LOCK.acquire(blocking=False)
+            if not lock_acquired:
+                return MacroRunResult(
+                    False,
+                    "Macro execution blocked: another macro is running.",
+                    0,
+                    None,
+                )
+        try:
+            with connect(self._db_path or get_database_path()) as connection:
+                item = get_item(connection, item_id)
+                if item is None:
+                    return MacroRunResult(False, "Macro not found.", 0, None)
+                profile = resolve_macro_emr_target_profile(connection, item)
 
-            steps = [
-                _db_macro_step_to_runtime_step(step)
-                for step in list_macro_steps(connection, item_id)
-            ]
-            base_settings = settings or get_settings(connection)
-            run_settings = self._build_execution_settings(base_settings, profile)
-        self._current_profile_name = profile.name if profile is not None else None
-        self._current_profile_id = profile.id if profile is not None else None
+                steps = [
+                    _db_macro_step_to_runtime_step(step)
+                    for step in list_macro_steps(connection, item_id)
+                ]
+                base_settings = settings or get_settings(connection)
+                run_settings = self._build_execution_settings(base_settings, profile)
+            self._current_profile_name = profile.name if profile is not None else None
+            self._current_profile_id = profile.id if profile is not None else None
 
-        if not dry_run and not item.is_enabled:
-            return MacroRunResult(False, "Macro execution blocked: macro is disabled.", 0, None)
+            if not dry_run and not item.is_enabled:
+                return MacroRunResult(
+                    False,
+                    "Macro execution blocked: macro is disabled.",
+                    0,
+                    None,
+                )
 
-        return self.run(
-            steps,
-            dry_run=dry_run,
-            settings=run_settings,
-        )
+            return self.run(
+                steps,
+                dry_run=dry_run,
+                settings=run_settings,
+            )
+        finally:
+            if lock_acquired:
+                _MACRO_EXECUTION_LOCK.release()
 
     def run(
         self,

@@ -441,7 +441,7 @@ def test_emr_targets_page_does_not_start_capture_hotkey_on_init(
     page.activate_page()
 
     assert calls == ["started"]
-    assert page.capture_hotkey_label.text() == "Global capture hotkey: Ctrl+Shift+F8"
+    assert page.capture_hotkey_label.text() == "Global capture hotkey: Ctrl+Shift+F9"
 
 
 def test_emr_targets_page_shows_capture_result_and_copies_details(
@@ -488,7 +488,38 @@ def test_emr_targets_page_shows_capture_result_and_copies_details(
     assert "Coordinate: (120, 340)" in page.capture_result.toPlainText()
     assert "Value: 홍길동" in page.capture_result.toPlainText()
     assert copied == ["홍길동"]
+    assert page.capture_button.text() == "Captured and copied"
     assert "value copied to clipboard" in page.capture_status_label.text().casefold()
+
+
+def test_emr_targets_page_arm_capture_retries_hotkey_listener(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+    calls: list[str] = []
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: calls.append("started") or True,
+    )
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.arm_capture",
+        lambda self: True,
+    )
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = EmrTargetsPage(db_path)
+    page.arm_capture()
+
+    assert calls == ["started"]
+    assert page.capture_hotkey_label.text() == "Global capture hotkey: Ctrl+Shift+F9"
+    assert "capture armed" in page.capture_status_label.text().casefold()
 
 
 def test_global_capture_controller_defers_inspection_to_qt_signal() -> None:
@@ -540,6 +571,75 @@ def test_global_capture_controller_windows_hotkey_listener_start_stop(monkeypatc
     controller.stop()
 
     assert events == ["start", "stop"]
+
+
+def test_windows_hotkey_listener_uses_qt_native_dispatcher() -> None:
+    _app()
+
+    import ctypes
+    import ctypes.wintypes
+
+    from KaosEghis.core.ui_capture import _WindowsGlobalHotkeyListener
+
+    events: list[str] = []
+
+    class FakeApplication:
+        def __init__(self) -> None:
+            self.installed = []
+            self.removed = []
+
+        def installNativeEventFilter(self, event_filter) -> None:
+            self.installed.append(event_filter)
+
+        def removeNativeEventFilter(self, event_filter) -> None:
+            self.removed.append(event_filter)
+
+    class FakeUser32:
+        def __init__(self) -> None:
+            self.registered = []
+            self.unregistered = []
+
+        def RegisterHotKey(self, hwnd, hotkey_id, modifiers, virtual_key) -> bool:
+            self.registered.append((hwnd, hotkey_id, modifiers, virtual_key))
+            return True
+
+        def UnregisterHotKey(self, hwnd, hotkey_id) -> bool:
+            self.unregistered.append((hwnd, hotkey_id))
+            return True
+
+    application = FakeApplication()
+    user32 = FakeUser32()
+    listener = _WindowsGlobalHotkeyListener(
+        lambda: events.append("hotkey"),
+        application=application,
+        user32=user32,
+    )
+
+    assert listener.start() is True
+    assert application.installed == [listener]
+    assert user32.registered == [
+        (
+            None,
+            listener.HOTKEY_ID,
+            listener.MOD_CONTROL | listener.MOD_SHIFT | listener.MOD_NOREPEAT,
+            listener.VK_F9,
+        )
+    ]
+
+    message = ctypes.wintypes.MSG()
+    message.message = listener.WM_HOTKEY
+    message.wParam = listener.HOTKEY_ID
+    handled, result = listener.nativeEventFilter(
+        b"windows_dispatcher_MSG", ctypes.addressof(message)
+    )
+
+    assert handled is True
+    assert result == 0
+    assert events == ["hotkey"]
+
+    listener.stop()
+    assert user32.unregistered == [(None, listener.HOTKEY_ID)]
+    assert application.removed == [listener]
 
 
 def test_parse_inspector_dump_maps_basic_fields() -> None:

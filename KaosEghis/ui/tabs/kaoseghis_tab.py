@@ -5,7 +5,7 @@ import random
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QEventLoop, Qt
+from PySide6.QtCore import QEventLoop, QTimer, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -15,10 +15,12 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -44,16 +46,28 @@ from KaosEghis.db.repositories import (
     create_macro_step,
     delete_item,
     delete_macro_steps_for_item,
+    delete_launcher_collection,
     get_active_emr_target_profile,
     get_item,
+    get_launcher_collection,
+    get_launcher_collection_for_macro,
     list_clipboard_variants,
+    list_launcher_collection_members,
+    list_launcher_entries,
     list_items,
     list_launcher_items,
+    add_macro_to_launcher_collection,
+    create_launcher_collection,
     list_macro_steps,
     get_settings,
+    rename_launcher_collection,
+    reorder_launcher_collection_members,
     resolve_macro_emr_target_profile,
+    remove_macro_from_launcher_collection,
     reorder_macro_steps,
     replace_clipboard_variants,
+    set_setting,
+    update_launcher_collection_placement,
     update_item_launcher_placement,
     update_item,
 )
@@ -121,6 +135,10 @@ class KaosEghisTab(QWidget):
 
 
 class LauncherPage(QWidget):
+    ENTRY_ID_ROLE = LauncherListWidget.ITEM_ID_ROLE if "LauncherListWidget" in globals() else 256
+    ENTRY_KIND_ROLE = 258
+    ITEM_TYPE_ROLE = LauncherListWidget.ITEM_TYPE_ROLE if "LauncherListWidget" in globals() else 257
+
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
         self._db_path = db_path
@@ -155,6 +173,18 @@ class LauncherPage(QWidget):
             self.launcher_lists[section] = section_list
             columns.addWidget(section_label, 0, index)
             columns.addWidget(section_list, 1, index)
+            columns.setColumnStretch(index, 1)
+
+        notes_index = len(LAUNCHER_SECTIONS)
+        self.quick_notes_label = QLabel("Quick Notes")
+        self.quick_notes_label.setObjectName("launcherSectionTitle")
+        self.quick_notes_editor = QPlainTextEdit()
+        self.quick_notes_editor.setPlaceholderText("Quick notes for today.")
+        self.quick_notes_editor.textChanged.connect(self._persist_quick_notes)
+        self._quick_notes_loading = False
+        columns.addWidget(self.quick_notes_label, 0, notes_index)
+        columns.addWidget(self.quick_notes_editor, 1, notes_index)
+        columns.setColumnStretch(notes_index, 1)
 
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_view)
@@ -184,8 +214,9 @@ class LauncherPage(QWidget):
         self._attempt_startup_auto_connect()
 
     def refresh_view(self) -> None:
-        launcher_items = _load_launcher_items(self._db_path)
-        self._populate_launcher_lists(launcher_items)
+        launcher_entries = _load_launcher_entries(self._db_path)
+        self._populate_launcher_lists(launcher_entries)
+        self._load_quick_notes()
         self._refresh_connection_status()
 
     def toggle_connection(self, checked: bool) -> None:
@@ -324,17 +355,32 @@ class LauncherPage(QWidget):
         self.connection_toggle.update()
 
     def dry_run_macro(self) -> None:
-        item_id = self._selected_macro_id()
-        if item_id is None:
+        entry = self._selected_launcher_entry()
+        if entry is None:
             self.log.setPlainText("Select a macro to dry run.")
             return
-
+        if entry["entry_kind"] == "collection":
+            self._open_collection(entry["entry_id"], dry_run=True)
+            return
+        item_id = entry.get("item_id")
+        item_type = entry.get("item_type")
+        if not isinstance(item_id, int) or item_type != "macro":
+            self.log.setPlainText("Select a macro to dry run.")
+            return
         result = MacroRunner(self._db_path).execute_macro(item_id, dry_run=True)
         self.log.setPlainText(result.message)
 
     def run_macro(self) -> None:
-        item_id = self._selected_macro_id()
-        if item_id is None:
+        entry = self._selected_launcher_entry()
+        if entry is None:
+            self.log.setPlainText("Select a macro to run.")
+            return
+        if entry["entry_kind"] == "collection":
+            self._open_collection(entry["entry_id"], dry_run=False)
+            return
+        item_id = entry.get("item_id")
+        item_type = entry.get("item_type")
+        if not isinstance(item_id, int) or item_type != "macro":
             self.log.setPlainText("Select a macro to run.")
             return
         self._run_macro_by_id(item_id)
@@ -346,9 +392,13 @@ class LauncherPage(QWidget):
     ) -> None:
         item_id = item.data(list_widget.ITEM_ID_ROLE)
         item_type = item.data(list_widget.ITEM_TYPE_ROLE)
+        entry_kind = item.data(self.ENTRY_KIND_ROLE) or "item"
         if not isinstance(item_id, int):
             return
         list_widget.setCurrentItem(item)
+        if entry_kind == "collection":
+            self._open_collection(item_id, dry_run=False)
+            return
         if item_type == "macro":
             self._run_macro_by_id(item_id)
             return
@@ -406,13 +456,45 @@ class LauncherPage(QWidget):
                 for index in range(list_widget.count()):
                     item = list_widget.item(index)
                     item_id = item.data(list_widget.ITEM_ID_ROLE)
-                    if isinstance(item_id, int):
+                    entry_kind = item.data(self.ENTRY_KIND_ROLE) or "item"
+                    if isinstance(item_id, int) and entry_kind == "item":
                         update_item_launcher_placement(
                             connection,
                             item_id,
                             section,
                             index + 1,
                         )
+                    elif isinstance(item_id, int) and entry_kind == "collection":
+                        update_launcher_collection_placement(
+                            connection,
+                            item_id,
+                            section,
+                            index + 1,
+                        )
+
+    def _load_quick_notes(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+        notes = settings.get("launcher_quick_notes", "")
+        self._quick_notes_loading = True
+        try:
+            if self.quick_notes_editor.toPlainText() != notes:
+                self.quick_notes_editor.setPlainText(notes)
+        finally:
+            self._quick_notes_loading = False
+
+    def _persist_quick_notes(self) -> None:
+        if self._quick_notes_loading:
+            return
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            set_setting(
+                connection,
+                "launcher_quick_notes",
+                self.quick_notes_editor.toPlainText(),
+            )
+            connection.commit()
 
     def _populate_launcher_lists(self, launcher_items: list) -> None:
         by_section = {section: [] for section in LAUNCHER_SECTIONS}
@@ -420,15 +502,42 @@ class LauncherPage(QWidget):
             by_section.setdefault(launcher_item.launcher_section, []).append(
                 launcher_item
             )
+        macro_profile_texts = _launcher_macro_profile_texts(
+            self._db_path,
+            [
+                getattr(launcher_item, "macro_item_id", getattr(launcher_item, "id", None))
+                for launcher_item in launcher_items
+                if getattr(launcher_item, "item_type", None) == "macro"
+                and getattr(launcher_item, "entry_kind", getattr(launcher_item, "entry_type", "item")) == "item"
+            ],
+        )
         for section, list_widget in self.launcher_lists.items():
             list_widget.blockSignals(True)
             list_widget.clear()
             for launcher_item in by_section.get(section, []):
                 item = QListWidgetItem(launcher_item.name)
-                item.setData(list_widget.ITEM_ID_ROLE, launcher_item.id)
+                entry_id = getattr(launcher_item, "id", getattr(launcher_item, "entry_id", None))
+                item.setData(list_widget.ITEM_ID_ROLE, entry_id)
+                item.setData(
+                    self.ENTRY_KIND_ROLE,
+                    getattr(launcher_item, "entry_kind", getattr(launcher_item, "entry_type", "item")),
+                )
                 item.setData(list_widget.ITEM_TYPE_ROLE, launcher_item.item_type)
-                if launcher_item.item_type == "macro":
-                    item.setToolTip(_macro_profile_text(self._db_path, launcher_item))
+                if getattr(launcher_item, "entry_kind", getattr(launcher_item, "entry_type", "item")) == "collection":
+                    item.setToolTip("Collection")
+                    item.setText(f"{launcher_item.name} >")
+                elif launcher_item.item_type == "macro":
+                    macro_item_id = getattr(
+                        launcher_item,
+                        "macro_item_id",
+                        getattr(launcher_item, "id", None),
+                    )
+                    item.setToolTip(
+                        macro_profile_texts.get(
+                            macro_item_id,
+                            "Profile: (No EMR profile)",
+                        )
+                    )
                 else:
                     mode = (
                         "Random selection"
@@ -449,6 +558,232 @@ class LauncherPage(QWidget):
             if isinstance(item_id, int) and item_type == "macro":
                 return item_id
         return None
+
+    def _selected_launcher_entry(self) -> dict[str, object] | None:
+        for list_widget in self.launcher_lists.values():
+            current = list_widget.currentItem()
+            if current is None:
+                continue
+            entry_id = current.data(list_widget.ITEM_ID_ROLE)
+            if not isinstance(entry_id, int):
+                continue
+            return {
+                "entry_id": entry_id,
+                "entry_kind": current.data(self.ENTRY_KIND_ROLE) or "item",
+                "item_id": entry_id,
+                "item_type": current.data(list_widget.ITEM_TYPE_ROLE),
+            }
+        return None
+
+    def _open_collection(self, collection_id: int, dry_run: bool) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            collection = get_launcher_collection(connection, collection_id)
+            members = list_launcher_collection_members(connection, collection_id)
+            macros = [get_item(connection, member.macro_item_id) for member in members]
+        if collection is None or not macros:
+            self.log.setPlainText("Collection is empty.")
+            return
+        dialog = LauncherCollectionChooserDialog(collection.name, [macro for macro in macros if macro is not None], self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected_macro_id = dialog.selected_macro_id()
+        if selected_macro_id is None:
+            return
+        if dry_run:
+            result = MacroRunner(self._db_path).execute_macro(selected_macro_id, dry_run=True)
+            self.log.setPlainText(result.message)
+            return
+        self._run_macro_by_id(selected_macro_id)
+
+    def create_collection_from_drop(
+        self,
+        source_item_id: int,
+        target_item_id: int,
+        launcher_section: str,
+        launcher_position: int,
+    ) -> bool:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            source = get_item(connection, source_item_id)
+            target = get_item(connection, target_item_id)
+        if source is None or target is None:
+            return False
+        if (
+            QMessageBox.question(
+                self,
+                "Create collection",
+                f"Create a collection from '{source.name}' and '{target.name}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return False
+        name, accepted = QInputDialog.getText(
+            self,
+            "Collection name",
+            "Collection name",
+            text=target.name,
+        )
+        if not accepted or not name.strip():
+            return False
+        with connect(self._db_path) as connection:
+            collection = create_launcher_collection(
+                connection,
+                name.strip(),
+                launcher_section,
+                launcher_position,
+            )
+            add_macro_to_launcher_collection(connection, collection.id, target_item_id)
+            add_macro_to_launcher_collection(connection, collection.id, source_item_id)
+        self.refresh_view()
+        self.log.setPlainText(f"Created collection '{name.strip()}'.")
+        return True
+
+    def add_macro_to_collection_from_drop(
+        self,
+        source_item_id: int,
+        collection_id: int,
+    ) -> bool:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            source = get_item(connection, source_item_id)
+            collection = get_launcher_collection(connection, collection_id)
+        if source is None or collection is None:
+            return False
+        if (
+            QMessageBox.question(
+                self,
+                "Add to collection",
+                f"Add '{source.name}' to collection '{collection.name}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return False
+        with connect(self._db_path) as connection:
+            add_macro_to_launcher_collection(connection, collection_id, source_item_id)
+        self.refresh_view()
+        self.log.setPlainText(f"Added '{source.name}' to '{collection.name}'.")
+        return True
+
+    def show_collection_context_menu(
+        self,
+        list_widget: "LauncherListWidget",
+        item: QListWidgetItem,
+        global_pos,
+    ) -> None:
+        collection_id = item.data(list_widget.ITEM_ID_ROLE)
+        if not isinstance(collection_id, int):
+            return
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            collection = get_launcher_collection(connection, collection_id)
+            members = list_launcher_collection_members(connection, collection_id)
+            macros = [get_item(connection, member.macro_item_id) for member in members]
+        if collection is None:
+            return
+        menu = QMenu(self)
+        for macro in [macro for macro in macros if macro is not None]:
+            action = menu.addAction(macro.name)
+            action.triggered.connect(
+                lambda _checked=False, macro_id=macro.id: self._run_macro_by_id(macro_id)
+            )
+        if menu.actions():
+            menu.addSeparator()
+        edit_action = menu.addAction("Edit collection...")
+        unpack_action = menu.addAction("Unpack collection")
+        chosen = menu.exec(global_pos)
+        if chosen == edit_action:
+            self.edit_collection(collection_id)
+        elif chosen == unpack_action:
+            self.unpack_collection(collection_id)
+
+    def edit_collection(self, collection_id: int) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            collection = get_launcher_collection(connection, collection_id)
+            members = list_launcher_collection_members(connection, collection_id)
+            macros = [get_item(connection, member.macro_item_id) for member in members]
+        if collection is None:
+            return
+        dialog = LauncherCollectionEditorDialog(
+            collection.name,
+            [macro for macro in macros if macro is not None],
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        member_ids = dialog.member_macro_ids()
+        with connect(self._db_path) as connection:
+            current_collection = get_launcher_collection(connection, collection_id)
+            if current_collection is None:
+                return
+            rename_launcher_collection(connection, collection_id, dialog.collection_name())
+            original_ids = [member.macro_item_id for member in list_launcher_collection_members(connection, collection_id)]
+            removed_ids = [macro_id for macro_id in original_ids if macro_id not in member_ids]
+            insert_position = current_collection.launcher_position + 1
+            for removed_id in removed_ids:
+                removed, _collapsed_macro_id = remove_macro_from_launcher_collection(
+                    connection,
+                    collection_id,
+                    removed_id,
+                )
+                if removed:
+                    update_item_launcher_placement(
+                        connection,
+                        removed_id,
+                        current_collection.launcher_section,
+                        insert_position,
+                    )
+                    insert_position += 1
+            remaining_collection = get_launcher_collection(connection, collection_id)
+            if remaining_collection is None:
+                if member_ids:
+                    update_item_launcher_placement(
+                        connection,
+                        member_ids[0],
+                        current_collection.launcher_section,
+                        current_collection.launcher_position,
+                    )
+                self.refresh_view()
+                self.log.setPlainText("Collection collapsed back to a single macro.")
+                return
+            reorder_launcher_collection_members(connection, collection_id, member_ids)
+        self.refresh_view()
+        self.log.setPlainText("Collection updated.")
+
+    def unpack_collection(self, collection_id: int) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            collection = get_launcher_collection(connection, collection_id)
+            members = list_launcher_collection_members(connection, collection_id)
+        if collection is None:
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Unpack collection",
+                f"Unpack collection '{collection.name}' into simple launcher items?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        with connect(self._db_path) as connection:
+            delete_launcher_collection(connection, collection_id)
+            for offset, member in enumerate(members):
+                update_item_launcher_placement(
+                    connection,
+                    member.macro_item_id,
+                    collection.launcher_section,
+                    collection.launcher_position + offset,
+                )
+        self.refresh_view()
+        self.log.setPlainText(f"Unpacked '{collection.name}'.")
 
 
 class MacrosPage(QWidget):
@@ -982,9 +1317,107 @@ class MacroTextDialog(QDialog):
 PresetsPage = MacroTextsPage
 
 
+class LauncherCollectionChooserDialog(QDialog):
+    def __init__(self, collection_name: str, macros: list, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(collection_name)
+        self._macros = macros
+        self.list_widget = QListWidget()
+        for macro in macros:
+            item = QListWidgetItem(macro.name)
+            item.setData(Qt.ItemDataRole.UserRole, macro.id)
+            self.list_widget.addItem(item)
+        if self.list_widget.count():
+            self.list_widget.setCurrentRow(0)
+        self.list_widget.itemDoubleClicked.connect(lambda _item: self.accept())
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Select macro"))
+        layout.addWidget(self.list_widget)
+        layout.addWidget(buttons)
+
+    def selected_macro_id(self) -> int | None:
+        item = self.list_widget.currentItem()
+        if item is None:
+            return None
+        value = item.data(Qt.ItemDataRole.UserRole)
+        return value if isinstance(value, int) else None
+
+
+class LauncherCollectionEditorListWidget(QListWidget):
+    ITEM_ID_ROLE = Qt.ItemDataRole.UserRole
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+
+    def macro_ids(self) -> list[int]:
+        ids: list[int] = []
+        for index in range(self.count()):
+            item = self.item(index)
+            value = item.data(self.ITEM_ID_ROLE)
+            if isinstance(value, int):
+                ids.append(value)
+        return ids
+
+
+class LauncherCollectionEditorDialog(QDialog):
+    def __init__(self, collection_name: str, macros: list, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Edit collection")
+        self.name_input = QLineEdit(collection_name)
+        self.members_list = LauncherCollectionEditorListWidget()
+        for macro in macros:
+            item = QListWidgetItem(macro.name)
+            item.setData(self.members_list.ITEM_ID_ROLE, macro.id)
+            self.members_list.addItem(item)
+        self.remove_button = QPushButton("Remove selected")
+        self.remove_button.clicked.connect(self._remove_selected)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        form.addRow("Collection name", self.name_input)
+        layout.addLayout(form)
+        layout.addWidget(QLabel("Macros"))
+        layout.addWidget(self.members_list)
+        controls = QHBoxLayout()
+        controls.addWidget(self.remove_button)
+        controls.addStretch()
+        layout.addLayout(controls)
+        layout.addWidget(buttons)
+
+    def _remove_selected(self) -> None:
+        row = self.members_list.currentRow()
+        if row >= 0:
+            self.members_list.takeItem(row)
+
+    def collection_name(self) -> str:
+        return self.name_input.text().strip()
+
+    def member_macro_ids(self) -> list[int]:
+        return self.members_list.macro_ids()
+
+
 class LauncherListWidget(QListWidget):
     ITEM_ID_ROLE = 256
     ITEM_TYPE_ROLE = 257
+    ENTRY_KIND_ROLE = 258
 
     def __init__(self, section: str, launcher_page: LauncherPage) -> None:
         super().__init__()
@@ -996,6 +1429,8 @@ class LauncherListWidget(QListWidget):
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
         self.setStyleSheet(
             "QListWidget {"
             " border: 1px solid #4c566a;"
@@ -1007,6 +1442,45 @@ class LauncherListWidget(QListWidget):
 
     def dropEvent(self, event) -> None:
         source = event.source()
+        drop_point = event.position().toPoint()
+        target_item = self._target_item_for_collection_drop(drop_point)
+        if (
+            isinstance(source, LauncherListWidget)
+            and target_item is not None
+        ):
+            source_item = source.currentItem()
+            if source_item is not None and source_item is not target_item:
+                source_kind = source_item.data(self.ENTRY_KIND_ROLE) or "item"
+                source_type = source_item.data(self.ITEM_TYPE_ROLE)
+                target_kind = target_item.data(self.ENTRY_KIND_ROLE) or "item"
+                target_type = target_item.data(self.ITEM_TYPE_ROLE)
+                source_id = source_item.data(self.ITEM_ID_ROLE)
+                target_id = target_item.data(self.ITEM_ID_ROLE)
+                if (
+                    source_kind == "item"
+                    and source_type == "macro"
+                    and isinstance(source_id, int)
+                    and isinstance(target_id, int)
+                ):
+                    if target_kind == "item" and target_type == "macro":
+                        row = self.row(target_item)
+                        handled = self.launcher_page.create_collection_from_drop(
+                            source_id,
+                            target_id,
+                            self.section,
+                            row + 1,
+                        )
+                        if handled:
+                            event.acceptProposedAction()
+                            return
+                    if target_kind == "collection":
+                        handled = self.launcher_page.add_macro_to_collection_from_drop(
+                            source_id,
+                            target_id,
+                        )
+                        if handled:
+                            event.acceptProposedAction()
+                            return
         if isinstance(source, LauncherListWidget):
             source_item = source.currentItem()
             item_type = (
@@ -1024,6 +1498,33 @@ class LauncherListWidget(QListWidget):
         if event.isAccepted():
             QTimer.singleShot(0, self.launcher_page.persist_launcher_layout)
 
+    def _target_item_for_collection_drop(self, pos):
+        item = self.itemAt(pos)
+        if item is None:
+            return None
+        rect = self.visualItemRect(item)
+        if not rect.isValid():
+            return None
+        inset_x = min(16, max(6, rect.width() // 8))
+        inset_y = min(10, max(6, rect.height() // 4))
+        collection_zone = rect.adjusted(inset_x, inset_y, -inset_x, -inset_y)
+        if collection_zone.contains(pos):
+            return item
+        return None
+
+    def _show_context_menu(self, pos) -> None:
+        item = self.itemAt(pos)
+        if item is None:
+            return
+        if (item.data(self.ENTRY_KIND_ROLE) or "item") != "collection":
+            return
+        self.setCurrentItem(item)
+        self.launcher_page.show_collection_context_menu(
+            self,
+            item,
+            self.viewport().mapToGlobal(pos),
+        )
+
 
 def _create_macro_table() -> QTableWidget:
     table = QTableWidget(0, 4)
@@ -1040,14 +1541,15 @@ def _load_macros(db_path: Path | None) -> list:
         return list_items(connection, "macro")
 
 
-def _load_launcher_items(db_path: Path | None) -> list:
+def _load_launcher_entries(db_path: Path | None) -> list:
     initialize_database(db_path)
     with connect(db_path) as connection:
-        items = list_launcher_items(connection)
+        items = list_launcher_entries(connection)
     return [
         SimpleNamespace(
             id=DYNAMIC_CURRENT_DATE_MACROTEXT_ID,
             name="Current Date",
+            entry_kind="item",
             item_type="clipboard",
             is_enabled=True,
             emr_target_profile_id=None,
@@ -1062,7 +1564,9 @@ def _load_launcher_items(db_path: Path | None) -> list:
 
 def _load_launcher_macros(db_path: Path | None) -> list:
     return [
-        item for item in _load_launcher_items(db_path) if item.item_type == "macro"
+        item
+        for item in _load_launcher_entries(db_path)
+        if getattr(item, "entry_kind", "item") == "item" and item.item_type == "macro"
     ]
 
 
@@ -1159,8 +1663,32 @@ def _yes_no(value: bool) -> str:
 
 def _macro_profile_text(db_path: Path | None, macro) -> str:
     with connect(db_path) as connection:
-        profile = resolve_macro_emr_target_profile(connection, macro)
+        macro_record = macro
+        macro_item_id = getattr(macro, "macro_item_id", None)
+        if isinstance(macro_item_id, int):
+            resolved = get_item(connection, macro_item_id)
+            if resolved is not None:
+                macro_record = resolved
+        profile = resolve_macro_emr_target_profile(connection, macro_record)
     return f"Profile: {profile.name if profile is not None else '(No EMR profile)'}"
+
+
+def _launcher_macro_profile_texts(
+    db_path: Path | None,
+    macro_item_ids: list[int | None],
+) -> dict[int, str]:
+    valid_ids = [macro_item_id for macro_item_id in macro_item_ids if isinstance(macro_item_id, int)]
+    if not valid_ids:
+        return {}
+    texts: dict[int, str] = {}
+    with connect(db_path) as connection:
+        for macro_item_id in valid_ids:
+            macro = get_item(connection, macro_item_id)
+            profile = resolve_macro_emr_target_profile(connection, macro)
+            texts[macro_item_id] = (
+                f"Profile: {profile.name if profile is not None else '(No EMR profile)'}"
+            )
+    return texts
 
 
 def _format_macro_run_result(result) -> str:

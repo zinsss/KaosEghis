@@ -1,6 +1,6 @@
 # KaosEghis Design
 
-Last updated: 2026-07-22
+Last updated: 2026-08-03
 
 ## Purpose
 
@@ -26,8 +26,14 @@ Main window:
 - [KaosEghis/ui/main_window.py](/E:/Kaos/KaosEghis/KaosEghis/ui/main_window.py)
 - fixed-size `QMainWindow`
 - global Nord stylesheet, including themed vertical and horizontal scrollbars
+- shared Qt layout metrics provide an 8 px gap between adjacent controls throughout
+  the application; intentional tab bars remain visually grouped
 - shared buttons keep stable font metrics across normal and selected states; selection
   uses accent color without a late bold-weight change that can clip Korean or Latin text
+- the right side of the top tab bar contains a persistent app notification area with
+  a colored state dot and short operator-facing text
+- app notifications contain action status only and must not expose captured values,
+  clipboard contents, patient information, or national IDs
 - the optional KaosEghis-PACS patient-context listener follows the desktop app
   lifecycle; it starts from saved settings and closes with the application
 - top-level tabs:
@@ -37,6 +43,7 @@ Main window:
   - `PACS`
   - `Flu-Report`
   - `Scan`
+  - `Scheduler`
   - `Settings`
 
 ## Current Top-Level Information Architecture
@@ -56,6 +63,11 @@ Primary daily-use tab.
 - `Launcher` is the daily-use macro launcher surface; double-click or its run button
   executes immediately with an in-page `Running '<macro name>'...` status instead of
   a confirmation dialog
+- the Launcher now supports both direct executable macros and launcher
+  collections
+- direct macros run immediately
+- launcher collections open a chooser dialog on double-click and expose member
+  macros from a right-click context menu
 - the Launcher does not repeat saved macro names above its three columns
 - the Launcher EMR toggle uses a dedicated green accent when connected and an
   orange warning accent when manual reconnection is required
@@ -72,6 +84,8 @@ Primary daily-use tab.
   be selected by a macro `preset_text` step or copied directly from `Comments`
 - randomized MacroText options use `---` on its own line as the separator, allowing
   each randomly selected comment to preserve multiple lines
+- launcher collection implementation and future expansion plan:
+  `docs/kaoseghis-launcher-plan.md`
 
 ### `Settings`
 
@@ -121,6 +135,18 @@ Dedicated KaosEghis-scan surface.
 - `View folder` fallback
 - configurable periodic cleanup and explicit `Clean now`
 
+### `Scheduler`
+
+Top-level saved-macro scheduling surface.
+
+- binds an existing macro to a local time and selected weekdays
+- jobs are disabled by default
+- runs only while the visible KaosEghis application is open
+- startup calculates future occurrences but never replays a missed job
+- uses a 10-second countdown, operator cancellation, and sanitized local history
+- shares the MacroRunner safety gate and process-wide execution lock
+- the backup workflow remains a future macro; Scheduler itself is not a backup engine
+
 ## Architectural Boundaries
 
 ### Core
@@ -133,6 +159,7 @@ Responsibilities:
 - UI target inspection
 - wait engine
 - macro runner
+- scheduler runtime and due-time calculation
 - PACS polling
 - weekly reporting
 - clipboard and write-test helpers
@@ -149,6 +176,7 @@ Responsibilities:
 - local worklist/macro/settings persistence
 - EMR target profile persistence
 - EMR UI target library persistence
+- scheduler job and sanitized run-history persistence
 
 ### UI
 
