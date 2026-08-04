@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import threading
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -34,6 +35,8 @@ class FluPanel(QWidget):
     """Weekly influenza report surface backed by the age-group practice count query."""
 
     REPORT_COLUMNS = ("Age Group", "Visits", "Patients")
+    report_loaded = Signal(int, dict, int)
+    report_failed = Signal(int, str)
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -41,6 +44,8 @@ class FluPanel(QWidget):
         self._db_path = db_path
         iso_today = date.today().isocalendar()
         self._current_year = iso_today.year
+        self._load_generation = 0
+        self._loading = False
 
         title = QLabel("Weekly - Influenza Report")
         title.setObjectName("pluginTitle")
@@ -54,9 +59,9 @@ class FluPanel(QWidget):
         self.date_range_label = QLabel("Not loaded yet.")
         self.date_range_label.setStyleSheet("font-size: 18px;")
 
-        search_button = QPushButton("Search")
-        search_button.setStyleSheet("font-size: 18px; padding: 8px 16px;")
-        search_button.clicked.connect(self.load_report)
+        self.search_button = QPushButton("Search")
+        self.search_button.setStyleSheet("font-size: 18px; padding: 8px 16px;")
+        self.search_button.clicked.connect(self.load_report)
 
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Week No."))
@@ -65,7 +70,7 @@ class FluPanel(QWidget):
         controls.addWidget(QLabel(":"))
         controls.itemAt(2).widget().setStyleSheet("font-size: 18px;")
         controls.addWidget(self.date_range_label, 1)
-        controls.addWidget(search_button)
+        controls.addWidget(self.search_button)
 
         self.summary_label = QLabel("Week -")
         self.summary_label.setStyleSheet("font-size: 26px; font-weight: 600;")
@@ -98,6 +103,8 @@ class FluPanel(QWidget):
         layout.addWidget(self.status_label)
 
         self._populate_table({label: (0, 0) for label in AGE_GROUP_ORDER})
+        self.report_loaded.connect(self._handle_report_loaded)
+        self.report_failed.connect(self._handle_report_failed)
 
     def load_report(self) -> None:
         week_text = self.week_input.text().strip()
@@ -137,6 +144,32 @@ class FluPanel(QWidget):
             self.status_label.setText("No eGHIS DB connection configured.")
             return
 
+        self._loading = True
+        self._load_generation += 1
+        generation = self._load_generation
+        self.search_button.setEnabled(False)
+        self.status_label.setText("Loading report...")
+        self._start_report_worker(settings, week_number, generation)
+
+    def _start_report_worker(
+        self,
+        settings: dict[str, str],
+        week_number: int,
+        generation: int,
+    ) -> None:
+        worker = threading.Thread(
+            target=self._load_report_worker,
+            args=(dict(settings), week_number, generation),
+            daemon=True,
+        )
+        worker.start()
+
+    def _load_report_worker(
+        self,
+        settings: dict[str, str],
+        week_number: int,
+        generation: int,
+    ) -> None:
         try:
             rows = fetch_weekly_age_report(
                 settings,
@@ -149,14 +182,10 @@ class FluPanel(QWidget):
             EghisDbUnavailableError,
             EghisDbQueryRejectedError,
         ):
-            self.total_visits_label.setText("Total Visits(Practice) Count: -")
-            self.status_label.setText("Flu report DB query failed.")
-            self._populate_table({label: (0, 0) for label in AGE_GROUP_ORDER})
+            self.report_failed.emit(generation, "Flu report DB query failed.")
             return
         except Exception:
-            self.total_visits_label.setText("Total Visits(Practice) Count: -")
-            self.status_label.setText("Flu report DB query failed.")
-            self._populate_table({label: (0, 0) for label in AGE_GROUP_ORDER})
+            self.report_failed.emit(generation, "Flu report DB query failed.")
             return
 
         counts_by_age = {label: (0, 0) for label in AGE_GROUP_ORDER}
@@ -166,11 +195,33 @@ class FluPanel(QWidget):
                 counts_by_age[row.age_group] = (row.visit_count, row.patient_count)
                 total_visits += row.visit_count
 
+        self.report_loaded.emit(generation, counts_by_age, total_visits)
+
+    def _handle_report_loaded(
+        self,
+        generation: int,
+        counts_by_age: dict[str, tuple[int, int]],
+        total_visits: int,
+    ) -> None:
+        if generation != self._load_generation:
+            return
+        self._loading = False
+        self.search_button.setEnabled(True)
+
         self.total_visits_label.setText(
             f"Total Visits(Practice) Count: {total_visits}"
         )
         self._populate_table(counts_by_age)
         self.status_label.setText("Report loaded.")
+
+    def _handle_report_failed(self, generation: int, message: str) -> None:
+        if generation != self._load_generation:
+            return
+        self._loading = False
+        self.search_button.setEnabled(True)
+        self.total_visits_label.setText("Total Visits(Practice) Count: -")
+        self.status_label.setText(message)
+        self._populate_table({label: (0, 0) for label in AGE_GROUP_ORDER})
 
     def _populate_table(self, counts_by_age: dict[str, tuple[int, int]]) -> None:
         self.report_table.setRowCount(len(AGE_GROUP_ORDER))

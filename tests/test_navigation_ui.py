@@ -490,6 +490,71 @@ def test_kaosgdd_vaccine_pacs_and_flu_report_tabs_instantiate(tmp_path, monkeypa
     assert flu_panel.status_label.text() == "Not loaded yet."
 
 
+def test_main_window_starts_without_querying_flu_db(tmp_path, monkeypatch) -> None:
+    _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    import KaosEghis.ui.plugins.flu_panel as flu_panel_module
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    monkeypatch.setattr(
+        flu_panel_module,
+        "fetch_weekly_age_report",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Flu DB query should not run during startup")
+        ),
+    )
+    monkeypatch.setattr(pacs_panel_module, "check_kaospacs_health", lambda settings: True)
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "run_readonly_query",
+        lambda *_args, **_kwargs: (["?column?"], [(1,)]),
+    )
+
+    from KaosEghis.ui.main_window import MainWindow
+
+    window = MainWindow()
+
+    flu_tab = window.tabs.widget(4)
+    assert flu_tab is not None
+
+
+def test_flu_panel_load_failure_updates_status_without_raising(tmp_path, monkeypatch) -> None:
+    _app()
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.ui.plugins.flu_panel import FluPanel
+
+    panel = FluPanel(tmp_path / "KaosEghis.sqlite")
+
+    def fake_start_report_worker(settings, week_number, generation) -> None:
+        panel.report_failed.emit(generation, "Flu report DB query failed.")
+
+    monkeypatch.setattr(panel, "_start_report_worker", fake_start_report_worker)
+
+    panel.load_report()
+
+    assert panel.status_label.text() == "No eGHIS DB connection configured."
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+
+    initialize_database(tmp_path / "KaosEghis.sqlite")
+    with connect(tmp_path / "KaosEghis.sqlite") as connection:
+        set_settings(
+            connection,
+            {
+                "eghis_db_connection_string": "postgresql://readonly@db/eghis",
+            },
+        )
+
+    panel.load_report()
+
+    assert panel.status_label.text() == "Flu report DB query failed."
+    assert panel.search_button.isEnabled() is True
+
 def test_kaosgdd_profile_persists_cookies_and_cache(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 

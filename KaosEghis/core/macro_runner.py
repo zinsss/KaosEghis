@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import random
 import threading
@@ -1317,6 +1318,11 @@ class MacroRunner:
             )
             if parent_target is not None:
                 parent_automation_id = parent_target.automation_id
+        if parent_automation_id is None:
+            parent_automation_id = self._scope_automation_id_from_ancestor_path(
+                emr_target.ancestor_path,
+                target_automation_id=emr_target.automation_id,
+            )
         if profile_main_window_automation_id and parent_automation_id in {None, "MdiMain"}:
             parent_automation_id = profile_main_window_automation_id
         return UiTargetRecord(
@@ -1331,6 +1337,44 @@ class MacroRunner:
             created_at=emr_target.created_at,
             ancestor_path=emr_target.ancestor_path,
         )
+
+    @staticmethod
+    def _scope_automation_id_from_ancestor_path(
+        ancestor_path: str | None,
+        *,
+        target_automation_id: str | None = None,
+    ) -> str | None:
+        if not ancestor_path:
+            return None
+        try:
+            raw_nodes = json.loads(ancestor_path)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(raw_nodes, list):
+            return None
+        target_auto = (target_automation_id or "").strip().casefold()
+        ignored_ids = {
+            "",
+            "desktop",
+        }
+        ignored_names = {
+            "mdimain",
+        }
+        for node in reversed(raw_nodes):
+            if not isinstance(node, dict):
+                continue
+            automation_id = str(node.get("automation_id", "") or "").strip()
+            if not automation_id:
+                continue
+            folded = automation_id.casefold()
+            if folded == target_auto:
+                continue
+            if folded in ignored_ids:
+                continue
+            if folded in ignored_names:
+                continue
+            return automation_id
+        return None
 
     @staticmethod
     def _sanitize_failure_message(action: str, message: str) -> str:

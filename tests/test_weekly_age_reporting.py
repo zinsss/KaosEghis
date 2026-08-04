@@ -178,3 +178,57 @@ def test_fetch_weekly_age_report_raises_when_psycopg2_missing(monkeypatch) -> No
         raise AssertionError("Expected WeeklyAgeReportingUnavailableError")
 
     assert "psycopg2" in message
+
+
+def test_run_readonly_query_closes_cursor_and_connection_on_error(monkeypatch) -> None:
+    import sys
+
+    from KaosEghis.core.eghis_db import run_readonly_query
+
+    events: list[str] = []
+
+    class FakeCursor:
+        description = [("age_group",), ("visit_count",), ("patient_count",)]
+
+        def execute(self, query: str) -> None:
+            events.append("execute")
+            raise RuntimeError("boom")
+
+        def close(self) -> None:
+            events.append("cursor_close")
+
+    class FakeConnection:
+        autocommit = False
+
+        def set_session(self, readonly: bool, autocommit: bool) -> None:
+            events.append(f"set_session:{readonly}:{autocommit}")
+
+        def cursor(self) -> FakeCursor:
+            events.append("cursor")
+            return FakeCursor()
+
+        def close(self) -> None:
+            events.append("connection_close")
+
+    class FakePsycopg2Module:
+        def connect(self, connection_string: str):
+            events.append("connect")
+            return FakeConnection()
+
+    monkeypatch.setitem(sys.modules, "psycopg2", FakePsycopg2Module())
+
+    try:
+        run_readonly_query("postgresql://example", "SELECT 1")
+    except RuntimeError as exc:
+        assert str(exc) == "boom"
+    else:
+        raise AssertionError("Expected RuntimeError")
+
+    assert events == [
+        "connect",
+        "set_session:True:True",
+        "cursor",
+        "execute",
+        "cursor_close",
+        "connection_close",
+    ]

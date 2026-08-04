@@ -996,6 +996,50 @@ def test_emr_scope_automation_id_overrides_parent_key_and_profile_scope(
     assert runtime_target.parent_automation_id == "grdOpdList"
 
 
+def test_emr_runtime_target_infers_scope_from_ancestor_path_when_missing(
+    tmp_path,
+) -> None:
+    import json
+
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_emr_target_profile,
+        create_emr_ui_target,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Production",
+            is_enabled=True,
+            is_default=True,
+            main_window_automation_id="H2OpdTreatment",
+        )
+        target = create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="symptom.text",
+            label="symptom text",
+            automation_id="eghisRichTextBox",
+            control_type="Edit",
+            ancestor_path=json.dumps(
+                [
+                    {"name": "이지스 전자차트 2.0", "automation_id": "MdiMain"},
+                    {"name": "진료실", "automation_id": "H2OpdTreatment"},
+                    {"name": "증상", "automation_id": "TreatmentSymp"},
+                ],
+                ensure_ascii=False,
+            ),
+        )
+        runner = MacroRunner(db_path)
+        runtime_target = runner._runtime_target_from_emr_target(connection, target)
+
+    assert runtime_target.parent_automation_id == "TreatmentSymp"
+
+
 def test_macro_stops_on_failed_step(monkeypatch, tmp_path) -> None:
     from KaosEghis.core.macro_models import MacroRunResult
     from KaosEghis.core.macro_runner import MacroRunner

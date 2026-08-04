@@ -138,6 +138,8 @@ class LauncherPage(QWidget):
     ENTRY_ID_ROLE = LauncherListWidget.ITEM_ID_ROLE if "LauncherListWidget" in globals() else 256
     ENTRY_KIND_ROLE = 258
     ITEM_TYPE_ROLE = LauncherListWidget.ITEM_TYPE_ROLE if "LauncherListWidget" in globals() else 257
+    LAUNCHER_COLUMN_STRETCH = 2
+    QUICK_NOTES_COLUMN_STRETCH = 3
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -173,7 +175,7 @@ class LauncherPage(QWidget):
             self.launcher_lists[section] = section_list
             columns.addWidget(section_label, 0, index)
             columns.addWidget(section_list, 1, index)
-            columns.setColumnStretch(index, 1)
+            columns.setColumnStretch(index, self.LAUNCHER_COLUMN_STRETCH)
 
         notes_index = len(LAUNCHER_SECTIONS)
         self.quick_notes_label = QLabel("Quick Notes")
@@ -184,7 +186,7 @@ class LauncherPage(QWidget):
         self._quick_notes_loading = False
         columns.addWidget(self.quick_notes_label, 0, notes_index)
         columns.addWidget(self.quick_notes_editor, 1, notes_index)
-        columns.setColumnStretch(notes_index, 1)
+        columns.setColumnStretch(notes_index, self.QUICK_NOTES_COLUMN_STRETCH)
 
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_view)
@@ -525,7 +527,7 @@ class LauncherPage(QWidget):
                 item.setData(list_widget.ITEM_TYPE_ROLE, launcher_item.item_type)
                 if getattr(launcher_item, "entry_kind", getattr(launcher_item, "entry_type", "item")) == "collection":
                     item.setToolTip("Collection")
-                    item.setText(f"{launcher_item.name} >")
+                    item.setText(f"{launcher_item.name} *")
                 elif launcher_item.item_type == "macro":
                     macro_item_id = getattr(
                         launcher_item,
