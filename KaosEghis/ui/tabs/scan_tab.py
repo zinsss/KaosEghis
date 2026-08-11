@@ -61,8 +61,21 @@ class DraggablePdfList(QListWidget):
 
 
 def pdf_file_mime_data(path: Path) -> QMimeData:
+    resolved_path = path.resolve()
+    native_path = str(resolved_path)
     mime_data = QMimeData()
-    mime_data.setUrls([QUrl.fromLocalFile(str(path.resolve()))])
+    mime_data.setUrls([QUrl.fromLocalFile(native_path)])
+    mime_data.setText(native_path)
+    # Add Windows-native filename payloads so external apps like Chrome receive
+    # the drag as a real file drop, not just a generic URI list.
+    mime_data.setData(
+        'application/x-qt-windows-mime;value="FileNameW"',
+        (native_path + "\x00").encode("utf-16-le"),
+    )
+    mime_data.setData(
+        'application/x-qt-windows-mime;value="FileName"',
+        (native_path + "\x00").encode("mbcs", errors="replace"),
+    )
     return mime_data
 
 

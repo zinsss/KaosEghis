@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -19,6 +20,7 @@ from KaosEghis.core.kaospacs_client import check_kaospacs_health
 
 
 class SettingsTab(QWidget):
+    TOP_PAGES = ["General", "PACS"]
     PACS_DEFAULTS = {
         "eghis_db_connection_string": DEFAULT_SETTINGS["eghis_db_connection_string"],
         "eghis_db_image_study_query": DEFAULT_SETTINGS["eghis_db_image_study_query"],
@@ -36,13 +38,25 @@ class SettingsTab(QWidget):
         "pacs_dry_run": DEFAULT_SETTINGS["pacs_dry_run"],
     }
 
-    def __init__(self, db_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+    ) -> None:
         super().__init__()
         self._db_path = db_path
+        self.nav_buttons: dict[str, QPushButton] = {}
+        self.top_nav_row = QHBoxLayout()
+        self.stacked_widget = QStackedWidget()
 
         self.process_name = QLineEdit()
         self.window_title = QLineEdit()
         self.kaosgdd_url = QLineEdit()
+        self.memos_url = QLineEdit()
+        self.paperless_url = QLineEdit()
+        self.stirling_pdf_url = QLineEdit()
+        self.rhwp_url = QLineEdit()
+        self.wikijs_url = QLineEdit()
+        self.sftpgo_url = QLineEdit()
         self.credential_ref = QLineEdit()
         self.eghis_db_connection_string = QLineEdit()
         self.eghis_db_connection_string.setEchoMode(QLineEdit.EchoMode.Password)
@@ -78,22 +92,27 @@ class SettingsTab(QWidget):
         self.toggle_connection_string_button.clicked.connect(
             self.toggle_connection_string_visibility
         )
+        self.save_general_button = QPushButton("Save Settings")
+        self.save_general_button.clicked.connect(self.save_general_settings)
 
-        save_button = QPushButton("Save Settings")
-        save_button.clicked.connect(self.save_general_settings)
+        self.reload_general_button = QPushButton("Reload Settings")
+        self.reload_general_button.clicked.connect(self.load_settings)
 
-        reload_button = QPushButton("Reload Settings")
-        reload_button.clicked.connect(self.load_settings)
-
-        buttons = QHBoxLayout()
-        buttons.addWidget(save_button)
-        buttons.addWidget(reload_button)
-        buttons.addStretch()
+        general_buttons = QHBoxLayout()
+        general_buttons.addWidget(self.save_general_button)
+        general_buttons.addWidget(self.reload_general_button)
+        general_buttons.addStretch()
 
         form = QFormLayout()
         form.addRow("Eghis process name", self.process_name)
         form.addRow("Eghis window title contains", self.window_title)
         form.addRow("KaosGDD URL", self.kaosgdd_url)
+        form.addRow("Memos URL", self.memos_url)
+        form.addRow("Paperless URL", self.paperless_url)
+        form.addRow("Stirling-PDF URL", self.stirling_pdf_url)
+        form.addRow("rHWP URL", self.rhwp_url)
+        form.addRow("Wiki.js URL", self.wikijs_url)
+        form.addRow("SFTPGo URL", self.sftpgo_url)
         form.addRow("Credential reference name", self.credential_ref)
 
         connection_string_widget = QWidget()
@@ -130,20 +149,47 @@ class SettingsTab(QWidget):
         pacs_buttons.addWidget(self.reset_pacs_button, 0, 1)
         pacs_buttons.addWidget(self.test_kaospacs_button, 1, 0, 1, 2)
 
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addLayout(buttons)
-        layout.addWidget(self.sqlite_path_label)
-        layout.addWidget(self.general_status)
-        layout.addSpacing(12)
-        layout.addWidget(QLabel("PACS Settings"))
-        layout.addWidget(self.pacs_info)
-        layout.addLayout(pacs_form)
-        layout.addLayout(pacs_buttons)
-        layout.addWidget(self.pacs_status)
-        layout.addStretch()
+        self.general_page = QWidget()
+        general_layout = QVBoxLayout(self.general_page)
+        general_layout.addLayout(form)
+        general_layout.addLayout(general_buttons)
+        general_layout.addWidget(self.sqlite_path_label)
+        general_layout.addWidget(self.general_status)
+        general_layout.addStretch()
 
+        self.pacs_page = QWidget()
+        pacs_layout = QVBoxLayout(self.pacs_page)
+        pacs_layout.addWidget(QLabel("PACS Settings"))
+        pacs_layout.addWidget(self.pacs_info)
+        pacs_layout.addLayout(pacs_form)
+        pacs_layout.addLayout(pacs_buttons)
+        pacs_layout.addWidget(self.pacs_status)
+        pacs_layout.addStretch()
+
+        for page in (self.general_page, self.pacs_page):
+            self.stacked_widget.addWidget(page)
+
+        for index, name in enumerate(self.TOP_PAGES):
+            button = QPushButton(name)
+            button.setCheckable(True)
+            button.clicked.connect(
+                lambda _checked=False, page_index=index: self.show_page(page_index)
+            )
+            self.nav_buttons[name] = button
+            self.top_nav_row.addWidget(button)
+        self.top_nav_row.addStretch()
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(self.top_nav_row)
+        layout.addWidget(self.stacked_widget, 1)
+
+        self.show_page(0)
         self.load_settings()
+
+    def show_page(self, index: int) -> None:
+        self.stacked_widget.setCurrentIndex(index)
+        for button_index, name in enumerate(self.TOP_PAGES):
+            self.nav_buttons[name].setChecked(button_index == index)
 
     def load_settings(self) -> None:
         initialize_database(self._db_path)
@@ -155,6 +201,12 @@ class SettingsTab(QWidget):
         self.process_name.setText(settings["eghis_process_name"])
         self.window_title.setText(settings["eghis_window_title_contains"])
         self.kaosgdd_url.setText(settings["kaosgdd_url"])
+        self.memos_url.setText(settings["memos_url"])
+        self.paperless_url.setText(settings["paperless_url"])
+        self.stirling_pdf_url.setText(settings["stirling_pdf_url"])
+        self.rhwp_url.setText(settings["rhwp_url"])
+        self.wikijs_url.setText(settings["wikijs_url"])
+        self.sftpgo_url.setText(settings["sftpgo_url"])
         self.credential_ref.setText(settings["credential_reference_name"])
         self.eghis_db_connection_string.setText(
             settings["eghis_db_connection_string"]
@@ -192,6 +244,12 @@ class SettingsTab(QWidget):
             "eghis_process_name": self.process_name.text().strip(),
             "eghis_window_title_contains": self.window_title.text().strip(),
             "kaosgdd_url": self.kaosgdd_url.text().strip(),
+            "memos_url": self.memos_url.text().strip(),
+            "paperless_url": self.paperless_url.text().strip(),
+            "stirling_pdf_url": self.stirling_pdf_url.text().strip(),
+            "rhwp_url": self.rhwp_url.text().strip(),
+            "wikijs_url": self.wikijs_url.text().strip(),
+            "sftpgo_url": self.sftpgo_url.text().strip(),
             "credential_reference_name": self.credential_ref.text().strip(),
         }
         initialize_database(self._db_path)

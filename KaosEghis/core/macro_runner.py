@@ -12,6 +12,8 @@ from KaosEghis.core.clipboard_service import copy_text, restore_clipboard
 from KaosEghis.core.eghis_connector import (
     build_connector_settings,
     ensure_cached_connection_ready,
+    focus_cached_eghis_window,
+    get_cached_eghis_state,
     refresh_cached_eghis_state,
 )
 from KaosEghis.core.macro_models import MacroRunResult, MacroStep
@@ -53,6 +55,8 @@ class MacroRunner:
         self._current_profile_name: str | None = None
         self._current_profile_id: int | None = None
         self._connection_ready_confirmed = False
+        self._use_cached_focus = False
+        self._window_focus_applied = False
         self._resolved_target_cache: dict[tuple[int | None, str, str | None], object] = {}
         self._resolved_target_aliases: dict[str, tuple[int | None, str, str | None]] = {}
         self._run_metrics = _RunMetrics()
@@ -147,6 +151,10 @@ class MacroRunner:
         executed_steps = 0
         self._current_settings = settings
         self._connection_ready_confirmed = True
+        cached_state = get_cached_eghis_state()
+        self._use_cached_focus = bool(
+            cached_state is not None and getattr(state, "window_handle", None) is not None
+        )
         for step in steps:
             if self._cancel_requested:
                 self._clear_resolved_target_cache()
@@ -265,6 +273,8 @@ class MacroRunner:
             return self._run_set_edit_text(step, self._require_settings())
         if action == "preset_text":
             return self._run_preset_text(step, self._require_settings())
+        if action == "legacy_symptom_paste":
+            return self._run_legacy_symptom_paste(step, self._require_settings())
         return MacroRunResult(False, "unsupported action", 0, None)
 
     def _run_delay(self, step: MacroStep) -> MacroRunResult:
@@ -308,13 +318,18 @@ class MacroRunner:
         )
 
     def _run_focus_window(self, settings: dict[str, str]) -> MacroRunResult:
-        if self._connection_ready_confirmed and self._current_settings == settings:
-            return MacroRunResult(True, "Focused configured Eghis window.", 1, None)
-        state = ensure_cached_connection_ready(settings)
+        if self._connection_ready_confirmed or self._use_cached_focus:
+            state = focus_cached_eghis_window(settings)
+            if state.status != "green":
+                state = ensure_cached_connection_ready(settings)
+        else:
+            state = ensure_cached_connection_ready(settings)
         if state.status != "green":
             self._clear_resolved_target_cache()
+            self._window_focus_applied = False
             return MacroRunResult(False, state.message or "window not ready", 0, None)
         self._connection_ready_confirmed = True
+        self._window_focus_applied = True
         return MacroRunResult(True, "Focused configured Eghis window.", 1, None)
 
     def _run_wait_window(
@@ -482,6 +497,20 @@ class MacroRunner:
         return MacroRunResult(True, f"Double-clicked target '{step.target_id}'.", 1, None)
 
     def _run_hotkey(self, step: MacroStep) -> MacroRunResult:
+        if step.target_id:
+            if self._is_window_anchor_target(step.target_id):
+                if not self._window_focus_applied:
+                    focus_result = self._run_focus_window(self._require_settings())
+                    if not focus_result.success:
+                        return focus_result
+                    time.sleep(0.12)
+            else:
+                target_result = self._focus_runtime_target(
+                    step,
+                    require_keyboard_focus=False,
+                )
+                if target_result is not None:
+                    return target_result
         key = step.options.get("key", step.value)
         if not isinstance(key, str) or not key:
             return MacroRunResult(False, "unknown error", 0, None)
@@ -493,12 +522,29 @@ class MacroRunner:
 
     def _run_type_text(self, step: MacroStep) -> MacroRunResult:
         if step.target_id:
-            target_result = self._focus_runtime_target(step)
+            target_result = self._focus_runtime_target(step, require_keyboard_focus=True)
             if target_result is not None:
                 return target_result
+        else:
+            readiness_result = self._prepare_blind_emr_text_input()
+            if readiness_result is not None:
+                return readiness_result
         text = step.options.get("text", step.value)
         if not isinstance(text, str) or not text:
             return MacroRunResult(False, "unknown error", 0, None)
+        pasted = self._try_clipboard_text_action(
+            text,
+            press_enter_before=step.options.get("press_enter_before", False),
+            press_enter_after=step.options.get("press_enter_after", False),
+        )
+        if pasted:
+            if step.options.get("press_enter_before", False) and step.options.get("press_enter_after", False):
+                return MacroRunResult(True, "Pressed Enter, typed text, and pressed Enter.", 1, None)
+            if step.options.get("press_enter_before", False):
+                return MacroRunResult(True, "Pressed Enter and typed text.", 1, None)
+            if step.options.get("press_enter_after", False):
+                return MacroRunResult(True, "Typed text and pressed Enter.", 1, None)
+            return MacroRunResult(True, "Typed text.", 1, None)
         if not self._send_text_direct(
             text,
             press_enter_before=step.options.get("press_enter_before", False),
@@ -515,9 +561,13 @@ class MacroRunner:
 
     def _run_paste_text(self, step: MacroStep) -> MacroRunResult:
         if step.target_id:
-            target_result = self._focus_runtime_target(step)
+            target_result = self._focus_runtime_target(step, require_keyboard_focus=True)
             if target_result is not None:
                 return target_result
+        else:
+            readiness_result = self._prepare_blind_emr_text_input()
+            if readiness_result is not None:
+                return readiness_result
         text = step.options.get("text", step.value)
         if not isinstance(text, str) or not text:
             return MacroRunResult(False, "clipboard failed", 0, None)
@@ -549,6 +599,63 @@ class MacroRunner:
             return MacroRunResult(True, self._text_action_success_message(step, pasted=True), 1, None)
         return MacroRunResult(True, self._text_action_success_message(step, pasted=True), 1, None)
 
+    def _try_clipboard_text_action(
+        self,
+        text: str,
+        *,
+        press_enter_before: bool = False,
+        press_enter_after: bool = False,
+    ) -> bool:
+        snapshot = None
+        try:
+            snapshot = copy_text(text)
+            self._send_clipboard_paste(
+                press_enter_before=press_enter_before,
+                press_enter_after=press_enter_after,
+            )
+        except Exception:
+            if snapshot is not None:
+                try:
+                    restore_clipboard(snapshot)
+                except Exception:
+                    pass
+            return False
+        try:
+            restore_clipboard(snapshot)
+        except Exception:
+            pass
+        return True
+
+    def _prepare_blind_emr_text_input(self) -> MacroRunResult | None:
+        if not self._current_settings or not self._connection_ready_confirmed:
+            return None
+        state = focus_cached_eghis_window(self._current_settings)
+        if state.status != "green":
+            state = ensure_cached_connection_ready(self._current_settings)
+        if state.status != "green":
+            self._clear_resolved_target_cache()
+            self._window_focus_applied = False
+            return MacroRunResult(False, state.message or "window not ready", 0, None)
+        self._window_focus_applied = True
+        self._legacy_input_settle()
+        return None
+
+    @staticmethod
+    def _legacy_input_settle(duration_seconds: float = 0.2) -> None:
+        try:
+            import pyautogui
+
+            current_mouse = pyautogui.position()
+            delta = max(1, int(30 * duration_seconds))
+            quarter = max(0.01, duration_seconds / 4)
+            half = max(0.01, duration_seconds / 2)
+            pyautogui.move(-delta, 0, duration=quarter)
+            pyautogui.move(delta * 2, 0, duration=half)
+            pyautogui.move(-delta, 0, duration=quarter)
+            pyautogui.moveTo(current_mouse)
+        except Exception:
+            time.sleep(max(0.05, duration_seconds))
+
     def _run_preset_text(
         self,
         step: MacroStep,
@@ -575,6 +682,49 @@ class MacroRunner:
             },
         )
         return self._run_paste_text(preset_step)
+
+    def _run_legacy_symptom_paste(
+        self,
+        step: MacroStep,
+        settings: dict[str, str],
+    ) -> MacroRunResult:
+        reference = step.options.get("preset", step.value)
+        if not isinstance(reference, str) or not reference.strip():
+            return MacroRunResult(False, "clipboard failed", 0, None)
+
+        text = self._resolve_preset_text(reference.strip())
+        if text is None:
+            text = reference.strip()
+        if not text:
+            return MacroRunResult(False, "clipboard failed", 0, None)
+
+        focus_result = self._run_focus_window(settings)
+        if not focus_result.success:
+            return focus_result
+
+        self._legacy_input_settle()
+
+        snapshot = None
+        try:
+            snapshot = copy_text(text)
+            self._send_hotkey_sequence("{F1},{ENTER}")
+            time.sleep(0.08)
+            self._send_clipboard_paste()
+            time.sleep(0.05)
+            self._send_hotkey_sequence("{ENTER}")
+        except Exception:
+            if snapshot is not None:
+                try:
+                    restore_clipboard(snapshot)
+                except Exception:
+                    pass
+            return MacroRunResult(False, "input failed" if snapshot is not None else "clipboard failed", 0, None)
+
+        try:
+            restore_clipboard(snapshot)
+        except Exception:
+            pass
+        return MacroRunResult(True, "Pasted legacy symptom text.", 1, None)
 
     def _run_set_text_uia(
         self,
@@ -714,15 +864,27 @@ class MacroRunner:
         press_enter_before: bool = False,
         press_enter_after: bool = False,
     ) -> None:
-        from pywinauto.keyboard import send_keys
+        try:
+            import pyautogui
+
+            if press_enter_before:
+                pyautogui.press("enter")
+            time.sleep(0.05)
+            pyautogui.hotkey("ctrl", "v", interval=0.01)
+            time.sleep(0.15)
+            if press_enter_after:
+                pyautogui.press("enter")
+            return
+        except Exception:
+            pass
 
         if press_enter_before:
-            send_keys("{ENTER}")
+            MacroRunner._send_keys("{ENTER}")
         time.sleep(0.05)
-        send_keys("^v")
+        MacroRunner._send_keys("^v")
         time.sleep(0.15)
         if press_enter_after:
-            send_keys("{ENTER}")
+            MacroRunner._send_keys("{ENTER}")
 
     @staticmethod
     def _send_text_direct(
@@ -732,16 +894,15 @@ class MacroRunner:
         press_enter_after: bool = False,
     ) -> bool:
         try:
-            from pywinauto.keyboard import send_keys
-
             if press_enter_before:
-                send_keys("{ENTER}")
-            send_keys(text)
+                MacroRunner._send_keys("{ENTER}")
+            MacroRunner._send_keys(text)
             if press_enter_after:
-                send_keys("{ENTER}")
+                MacroRunner._send_keys("{ENTER}")
         except Exception:
             return False
         return True
+
 
     @staticmethod
     def _set_text_uia_on_element(element: object, text: str) -> bool:
@@ -791,10 +952,36 @@ class MacroRunner:
 
     @staticmethod
     def _send_hotkey_sequence(key: str) -> None:
+        for segment in [part.strip() for part in key.split(",") if part.strip()]:
+            if not MacroRunner._send_hotkey_segment_legacy(segment):
+                MacroRunner._send_keys(_normalize_hotkey_segment(segment))
+            time.sleep(0.03)
+
+    @staticmethod
+    def _send_keys(keys: str) -> None:
         from pywinauto.keyboard import send_keys
 
-        for segment in [part.strip() for part in key.split(",") if part.strip()]:
-            send_keys(_normalize_hotkey_segment(segment))
+        try:
+            send_keys(keys, vk_packet=False)
+        except TypeError:
+            send_keys(keys)
+
+    @staticmethod
+    def _send_hotkey_segment_legacy(segment: str) -> bool:
+        parsed = _parse_legacy_hotkey_segment(segment)
+        if parsed is None:
+            return False
+        modifiers, key = parsed
+        try:
+            import pyautogui
+
+            if modifiers:
+                pyautogui.hotkey(*modifiers, key, interval=0.01)
+            else:
+                pyautogui.press(key)
+            return True
+        except Exception:
+            return False
 
     @staticmethod
     def _text_action_success_message(step: MacroStep, *, pasted: bool) -> str:
@@ -842,10 +1029,22 @@ class MacroRunner:
         self._run_metrics.resolved_targets = len(self._resolved_target_cache)
         return element, "Target resolved."
 
-    def _focus_runtime_target(self, step: MacroStep) -> MacroRunResult | None:
+    def _focus_runtime_target(
+        self,
+        step: MacroStep,
+        *,
+        require_keyboard_focus: bool = False,
+    ) -> MacroRunResult | None:
         if not step.target_id:
             return None
         settings = self._require_settings()
+        target_record = None
+        with connect(self._db_path or get_database_path()) as connection:
+            target_record, _cache_key = self._load_runtime_target_record(
+                connection, step.target_id
+            )
+        if target_record is None:
+            return MacroRunResult(False, "target not found", 0, None)
         target, resolve_message = self._resolve_runtime_target(settings, step.target_id)
         if target is None:
             return MacroRunResult(False, resolve_message, 0, None)
@@ -863,7 +1062,37 @@ class MacroRunner:
             if not focused:
                 self._clear_resolved_target_cache()
                 return MacroRunResult(False, focus_message, 0, None)
+        if require_keyboard_focus and not self._target_has_keyboard_focus(
+            settings,
+            target_record,
+            timeout_seconds=step.timeout_seconds,
+        ):
+            self._clear_resolved_target_cache()
+            return MacroRunResult(False, "window not ready", 0, None)
         return None
+
+    @staticmethod
+    def _keyboard_focus_timeout_ms(timeout_seconds: float) -> int:
+        requested_ms = max(0, int(float(timeout_seconds or 0.0) * 1000))
+        if requested_ms <= 0:
+            return 400
+        return max(250, min(requested_ms, 1200))
+
+    def _target_has_keyboard_focus(
+        self,
+        settings: dict[str, str],
+        target_record: UiTargetRecord,
+        *,
+        timeout_seconds: float,
+    ) -> bool:
+        result = wait_for_target_condition(
+            settings,
+            target_record,
+            WaitCondition.KEYBOARD_FOCUS,
+            timeout_ms=self._keyboard_focus_timeout_ms(timeout_seconds),
+            poll_ms=50,
+        )
+        return result.success
 
     @staticmethod
     def _focus_target_element(element: object) -> tuple[bool, str]:
@@ -1185,6 +1414,11 @@ class MacroRunner:
                 f"{display_order}. preset_text value={step.value}{timing_text} "
                 "(dry run only)"
             )
+        if action == "legacy_symptom_paste":
+            return (
+                f"{display_order}. legacy_symptom_paste value={step.value}{timing_text} "
+                "(legacy F1/Enter/paste/Enter, dry run only)"
+            )
         if action == "wait_text_or_image":
             return (
                 f"{display_order}. wait_text_or_image{target}{timing_text} "
@@ -1242,6 +1476,8 @@ class MacroRunner:
     def _start_run_state(self) -> None:
         self._clear_resolved_target_cache()
         self._connection_ready_confirmed = False
+        self._use_cached_focus = False
+        self._window_focus_applied = False
         self._run_metrics = _RunMetrics()
 
     def _clear_resolved_target_cache(self) -> None:
@@ -1441,6 +1677,31 @@ class MacroRunner:
             or "grdOpdList",
         )
 
+    def _is_window_anchor_target(self, target_id: str) -> bool:
+        if target_id == "eghis_main":
+            return True
+        try:
+            with connect(self._db_path or get_database_path()) as connection:
+                target_record, _cache_key = self._load_runtime_target_record(
+                    connection, target_id
+                )
+        except Exception:
+            return False
+        if target_record is None:
+            return False
+        if target_record.target_id == "eghis_main":
+            return True
+        if target_record.parent_target_id or target_record.parent_automation_id:
+            return False
+        automation_id = (target_record.automation_id or "").strip().casefold()
+        configured_main = (
+            (self._current_settings or {}).get("eghis_main_window_automation_id", "")
+            or ""
+        ).strip().casefold()
+        if automation_id and configured_main and automation_id == configured_main:
+            return True
+        return automation_id in {"mdimain", "h2opdtreatment"}
+
 
 def _db_macro_step_to_runtime_step(step) -> MacroStep:
     options: dict[str, object] = {"step_order": step.step_order}
@@ -1504,6 +1765,67 @@ def _normalize_hotkey_segment(segment: str) -> str:
     if prefixes:
         return prefixes + normalized
     return normalized
+
+
+def _parse_legacy_hotkey_segment(segment: str) -> tuple[list[str], str] | None:
+    normalized = segment.strip()
+    if not normalized:
+        return None
+
+    modifier_tokens = {
+        "{ALT}": "alt",
+        "{CTRL}": "ctrl",
+        "{CONTROL}": "ctrl",
+        "{SHIFT}": "shift",
+        "{WIN}": "win",
+    }
+    modifier_prefixes = {
+        "^": "ctrl",
+        "%": "alt",
+        "+": "shift",
+        "#": "win",
+    }
+
+    modifiers: list[str] = []
+    while normalized:
+        matched = False
+        for token, modifier in modifier_tokens.items():
+            if normalized.upper().startswith(token):
+                modifiers.append(modifier)
+                normalized = normalized[len(token) :].lstrip()
+                matched = True
+                break
+        if matched:
+            continue
+        prefix = modifier_prefixes.get(normalized[0])
+        if prefix is not None:
+            modifiers.append(prefix)
+            normalized = normalized[1:].lstrip()
+            continue
+        break
+
+    if not normalized:
+        return None
+
+    key_token = normalized
+    if key_token.startswith("{") and key_token.endswith("}") and len(key_token) >= 3:
+        key_token = key_token[1:-1]
+
+    key = key_token.strip().casefold()
+    key_aliases = {
+        "control": "ctrl",
+        "return": "enter",
+        "esc": "escape",
+        "del": "delete",
+        "ins": "insert",
+        "pgup": "pageup",
+        "pgdn": "pagedown",
+        "bksp": "backspace",
+    }
+    key = key_aliases.get(key, key)
+    if not key:
+        return None
+    return modifiers, key
 
 
 def _message_indicates_window_not_ready(message: str) -> bool:

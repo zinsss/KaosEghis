@@ -13,6 +13,12 @@ DEFAULT_SETTINGS = {
     "eghis_patient_status_tab_automation_id": "tabProc",
     "launcher_quick_notes": "",
     "kaosgdd_url": "https://kaosgdd.net",
+    "memos_url": "http://100.94.208.16:5230/",
+    "paperless_url": "http://100.94.208.16:8000/",
+    "stirling_pdf_url": "http://100.94.208.16:8082/",
+    "rhwp_url": "http://100.94.208.16:8085/rhwp/",
+    "wikijs_url": "http://100.94.208.16:3001/",
+    "sftpgo_url": "http://100.94.208.16:8081/web/client/login",
     "credential_reference_name": "default",
     "eghis_db_connection_string": "",
     "eghis_db_image_study_query": "",
@@ -28,6 +34,87 @@ DEFAULT_SETTINGS = {
     "pacs_auto_poll_enabled": "false",
     "pacs_poll_interval_seconds": "60",
     "pacs_dry_run": "false",
+    "vaccine_influenza_daily_cap": "100",
+    "vaccine_covid_daily_cap": "100",
+    "vaccine_schedule_rules_json": json.dumps(
+        {
+            "influenza": {
+                "season_name": "2026-2027",
+                "elderly_75_plus_start": "2026-10-11",
+                "elderly_70_74_start": "2026-10-15",
+                "elderly_65_69_start": "2026-10-18",
+                "elderly_program_end": "2027-04-30",
+                "child_two_dose_start": "2026-09-20",
+                "child_two_dose_end": "2027-04-30",
+                "child_one_dose_start": "2026-10-05",
+                "child_one_dose_end": "2027-04-30",
+                "daily_cap": 100,
+            },
+            "covid": {
+                "season_name": "2026-2027",
+                "program_start": "",
+                "program_end": "",
+                "daily_cap": 100,
+            },
+        },
+        ensure_ascii=False,
+        indent=2,
+    ),
+    "vaccine_age_groups_json": json.dumps(
+        [
+            {
+                "key": "elderly_75_plus",
+                "label": "Elderly 75+",
+                "vaccine": "influenza",
+                "birth_date_from": "",
+                "birth_date_to": "",
+            },
+            {
+                "key": "elderly_70_74",
+                "label": "Elderly 70-74",
+                "vaccine": "influenza",
+                "birth_date_from": "",
+                "birth_date_to": "",
+            },
+            {
+                "key": "elderly_65_69",
+                "label": "Elderly 65-69",
+                "vaccine": "influenza",
+                "birth_date_from": "",
+                "birth_date_to": "",
+            },
+            {
+                "key": "child_two_dose",
+                "label": "Child two-dose",
+                "vaccine": "influenza",
+                "birth_date_from": "",
+                "birth_date_to": "",
+            },
+            {
+                "key": "child_one_dose",
+                "label": "Child one-dose",
+                "vaccine": "influenza",
+                "birth_date_from": "",
+                "birth_date_to": "",
+            },
+            {
+                "key": "exception_influenza",
+                "label": "Exception influenza",
+                "vaccine": "influenza",
+                "birth_date_from": "",
+                "birth_date_to": "",
+            },
+            {
+                "key": "national_covid",
+                "label": "National COVID",
+                "vaccine": "covid",
+                "birth_date_from": "",
+                "birth_date_to": "",
+            },
+        ],
+        ensure_ascii=False,
+        indent=2,
+    ),
 }
 
 
@@ -51,6 +138,7 @@ class ItemRecord:
     name: str
     item_type: str
     is_enabled: bool
+    is_launcher_exposed: bool
     emr_target_profile_id: int | None
     launcher_section: str
     launcher_position: int
@@ -145,6 +233,27 @@ class SchedulerRunRecord:
 
 
 @dataclass(frozen=True)
+class SoclCollectionRecord:
+    id: int
+    domain: str
+    name: str
+    sort_order: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class SoclFindingRecord:
+    id: int
+    collection_id: int
+    label: str
+    render_text: str
+    sort_order: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class PacsWorklistItemRecord:
     id: int
     status: str
@@ -220,8 +329,37 @@ class EmrUiTargetRecord:
     ancestor_path: str | None = None
 
 
+@dataclass(frozen=True)
+class VaccineTypeRecord:
+    id: int
+    name: str
+    code: str | None
+    chart_note_template: str | None
+    is_active: bool
+    sort_order: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class VaccineRecord:
+    id: int
+    vaccine_type_id: int | None
+    vaccine_type_name: str
+    patient_chart_no: str | None
+    patient_resident_id: str | None
+    patient_name: str | None
+    patient_sex: str | None
+    patient_age: str | None
+    patient_phone: str | None
+    patient_address: str | None
+    status: str
+    created_at: str
+    updated_at: str
+
+
 SUPPORTED_ITEM_TYPES = {"clipboard", "randomized_clipboard", "macro", "workflow"}
-LAUNCHER_SECTIONS = ("Favorite", "Macro", "Comments")
+LAUNCHER_SECTIONS = ("Macro", "Comments", "Actions")
 LAUNCHER_ITEM_TYPES = ("macro", "clipboard", "randomized_clipboard")
 ALLOWED_MACRO_ACTIONS = {
     "focus_window",
@@ -235,6 +373,7 @@ ALLOWED_MACRO_ACTIONS = {
     "type_text",
     "paste_text",
     "preset_text",
+    "legacy_symptom_paste",
     "set_edit_text",
     "delay_ms",
     # Legacy actions kept for existing saved definitions and older dry-run tests.
@@ -248,6 +387,7 @@ ALLOWED_MACRO_ACTIONS = {
 }
 ALLOWED_SCHEDULER_MISSED_RUN_POLICIES = {"skip", "prompt"}
 ALLOWED_SCHEDULER_RUN_TRIGGERS = {"scheduled", "manual"}
+ALLOWED_SOCL_DOMAINS = {"subjective", "objective"}
 
 LEGACY_PACS_WORKLIST_STATUS_ALIASES = {
     "done": "completed",
@@ -304,20 +444,25 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
     if item_type is None:
         rows = connection.execute(
             """
-            SELECT id, name, item_type, is_enabled, emr_target_profile_id,
+            SELECT id, name, item_type, is_enabled, is_launcher_exposed,
+                   emr_target_profile_id,
                    launcher_section, launcher_position, created_at, updated_at
             FROM items
             ORDER BY name
             """
         )
     else:
+        order_by = "ORDER BY name"
+        if item_type == "macro":
+            order_by = "ORDER BY launcher_position, id"
         rows = connection.execute(
-            """
-            SELECT id, name, item_type, is_enabled, emr_target_profile_id,
+            f"""
+            SELECT id, name, item_type, is_enabled, is_launcher_exposed,
+                   emr_target_profile_id,
                    launcher_section, launcher_position, created_at, updated_at
             FROM items
             WHERE item_type = ?
-            ORDER BY name
+            {order_by}
             """,
             (item_type,),
         )
@@ -327,7 +472,8 @@ def list_items(connection: sqlite3.Connection, item_type: str | None = None) -> 
 def get_item(connection: sqlite3.Connection, item_id: int) -> ItemRecord | None:
     row = connection.execute(
         """
-        SELECT id, name, item_type, is_enabled, emr_target_profile_id,
+        SELECT id, name, item_type, is_enabled, is_launcher_exposed,
+               emr_target_profile_id,
                launcher_section, launcher_position, created_at, updated_at
         FROM items
         WHERE id = ?
@@ -346,15 +492,14 @@ def create_item(
     is_enabled: bool = True,
     emr_target_profile_id: int | None = None,
     launcher_section: str | None = None,
+    is_launcher_exposed: bool = True,
 ) -> ItemRecord:
     _validate_item_type(item_type)
-    default_section = (
-        "Comments"
-        if item_type in {"clipboard", "randomized_clipboard"}
-        else "Macro"
-    )
-    normalized_launcher_section = _normalize_launcher_section(
-        launcher_section or default_section
+    normalized_launcher_section = _coerce_launcher_section_for_item_type(
+        item_type,
+        _normalize_launcher_section(
+            launcher_section or _default_launcher_section_for_item_type(item_type)
+        ),
     )
     launcher_position = _next_launcher_position(
         connection,
@@ -363,15 +508,16 @@ def create_item(
     cursor = connection.execute(
         """
         INSERT INTO items (
-            name, item_type, is_enabled, emr_target_profile_id,
+            name, item_type, is_enabled, is_launcher_exposed, emr_target_profile_id,
             launcher_section, launcher_position
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
             name.strip(),
             item_type,
             int(is_enabled),
+            int(is_launcher_exposed),
             emr_target_profile_id,
             normalized_launcher_section,
             launcher_position,
@@ -384,6 +530,309 @@ def create_item(
     return created
 
 
+def list_socl_collections(
+    connection: sqlite3.Connection,
+    domain: str | None = None,
+) -> list[SoclCollectionRecord]:
+    if domain is None:
+        rows = connection.execute(
+            """
+            SELECT id, domain, name, sort_order, created_at, updated_at
+            FROM socl_collections
+            ORDER BY CASE domain WHEN 'subjective' THEN 0 ELSE 1 END,
+                     sort_order, id
+            """
+        )
+    else:
+        _validate_socl_domain(domain)
+        rows = connection.execute(
+            """
+            SELECT id, domain, name, sort_order, created_at, updated_at
+            FROM socl_collections
+            WHERE domain = ?
+            ORDER BY sort_order, id
+            """,
+            (domain,),
+        )
+    return [_socl_collection_from_row(row) for row in rows]
+
+
+def get_socl_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+) -> SoclCollectionRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, domain, name, sort_order, created_at, updated_at
+        FROM socl_collections
+        WHERE id = ?
+        """,
+        (collection_id,),
+    ).fetchone()
+    return _socl_collection_from_row(row) if row is not None else None
+
+
+def create_socl_collection(
+    connection: sqlite3.Connection,
+    domain: str,
+    name: str,
+) -> SoclCollectionRecord:
+    _validate_socl_domain(domain)
+    normalized_name = _required_socl_text(name, "Collection name")
+    _ensure_socl_collection_name_available(connection, domain, normalized_name)
+    row = connection.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM socl_collections WHERE domain = ?",
+        (domain,),
+    ).fetchone()
+    cursor = connection.execute(
+        """
+        INSERT INTO socl_collections (domain, name, sort_order)
+        VALUES (?, ?, ?)
+        """,
+        (domain, normalized_name, int(row[0] if row is not None else 1)),
+    )
+    connection.commit()
+    created = get_socl_collection(connection, cursor.lastrowid)
+    if created is None:
+        raise RuntimeError("Failed to create SOCL collection.")
+    return created
+
+
+def update_socl_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    name: str,
+) -> SoclCollectionRecord | None:
+    current = get_socl_collection(connection, collection_id)
+    if current is None:
+        return None
+    normalized_name = _required_socl_text(name, "Collection name")
+    _ensure_socl_collection_name_available(
+        connection,
+        current.domain,
+        normalized_name,
+        exclude_id=collection_id,
+    )
+    connection.execute(
+        """
+        UPDATE socl_collections
+        SET name = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (normalized_name, collection_id),
+    )
+    connection.commit()
+    return get_socl_collection(connection, collection_id)
+
+
+def delete_socl_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+) -> bool:
+    connection.execute(
+        "DELETE FROM socl_findings WHERE collection_id = ?",
+        (collection_id,),
+    )
+    cursor = connection.execute(
+        "DELETE FROM socl_collections WHERE id = ?",
+        (collection_id,),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def move_socl_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    direction: int,
+) -> SoclCollectionRecord | None:
+    current = get_socl_collection(connection, collection_id)
+    if current is None:
+        return None
+    ordered = list_socl_collections(connection, current.domain)
+    return _move_socl_record(
+        connection,
+        "socl_collections",
+        ordered,
+        collection_id,
+        direction,
+        get_socl_collection,
+    )
+
+
+def list_socl_findings(
+    connection: sqlite3.Connection,
+    collection_id: int,
+) -> list[SoclFindingRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, collection_id, label, render_text, sort_order,
+               created_at, updated_at
+        FROM socl_findings
+        WHERE collection_id = ?
+        ORDER BY sort_order, id
+        """,
+        (collection_id,),
+    )
+    return [_socl_finding_from_row(row) for row in rows]
+
+
+def get_socl_finding(
+    connection: sqlite3.Connection,
+    finding_id: int,
+) -> SoclFindingRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, collection_id, label, render_text, sort_order,
+               created_at, updated_at
+        FROM socl_findings
+        WHERE id = ?
+        """,
+        (finding_id,),
+    ).fetchone()
+    return _socl_finding_from_row(row) if row is not None else None
+
+
+def create_socl_finding(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    label: str,
+    render_text: str | None = None,
+) -> SoclFindingRecord:
+    if get_socl_collection(connection, collection_id) is None:
+        raise ValueError("SOCL collection was not found.")
+    normalized_label = _required_socl_text(label, "Finding label")
+    normalized_render_text = _required_socl_text(
+        render_text if render_text is not None else normalized_label,
+        "Rendered phrase",
+    )
+    _ensure_socl_finding_label_available(
+        connection,
+        collection_id,
+        normalized_label,
+    )
+    row = connection.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM socl_findings WHERE collection_id = ?",
+        (collection_id,),
+    ).fetchone()
+    cursor = connection.execute(
+        """
+        INSERT INTO socl_findings (
+            collection_id, label, render_text, sort_order
+        )
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            collection_id,
+            normalized_label,
+            normalized_render_text,
+            int(row[0] if row is not None else 1),
+        ),
+    )
+    connection.commit()
+    created = get_socl_finding(connection, cursor.lastrowid)
+    if created is None:
+        raise RuntimeError("Failed to create SOCL finding.")
+    return created
+
+
+def update_socl_finding(
+    connection: sqlite3.Connection,
+    finding_id: int,
+    label: str,
+    render_text: str,
+) -> SoclFindingRecord | None:
+    current = get_socl_finding(connection, finding_id)
+    if current is None:
+        return None
+    normalized_label = _required_socl_text(label, "Finding label")
+    normalized_render_text = _required_socl_text(render_text, "Rendered phrase")
+    _ensure_socl_finding_label_available(
+        connection,
+        current.collection_id,
+        normalized_label,
+        exclude_id=finding_id,
+    )
+    connection.execute(
+        """
+        UPDATE socl_findings
+        SET label = ?, render_text = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (normalized_label, normalized_render_text, finding_id),
+    )
+    connection.commit()
+    return get_socl_finding(connection, finding_id)
+
+
+def delete_socl_finding(connection: sqlite3.Connection, finding_id: int) -> bool:
+    cursor = connection.execute(
+        "DELETE FROM socl_findings WHERE id = ?",
+        (finding_id,),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def move_socl_finding(
+    connection: sqlite3.Connection,
+    finding_id: int,
+    direction: int,
+) -> SoclFindingRecord | None:
+    current = get_socl_finding(connection, finding_id)
+    if current is None:
+        return None
+    ordered = list_socl_findings(connection, current.collection_id)
+    return _move_socl_record(
+        connection,
+        "socl_findings",
+        ordered,
+        finding_id,
+        direction,
+        get_socl_finding,
+    )
+
+
+def restore_default_socl_vocabulary(connection: sqlite3.Connection) -> None:
+    from KaosEghis.db.socl_defaults import (
+        SOCL_CATALOG_VERSION,
+        SOCL_DEFAULT_COLLECTIONS,
+    )
+
+    connection.execute("DELETE FROM socl_findings")
+    connection.execute("DELETE FROM socl_collections")
+    for collection_order, (domain, name, findings) in enumerate(
+        SOCL_DEFAULT_COLLECTIONS,
+        start=1,
+    ):
+        cursor = connection.execute(
+            """
+            INSERT INTO socl_collections (domain, name, sort_order)
+            VALUES (?, ?, ?)
+            """,
+            (domain, name, collection_order),
+        )
+        for finding_order, label in enumerate(findings, start=1):
+            connection.execute(
+                """
+                INSERT INTO socl_findings (
+                    collection_id, label, render_text, sort_order
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (cursor.lastrowid, label, label, finding_order),
+            )
+    connection.execute(
+        """
+        INSERT INTO socl_metadata (key, value)
+        VALUES ('default_catalog_version', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (SOCL_CATALOG_VERSION,),
+    )
+    connection.commit()
+
+
 def update_item(
     connection: sqlite3.Connection,
     item_id: int,
@@ -392,6 +841,7 @@ def update_item(
     is_enabled: bool,
     emr_target_profile_id: int | None = None,
     launcher_section: str | None = None,
+    is_launcher_exposed: bool | None = None,
 ) -> ItemRecord | None:
     _validate_item_type(item_type)
     current = get_item(connection, item_id)
@@ -400,12 +850,19 @@ def update_item(
     normalized_launcher_section = _normalize_launcher_section(
         launcher_section or current.launcher_section
     )
+    exposed = (
+        current.is_launcher_exposed
+        if is_launcher_exposed is None
+        else bool(is_launcher_exposed)
+    )
+    existing_collection = get_launcher_collection_for_item(connection, item_id)
     connection.execute(
         """
         UPDATE items
         SET name = ?,
             item_type = ?,
             is_enabled = ?,
+            is_launcher_exposed = ?,
             emr_target_profile_id = ?,
             launcher_section = ?,
             updated_at = CURRENT_TIMESTAMP
@@ -415,12 +872,26 @@ def update_item(
             name.strip(),
             item_type,
             int(is_enabled),
+            int(exposed),
             emr_target_profile_id,
             normalized_launcher_section,
             item_id,
         ),
     )
     connection.commit()
+    if not exposed and existing_collection is not None:
+        removed, collapsed_item_id = remove_item_from_launcher_collection(
+            connection,
+            existing_collection.id,
+            item_id,
+        )
+        if removed and collapsed_item_id is not None:
+            update_item_launcher_placement(
+                connection,
+                collapsed_item_id,
+                existing_collection.launcher_section,
+                existing_collection.launcher_position,
+            )
     return get_item(connection, item_id)
 
 
@@ -430,21 +901,22 @@ def list_launcher_items(
 ) -> list[ItemRecord]:
     launcher_filter = """
         (
-            item_type IN ('clipboard', 'randomized_clipboard')
-            OR (
-                item_type = 'macro'
-                AND is_enabled = 1
-                AND id NOT IN (
-                    SELECT macro_item_id
-                    FROM launcher_collection_members
-                )
+            (
+                item_type IN ('clipboard', 'randomized_clipboard')
+                OR (item_type = 'macro' AND is_enabled = 1)
+            )
+            AND is_launcher_exposed = 1
+            AND id NOT IN (
+                SELECT macro_item_id
+                FROM launcher_collection_members
             )
         )
     """
     if launcher_section is None:
         rows = connection.execute(
             f"""
-            SELECT id, name, item_type, is_enabled, emr_target_profile_id,
+            SELECT id, name, item_type, is_enabled, is_launcher_exposed,
+                   emr_target_profile_id,
                    launcher_section, launcher_position, created_at, updated_at
             FROM items
             WHERE {launcher_filter}
@@ -455,7 +927,8 @@ def list_launcher_items(
         normalized_launcher_section = _normalize_launcher_section(launcher_section)
         rows = connection.execute(
             f"""
-            SELECT id, name, item_type, is_enabled, emr_target_profile_id,
+            SELECT id, name, item_type, is_enabled, is_launcher_exposed,
+                   emr_target_profile_id,
                    launcher_section, launcher_position, created_at, updated_at
             FROM items
             WHERE {launcher_filter}
@@ -605,9 +1078,9 @@ def list_launcher_collection_members(
     return [_launcher_collection_member_from_row(row) for row in rows]
 
 
-def get_launcher_collection_for_macro(
+def get_launcher_collection_for_item(
     connection: sqlite3.Connection,
-    macro_item_id: int,
+    item_id: int,
 ) -> LauncherCollectionRecord | None:
     row = connection.execute(
         """
@@ -616,24 +1089,42 @@ def get_launcher_collection_for_macro(
         JOIN launcher_collections c ON c.id = m.collection_id
         WHERE m.macro_item_id = ?
         """,
-        (macro_item_id,),
+        (item_id,),
     ).fetchone()
     if row is None:
         return None
     return _launcher_collection_from_row(row)
 
 
-def add_macro_to_launcher_collection(
+def get_launcher_collection_for_macro(
+    connection: sqlite3.Connection,
+    macro_item_id: int,
+) -> LauncherCollectionRecord | None:
+    return get_launcher_collection_for_item(connection, macro_item_id)
+
+
+def add_item_to_launcher_collection(
     connection: sqlite3.Connection,
     collection_id: int,
-    macro_item_id: int,
+    item_id: int,
 ) -> LauncherCollectionMemberRecord:
-    item = get_item(connection, macro_item_id)
-    if item is None or item.item_type != "macro":
-        raise ValueError("Only macro items can be added to a launcher collection.")
-    existing_collection = get_launcher_collection_for_macro(connection, macro_item_id)
+    item = get_item(connection, item_id)
+    collection = get_launcher_collection(connection, collection_id)
+    if item is None or collection is None:
+        raise ValueError("Launcher item or collection was not found.")
+    if item.item_type not in {"macro", "clipboard", "randomized_clipboard"}:
+        raise ValueError("Only macro and comment items can be added to a launcher collection.")
+    if not item.is_launcher_exposed:
+        raise ValueError("Only items exposed in Launcher can be added to a collection.")
+    if collection.launcher_section == "Macro" and item.item_type != "macro":
+        raise ValueError("Only macro items can be added to a Macro collection.")
+    if collection.launcher_section == "Comments" and item.item_type not in {"clipboard", "randomized_clipboard"}:
+        raise ValueError("Only comment items can be added to a Comments collection.")
+    if collection.launcher_section == "Actions":
+        raise ValueError("Action collections are not supported.")
+    existing_collection = get_launcher_collection_for_item(connection, item_id)
     if existing_collection is not None:
-        raise ValueError("Macro already belongs to a launcher collection.")
+        raise ValueError("Item already belongs to a launcher collection.")
     sort_order = _next_launcher_collection_member_order(connection, collection_id)
     cursor = connection.execute(
         """
@@ -642,7 +1133,7 @@ def add_macro_to_launcher_collection(
         )
         VALUES (?, ?, ?)
         """,
-        (collection_id, macro_item_id, sort_order),
+        (collection_id, item_id, sort_order),
     )
     connection.commit()
     member = connection.execute(
@@ -654,14 +1145,22 @@ def add_macro_to_launcher_collection(
         (cursor.lastrowid,),
     ).fetchone()
     if member is None:
-        raise RuntimeError("Failed to add macro to launcher collection.")
+        raise RuntimeError("Failed to add item to launcher collection.")
     return _launcher_collection_member_from_row(member)
 
 
-def remove_macro_from_launcher_collection(
+def add_macro_to_launcher_collection(
     connection: sqlite3.Connection,
     collection_id: int,
     macro_item_id: int,
+) -> LauncherCollectionMemberRecord:
+    return add_item_to_launcher_collection(connection, collection_id, macro_item_id)
+
+
+def remove_item_from_launcher_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    item_id: int,
 ) -> tuple[bool, int | None]:
     cursor = connection.execute(
         """
@@ -669,7 +1168,7 @@ def remove_macro_from_launcher_collection(
         WHERE collection_id = ?
           AND macro_item_id = ?
         """,
-        (collection_id, macro_item_id),
+        (collection_id, item_id),
     )
     if cursor.rowcount <= 0:
         connection.commit()
@@ -688,6 +1187,14 @@ def remove_macro_from_launcher_collection(
         )
     connection.commit()
     return True, collapsed_macro_id
+
+
+def remove_macro_from_launcher_collection(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    macro_item_id: int,
+) -> tuple[bool, int | None]:
+    return remove_item_from_launcher_collection(connection, collection_id, macro_item_id)
 
 
 def reorder_launcher_collection_members(
@@ -793,7 +1300,23 @@ def update_item_launcher_placement(
     launcher_section: str,
     launcher_position: int,
 ) -> ItemRecord | None:
-    normalized_launcher_section = _normalize_launcher_section(launcher_section)
+    requested_launcher_section = _normalize_launcher_section(launcher_section)
+    item = get_item(connection, item_id)
+    if item is None:
+        return None
+    normalized_launcher_section = _coerce_launcher_section_for_item_type(
+        item.item_type,
+        requested_launcher_section,
+    )
+    normalized_launcher_position = launcher_position
+    if normalized_launcher_section != requested_launcher_section:
+        if item.launcher_section == normalized_launcher_section:
+            normalized_launcher_position = item.launcher_position
+        else:
+            normalized_launcher_position = _next_launcher_position(
+                connection,
+                normalized_launcher_section,
+            )
     connection.execute(
         """
         UPDATE items
@@ -802,16 +1325,33 @@ def update_item_launcher_placement(
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (normalized_launcher_section, launcher_position, item_id),
+        (normalized_launcher_section, normalized_launcher_position, item_id),
     )
     connection.commit()
     return get_item(connection, item_id)
 
 
+def reorder_macro_items(
+    connection: sqlite3.Connection,
+    item_ids: list[int],
+) -> None:
+    for position, item_id in enumerate(item_ids, start=1):
+        connection.execute(
+            """
+            UPDATE items
+            SET launcher_position = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND item_type = 'macro'
+            """,
+            (position, item_id),
+        )
+    connection.commit()
+
+
 def delete_item(connection: sqlite3.Connection, item_id: int) -> bool:
-    collection = get_launcher_collection_for_macro(connection, item_id)
+    collection = get_launcher_collection_for_item(connection, item_id)
     if collection is not None:
-        removed, collapsed_macro_id = remove_macro_from_launcher_collection(
+        removed, collapsed_macro_id = remove_item_from_launcher_collection(
             connection,
             collection.id,
             item_id,
@@ -2012,6 +2552,286 @@ def delete_emr_ui_target(connection: sqlite3.Connection, ui_target_id: int) -> b
     return cursor.rowcount > 0
 
 
+def list_vaccine_types(connection: sqlite3.Connection) -> list[VaccineTypeRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, name, code, chart_note_template, is_active, sort_order,
+               created_at, updated_at
+        FROM vaccine_types
+        ORDER BY sort_order, id
+        """
+    )
+    return [_vaccine_type_from_row(row) for row in rows]
+
+
+def get_vaccine_type(
+    connection: sqlite3.Connection, vaccine_type_id: int
+) -> VaccineTypeRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, name, code, chart_note_template, is_active, sort_order,
+               created_at, updated_at
+        FROM vaccine_types
+        WHERE id = ?
+        """,
+        (vaccine_type_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _vaccine_type_from_row(row)
+
+
+def create_vaccine_type(
+    connection: sqlite3.Connection,
+    *,
+    name: str,
+    code: str | None = None,
+    chart_note_template: str | None = None,
+    is_active: bool = True,
+    sort_order: int | None = None,
+) -> VaccineTypeRecord:
+    if sort_order is None:
+        current = connection.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM vaccine_types"
+        ).fetchone()
+        sort_order = int(current[0] or 0) + 1
+    cursor = connection.execute(
+        """
+        INSERT INTO vaccine_types (
+            name, code, chart_note_template, is_active, sort_order
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            name.strip(),
+            _blank_to_none(code),
+            _blank_to_none(chart_note_template),
+            int(is_active),
+            int(sort_order),
+        ),
+    )
+    connection.commit()
+    created = get_vaccine_type(connection, cursor.lastrowid)
+    if created is None:
+        raise RuntimeError("Failed to create vaccine type.")
+    return created
+
+
+def update_vaccine_type(
+    connection: sqlite3.Connection,
+    vaccine_type_id: int,
+    *,
+    name: str,
+    code: str | None = None,
+    chart_note_template: str | None = None,
+    is_active: bool = True,
+) -> VaccineTypeRecord | None:
+    connection.execute(
+        """
+        UPDATE vaccine_types
+        SET name = ?,
+            code = ?,
+            chart_note_template = ?,
+            is_active = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            name.strip(),
+            _blank_to_none(code),
+            _blank_to_none(chart_note_template),
+            int(is_active),
+            vaccine_type_id,
+        ),
+    )
+    connection.commit()
+    return get_vaccine_type(connection, vaccine_type_id)
+
+
+def delete_vaccine_type(connection: sqlite3.Connection, vaccine_type_id: int) -> bool:
+    cursor = connection.execute(
+        "DELETE FROM vaccine_types WHERE id = ?",
+        (vaccine_type_id,),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def reorder_vaccine_types(
+    connection: sqlite3.Connection, ordered_ids: list[int]
+) -> list[VaccineTypeRecord]:
+    for index, vaccine_type_id in enumerate(ordered_ids, start=1):
+        connection.execute(
+            """
+            UPDATE vaccine_types
+            SET sort_order = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (index, vaccine_type_id),
+        )
+    connection.commit()
+    return list_vaccine_types(connection)
+
+
+def list_vaccine_records(connection: sqlite3.Connection) -> list[VaccineRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, vaccine_type_id, vaccine_type_name, patient_chart_no,
+               patient_resident_id, patient_name, patient_sex, patient_age,
+               patient_phone, patient_address, status, created_at, updated_at
+        FROM vaccine_records
+        ORDER BY id DESC
+        """
+    )
+    return [_vaccine_record_from_row(row) for row in rows]
+
+
+def get_vaccine_record(
+    connection: sqlite3.Connection, record_id: int
+) -> VaccineRecord | None:
+    row = connection.execute(
+        """
+        SELECT id, vaccine_type_id, vaccine_type_name, patient_chart_no,
+               patient_resident_id, patient_name, patient_sex, patient_age,
+               patient_phone, patient_address, status, created_at, updated_at
+        FROM vaccine_records
+        WHERE id = ?
+        """,
+        (record_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _vaccine_record_from_row(row)
+
+
+def create_vaccine_record(
+    connection: sqlite3.Connection,
+    *,
+    vaccine_type_id: int | None,
+    vaccine_type_name: str,
+    patient_chart_no: str | None = None,
+    patient_resident_id: str | None = None,
+    patient_name: str | None = None,
+    patient_sex: str | None = None,
+    patient_age: str | None = None,
+    patient_phone: str | None = None,
+    patient_address: str | None = None,
+    status: str = "prepared",
+) -> VaccineRecord:
+    cursor = connection.execute(
+        """
+        INSERT INTO vaccine_records (
+            vaccine_type_id, vaccine_type_name, patient_chart_no,
+            patient_resident_id, patient_name, patient_sex, patient_age,
+            patient_phone, patient_address, status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            vaccine_type_id,
+            vaccine_type_name.strip(),
+            _blank_to_none(patient_chart_no),
+            _blank_to_none(patient_resident_id),
+            _blank_to_none(patient_name),
+            _blank_to_none(patient_sex),
+            _blank_to_none(patient_age),
+            _blank_to_none(patient_phone),
+            _blank_to_none(patient_address),
+            status.strip() or "prepared",
+        ),
+    )
+    connection.commit()
+    created = get_vaccine_record(connection, cursor.lastrowid)
+    if created is None:
+        raise RuntimeError("Failed to create vaccine record.")
+    return created
+
+
+def update_vaccine_record(
+    connection: sqlite3.Connection,
+    record_id: int,
+    *,
+    vaccine_type_id: int | None,
+    vaccine_type_name: str,
+    patient_chart_no: str | None = None,
+    patient_resident_id: str | None = None,
+    patient_name: str | None = None,
+    patient_sex: str | None = None,
+    patient_age: str | None = None,
+    patient_phone: str | None = None,
+    patient_address: str | None = None,
+    status: str = "prepared",
+) -> VaccineRecord | None:
+    connection.execute(
+        """
+        UPDATE vaccine_records
+        SET vaccine_type_id = ?,
+            vaccine_type_name = ?,
+            patient_chart_no = ?,
+            patient_resident_id = ?,
+            patient_name = ?,
+            patient_sex = ?,
+            patient_age = ?,
+            patient_phone = ?,
+            patient_address = ?,
+            status = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            vaccine_type_id,
+            vaccine_type_name.strip(),
+            _blank_to_none(patient_chart_no),
+            _blank_to_none(patient_resident_id),
+            _blank_to_none(patient_name),
+            _blank_to_none(patient_sex),
+            _blank_to_none(patient_age),
+            _blank_to_none(patient_phone),
+            _blank_to_none(patient_address),
+            status.strip() or "prepared",
+            record_id,
+        ),
+    )
+    connection.commit()
+    return get_vaccine_record(connection, record_id)
+
+
+def delete_vaccine_record(connection: sqlite3.Connection, record_id: int) -> bool:
+    cursor = connection.execute(
+        "DELETE FROM vaccine_records WHERE id = ?",
+        (record_id,),
+    )
+    connection.commit()
+    return cursor.rowcount > 0
+
+
+def get_today_vaccine_counts(
+    connection: sqlite3.Connection,
+    target_date: str,
+) -> dict[str, int]:
+    rows = connection.execute(
+        """
+        SELECT
+            LOWER(COALESCE(NULLIF(TRIM(vt.code), ''), NULLIF(TRIM(vr.vaccine_type_name), ''))) AS normalized_code,
+            COUNT(*)
+        FROM vaccine_records vr
+        LEFT JOIN vaccine_types vt ON vt.id = vr.vaccine_type_id
+        WHERE substr(vr.created_at, 1, 10) = ?
+        GROUP BY normalized_code
+        """,
+        (target_date,),
+    ).fetchall()
+    counts = {"flu": 0, "covid": 0}
+    for normalized_code, count in rows:
+        code = str(normalized_code or "").strip().lower()
+        if code in {"flu", "influenza"}:
+            counts["flu"] += int(count or 0)
+        elif code in {"covid", "covid-19", "covid19"}:
+            counts["covid"] += int(count or 0)
+    return counts
+
+
 def reorder_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[MacroStepRecord]:
     steps = list_macro_steps(connection, item_id)
     for index, step in enumerate(steps, start=1):
@@ -2212,11 +3032,12 @@ def _item_from_row(row: sqlite3.Row | tuple) -> ItemRecord:
         name=row[1],
         item_type=row[2],
         is_enabled=bool(row[3]),
-        emr_target_profile_id=row[4],
-        launcher_section=row[5] or "Macro",
-        launcher_position=int(row[6] or 0),
-        created_at=row[7],
-        updated_at=row[8],
+        is_launcher_exposed=bool(row[4]),
+        emr_target_profile_id=row[5],
+        launcher_section=row[6] or "Macro",
+        launcher_position=int(row[7] or 0),
+        created_at=row[8],
+        updated_at=row[9],
     )
 
 
@@ -2267,6 +3088,29 @@ def _scheduler_run_from_row(row: sqlite3.Row | tuple) -> SchedulerRunRecord:
         executed_steps=int(row[8] or 0),
         summary=row[9],
         created_at=row[10],
+    )
+
+
+def _socl_collection_from_row(row: sqlite3.Row | tuple) -> SoclCollectionRecord:
+    return SoclCollectionRecord(
+        id=row[0],
+        domain=row[1],
+        name=row[2],
+        sort_order=int(row[3]),
+        created_at=row[4],
+        updated_at=row[5],
+    )
+
+
+def _socl_finding_from_row(row: sqlite3.Row | tuple) -> SoclFindingRecord:
+    return SoclFindingRecord(
+        id=row[0],
+        collection_id=row[1],
+        label=row[2],
+        render_text=row[3],
+        sort_order=int(row[4]),
+        created_at=row[5],
+        updated_at=row[6],
     )
 
 
@@ -2353,6 +3197,37 @@ def _emr_ui_target_from_row(row: sqlite3.Row | tuple) -> EmrUiTargetRecord:
         created_at=row[12],
         updated_at=row[13],
         ancestor_path=row[11],
+    )
+
+
+def _vaccine_type_from_row(row: sqlite3.Row | tuple) -> VaccineTypeRecord:
+    return VaccineTypeRecord(
+        id=row[0],
+        name=row[1],
+        code=row[2],
+        chart_note_template=row[3],
+        is_active=bool(row[4]),
+        sort_order=int(row[5]),
+        created_at=row[6],
+        updated_at=row[7],
+    )
+
+
+def _vaccine_record_from_row(row: sqlite3.Row | tuple) -> VaccineRecord:
+    return VaccineRecord(
+        id=row[0],
+        vaccine_type_id=row[1],
+        vaccine_type_name=row[2],
+        patient_chart_no=row[3],
+        patient_resident_id=row[4],
+        patient_name=row[5],
+        patient_sex=row[6],
+        patient_age=row[7],
+        patient_phone=row[8],
+        patient_address=row[9],
+        status=row[10],
+        created_at=row[11],
+        updated_at=row[12],
     )
 
 
@@ -2460,17 +3335,119 @@ def _validate_scheduler_missed_run_policy(value: str) -> None:
         raise ValueError(f"Unsupported scheduler missed-run policy: {value}")
 
 
+def _validate_socl_domain(domain: str) -> None:
+    if domain not in ALLOWED_SOCL_DOMAINS:
+        raise ValueError(f"Unsupported SOCL domain: {domain}")
+
+
+def _required_socl_text(value: str, label: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{label} is required.")
+    return normalized
+
+
+def _ensure_socl_collection_name_available(
+    connection: sqlite3.Connection,
+    domain: str,
+    name: str,
+    *,
+    exclude_id: int | None = None,
+) -> None:
+    row = connection.execute(
+        """
+        SELECT id
+        FROM socl_collections
+        WHERE domain = ? AND lower(name) = lower(?)
+          AND (? IS NULL OR id <> ?)
+        """,
+        (domain, name, exclude_id, exclude_id),
+    ).fetchone()
+    if row is not None:
+        raise ValueError("A SOCL collection with this name already exists.")
+
+
+def _ensure_socl_finding_label_available(
+    connection: sqlite3.Connection,
+    collection_id: int,
+    label: str,
+    *,
+    exclude_id: int | None = None,
+) -> None:
+    row = connection.execute(
+        """
+        SELECT id
+        FROM socl_findings
+        WHERE collection_id = ? AND lower(label) = lower(?)
+          AND (? IS NULL OR id <> ?)
+        """,
+        (collection_id, label, exclude_id, exclude_id),
+    ).fetchone()
+    if row is not None:
+        raise ValueError("A SOCL finding with this label already exists.")
+
+
+def _move_socl_record(
+    connection: sqlite3.Connection,
+    table: str,
+    ordered_records: list,
+    record_id: int,
+    direction: int,
+    getter,
+):
+    if direction not in {-1, 1}:
+        raise ValueError("SOCL move direction must be -1 or 1.")
+    current_index = next(
+        (index for index, record in enumerate(ordered_records) if record.id == record_id),
+        None,
+    )
+    if current_index is None:
+        return None
+    target_index = current_index + direction
+    if target_index < 0 or target_index >= len(ordered_records):
+        return getter(connection, record_id)
+    current = ordered_records[current_index]
+    target = ordered_records[target_index]
+    connection.execute(
+        f"UPDATE {table} SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (target.sort_order, current.id),
+    )
+    connection.execute(
+        f"UPDATE {table} SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (current.sort_order, target.id),
+    )
+    connection.commit()
+    return getter(connection, record_id)
+
+
 def _normalize_launcher_section(launcher_section: str | None) -> str:
     normalized = (launcher_section or "Macro").strip()
     if normalized == "Medical Documents":
         normalized = "Comments"
     elif normalized == "Eghis":
         normalized = "Macro"
-    elif normalized == "ETC":
-        normalized = "Favorite"
+    elif normalized in {"ETC", "Favorite"}:
+        normalized = "Actions"
     if normalized not in LAUNCHER_SECTIONS:
         return "Macro"
     return normalized
+
+
+def _default_launcher_section_for_item_type(item_type: str) -> str:
+    if item_type in {"clipboard", "randomized_clipboard"}:
+        return "Comments"
+    return "Macro"
+
+
+def _coerce_launcher_section_for_item_type(
+    item_type: str,
+    launcher_section: str,
+) -> str:
+    if item_type in {"clipboard", "randomized_clipboard"}:
+        return "Comments"
+    if item_type == "macro":
+        return "Macro"
+    return launcher_section
 
 
 def _next_launcher_position(

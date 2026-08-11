@@ -1,6 +1,6 @@
 # KaosEghis Design
 
-Last updated: 2026-08-03
+Last updated: 2026-08-08
 
 ## Purpose
 
@@ -9,6 +9,7 @@ KaosEghis is a local Windows companion application for Eghis EMR. The project is
 - daily-use automation access
 - configuration and diagnostics
 - plugin workflows
+- hidden infrastructure modules
 - local data persistence
 - guarded EMR-side integration
 
@@ -36,15 +37,17 @@ Main window:
   clipboard contents, patient information, or national IDs
 - the optional KaosEghis-PACS patient-context listener follows the desktop app
   lifecycle; it starts from saved settings and closes with the application
-- top-level tabs:
-  - `Macros`
-  - `KaosGdd`
-  - `Vaccine`
-  - `PACS`
-  - `Flu-Report`
-  - `Scan`
-  - `Scheduler`
-  - `Settings`
+- top-level tabs currently in code:
+  - `KaosEghis`
+  - `Memos`
+- `Workspace`
+- `PACS`
+- `Macros`
+- `Settings`
+
+Hidden infrastructure should not add top-level tabs unless it truly needs a daily-use
+operator surface. The current credential plan for `KaosEghis-pw` is intentionally
+hidden and hotkey-driven rather than visible in the shell.
 
 ## Current Top-Level Information Architecture
 
@@ -82,10 +85,27 @@ Primary daily-use tab.
 - `Builder` is the macro add/edit surface
 - `MacroTexts` creates and edits fixed or randomized reusable text; the same item can
   be selected by a macro `preset_text` step or copied directly from `Comments`
+- macros and MacroTexts can remain available in their editors without appearing in
+  Launcher by clearing **Exposed in Launcher**
+- exposed MacroTexts can be organized into Comments collections from the MacroTexts
+  page, with edit, reorder, remove, and unpack controls
 - randomized MacroText options use `---` on its own line as the separator, allowing
   each randomly selected comment to preserve multiple lines
 - launcher collection implementation and future expansion plan:
   `docs/kaoseghis-launcher-plan.md`
+
+### `SOCL`
+
+Physician-controlled Subjective and Objective note composer.
+
+- starts with no selected findings
+- contains the reviewed primary-care symptom and physical-exam vocabulary
+- supports local add/edit/delete/reorder for collections, labels, and rendered phrases
+- generates deterministic editable S and O previews from checked findings only
+- copies S, O, or combined S/O to the clipboard
+- persists vocabulary only; encounter selections and generated notes stay in memory
+- performs no diagnosis inference, EMR automation, or eGHIS database write
+- detailed design: `docs/kaoseghis-socl.md`
 
 ### `Settings`
 
@@ -107,6 +127,14 @@ Embedded KaosGDD browser surface.
 Placeholder plugin tab.
 
 - no active workflow yet
+- planned editable vaccine catalog and thermal-label workflow
+- preserves the legacy national-influenza age-group, birthday-boundary, schedule,
+  exception, and daily-cap model
+- default counted-program cap remains `100`, with seasonal values editable by the
+  operator
+- patient identifiers remain transient and are never written to the local vaccine
+  configuration/counter store or routine logs
+- detailed specification: `docs/kaoseghis-vaccine.md`
 
 ### `PACS`
 
@@ -160,9 +188,26 @@ Responsibilities:
 - wait engine
 - macro runner
 - scheduler runtime and due-time calculation
+- SOCL explicit-selection renderer
 - PACS polling
 - weekly reporting
 - clipboard and write-test helpers
+- shell-level integration points for hidden infrastructure modules
+
+### Hidden Infrastructure Modules
+
+Hidden modules are not daily-use tabs. They provide runtime services to the shell and
+other product modules.
+
+Current planned hidden infrastructure module:
+
+- `KaosEghis-pw`
+  - startup master-password prompt
+  - locked/unlocked credential state
+  - hidden credential popup on global hotkey
+  - internal-service credential support
+  - manual external credential typing support
+  - detailed plan: `docs/kaoseghis-pw.md`
 
 ### Database
 
@@ -177,6 +222,7 @@ Responsibilities:
 - EMR target profile persistence
 - EMR UI target library persistence
 - scheduler job and sanitized run-history persistence
+- SOCL editable vocabulary persistence; no encounter-note persistence
 
 ### UI
 
@@ -245,8 +291,12 @@ The design strategy is milestone-based:
 - EMR UI targets can now preserve parsed Inspector ancestor chains for deeper scoped lookup
 - macros can now bind to a specific EMR target profile or fall back to the default profile
 - PACS and flu are product/plugin workflows, not separate executables inside this repo
+- `KaosEghis-pw` should remain a hidden infrastructure module, not a visible top-level tab
 - KaosClip remains a future plugin direction, not a standalone app
-- future `KaosEghis-inj` should keep authoritative injection worklist ownership on the KaosEghis side and treat Raspberry Pi as a reload-only consumer
+- future `KaosEghis-inj` should keep authoritative injection/laboratory staff-task state
+  on the KaosEghis side, project PACS imaging state read-only through the existing PACS
+  boundary, and treat Raspberry Pi as a reload-only, 21-inch touch-first consumer with
+  no mouse/keyboard requirement for routine staff use
 - `KaosEghis-scan` uses a non-GUI NAPS2 process with the Canon DR-C125 Native profile, keeps PDFs in a dedicated temporary folder, and supports manual browser upload through in-app preview, native file drag-out, and a View folder fallback
 
 ## Removed or Superseded Directions

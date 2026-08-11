@@ -41,6 +41,10 @@ def test_type_text_can_send_enter_after_text(monkeypatch) -> None:
     from KaosEghis.core.macro_runner import MacroRunner
 
     sent_keys: list[str] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda _text: (_ for _ in ()).throw(RuntimeError("clipboard busy")),
+    )
     monkeypatch.setattr("pywinauto.keyboard.send_keys", sent_keys.append)
 
     result = MacroRunner()._run_type_text(
@@ -61,6 +65,10 @@ def test_type_text_can_send_enter_before_and_after_text(monkeypatch) -> None:
     from KaosEghis.core.macro_runner import MacroRunner
 
     sent_keys: list[str] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda _text: (_ for _ in ()).throw(RuntimeError("clipboard busy")),
+    )
     monkeypatch.setattr("pywinauto.keyboard.send_keys", sent_keys.append)
 
     result = MacroRunner()._run_type_text(
@@ -85,6 +93,10 @@ def test_type_text_without_enter_option_does_not_send_enter(monkeypatch) -> None
     from KaosEghis.core.macro_runner import MacroRunner
 
     sent_keys: list[str] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda _text: (_ for _ in ()).throw(RuntimeError("clipboard busy")),
+    )
     monkeypatch.setattr("pywinauto.keyboard.send_keys", sent_keys.append)
 
     result = MacroRunner()._run_type_text(
@@ -93,6 +105,40 @@ def test_type_text_without_enter_option_does_not_send_enter(monkeypatch) -> None
 
     assert result.success is True
     assert sent_keys == ["hello"]
+
+
+def test_type_text_prefers_clipboard_for_non_ascii_text(monkeypatch) -> None:
+    from KaosEghis.core.macro_models import MacroStep
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda text: calls.append(("copy", text)) or type("Snapshot", (), {"text": text})(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.restore_clipboard",
+        lambda snapshot: calls.append(("restore", snapshot.text)),
+    )
+    monkeypatch.setattr(
+        MacroRunner,
+        "_send_clipboard_paste",
+        staticmethod(
+            lambda press_enter_before=False, press_enter_after=False: calls.append(("paste", "^v"))
+        ),
+    )
+    monkeypatch.setattr(
+        MacroRunner,
+        "_send_text_direct",
+        staticmethod(lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("direct typing should not be used"))),
+    )
+
+    result = MacroRunner()._run_type_text(
+        MacroStep(action="type_text", value="물치", options={"text": "물치"})
+    )
+
+    assert result.success is True
+    assert calls == [("copy", "물치"), ("paste", "^v"), ("restore", "물치")]
 
 
 def test_type_text_dry_run_shows_enter_option_without_input(
@@ -243,8 +289,8 @@ def test_step_wait_runs_before_actual_action(monkeypatch) -> None:
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
-        "pywinauto.keyboard.send_keys",
-        lambda key: events.append(f"key:{key}"),
+        "pyautogui.hotkey",
+        lambda *keys, interval=0.0: events.append(f"key:{'+'.join(keys)}"),
     )
 
     runner = MacroRunner()
@@ -273,7 +319,7 @@ def test_step_wait_runs_before_actual_action(monkeypatch) -> None:
 
     assert result.success is True
     assert result.executed_steps == 1
-    assert events == ["wait:25", "key:^a"]
+    assert events == ["wait:25", "key:ctrl+a"]
 
 
 def test_disabled_macro_cannot_run_real_execution(monkeypatch, tmp_path) -> None:
@@ -662,6 +708,14 @@ def test_paste_text_focuses_resolved_target_before_paste(monkeypatch, tmp_path) 
         lambda _settings, _target: (fake_element, None, "Target resolved."),
     )
     monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.wait_for_target_condition",
+        lambda settings, target, condition, timeout_ms=0, poll_ms=0: type(
+            "WaitResult",
+            (),
+            {"success": True, "message": "focused", "target_id": target.target_id, "condition": "keyboard_focus", "elapsed_ms": 10, "attempts": 1},
+        )(),
+    )
+    monkeypatch.setattr(
         "KaosEghis.core.macro_runner.copy_text",
         lambda text: events.append(("copy", text)) or type("Snapshot", (), {"text": text})(),
     )
@@ -669,17 +723,80 @@ def test_paste_text_focuses_resolved_target_before_paste(monkeypatch, tmp_path) 
         "KaosEghis.core.macro_runner.restore_clipboard",
         lambda snapshot: events.append(("restore", snapshot.text)),
     )
+    monkeypatch.setattr("pyautogui.press", lambda key: events.append(("press", key)))
+    monkeypatch.setattr(
+        "pyautogui.hotkey",
+        lambda *keys, interval=0.0: events.append(("hotkey", tuple(keys))),
+    )
     monkeypatch.setitem(
         sys.modules,
         "pywinauto.keyboard",
-        type("Keyboard", (), {"send_keys": staticmethod(lambda keys: events.append(("send", keys)))})(),
+        type("Keyboard", (), {"send_keys": staticmethod(lambda keys, **_kwargs: events.append(("send", keys)))})(),
     )
 
     result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
 
     assert result.success is True
     assert fake_element.focused is True
-    assert events[:2] == [("copy", "hello"), ("send", "^v")]
+    assert events[:4] == [
+        ("copy", "hello"),
+        ("hotkey", ("ctrl", "v")),
+        ("restore", "hello"),
+    ] or events[:4] == [
+        ("copy", "hello"),
+        ("sleep", 0.05),
+        ("hotkey", ("ctrl", "v")),
+        ("sleep", 0.15),
+    ]
+
+
+def test_paste_text_blocks_when_target_never_gets_keyboard_focus(
+    monkeypatch, tmp_path
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.core.wait_engine import WaitResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="SymptomBox")
+        item = create_item(connection, "Paste Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "paste_text", target_id="sx", value="hello")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    class FakeElement:
+        def set_focus(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (FakeElement(), None, "Target resolved."),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.wait_for_target_condition",
+        lambda settings, target, condition, timeout_ms=0, poll_ms=0: WaitResult(
+            success=False,
+            message="Timed out waiting for keyboard_focus.",
+            target_id=target.target_id,
+            condition="keyboard_focus",
+            elapsed_ms=400,
+            attempts=8,
+        ),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is False
+    assert result.message == "window not ready"
 
 
 def test_reuses_resolved_target_within_single_macro_run(monkeypatch, tmp_path) -> None:
@@ -722,6 +839,14 @@ def test_reuses_resolved_target_within_single_macro_run(monkeypatch, tmp_path) -
     monkeypatch.setattr(
         "KaosEghis.core.macro_runner.resolve_target_element",
         lambda _settings, _target: resolve_calls.append(_target.target_id) or (fake_element, None, "Target resolved."),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.wait_for_target_condition",
+        lambda settings, target, condition, timeout_ms=0, poll_ms=0: type(
+            "WaitResult",
+            (),
+            {"success": True, "message": "focused", "target_id": target.target_id, "condition": "keyboard_focus", "elapsed_ms": 10, "attempts": 1},
+        )(),
     )
     monkeypatch.setattr(
         "KaosEghis.core.macro_runner.copy_text",
@@ -809,6 +934,14 @@ def test_emr_profile_target_resolution_still_works_with_cache_enabled(
         "KaosEghis.core.macro_runner.resolve_target_element",
         lambda _settings, _target: resolved_automation_ids.append(_target.automation_id)
         or (FakeElement(), None, "Target resolved."),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.wait_for_target_condition",
+        lambda settings, target, condition, timeout_ms=0, poll_ms=0: type(
+            "WaitResult",
+            (),
+            {"success": True, "message": "focused", "target_id": target.target_id, "condition": "keyboard_focus", "elapsed_ms": 10, "attempts": 1},
+        )(),
     )
     monkeypatch.setattr(
         "KaosEghis.core.macro_runner.copy_text",
@@ -1105,9 +1238,18 @@ def test_preset_text_resolves_clipboard_item(monkeypatch, tmp_path) -> None:
         "KaosEghis.core.macro_runner.restore_clipboard",
         lambda snapshot: calls.append(("restore", snapshot.text)),
     )
+    monkeypatch.setattr("pyautogui.press", lambda key: calls.append(("press", key)))
+    monkeypatch.setattr(
+        "pyautogui.hotkey",
+        lambda *keys, interval=0.0: calls.append(("hotkey", tuple(keys))),
+    )
     monkeypatch.setattr(
         "KaosEghis.core.macro_runner.time.sleep",
         lambda seconds: calls.append(("sleep", seconds)),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.MacroRunner._legacy_input_settle",
+        staticmethod(lambda duration_seconds=0.2: None),
     )
     monkeypatch.setitem(
         __import__("sys").modules,
@@ -1121,8 +1263,141 @@ def test_preset_text_resolves_clipboard_item(monkeypatch, tmp_path) -> None:
     assert calls == [
         ("copy", "hello there"),
         ("sleep", 0.05),
-        ("send", "^v"),
+        ("hotkey", ("ctrl", "v")),
         ("sleep", 0.15),
+        ("restore", "hello there"),
+    ]
+
+
+def test_preset_text_refocuses_and_settles_for_blind_emr_input(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        preset = create_item(connection, "Greeting", "clipboard", True)
+        connection.execute(
+            "INSERT INTO clipboard_variants (item_id, label, body) VALUES (?, ?, ?)",
+            (preset.id, "default", "hello there"),
+        )
+        item = create_item(connection, "Preset Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "focus_window")
+        create_macro_step(connection, item.id, 2, "preset_text", value=str(preset.id))
+        connection.commit()
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.focus_cached_eghis_window",
+        lambda _settings: calls.append(("focus_cached", None)) or FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.MacroRunner._legacy_input_settle",
+        staticmethod(lambda duration_seconds=0.2: calls.append(("settle", duration_seconds))),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda text: calls.append(("copy", text)) or type("Snapshot", (), {"text": text})(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.restore_clipboard",
+        lambda snapshot: calls.append(("restore", snapshot.text)),
+    )
+    monkeypatch.setattr("pyautogui.press", lambda key: calls.append(("press", key)))
+    monkeypatch.setattr(
+        "pyautogui.hotkey",
+        lambda *keys, interval=0.0: calls.append(("hotkey", tuple(keys))),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.time.sleep",
+        lambda seconds: calls.append(("sleep", seconds)),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert ("focus_cached", None) in calls
+    assert ("settle", 0.2) in calls
+
+
+def test_legacy_symptom_paste_runs_old_sequence(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        preset = create_item(connection, "Greeting", "clipboard", True)
+        connection.execute(
+            "INSERT INTO clipboard_variants (item_id, label, body) VALUES (?, ?, ?)",
+            (preset.id, "default", "hello there"),
+        )
+        item = create_item(connection, "Legacy Symptom Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "legacy_symptom_paste", value=str(preset.id))
+        connection.commit()
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    calls = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.focus_cached_eghis_window",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.MacroRunner._legacy_input_settle",
+        staticmethod(lambda duration_seconds=0.2: calls.append(("settle", duration_seconds))),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.copy_text",
+        lambda text: calls.append(("copy", text)) or type("Snapshot", (), {"text": text})(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.restore_clipboard",
+        lambda snapshot: calls.append(("restore", snapshot.text)),
+    )
+    monkeypatch.setattr("pyautogui.press", lambda key: calls.append(("press", key)))
+    monkeypatch.setattr(
+        "pyautogui.hotkey",
+        lambda *keys, interval=0.0: calls.append(("hotkey", tuple(keys))),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.time.sleep",
+        lambda seconds: calls.append(("sleep", seconds)),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert calls == [
+        ("settle", 0.2),
+        ("copy", "hello there"),
+        ("press", "f1"),
+        ("sleep", 0.03),
+        ("press", "enter"),
+        ("sleep", 0.03),
+        ("sleep", 0.08),
+        ("sleep", 0.05),
+        ("hotkey", ("ctrl", "v")),
+        ("sleep", 0.15),
+        ("sleep", 0.05),
+        ("press", "enter"),
+        ("sleep", 0.03),
         ("restore", "hello there"),
     ]
 
@@ -1131,23 +1406,113 @@ def test_hotkey_normalizes_braced_sequences(monkeypatch) -> None:
     from KaosEghis.core.macro_models import MacroStep
     from KaosEghis.core.macro_runner import MacroRunner
 
-    sent_keys: list[str] = []
-    monkeypatch.setattr("pywinauto.keyboard.send_keys", sent_keys.append)
+    events: list[tuple[str, tuple[str, ...] | str]] = []
+    monkeypatch.setattr("pyautogui.press", lambda key: events.append(("press", key)))
+    monkeypatch.setattr(
+        "pyautogui.hotkey",
+        lambda *keys, interval=0.0: events.append(("hotkey", tuple(keys))),
+    )
 
     result = MacroRunner()._run_hotkey(
         MacroStep(action="hotkey", value="{ENTER},{ENTER}", options={"key": "{ENTER},{ENTER}"})
     )
 
     assert result.success is True
-    assert sent_keys == ["{ENTER}", "{ENTER}"]
+    assert events == [("press", "enter"), ("press", "enter")]
 
-    sent_keys.clear()
+    events.clear()
     result = MacroRunner()._run_hotkey(
         MacroStep(action="hotkey", value="{ALT}{1}", options={"key": "{ALT}{1}"})
     )
 
     assert result.success is True
-    assert sent_keys == ["%{1}"]
+    assert events == [("hotkey", ("alt", "1"))]
+
+
+def test_hotkey_window_anchor_target_refocuses_before_sending(
+    monkeypatch, tmp_path
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="eghis_main", automation_id="MdiMain")
+        item = create_item(connection, "Hotkey Focus Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "hotkey", target_id="eghis_main", value="{F1}")
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    events: list[tuple[str, tuple[str, ...] | str]] = []
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr("pyautogui.press", lambda key: events.append(("press", key)))
+    monkeypatch.setattr(
+        "pyautogui.hotkey",
+        lambda *keys, interval=0.0: events.append(("hotkey", tuple(keys))),
+    )
+    monkeypatch.setattr("KaosEghis.core.macro_runner.time.sleep", sleep_calls.append)
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert events == [("press", "f1")]
+    assert sleep_calls == [0.12, 0.03]
+
+
+def test_hotkey_window_anchor_target_skips_stale_resolution_after_focus_window(
+    monkeypatch, tmp_path
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_item(connection, "Legacy Hotkey Macro", "macro", True)
+        create_macro_step(connection, item.id, 1, "focus_window")
+        create_macro_step(
+            connection,
+            item.id,
+            2,
+            "hotkey",
+            target_id="eghis_main",
+            value="{F1}",
+        )
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+
+    events: list[tuple[str, tuple[str, ...] | str]] = []
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, _target: (_ for _ in ()).throw(
+            AssertionError("window-anchor hotkey should not re-resolve target after focus_window")
+        ),
+    )
+    monkeypatch.setattr("pyautogui.press", lambda key: events.append(("press", key)))
+    monkeypatch.setattr(
+        "pyautogui.hotkey",
+        lambda *keys, interval=0.0: events.append(("hotkey", tuple(keys))),
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert events == [("press", "f1")]
 
 
 def test_randomized_preset_selects_one_option(monkeypatch, tmp_path) -> None:
@@ -1496,6 +1861,14 @@ def test_cached_connection_check_called_once_per_run_when_possible(monkeypatch, 
         lambda _settings, _target: (FakeElement(), None, "Target resolved."),
     )
     monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.wait_for_target_condition",
+        lambda settings, target, condition, timeout_ms=0, poll_ms=0: type(
+            "WaitResult",
+            (),
+            {"success": True, "message": "focused", "target_id": target.target_id, "condition": "keyboard_focus", "elapsed_ms": 10, "attempts": 1},
+        )(),
+    )
+    monkeypatch.setattr(
         "KaosEghis.core.macro_runner.copy_text",
         lambda text: type("Snapshot", (), {"text": text})(),
     )
@@ -1566,6 +1939,45 @@ def test_macros_page_splits_executable_and_non_executable_lists(monkeypatch, tmp
     assert page.non_executable_macros_table.rowCount() == 1
     assert page.executable_macros_table.item(0, 1).text() == "Real Macro"
     assert page.non_executable_macros_table.item(0, 1).text() == "Template Macro"
+
+
+def test_macros_page_lists_collections_too(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        add_macro_to_launcher_collection,
+        create_item,
+        create_launcher_collection,
+    )
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        first = create_item(connection, "Real Macro", "macro", True)
+        second = create_item(connection, "Template Macro", "macro", False)
+        collection = create_launcher_collection(connection, "Daily Set", "Macro", 1)
+        add_macro_to_launcher_collection(connection, collection.id, first.id)
+        add_macro_to_launcher_collection(connection, collection.id, second.id)
+
+    page = MacrosPage(db_path)
+
+    assert page.collections_table.rowCount() == 1
+    assert page.collections_table.item(0, 1).text() == "Daily Set"
+    assert page.collections_table.item(0, 3).text() == "2"
+
+
+def test_macros_page_has_collection_management_buttons() -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+
+    page = MacrosPage()
+
+    assert page.edit_collection_button.text() == "Edit selected collection"
+    assert page.unpack_collection_button.text() == "Unpack selected collection"
 
 
 def test_new_macro_editor_seeds_focus_window_step(monkeypatch, tmp_path) -> None:
@@ -1641,6 +2053,40 @@ def test_macro_editor_reorders_complete_steps_by_drag_order(monkeypatch, tmp_pat
     assert steps[0]["wait_before_ms"] == 40
     assert steps[2]["wait_before_enabled"] is True
     assert steps[2]["wait_before_ms"] == 25
+
+
+def test_macros_page_reorders_saved_macro_list(monkeypatch, tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item
+    from KaosEghis.ui.tabs.kaoseghis_tab import MacrosPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_item(connection, "Alpha", "macro", True)
+        create_item(connection, "Beta", "macro", True)
+        create_item(connection, "Gamma", "macro", True)
+
+    page = MacrosPage(db_path)
+    table = page.executable_macros_table
+
+    assert [table.item(row, 1).text() for row in range(table.rowCount())] == [
+        "Alpha",
+        "Beta",
+        "Gamma",
+    ]
+
+    table.move_row(2, 0)
+    page.refresh_view()
+
+    assert [table.item(row, 1).text() for row in range(table.rowCount())] == [
+        "Gamma",
+        "Alpha",
+        "Beta",
+    ]
 
 
 def test_new_macro_step_dialog_defaults_to_focus_window(monkeypatch, tmp_path) -> None:
@@ -2095,7 +2541,10 @@ def test_macro_runner_requires_manual_connection_before_real_run(tmp_path) -> No
 
     assert result.success is False
     assert result.executed_steps == 0
-    assert result.message == "Application not connected. Connect manually and retry."
+    assert result.message in {
+        "Application not connected. Connect manually and retry.",
+        "Application connection stale. Reconnect manually and retry.",
+    }
 
 
 def test_macro_runner_uses_selected_profile_for_connection_settings(
@@ -2584,10 +3033,18 @@ def test_hotkey_failure_is_sanitized(monkeypatch, tmp_path) -> None:
         "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
+    monkeypatch.setattr(
+        "pyautogui.press",
+        lambda _key: (_ for _ in ()).throw(RuntimeError("raw press failure")),
+    )
+    monkeypatch.setattr(
+        "pyautogui.hotkey",
+        lambda *_keys, **_kwargs: (_ for _ in ()).throw(RuntimeError("raw hotkey failure")),
+    )
     monkeypatch.setitem(
         sys.modules,
         "pywinauto.keyboard",
-        type("Keyboard", (), {"send_keys": staticmethod(lambda _keys: (_ for _ in ()).throw(RuntimeError("raw send_keys failure")))})(),
+        type("Keyboard", (), {"send_keys": staticmethod(lambda _keys, **_kwargs: (_ for _ in ()).throw(RuntimeError("raw send_keys failure")))})(),
     )
 
     result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)

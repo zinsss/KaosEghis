@@ -185,7 +185,11 @@ def test_pdf_drag_mime_contains_local_file_url(tmp_path) -> None:
     path = tmp_path / "scan.pdf"
     path.write_bytes(b"pdf")
 
-    urls = pdf_file_mime_data(path).urls()
+    mime_data = pdf_file_mime_data(path)
+    urls = mime_data.urls()
 
     assert len(urls) == 1
     assert Path(urls[0].toLocalFile()) == path
+    assert mime_data.text() == str(path)
+    assert 'application/x-qt-windows-mime;value="FileNameW"' in mime_data.formats()
+    assert 'application/x-qt-windows-mime;value="FileName"' in mime_data.formats()

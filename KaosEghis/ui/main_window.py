@@ -1,23 +1,39 @@
+import os
+import time
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QDialog,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QMainWindow,
     QSizePolicy,
     QTabWidget,
     QWidget,
 )
 
+from pywinauto.keyboard import send_keys
+
+from KaosEghis.core.credential_vault import CredentialEntry
+from KaosEghis.core.pw_runtime import ForegroundWindowContext, PwRuntime
 from KaosEghis.core.scheduler import SchedulerRuntime
+from KaosEghis.ui.drag_hover_switch import TabBarFileHoverFilter
 from KaosEghis.ui.plugins.pacs_panel import PacsPanel
-from KaosEghis.ui.tabs.flu_report_tab import FluReportTab
-from KaosEghis.ui.tabs.kaoseghis_tab import KaosEghisTab
-from KaosEghis.ui.tabs.kaosgdd_tab import KaosGddTab
-from KaosEghis.ui.tabs.scan_tab import ScanTab
-from KaosEghis.ui.tabs.scheduler_tab import SchedulerTab
+from KaosEghis.ui.dialogs.master_password_dialog import MasterPasswordDialog
+from KaosEghis.ui.dialogs.pw_popup_dialog import (
+    CredentialEntryDialog,
+    CredentialPopupDialog,
+)
+from KaosEghis.ui.tabs.memos_tab import MemosTab
+from KaosEghis.ui.tabs.kaoseghis_tab import (
+    KaosEghisTab,
+    MacrosTab,
+    PlaceholderPage,
+    WorkspaceTab,
+)
 from KaosEghis.ui.tabs.settings_tab import SettingsTab
-from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
 
 
 class AppNotificationArea(QWidget):
@@ -63,6 +79,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("KaosEghis")
         self.setFixedSize(1438, 1194)
+        self.pw_runtime = PwRuntime(self)
 
         tabs = QTabWidget()
         self.tabs = tabs
@@ -72,23 +89,32 @@ class MainWindow(QMainWindow):
         )
         self.kaoseghis_tab = KaosEghisTab()
         self.scheduler_runtime = SchedulerRuntime(parent=self)
-        tabs.addTab(self.kaoseghis_tab, "Macros")
-        tabs.addTab(KaosGddTab(), "KaosGdd")
-        tabs.addTab(VaccineTab(), "Vaccine")
+        tabs.addTab(self.kaoseghis_tab, "KaosEghis")
+        self.memos_tab = MemosTab()
+        tabs.addTab(self.memos_tab, "Memos")
+        self.workspace_tab = WorkspaceTab()
+        tabs.addTab(self.workspace_tab, "Workspace")
         self.pacs_panel = PacsPanel()
         self.pacs_tab_index = tabs.addTab(self.pacs_panel, "PACS")
-        tabs.addTab(FluReportTab(), "Flu-Report")
-        tabs.addTab(ScanTab(), "Scan")
-        self.scheduler_tab = SchedulerTab(runtime=self.scheduler_runtime)
-        tabs.addTab(self.scheduler_tab, "Scheduler")
-        tabs.addTab(SettingsTab(), "Settings")
+        self.macros_tab = MacrosTab(scheduler_runtime=self.scheduler_runtime)
+        tabs.addTab(self.macros_tab, "Macros")
+        self.settings_tab = SettingsTab()
+        tabs.addTab(self.settings_tab, "Settings")
+        self._file_hover_tab_filter = TabBarFileHoverFilter(tabs.setCurrentIndex)
+        tabs.tabBar().setAcceptDrops(True)
+        tabs.tabBar().installEventFilter(self._file_hover_tab_filter)
         self.pacs_panel.health_state_changed.connect(self._update_pacs_tab_health)
-        self.kaoseghis_tab.emr_page.app_notification.connect(
+        self.macros_tab.emr_page.app_notification.connect(
             self.show_notification
         )
         self.scheduler_runtime.notification_requested.connect(
             self.show_notification
         )
+        self.kaoseghis_tab.socl_page.notification_requested.connect(
+            self.show_notification
+        )
+        self.pw_runtime.state_changed.connect(self._handle_pw_state_changed)
+        self.pw_runtime.action_requested.connect(self._handle_pw_hotkey)
         self._update_pacs_tab_health(self.pacs_panel.is_healthy, self.pacs_panel.health_reason)
 
         self.setCentralWidget(tabs)
@@ -103,5 +129,142 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setTabToolTip(self.pacs_tab_index, reason)
 
     def closeEvent(self, event) -> None:
+        self.pw_runtime.stop()
         self.scheduler_runtime.stop()
         super().closeEvent(event)
+
+    def initialize_runtime_services(self) -> None:
+        self.pw_runtime.start()
+
+    def prompt_startup_master_password(self) -> None:
+        if os.environ.get("QT_QPA_PLATFORM", "").strip().lower() == "offscreen":
+            return
+        dialog = MasterPasswordDialog(vault_exists=self.pw_runtime.vault.exists(), parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self.show_notification("KaosEghis-pw locked.", "warning")
+            return
+        success, message = self.pw_runtime.initialize_or_unlock(dialog.password())
+        self.show_notification(message, "success" if success else "warning")
+
+    def _handle_pw_state_changed(self, unlocked: bool) -> None:
+        self.show_notification(
+            "KaosEghis-pw unlocked." if unlocked else "KaosEghis-pw locked.",
+            "success" if unlocked else "warning",
+        )
+
+    def _handle_pw_hotkey(self, context: ForegroundWindowContext) -> None:
+        if not self.pw_runtime.is_unlocked:
+            dialog = MasterPasswordDialog(
+                vault_exists=self.pw_runtime.vault.exists(),
+                parent=self,
+            )
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            success, message = self.pw_runtime.initialize_or_unlock(dialog.password())
+            self.show_notification(message, "success" if success else "warning")
+            return
+
+        session = self.pw_runtime.session
+        if session is None:
+            return
+        popup = CredentialPopupDialog(
+            session.list_entries(),
+            locked=False,
+            context_title=context.title,
+            parent=self,
+        )
+        if popup.exec() != QDialog.DialogCode.Accepted:
+            return
+        action = popup.selected_action
+        if action == "manage":
+            self._open_pw_manage_dialog()
+            return
+        if action == "lock":
+            self.pw_runtime.lock()
+            return
+        service_name = popup.selected_service_name()
+        if not service_name:
+            return
+        entry = session.get_entry(service_name)
+        if entry is None:
+            QMessageBox.warning(self, "KaosEghis-pw", "Credential entry was not found.")
+            return
+        self._type_credential_action(entry, action or "", context)
+
+    def _open_pw_manage_dialog(self) -> None:
+        session = self.pw_runtime.session
+        if session is None:
+            return
+        popup = CredentialPopupDialog(
+            session.list_entries(),
+            locked=False,
+            context_title=self.pw_runtime.current_context().title,
+            parent=self,
+        )
+        popup.status_label.setText("Manage KaosEghis-pw entries.")
+        popup.type_id_button.hide()
+        popup.type_password_button.hide()
+        popup.type_both_button.hide()
+        popup.lock_button.hide()
+        popup.cancel_button.setText("Done")
+        popup.manage_button.setText("Add / Edit")
+        if popup.exec() != QDialog.DialogCode.Accepted:
+            return
+        service_name = popup.selected_service_name()
+        existing = session.get_entry(service_name) if service_name else None
+        dialog = CredentialEntryDialog(self, existing)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if dialog.delete_requested:
+            if not service_name:
+                QMessageBox.warning(self, "KaosEghis-pw", "Credential entry was not found.")
+                return
+            removed = session.delete_entry(service_name)
+            if not removed:
+                QMessageBox.warning(self, "KaosEghis-pw", "Credential entry was not found.")
+                return
+            self.show_notification("KaosEghis-pw entry deleted.", "success")
+            return
+        values = dialog.values()
+        session.set_entry(
+            service_name=values.service_name,
+            username=values.username,
+            password=values.password,
+            target_type=values.target_type,
+            notes=values.notes,
+        )
+        self.show_notification("KaosEghis-pw entry saved.", "success")
+
+    def _type_credential_action(
+        self,
+        entry: CredentialEntry,
+        action: str,
+        context: ForegroundWindowContext,
+    ) -> None:
+        if context.hwnd is None:
+            QMessageBox.warning(self, "KaosEghis-pw", "Foreground window is not available.")
+            return
+        try:
+            _activate_hwnd(context.hwnd)
+            time.sleep(0.12)
+            if action == CredentialPopupDialog.ACTION_TYPE_ID:
+                send_keys(entry.username, with_spaces=True, with_tabs=True, with_newlines=True)
+            elif action == CredentialPopupDialog.ACTION_TYPE_PASSWORD:
+                send_keys(entry.password, with_spaces=True, with_tabs=True, with_newlines=True)
+            elif action == CredentialPopupDialog.ACTION_TYPE_BOTH:
+                send_keys(entry.username, with_spaces=True, with_tabs=True, with_newlines=True)
+                send_keys("{TAB}")
+                send_keys(entry.password, with_spaces=True, with_tabs=True, with_newlines=True)
+            else:
+                return
+        except Exception:
+            QMessageBox.warning(self, "KaosEghis-pw", "Credential typing failed.")
+            return
+        self.show_notification(f"Typed credentials for {entry.service_name}.", "success")
+
+def _activate_hwnd(hwnd: int) -> None:
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    user32.ShowWindow(hwnd, 5)
+    user32.SetForegroundWindow(hwnd)

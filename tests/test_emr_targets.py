@@ -415,7 +415,7 @@ def test_emr_targets_page_connection_toggle_updates_status(
     assert "Connected and active" in page.connection_status_label.text()
 
 
-def test_emr_targets_page_does_not_start_capture_hotkey_on_init(
+def test_emr_targets_page_starts_capture_hotkey_on_init(
     tmp_path, monkeypatch
 ) -> None:
     _app()
@@ -434,11 +434,6 @@ def test_emr_targets_page_does_not_start_capture_hotkey_on_init(
     initialize_database(db_path)
 
     page = EmrTargetsPage(db_path)
-
-    assert calls == []
-    assert "starts when EMR page opens" in page.capture_hotkey_label.text()
-
-    page.activate_page()
 
     assert calls == ["started"]
     assert page.capture_hotkey_label.text() == "Global capture hotkey: Ctrl+Shift+F9"

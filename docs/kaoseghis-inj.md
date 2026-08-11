@@ -1,30 +1,36 @@
 # KaosEghis-inj
 
-Last updated: 2026-07-22
+Last updated: 2026-08-08
 
 ## Status
 
-`KaosEghis-inj` is a planned KaosEghis plugin and Raspberry Pi display workflow.
+`KaosEghis-inj` is a planned KaosEghis plugin and Raspberry Pi staff task-board
+workflow. The product name remains KaosEghis-inj, but its planned display scope now
+includes injection, laboratory, and optional imaging/PACS tasks.
 This document defines the intended architecture before implementation. It does not
 describe a currently active clinical workflow.
 
 ## Purpose
 
-KaosEghis-inj will provide a simple injection-room worklist for staff who should not
-need to operate the Windows EMR directly.
+KaosEghis-inj will provide a simple patient-centered task board for staff who should not
+need to operate the Windows EMR directly merely to learn what remains to be done.
 
 The system will:
 
-- read injection orders from eGHIS in read-only mode
-- maintain the authoritative injection-room worklist in KaosEghis
+- read injection and verified laboratory-order categories from eGHIS in read-only mode
+- optionally project existing KaosEghis-pacs/KaosPACS imaging status into the same board
+- maintain the authoritative staff task-board state in KaosEghis
 - detect new, changed, cancelled, deleted, restored, and reordered source orders
-- display the current worklist on a Raspberry Pi kiosk
-- let staff mark a worklist row Done and undo that action with confirmation
+- display the current task board on a Raspberry Pi kiosk
+- let staff mark an eligible injection/laboratory task Done and undo that action with
+  confirmation
 - keep the Raspberry Pi free of durable patient data
 - operate automatically during configured office hours
 
-Done is an operational KaosEghis-inj worklist state. It does not write an
-administration record to eGHIS and must not be described as eGHIS documentation.
+Done is an operational KaosEghis-inj state for staff-managed tasks. It does not write
+an administration/result record to eGHIS and must not be described as eGHIS
+documentation. Imaging completion is never produced by a staff Done action; it is
+accepted only from KaosPACS imaging lifecycle reconciliation.
 
 ## Operator Model
 
@@ -49,15 +55,21 @@ restart, and reboot.
 
 ```text
 eGHIS PostgreSQL (read-only)
-            |
-            v
+  - injection orders
+  - verified lab orders
+            |                         KaosEghis-pacs / KaosPACS
+            |                           - imaging order/lifecycle state
+            v                                      |
 KaosEghis-inj on EMR workstation
   - polling and reconciliation
-  - authoritative local worklist
+  - category-specific source adapters
+  - authoritative local staff task board
   - Done / Undo state
   - daily worklist lifecycle
   - worklist API
   - Pi health and control
+            ^                                      |
+            +--------------------------------------+
             |
             | non-PHI reload signal
             v
@@ -77,7 +89,8 @@ Raspberry Pi kiosk
 ### KaosEghis-inj owns
 
 - read-only eGHIS database access
-- injection-order classification
+- injection and laboratory order classification
+- read-only projection of existing PACS/imaging state without taking imaging ownership
 - stable source-order identity
 - local worklist persistence
 - worklist state transitions
@@ -87,6 +100,10 @@ Raspberry Pi kiosk
 - Pi health monitoring and narrow control requests
 - sanitized operational audit
 
+KaosEghis-inj does not own imaging completion, expiry, or cancellation inference.
+KaosPACS remains authoritative for imaging `completed` and `expired`; KaosEghis-pacs
+remains authoritative for source/business imaging cancellation.
+
 ### Raspberry Pi owns
 
 - kiosk presentation
@@ -95,7 +112,7 @@ Raspberry Pi kiosk
 - office-hours display schedule
 - display wake, sleep, and privacy blanking
 - automatic reconnect and display-process recovery
-- sending an opaque item ID for explicit Done or Undo actions
+- sending an opaque item ID for explicit eligible-task Done or Undo actions
 
 ### Raspberry Pi does not own
 
@@ -127,6 +144,51 @@ Examples observed under the working rule include:
 
 The production query must be validated again against the live schema before
 deployment. No write permission is required or permitted.
+
+## Expanded Task Categories
+
+### Injection
+
+- confirmed starting source: `public.h2opd_doct_ord`
+- current candidate classification: `ord_type = '07'` and `proc_dept_cd = 'INJ'`
+- staff may use operational Done/Undo
+- source cancellation/removal overrides active operational presentation
+
+### Laboratory
+
+- planned read-only eGHIS task source
+- exact order type, department routing, service date, completion/result status, and
+  cancellation fields are not yet verified
+- no production filter may be guessed from injection behavior
+- staff Done, if retained for the first milestone, means only `staff handled`; it does
+  not assert that a specimen was collected, a test was performed, or a result exists in
+  eGHIS
+- once a reliable source completion state is verified, it should be displayed separately
+  from the staff operational state
+
+### Imaging / PACS
+
+- optional board category fed from the existing KaosEghis-pacs local model and/or
+  KaosPACS Gateway reconciliation, not a duplicate PACS polling implementation
+- show imaging lifecycle updates useful to staff, such as active, completed, expired,
+  and cancelled
+- staff cannot create imaging `completed`, `expired`, or source `cancelled` state from
+  KaosEghis-inj
+- imaging rows become complete only when KaosPACS reports `completed`
+- an optional staff acknowledgement may be added later, but it must be named
+  `acknowledged`, not Done or Completed
+
+### Patient-Centered Presentation
+
+The kiosk should group current-day tasks by patient where safe and practical. Each
+patient group may contain independent task rows or status chips for:
+
+- Injection
+- Laboratory
+- Imaging
+
+A status change in one category must not complete, hide, or cancel another category.
+The board must retain category filters plus an `All` view.
 
 ## Read-Only Source Data
 
@@ -174,13 +236,26 @@ recept_no + ord_no + ord_seq_no
 KaosEghis should also assign an opaque local worklist item ID. The Pi uses the opaque
 ID for Done and Undo requests and does not need source database keys.
 
-## Worklist States
+## Task and Source States
 
-Initial states:
+Do not collapse clinical/source state and staff operational state into one ambiguous
+field.
 
-- `active`: waiting in the injection-room worklist
-- `done`: staff marked the operational row complete
+Staff operational states for injection and initially supported laboratory tasks:
+
+- `active`: waiting on the staff task board
+- `done`: staff marked the operational task handled
 - `cancelled`: eGHIS explicitly cancelled or confirmed removal of the source order
+
+Imaging lifecycle states are projected read-only from PACS ownership:
+
+- `active`
+- `completed`
+- `expired`
+- `cancelled`
+
+Laboratory source completion/result state remains separate and is added only after the
+live schema and semantics are verified.
 
 Optional internal reason values may distinguish:
 
@@ -202,17 +277,19 @@ staff confirms Done              -> done
 staff confirms Undo              -> active, only if source remains valid
 ```
 
-Done and Cancelled are not interchangeable. Done is an operator worklist action;
-Cancelled reflects eGHIS business order state.
+Done and Cancelled are not interchangeable. Done is an operator worklist action for an
+eligible staff-managed task; Cancelled reflects eGHIS business order state. Completed
+and Expired are imaging states owned by KaosPACS and cannot be produced by kiosk actions.
 
 ## Polling and Reconciliation
 
-Polling does not need to compare every patient in eGHIS. Each cycle should use two
-narrow read-only paths.
+Polling does not need to compare every patient in eGHIS. Each eGHIS source adapter uses
+two narrow read-only paths: category discovery and unfiltered stable-key revalidation.
+PACS projection follows its existing API/local reconciliation boundary separately.
 
-### 1. Discover current injection orders
+### 1. Discover current source orders
 
-Query the selected/current service date for:
+Injection discovery queries the selected/current service date for:
 
 - `ord_type = '07'`
 - `proc_dept_cd = 'INJ'`
@@ -221,15 +298,23 @@ Query the selected/current service date for:
 Do not filter cancelled rows out before reconciliation. Otherwise a cancellation
 would be indistinguishable from a query omission.
 
+Laboratory discovery must use a separate adapter and independently verified filter. A
+failure in the lab query must not cancel, hide, or stale-mark valid injection rows.
+
+Imaging status is projected from the existing PACS boundary. KaosEghis-inj must not
+query Orthanc, MWL, DICOM, or eGHIS imaging tables independently when an authoritative
+KaosEghis-pacs/KaosPACS state already exists.
+
 ### 2. Revalidate locally active source keys
 
-For source keys currently stored as Active:
+For eGHIS injection/laboratory source keys currently stored as Active:
 
 - check whether the exact key still exists
-- read `dc_yn`
+- read the verified category-specific cancellation field (`dc_yn` for the confirmed
+  injection source)
 - compare normalized display fields
-- do not apply the active-order, INJ, department, or cancellation filters to the
-  existence check
+- do not apply active-order, category, department, or cancellation discovery filters to
+  the existence check
 
 This catches a patient declining an injection after the order was already displayed.
 The next successful poll sees `dc_yn = 'Y'`, marks the local item Cancelled, increments
@@ -266,6 +351,10 @@ Done rows do not need high-frequency source comparison and are excluded from the
 active reconciliation set. A lower-frequency audit reconciliation may be added later
 if operational experience shows that post-completion source cancellation matters.
 
+The optimization applies only to staff-managed injection/lab tasks. Active imaging rows
+continue to follow PACS reconciliation; completed/expired imaging rows are never inferred
+from staff interaction.
+
 ## Generation-Based Synchronization
 
 KaosEghis should update local rows in one transaction. If the visible worklist
@@ -291,7 +380,7 @@ the Pi performs a periodic full refresh and compares the generation number.
 
 ## Daily Lifecycle
 
-The worklist is date-scoped. Yesterday's list must never be reused as today's current
+The task board is date-scoped. Yesterday's list must never be reused as today's current
 list.
 
 ### Before opening
@@ -307,7 +396,9 @@ not present the previous day's list as current.
 
 ### During office hours
 
-- poll eGHIS at a measured, configurable interval
+- poll each enabled eGHIS source adapter at a measured, configurable interval
+- reconcile PACS projection through the existing PACS boundary when imaging display is
+  enabled
 - reconcile new, changed, cancelled, and removed active rows
 - notify the Pi only when generation changes
 - keep periodic Pi refresh as a missed-signal fallback
@@ -322,10 +413,31 @@ not present the previous day's list as current.
 - close the current display session
 - apply KaosEghis-side identifying-data retention according to the approved policy
 
-Completed and cancelled rows are visible only within the current day's operator
-worklist. The next day's view begins clean.
+Completed/done and cancelled rows are visible only within the current day's operator
+task board. The next day's view begins clean.
 
 ## Raspberry Pi Appliance
+
+### Target hardware and interaction
+
+The primary kiosk target is a 21-inch touch monitor connected to the Raspberry Pi. The
+normal staff workflow is touch-only; no mouse or keyboard is required.
+
+- support landscape and portrait orientation through an administrator-selected layout
+- use native/kinetic one-finger vertical scrolling with a generous scroll area
+- no horizontal swipe navigation or browser back/forward gesture
+- do not depend on hover, right-click, context menus, tooltips, or keyboard focus
+- use touch targets at least 64 logical pixels high for Done, Undo, Retry, and filters
+- keep patient/task rows tall enough to read while standing and moving quickly
+- retain the current patient's full group on screen where practical
+- use large category badges and state text in addition to color
+- keep connection state, last refresh, and current date visible in a sticky header
+- hide the mouse pointer after a short idle interval when no physical mouse is in use
+- calibrate and validate touch through the Raspberry Pi display stack during deployment
+- disable touch gestures that can expose browser chrome, desktop, or an exit path
+
+The interface should feel like a dedicated clinic appliance rather than a web page on a
+small computer.
 
 ### Recommended operating system
 
@@ -338,27 +450,53 @@ worklist. The next day's view begins clean.
 
 ### Staff-facing display
 
-- full-screen read-only list presentation
+- full-screen patient-centered task-board presentation
+- category filters: `All`, `Injection`, `Laboratory`, and `Imaging`
+- visually distinct task-type badges so staff cannot confuse an injection, specimen/test,
+  and imaging study
 - vertical scrolling only
 - large rows and wide scrollbar/touch targets
 - no horizontal scrolling
 - sticky connection and last-refresh status
-- Active rows first
-- Done and Cancelled rows remain visible below Active rows
+- Active staff tasks and active imaging rows first
+- Done, Completed, Expired, and Cancelled rows remain visible below current work
 - Done rows are grey and struck through
 - Cancelled rows use a distinct cancelled treatment
 - no automatic carousel scrolling
 - optional `Top`, `New items`, and `Retry` controls only
 
+Suggested row structure:
+
+```text
+Patient name / chart number / minimum age-sex context
+  [Injection] order name                          [ DONE ]
+  [Laboratory] study name                         [ DONE ]
+  [Imaging] study name                         [ ACTIVE ]
+```
+
+Imaging state is informational and does not expose a Done button.
+
 ### Done flow
 
-1. Staff selects `Done` on an Active row.
-2. Confirm: `이 항목을 완료 처리하시겠습니까?`
-3. Pi sends the opaque item ID and requested action to KaosEghis.
-4. KaosEghis persists Done with a timestamp and increments generation.
-5. Pi reloads.
-6. Row remains visible, moves below Active rows, and is struck through.
-7. Its control becomes `Undo`.
+Done is available only for staff-managed task categories. Imaging rows do not expose a
+Done control.
+
+1. Staff taps the large `Done` control on an Active eligible row.
+2. Show a touch-sized confirmation sheet that preserves the selected row/category and
+   asks: `이 항목을 완료 처리하시겠습니까?`
+3. Require a deliberate large `Confirm` tap; tapping outside or selecting Cancel performs
+   no state change.
+4. Pi sends the opaque item ID and requested action to KaosEghis.
+5. KaosEghis persists Done with a timestamp and increments generation.
+6. Pi reloads.
+7. Row remains visible, moves below Active rows, and is struck through.
+8. Its control becomes a large `Undo` control.
+
+Debounce repeated taps and make the server transition idempotent so a double touch cannot
+apply the action twice.
+
+For a laboratory row, this action means only that staff handled the displayed task. It
+does not create a collection, performance, or result record in eGHIS.
 
 ### Undo flow
 
@@ -425,7 +563,7 @@ Final route names may change, but responsibility should remain as follows.
 ### Pi pulls worklist from KaosEghis
 
 ```text
-GET /api/inj/worklist?date=YYYY-MM-DD
+GET /api/tasks/worklist?date=YYYY-MM-DD&category=all
 ```
 
 Response includes generation, health/status metadata, and the approved current-day
@@ -449,12 +587,12 @@ Example non-PHI body:
 ### Pi requests worklist transitions
 
 ```text
-POST /api/inj/worklist/<opaque_item_id>/done
-POST /api/inj/worklist/<opaque_item_id>/undo
+POST /api/tasks/worklist/<opaque_item_id>/done
+POST /api/tasks/worklist/<opaque_item_id>/undo
 ```
 
-These actions modify KaosEghis local operational state only. They do not write to
-eGHIS.
+These actions modify eligible KaosEghis local operational state only. They do not write
+to eGHIS and must reject imaging rows.
 
 ### Appliance controls
 
@@ -492,8 +630,8 @@ protocol.
 
 ### KaosEghis local storage
 
-KaosEghis may store the minimum current-day operational fields needed for the
-injection-room list. Candidate fields require final review but may include:
+KaosEghis may store the minimum current-day operational fields needed for the staff task
+board. Candidate fields require final review but may include:
 
 - opaque local item ID
 - stable source order key
@@ -521,15 +659,19 @@ insurance, billing, or resident registration data.
 An implementation may use a table shaped approximately as follows:
 
 ```text
-inj_worklist_items
+staff_worklist_items
   id
   opaque_id
+  task_category           injection / laboratory / imaging
   source_order_key
+  source_system
   recept_no
   ord_no
   ord_seq_no
   work_date
-  status                  active / done / cancelled
+  operational_status      active / done / cancelled / not_applicable
+  source_status
+  external_status         nullable; PACS or verified lab lifecycle only
   status_reason
   patient_no
   patient_name
@@ -546,6 +688,7 @@ inj_worklist_items
   changed_at
   done_at
   cancelled_at
+  external_completed_at
   created_at
   updated_at
 ```
@@ -558,6 +701,9 @@ KaosEghis workstation, not the Pi.
 ### Polling
 
 - new current-day INJ order creates one Active row
+- verified current-day laboratory order creates one Laboratory row
+- injection and laboratory adapters fail independently
+- imaging projection uses existing PACS state and does not query Orthanc/MWL/DICOM
 - duplicate poll is idempotent
 - changed source fields update the same row and revision
 - `dc_yn = 'Y'` marks an Active row Cancelled
@@ -567,6 +713,9 @@ KaosEghis workstation, not the Pi.
 - DB failure cancels nothing
 - restored source order reactivates the existing row
 - Done rows are excluded from high-frequency active reconciliation
+- staff Done is rejected for imaging rows
+- KaosPACS `completed` and `expired` are displayed without becoming staff-created states
+- a status change in one category never completes another task for the same patient
 
 ### API and synchronization
 
@@ -581,11 +730,18 @@ KaosEghis workstation, not the Pi.
 ### Kiosk
 
 - starts directly in full-screen worklist
+- 21-inch touch layout is usable without a mouse or keyboard
+- all routine controls meet the configured minimum touch-target size
+- kinetic scrolling works without exposing browser navigation gestures
+- no action depends on hover or right-click
 - no mouse-accessible exit exists
 - list remains vertically scrollable
+- All/Injection/Laboratory/Imaging filters show only their intended categories
+- patient grouping retains independent task rows and states
 - refresh preserves scroll position
 - Done row remains visible and struck through
 - Undo requires confirmation
+- repeated/double Done taps remain idempotent
 - current-day rollover clears prior display
 - unavailable backend never presents stale rows as current
 - browser/worklist data is not durably stored
@@ -604,16 +760,21 @@ KaosEghis workstation, not the Pi.
 
 ### Milestone 0: Source verification
 
-- confirm the live order query and date field
-- confirm cancellation and hard-deletion behavior
+- confirm the live injection order query and date field
+- identify and verify the laboratory order classification, routing, date, cancellation,
+  and source completion/result fields
+- confirm cancellation and hard-deletion behavior independently for injection and lab
+- define the exact existing PACS state feed used for optional imaging projection
 - measure narrow poll performance
 - confirm the minimum required patient/order display fields
 
-### Milestone 1: Local read-only worklist
+### Milestone 1: Local read-only task board
 
 - SQLite migration and repository
 - manual Poll now diagnostic surface
-- new/change/cancel/restore reconciliation
+- category adapters for injection and verified lab orders
+- optional read-only PACS projection through the existing PACS boundary
+- new/change/cancel/restore reconciliation per source category
 - generation tracking and sanitized audit
 - no Pi integration yet
 
@@ -662,3 +823,5 @@ KaosEghis-inj will not initially:
 - provide remote desktop to staff
 - become a medication ordering or clinical decision system
 - infer clinical completion from display interaction alone
+- treat a staff Done action as a laboratory result or imaging completion
+- duplicate KaosEghis-pacs polling, call Orthanc directly, or write DICOM/MWL

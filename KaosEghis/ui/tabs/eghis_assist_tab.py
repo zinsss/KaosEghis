@@ -1,4 +1,4 @@
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QMimeData, Qt, Signal
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
     QApplication,
@@ -541,6 +541,7 @@ class MacrosTab(QWidget):
                 "macro",
                 values["is_enabled"],
                 values["emr_target_profile_id"],
+                is_launcher_exposed=values["is_launcher_exposed"],
             )
             for step in values["steps"]:
                 create_macro_step(connection, item.id, **step)
@@ -571,6 +572,7 @@ class MacrosTab(QWidget):
                 "macro",
                 values["is_enabled"],
                 values["emr_target_profile_id"],
+                is_launcher_exposed=values["is_launcher_exposed"],
             )
             delete_macro_steps_for_item(connection, item_id)
             for step in values["steps"]:
@@ -783,33 +785,37 @@ class ReorderableStepsTable(QTableWidget):
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.CopyAction)
         self.setDragDropOverwriteMode(False)
+        self.viewport().installEventFilter(self)
 
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_start_pos = event.position().toPoint()
-        super().mousePressEvent(event)
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._drag_start_pos = event.position().toPoint()
+            elif event.type() == QEvent.Type.MouseMove:
+                if (
+                    self._drag_start_pos is not None
+                    and event.buttons() & Qt.MouseButton.LeftButton
+                    and (
+                        event.position().toPoint() - self._drag_start_pos
+                    ).manhattanLength()
+                    >= QApplication.startDragDistance()
+                ):
+                    self._begin_drag()
+                    return True
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                self._drag_start_pos = None
+        return super().eventFilter(watched, event)
 
-    def mouseMoveEvent(self, event) -> None:
-        if (
-            self._drag_start_pos is None
-            or not (event.buttons() & Qt.MouseButton.LeftButton)
-            or (
-                event.position().toPoint() - self._drag_start_pos
-            ).manhattanLength()
-            < QApplication.startDragDistance()
-        ):
-            super().mouseMoveEvent(event)
-            return
-
+    def _begin_drag(self) -> None:
         source_row = self.currentRow()
         if source_row < 0:
-            source_row = self.rowAt(self._drag_start_pos.y())
+            source_row = self.rowAt((self._drag_start_pos or QPoint()).y())
         if source_row < 0:
             self._drag_start_pos = None
             return
 
-        from PySide6.QtCore import QMimeData
-
+        self.selectRow(source_row)
         mime_data = QMimeData()
         mime_data.setData(self.MIME_TYPE, str(source_row).encode("utf-8"))
         drag = QDrag(self)
@@ -903,6 +909,10 @@ class MacroEditorDialog(QDialog):
         self.name = QLineEdit(item.name if item else "")
         self.enabled = QCheckBox()
         self.enabled.setChecked(item.is_enabled if item else True)
+        self.launcher_exposed = QCheckBox()
+        self.launcher_exposed.setChecked(
+            getattr(item, "is_launcher_exposed", True) if item else True
+        )
         self.emr_profile = QComboBox()
         self.emr_profile.addItem(
             self._default_profile_label(default_profile.name if default_profile else None),
@@ -956,6 +966,7 @@ class MacroEditorDialog(QDialog):
         form = QFormLayout()
         form.addRow("Macro name", self.name)
         form.addRow("Executable", self.enabled)
+        form.addRow("Exposed in Launcher", self.launcher_exposed)
         form.addRow("Application preset", self.emr_profile)
 
         buttons = QDialogButtonBox(
@@ -1007,6 +1018,7 @@ class MacroEditorDialog(QDialog):
         return {
             "name": self.name.text().strip(),
             "is_enabled": self.enabled.isChecked(),
+            "is_launcher_exposed": self.launcher_exposed.isChecked(),
             "emr_target_profile_id": self.current_profile_id(),
             "steps": self._steps(),
         }
@@ -1225,13 +1237,13 @@ class MacroStepDialog(QDialog):
             "press_enter_before": (
                 self.press_enter_before.isChecked()
                 if self.action.currentText()
-                in {"type_text", "type_text_keyboard", "paste_text", "type_text_clipboard", "preset_text"}
+                in {"type_text", "type_text_keyboard", "paste_text", "type_text_clipboard", "preset_text", "legacy_symptom_paste"}
                 else False
             ),
             "press_enter_after": (
                 self.press_enter_after.isChecked()
                 if self.action.currentText()
-                in {"type_text", "type_text_keyboard", "paste_text", "type_text_clipboard", "preset_text"}
+                in {"type_text", "type_text_keyboard", "paste_text", "type_text_clipboard", "preset_text", "legacy_symptom_paste"}
                 else False
             ),
             "wait_before_enabled": self.wait_before_enabled.isChecked(),
@@ -1253,12 +1265,13 @@ class MacroStepDialog(QDialog):
             "paste_text",
             "type_text_clipboard",
             "preset_text",
+            "legacy_symptom_paste",
         }
         self.press_enter_before.setEnabled(enabled)
         self.press_enter_after.setEnabled(enabled)
 
     def _update_value_option(self, action: str) -> None:
-        uses_macrotext = action == "preset_text"
+        uses_macrotext = action in {"preset_text", "legacy_symptom_paste"}
         self.value.setVisible(not uses_macrotext)
         self.preset_text.setVisible(uses_macrotext)
         value_label = self._form.labelForField(self.value)

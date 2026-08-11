@@ -1,6 +1,6 @@
 # KaosEghis Automation
 
-Last updated: 2026-07-23
+Last updated: 2026-08-08
 
 ## Purpose
 
@@ -12,6 +12,9 @@ This document describes the automation boundary of KaosEghis:
 - what is actually executable
 
 The project deliberately avoids mixing these categories.
+
+This document also records when automation-adjacent behavior belongs to a hidden
+infrastructure module rather than the main visible automation surfaces.
 
 ## Layers
 
@@ -105,6 +108,8 @@ Responsibilities:
 - connector-gated run execution
 - cancellation
 - limited supported actions
+- a dedicated `legacy_symptom_paste` path for old eGHIS symptom-entry flows that
+  need the proven `focus -> F1 -> Enter -> paste -> Enter` sequence
 - future EMR profile-aware resolution boundary
 - per-run target caching so repeated steps can reuse the same resolved control
 - one readiness check per run unless a step explicitly re-checks focus/window state
@@ -116,6 +121,27 @@ Current transition state:
 - macros can now be bound to an EMR target profile
 - dry run can report the resolved profile name
 - actual click/send/paste target resolution is intentionally not switched over yet
+
+### Hidden Credential Infrastructure
+
+Planned module:
+
+- `KaosEghis-pw`
+
+Responsibilities:
+
+- startup master-password prompt
+- hidden locked/unlocked vault state
+- hidden popup on a complex global hotkey
+- internal service credential support
+- manual external credential typing
+
+Boundary:
+
+- not a visible top-level automation tab
+- not a general-purpose password manager
+- not a browser extension replacement
+- no clipboard-based password handling by default
 
 ### EMR Target Foundation
 
@@ -161,6 +187,7 @@ implemented, and claim-day work remains planning-only.
 - hidden background macro service
 - generic recorder
 - unconstrained mouse automation
+- visible credential-management tab clutter for KaosEghis-pw
 
 ## Connector Requirement
 

@@ -58,6 +58,12 @@ They share one source of truth:
 - the Launcher `Comments` column copies the resolved body to the clipboard
 - a macro `preset_text` step selects the same item by its stable item ID and pastes
   the resolved body through the guarded macro runner
+- macro and MacroText editors include an **Exposed in Launcher** checkbox; existing
+  items migrate as exposed so upgrades do not unexpectedly hide them
+- clearing **Exposed in Launcher** keeps the saved item available to the Builder and
+  macro references while removing it from Launcher and any Launcher collection
+- exposed MacroTexts can be grouped into Comments collections from the MacroTexts
+  page; collections support member reorder/removal and unpacking
 
 ## Macro Definition Structure
 
@@ -127,7 +133,8 @@ Daily-use macro access:
 - shows saved executable macros in the three Launcher columns as direct launcher
   items unless they belong to a launcher collection
 - direct launcher macros still run immediately on double-click
-- launcher collections open a chooser dialog on double-click
+- launcher collections open a chooser dialog on double-click and may contain either
+  executable macros or, in the Comments section, exposed MacroTexts
 - right-clicking a launcher collection shows its member macros directly for fast run
 - shows `Running '<macro name>'...` while the macro is executing
 - does not show a per-run confirmation in Launcher; the EMR connection and runtime

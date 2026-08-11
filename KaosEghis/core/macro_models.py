@@ -18,6 +18,7 @@ class MacroAction(str, Enum):
     SET_TEXT_UIA = "set_text_uia"
     SET_EDIT_TEXT = "set_edit_text"
     PRESET_TEXT = "preset_text"
+    LEGACY_SYMPTOM_PASTE = "legacy_symptom_paste"
     DELAY_MS = "delay_ms"
 
 

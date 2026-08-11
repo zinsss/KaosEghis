@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS items (
     name TEXT NOT NULL,
     item_type TEXT NOT NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
+    is_launcher_exposed INTEGER NOT NULL DEFAULT 1,
     emr_target_profile_id INTEGER,
     launcher_section TEXT NOT NULL DEFAULT 'Macro',
     launcher_position INTEGER NOT NULL DEFAULT 0,
@@ -132,6 +133,39 @@ CREATE TABLE IF NOT EXISTS scheduler_runs (
 CREATE INDEX IF NOT EXISTS idx_scheduler_runs_job_created
     ON scheduler_runs(job_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS socl_collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain TEXT NOT NULL CHECK (domain IN ('subjective', 'objective')),
+    name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(domain, name)
+);
+
+CREATE TABLE IF NOT EXISTS socl_findings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    render_text TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(collection_id, label),
+    FOREIGN KEY (collection_id) REFERENCES socl_collections(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_socl_collections_domain_order
+    ON socl_collections(domain, sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_socl_findings_collection_order
+    ON socl_findings(collection_id, sort_order, id);
+
+CREATE TABLE IF NOT EXISTS socl_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS pacs_worklist_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'expired', 'cancelled', 'error')),
@@ -210,3 +244,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_emr_target_profiles_name
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_emr_ui_targets_profile_target_key
     ON emr_ui_targets(profile_id, target_key);
+
+CREATE TABLE IF NOT EXISTS vaccine_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    code TEXT,
+    chart_note_template TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS vaccine_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vaccine_type_id INTEGER,
+    vaccine_type_name TEXT NOT NULL,
+    patient_chart_no TEXT,
+    patient_resident_id TEXT,
+    patient_name TEXT,
+    patient_sex TEXT,
+    patient_age TEXT,
+    patient_phone TEXT,
+    patient_address TEXT,
+    status TEXT NOT NULL DEFAULT 'prepared',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vaccine_type_id) REFERENCES vaccine_types(id)
+);

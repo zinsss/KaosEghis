@@ -18,9 +18,24 @@ def test_settings_panel_instantiates(tmp_path) -> None:
     tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
 
     assert tab is not None
+    assert tab.TOP_PAGES == ["General", "PACS"]
+    assert tab.stacked_widget.count() == 2
     assert tab.eghis_db_connection_string.echoMode() == tab.eghis_db_connection_string.EchoMode.Password
     assert tab.kaospacs_gateway_api_token.echoMode() == tab.kaospacs_gateway_api_token.EchoMode.Password
     assert tab.kaospacs_integration_token.echoMode() == tab.kaospacs_integration_token.EchoMode.Password
+
+
+def test_settings_internal_pages_are_reachable(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.settings_tab import SettingsTab
+
+    tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
+
+    tab.show_page(1)
+    assert tab.stacked_widget.currentWidget() is tab.pacs_page
+    tab.show_page(0)
+    assert tab.stacked_widget.currentWidget() is tab.general_page
 
 
 def test_save_pacs_settings_persists_values(tmp_path) -> None:

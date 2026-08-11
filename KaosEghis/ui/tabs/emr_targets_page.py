@@ -240,8 +240,9 @@ class EmrTargetsPage(QWidget):
         self._capture_controller.capture_ready.connect(self._handle_capture_ready)
         self._capture_controller.capture_failed.connect(self._handle_capture_failed)
         self.capture_hotkey_label.setText(
-            "Global capture hotkey: Ctrl+Shift+F9 (starts when EMR page opens)"
+            "Global capture hotkey: Ctrl+Shift+F9"
         )
+        self._ensure_capture_hotkey_listener()
 
         self.refresh_view()
 
@@ -635,7 +636,7 @@ class EmrTargetsPage(QWidget):
             self._refresh_connection_status()
             return
 
-        state = refresh_cached_eghis_state(settings)
+        state = refresh_cached_eghis_state(settings, eager_grid_cache=True)
         connected = state.status in {"green", "yellow"} and state.pid is not None
         self.connection_toggle.blockSignals(True)
         self.connection_toggle.setChecked(connected)

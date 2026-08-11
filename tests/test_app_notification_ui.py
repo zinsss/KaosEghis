@@ -56,7 +56,7 @@ def test_main_window_places_notification_in_tab_bar_corner(tmp_path, monkeypatch
         is window.notification_area
     )
 
-    window.kaoseghis_tab.emr_page.app_notification.emit(
+    window.macros_tab.emr_page.app_notification.emit(
         "Captured and copied", "success"
     )
     QApplication.processEvents()

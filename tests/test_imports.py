@@ -388,9 +388,9 @@ def test_items_repository_crud(tmp_path) -> None:
             1,
         )
         assert moved is not None
-        assert moved.launcher_section == "Comments"
+        assert moved.launcher_section == "Macro"
         launcher_items = list_launcher_items(connection, "Comments")
-        assert [item.id for item in launcher_items] == [second.id]
+        assert launcher_items == []
         assert get_item(connection, first.id).launcher_section == "Macro"
 
         macrotext = create_item(connection, "Comment", "clipboard", True)
@@ -436,7 +436,31 @@ def test_launcher_section_migration_preserves_legacy_items(tmp_path) -> None:
     assert migrated_eghis is not None
     assert migrated_eghis.launcher_section == "Macro"
     assert migrated_etc is not None
-    assert migrated_etc.launcher_section == "Favorite"
+    assert migrated_etc.launcher_section == "Macro"
+
+
+def test_launcher_collection_migration_keeps_macro_collections_out_of_actions(
+    tmp_path,
+) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_launcher_collection, get_launcher_collection
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        collection = create_launcher_collection(connection, "Legacy collection", "Macro", 1)
+        connection.execute(
+            "UPDATE launcher_collections SET launcher_section = ? WHERE id = ?",
+            ("Actions", collection.id),
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        migrated = get_launcher_collection(connection, collection.id)
+    assert migrated is not None
+    assert migrated.launcher_section == "Macro"
 
 
 def test_macro_steps_repository_crud_and_reorder(tmp_path) -> None:
@@ -1580,6 +1604,132 @@ def test_discover_eghis_returns_green_when_found_and_active(monkeypatch) -> None
     assert state.message == "Connected and active"
 
 
+def test_discover_eghis_eager_grid_cache_loads_configured_handles(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    monkeypatch.setattr(
+        connector,
+        "_discover_process_info",
+        lambda _name: {"process_name": "Eghis.exe", "pid": 12, "exe_path": "C:/Eghis.exe"},
+    )
+    monkeypatch.setattr(
+        connector,
+        "_discover_window_info",
+        lambda _title: {"window_title": "Eghis EMR", "window_handle": 55},
+    )
+    monkeypatch.setattr(connector, "_get_window_owner_pid", lambda _hwnd: 12)
+    monkeypatch.setattr(connector, "_foreground_handle_matches", lambda _handle: True)
+    monkeypatch.setattr(connector, "_timestamp_now", lambda: "2026-08-05T09:30:00")
+    monkeypatch.setattr(connector, "_resolve_main_window_handle", lambda _hwnd, _auto: 77)
+    monkeypatch.setattr(
+        connector,
+        "_resolve_cached_grid_handles",
+        lambda scope_handle, grid_ids: {
+            grid_ids[0]: 101,
+            grid_ids[2]: 103,
+            grid_ids[4]: 105,
+        } if scope_handle == 77 else {},
+    )
+
+    state = connector.discover_eghis(
+        {
+            "eghis_process_name": "Eghis.exe",
+            "eghis_window_title_contains": "Eghis",
+            "eghis_main_window_automation_id": "H2OpdTreatment",
+            "eghis_patient_status_tab_automation_id": "tabProc",
+            "eghis_prescription_grid_automation_id": "tree처방",
+            "eghis_symptom_grid_automation_id": "grdSymp",
+            "eghis_diagnosis_grid_automation_id": "tree상병",
+            "eghis_patient_list_grid_automation_id": "grdOpdList",
+        },
+        eager_grid_cache=True,
+    )
+
+    assert state.status == "green"
+    assert state.main_window_handle == 77
+    assert state.cached_grid_handles == {
+        "tabProc": 101,
+        "grdSymp": 103,
+        "grdOpdList": 105,
+    }
+
+
+def test_discover_eghis_eager_grid_cache_access_denied_does_not_block_connect(
+    monkeypatch,
+) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    monkeypatch.setattr(
+        connector,
+        "_discover_process_info",
+        lambda _name: {"process_name": "eGhis.exe", "pid": 12, "exe_path": "C:/eghis/eGhis.exe"},
+    )
+    monkeypatch.setattr(
+        connector,
+        "_discover_window_info",
+        lambda _title: {"window_title": "이지스 전자차트 2.0", "window_handle": 55},
+    )
+    monkeypatch.setattr(connector, "_get_window_owner_pid", lambda _hwnd: 12)
+    monkeypatch.setattr(connector, "_foreground_handle_matches", lambda _handle: False)
+    monkeypatch.setattr(connector, "_timestamp_now", lambda: "2026-08-11T09:30:00")
+    monkeypatch.setattr(connector, "_resolve_main_window_handle", lambda _hwnd, _auto: 77)
+
+    def fail_grid_cache(_scope_handle, _grid_ids):
+        raise RuntimeError("access denied")
+
+    monkeypatch.setattr(connector, "_resolve_cached_grid_handles", fail_grid_cache)
+
+    state = connector.discover_eghis(
+        {
+            "eghis_process_name": "eGhis.exe",
+            "eghis_window_title_contains": "이지스 전자차트 2.0",
+            "eghis_main_window_automation_id": "H2OpdTreatment",
+        },
+        eager_grid_cache=True,
+    )
+
+    assert state.status == "yellow"
+    assert state.process_running is True
+    assert state.window_found is True
+    assert state.cached_grid_handles is None
+
+
+
+
+def test_resolve_main_window_handle_falls_back_to_named_mdi_child(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    import KaosEghis.core.eghis_connector as connector
+
+    monkeypatch.setattr(
+        connector,
+        "_find_named_mdi_child_window_handle",
+        lambda hwnd, title: 135064 if hwnd == 55 and title == "진료실" else None,
+    )
+
+    class FakeMissingChild:
+        @staticmethod
+        def wrapper_object():
+            raise RuntimeError("missing")
+
+    class FakeSpec:
+        @staticmethod
+        def child_window(**_kwargs):
+            return FakeMissingChild()
+
+    class FakeDesktop:
+        def __init__(self, backend):
+            self.backend = backend
+
+        @staticmethod
+        def window(handle):
+            assert handle == 55
+            return FakeSpec()
+
+    monkeypatch.setitem(sys.modules, "pywinauto", SimpleNamespace(Desktop=FakeDesktop))
+
+    assert connector._resolve_main_window_handle(55, "H2OpdTreatment") == 135064
 
 
 def test_discover_eghis_blocks_when_window_owner_pid_differs(monkeypatch) -> None:
@@ -1766,6 +1916,29 @@ def test_manual_cached_connection_refocuses_on_each_later_macro_run(
     assert first.status == "green"
     assert second.status == "green"
     assert focus_calls == [55, 55]
+
+
+def test_ensure_cached_connection_ready_requires_manual_cached_connection(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    monkeypatch.setattr(connector, "_CACHED_STATE", None)
+    monkeypatch.setattr(
+        connector,
+        "discover_eghis",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("manual-ready check should not auto-discover when disconnected")
+        ),
+    )
+
+    state = connector.ensure_cached_connection_ready(
+        {
+            "eghis_process_name": "Eghis.exe",
+            "eghis_window_title_contains": "Eghis",
+        }
+    )
+
+    assert state.status == "red"
+    assert state.message == "Application not connected. Connect manually and retry."
 
 
 def test_manual_cached_connection_reuses_valid_main_and_grid_handles(
@@ -2130,9 +2303,19 @@ def test_macro_runner_runs_wait_key_and_paste_text(monkeypatch) -> None:
     monkeypatch.setattr(macro_runner, "ensure_cached_connection_ready", lambda _settings: FakeState())
     monkeypatch.setattr(macro_runner.time, "monotonic", fake_monotonic)
     monkeypatch.setattr(macro_runner.time, "sleep", fake_sleep)
+    monkeypatch.setattr(
+        macro_runner.MacroRunner,
+        "_legacy_input_settle",
+        staticmethod(lambda duration_seconds=0.2: None),
+    )
     monkeypatch.setattr(macro_runner, "copy_text", lambda text: events.append(("copy", text)) or SimpleNamespace(text=text))
     monkeypatch.setattr(macro_runner, "restore_clipboard", lambda snapshot: events.append(("restore", snapshot.text)))
-    monkeypatch.setitem(sys.modules, "pywinauto.keyboard", SimpleNamespace(send_keys=lambda keys: events.append(("send", keys))))
+    monkeypatch.setattr("pyautogui.press", lambda key: events.append(("press", key)))
+    monkeypatch.setattr(
+        "pyautogui.hotkey",
+        lambda *keys, interval=0.0: events.append(("hotkey", tuple(keys))),
+    )
+    monkeypatch.setitem(sys.modules, "pywinauto.keyboard", SimpleNamespace(send_keys=lambda keys, **_kwargs: events.append(("send", keys))))
 
     runner = macro_runner.MacroRunner()
     steps = [
@@ -2145,16 +2328,17 @@ def test_macro_runner_runs_wait_key_and_paste_text(monkeypatch) -> None:
 
     assert result.success is True
     assert result.executed_steps == 3
-    enter_index = events.index(("send", "{ENTER}"))
+    enter_index = events.index(("press", "enter"))
     wait_events = [seconds for kind, seconds in events[:enter_index] if kind == "sleep"]
     assert wait_events
     assert max(wait_events) <= 0.05
     assert abs(sum(wait_events) - 0.25) < 0.001
     assert events[enter_index:] == [
-        ("send", "{ENTER}"),
+        ("press", "enter"),
+        ("sleep", 0.03),
         ("copy", "hello"),
         ("sleep", 0.05),
-        ("send", "^v"),
+        ("hotkey", ("ctrl", "v")),
         ("sleep", 0.15),
         ("restore", "hello"),
     ]

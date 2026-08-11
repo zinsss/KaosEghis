@@ -23,5 +23,7 @@ def run() -> int:
     if patient_context_runtime is not None:
         app.aboutToQuit.connect(patient_context_runtime.stop)
     window = MainWindow()
+    window.initialize_runtime_services()
+    window.prompt_startup_master_password()
     window.show()
     return app.exec()

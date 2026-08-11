@@ -52,7 +52,10 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_pacs_audit_events(connection)
         _migrate_emr_target_profiles(connection)
         _migrate_emr_ui_targets(connection)
+        _migrate_vaccine_tables(connection)
         _seed_default_emr_target_profile(connection)
+        _seed_default_socl_vocabulary(connection)
+        _seed_default_vaccine_types(connection)
         connection.commit()
 
 
@@ -90,6 +93,11 @@ def _migrate_items(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE items ADD COLUMN launcher_position INTEGER NOT NULL DEFAULT 0"
         )
+    if "is_launcher_exposed" not in columns:
+        connection.execute(
+            "ALTER TABLE items "
+            "ADD COLUMN is_launcher_exposed INTEGER NOT NULL DEFAULT 1"
+        )
     connection.execute(
         """
         UPDATE items
@@ -97,11 +105,13 @@ def _migrate_items(connection: sqlite3.Connection) -> None:
             WHEN item_type IN ('clipboard', 'randomized_clipboard') THEN 'Comments'
             WHEN launcher_section = 'Medical Documents' THEN 'Comments'
             WHEN launcher_section = 'Eghis' THEN 'Macro'
-            WHEN launcher_section = 'ETC' THEN 'Favorite'
+            WHEN item_type = 'macro' AND launcher_section IN ('ETC', 'Favorite') THEN 'Macro'
+            WHEN launcher_section IN ('ETC', 'Favorite') THEN 'Actions'
+            WHEN item_type = 'macro' AND launcher_section = 'Actions' THEN 'Macro'
             ELSE launcher_section
         END
         WHERE item_type IN ('clipboard', 'randomized_clipboard')
-           OR launcher_section IN ('Medical Documents', 'Eghis', 'ETC')
+           OR launcher_section IN ('Medical Documents', 'Eghis', 'ETC', 'Favorite', 'Actions')
         """
     )
     _normalize_launcher_positions(connection)
@@ -131,6 +141,18 @@ def _migrate_launcher_collections(connection: sqlite3.Connection) -> None:
             FOREIGN KEY (collection_id) REFERENCES launcher_collections(id),
             FOREIGN KEY (macro_item_id) REFERENCES items(id)
         )
+        """
+    )
+    connection.execute(
+        """
+        UPDATE launcher_collections
+        SET launcher_section = CASE
+            WHEN launcher_section = 'Medical Documents' THEN 'Comments'
+            WHEN launcher_section = 'Eghis' THEN 'Macro'
+            WHEN launcher_section IN ('ETC', 'Favorite', 'Actions') THEN 'Macro'
+            ELSE launcher_section
+        END
+        WHERE launcher_section IN ('Medical Documents', 'Eghis', 'ETC', 'Favorite', 'Actions')
         """
     )
 
@@ -414,6 +436,61 @@ def _migrate_emr_target_profiles(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_vaccine_tables(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vaccine_types (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            code TEXT,
+            chart_note_template TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vaccine_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vaccine_type_id INTEGER,
+            vaccine_type_name TEXT NOT NULL,
+            patient_chart_no TEXT,
+            patient_resident_id TEXT,
+            patient_name TEXT,
+            patient_sex TEXT,
+            patient_age TEXT,
+            patient_phone TEXT,
+            patient_address TEXT,
+            status TEXT NOT NULL DEFAULT 'prepared',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (vaccine_type_id) REFERENCES vaccine_types(id)
+        )
+        """
+    )
+
+
+def _seed_default_vaccine_types(connection: sqlite3.Connection) -> None:
+    count_row = connection.execute(
+        "SELECT COUNT(*) FROM vaccine_types"
+    ).fetchone()
+    if count_row is not None and int(count_row[0] or 0) > 0:
+        return
+    connection.executemany(
+        """
+        INSERT INTO vaccine_types (name, code, chart_note_template, is_active, sort_order)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            ("Influenza", "flu", "인플루엔자 예방접종 시행함.", 1, 1),
+            ("COVID-19", "covid", "코로나19 예방접종 시행함.", 1, 2),
+        ),
+    )
+
+
 def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:
     columns = {
         row[1]
@@ -482,4 +559,49 @@ def _seed_default_emr_target_profile(connection: sqlite3.Connection) -> None:
             "tree상병",
             "grdOpdList",
         ),
+    )
+
+
+def _seed_default_socl_vocabulary(connection: sqlite3.Connection) -> None:
+    from KaosEghis.db.socl_defaults import (
+        SOCL_CATALOG_VERSION,
+        SOCL_DEFAULT_COLLECTIONS,
+    )
+
+    marker = connection.execute(
+        "SELECT value FROM socl_metadata WHERE key = 'default_catalog_version'"
+    ).fetchone()
+    if marker is not None:
+        return
+
+    count_row = connection.execute("SELECT COUNT(*) FROM socl_collections").fetchone()
+    if count_row is not None and int(count_row[0]) == 0:
+        for collection_order, (domain, name, findings) in enumerate(
+            SOCL_DEFAULT_COLLECTIONS,
+            start=1,
+        ):
+            cursor = connection.execute(
+                """
+                INSERT INTO socl_collections (domain, name, sort_order)
+                VALUES (?, ?, ?)
+                """,
+                (domain, name, collection_order),
+            )
+            for finding_order, label in enumerate(findings, start=1):
+                connection.execute(
+                    """
+                    INSERT INTO socl_findings (
+                        collection_id, label, render_text, sort_order
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (cursor.lastrowid, label, label, finding_order),
+                )
+
+    connection.execute(
+        """
+        INSERT INTO socl_metadata (key, value)
+        VALUES ('default_catalog_version', ?)
+        """,
+        (SOCL_CATALOG_VERSION,),
     )

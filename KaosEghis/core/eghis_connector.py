@@ -80,7 +80,11 @@ def build_connector_settings(
     return settings
 
 
-def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
+def discover_eghis(
+    settings: dict[str, str],
+    *,
+    eager_grid_cache: bool = False,
+) -> EghisConnectorState:
     configured_process_name = settings.get("eghis_process_name", "")
     configured_window_title = settings.get("eghis_window_title_contains", "")
     configured_main_window_automation_id = (
@@ -95,6 +99,14 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
         configured_main_window_automation_id,
     )
     cached_grid_handles = None
+    if eager_grid_cache:
+        try:
+            cached_grid_handles = _resolve_cached_grid_handles(
+                main_window_handle or window_handle,
+                _grid_automation_ids_from_settings(settings),
+            )
+        except Exception:
+            cached_grid_handles = None
     is_active = bool(window_handle is not None and _foreground_handle_matches(window_handle))
     last_seen_at = _timestamp_now() if process_info or window_info else None
 
@@ -219,9 +231,13 @@ def clear_cached_eghis_state() -> None:
     _CACHED_STATE = None
 
 
-def refresh_cached_eghis_state(settings: dict[str, str]) -> EghisConnectorState:
+def refresh_cached_eghis_state(
+    settings: dict[str, str],
+    *,
+    eager_grid_cache: bool = False,
+) -> EghisConnectorState:
     global _CACHED_STATE
-    _CACHED_STATE = discover_eghis(settings)
+    _CACHED_STATE = discover_eghis(settings, eager_grid_cache=eager_grid_cache)
     return _CACHED_STATE
 
 
@@ -269,7 +285,7 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
         )
         _CACHED_STATE = blocked
         return blocked
-    focus_handle = state.main_window_handle or state.window_handle
+    focus_handle = state.window_handle or state.main_window_handle
     foreground = _get_foreground_window_info()
     if foreground is None or foreground.get("window_handle") not in {
         state.window_handle,
@@ -360,7 +376,7 @@ def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
         _CACHED_STATE = blocked
         return blocked
 
-    focus_handle = state.main_window_handle or state.window_handle
+    focus_handle = state.window_handle or state.main_window_handle
     if not state.is_active:
         focus_succeeded, focus_reason = _focus_and_confirm_window(
             focus_handle,
@@ -404,6 +420,62 @@ def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
         last_seen_at=_timestamp_now(),
         message="Connected and active",
         cached_grid_handles=cached_grid_handles,
+    )
+    _CACHED_STATE = ready
+    return ready
+
+
+def focus_cached_eghis_window(settings: dict[str, str]) -> EghisConnectorState:
+    global _CACHED_STATE
+    state = get_cached_eghis_state()
+    if state is None:
+        return ensure_cached_connection_ready(settings)
+    if not state.process_running or state.pid is None or not _pid_exists(state.pid):
+        return ensure_cached_connection_ready(settings)
+    if not _process_identity_matches_state(state, settings):
+        return ensure_cached_connection_ready(settings)
+    if state.window_handle is None or not _window_handle_is_valid(state.window_handle):
+        return ensure_cached_connection_ready(settings)
+
+    owner_pid = _get_window_owner_pid(state.window_handle)
+    if owner_pid is None or owner_pid != state.pid:
+        return ensure_cached_connection_ready(settings)
+
+    main_window_handle = _main_window_handle_for_state(state, settings)
+    foreground = _get_foreground_window_info()
+    if foreground is not None and foreground.get("window_handle") in {
+        state.window_handle,
+        main_window_handle,
+    }:
+        ready = replace(
+            state,
+            status="green",
+            is_active=True,
+            window_owner_pid=owner_pid,
+            main_window_handle=main_window_handle,
+            last_seen_at=_timestamp_now(),
+            message="Connected and active",
+        )
+        _CACHED_STATE = ready
+        return ready
+
+    focus_handle = state.window_handle or main_window_handle
+    focus_succeeded, _focus_reason = _focus_and_confirm_window(
+        focus_handle,
+        replace(state, main_window_handle=main_window_handle),
+        settings,
+    )
+    if not focus_succeeded:
+        return ensure_cached_connection_ready(settings)
+
+    ready = replace(
+        state,
+        status="green",
+        is_active=True,
+        window_owner_pid=owner_pid,
+        main_window_handle=main_window_handle,
+        last_seen_at=_timestamp_now(),
+        message="Connected and active",
     )
     _CACHED_STATE = ready
     return ready
@@ -648,7 +720,7 @@ def _main_window_handle_for_state(
     settings: dict[str, str],
 ) -> int | None:
     cached_handle = state.main_window_handle
-    if cached_handle is not None and _window_handle_is_valid(cached_handle):
+    if cached_handle is not None:
         return cached_handle
     return _refresh_cached_main_window_handle(state, settings)
 
@@ -659,17 +731,76 @@ def _resolve_main_window_handle(
 ) -> int | None:
     if window_handle is None or not automation_id:
         return None
-    try:
-        from pywinauto import Desktop
+    for backend in ("win32", "uia"):
+        try:
+            from pywinauto import Desktop
 
-        window = Desktop(backend="win32").window(handle=window_handle).wrapper_object()
-        target = window.child_window(auto_id=automation_id).wrapper_object()
-        handle = getattr(target, "handle", None)
-        if handle is not None:
-            return int(handle)
-        return getattr(getattr(target, "element_info", None), "handle", None)
+            window = Desktop(backend=backend).window(handle=window_handle)
+            target = window.child_window(auto_id=automation_id).wrapper_object()
+            handle = getattr(target, "handle", None)
+            if handle is None:
+                handle = getattr(getattr(target, "element_info", None), "handle", None)
+            if handle is not None:
+                return int(handle)
+        except Exception:
+            continue
+    fallback_handle = _find_named_mdi_child_window_handle(window_handle, "진료실")
+    if fallback_handle is not None:
+        return fallback_handle
+    return None
+
+
+def _find_named_mdi_child_window_handle(
+    root_handle: int | None,
+    expected_title: str,
+) -> int | None:
+    if root_handle is None or not expected_title:
+        return None
+    try:
+        import win32gui
     except Exception:
         return None
+
+    normalized_expected = expected_title.strip()
+    if not normalized_expected:
+        return None
+
+    child_handles: list[int] = []
+    try:
+        win32gui.EnumChildWindows(
+            root_handle,
+            lambda child_handle, _param: child_handles.append(child_handle),
+            None,
+        )
+    except Exception:
+        return None
+
+    for child_handle in child_handles:
+        try:
+            class_name = win32gui.GetClassName(child_handle)
+        except Exception:
+            class_name = ""
+        if "MDICLIENT" not in class_name.upper():
+            continue
+
+        mdi_children: list[int] = []
+        try:
+            win32gui.EnumChildWindows(
+                child_handle,
+                lambda nested_handle, _param: mdi_children.append(nested_handle),
+                None,
+            )
+        except Exception:
+            continue
+
+        for nested_handle in mdi_children:
+            try:
+                window_title = win32gui.GetWindowText(nested_handle).strip()
+            except Exception:
+                window_title = ""
+            if window_title == normalized_expected:
+                return int(nested_handle)
+    return None
 
 
 def _resolve_cached_grid_handles(
@@ -679,11 +810,14 @@ def _resolve_cached_grid_handles(
     if scope_handle is None:
         return None
     for backend in ("win32", "uia"):
-        handles = _resolve_cached_grid_handles_for_backend(
-            scope_handle,
-            backend,
-            grid_automation_ids,
-        )
+        try:
+            handles = _resolve_cached_grid_handles_for_backend(
+                scope_handle,
+                backend,
+                grid_automation_ids,
+            )
+        except Exception:
+            handles = {}
         if handles:
             return handles
     return None

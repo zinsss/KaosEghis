@@ -53,6 +53,7 @@ from KaosEghis.db.repositories import (
     get_active_emr_target_profile,
     get_item,
     get_launcher_collection,
+    get_launcher_collection_for_item,
     get_launcher_collection_for_macro,
     list_clipboard_variants,
     list_launcher_collection_members,
@@ -1119,6 +1120,7 @@ class MacrosPage(QWidget):
                 "macro",
                 values["is_enabled"],
                 values["emr_target_profile_id"],
+                is_launcher_exposed=values["is_launcher_exposed"],
             )
             for step in values["steps"]:
                 create_macro_step(connection, item.id, **step)
@@ -1150,6 +1152,7 @@ class MacrosPage(QWidget):
                 "macro",
                 values["is_enabled"],
                 values["emr_target_profile_id"],
+                is_launcher_exposed=values["is_launcher_exposed"],
             )
             delete_macro_steps_for_item(connection, item_id)
             for step in values["steps"]:
@@ -1175,6 +1178,7 @@ class MacrosPage(QWidget):
                 item.is_enabled,
                 item.emr_target_profile_id,
                 launcher_section=item.launcher_section,
+                is_launcher_exposed=item.is_launcher_exposed,
             )
             for step in steps:
                 create_macro_step(
@@ -1417,9 +1421,9 @@ class MacroTextsPage(QWidget):
         title = QLabel("MacroTexts")
         title.setObjectName("pageTitle")
 
-        self.presets_table = QTableWidget(0, 4)
+        self.presets_table = QTableWidget(0, 5)
         self.presets_table.setHorizontalHeaderLabels(
-            ["id", "name", "mode", "options"]
+            ["id", "name", "mode", "options", "exposed"]
         )
         self.presets_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.presets_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -1438,6 +1442,13 @@ class MacroTextsPage(QWidget):
         self.copy_button.clicked.connect(self.copy_macrotext)
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_view)
+        self.collections_table = _create_collection_table()
+        self.create_collection_button = QPushButton("Create collection")
+        self.create_collection_button.clicked.connect(self.create_collection)
+        self.edit_collection_button = QPushButton("Edit selected collection")
+        self.edit_collection_button.clicked.connect(self.edit_collection)
+        self.unpack_collection_button = QPushButton("Unpack selected collection")
+        self.unpack_collection_button.clicked.connect(self.unpack_collection)
 
         self.status_label = QLabel("")
         self.presets_table.cellDoubleClicked.connect(
@@ -1452,11 +1463,20 @@ class MacroTextsPage(QWidget):
         controls.addWidget(self.refresh_button)
         controls.addStretch()
 
+        collection_controls = QHBoxLayout()
+        collection_controls.addWidget(self.create_collection_button)
+        collection_controls.addWidget(self.edit_collection_button)
+        collection_controls.addWidget(self.unpack_collection_button)
+        collection_controls.addStretch()
+
         layout = QVBoxLayout(self)
         layout.addWidget(title)
         layout.addWidget(self.empty_state)
         layout.addWidget(self.presets_table)
         layout.addLayout(controls)
+        layout.addWidget(QLabel("Preset Text collections"))
+        layout.addWidget(self.collections_table)
+        layout.addLayout(collection_controls)
         layout.addWidget(self.status_label)
 
         self.refresh_view()
@@ -1491,6 +1511,9 @@ class MacroTextsPage(QWidget):
                 self.presets_table.setItem(
                     row_index, 3, QTableWidgetItem("Live")
                 )
+                self.presets_table.setItem(
+                    row_index, 4, QTableWidgetItem("Yes")
+                )
                 continue
             self.presets_table.setItem(row_index, 0, QTableWidgetItem(str(item.id)))
             self.presets_table.setItem(row_index, 1, QTableWidgetItem(item.name))
@@ -1503,7 +1526,11 @@ class MacroTextsPage(QWidget):
             self.presets_table.setItem(
                 row_index, 3, QTableWidgetItem(str(variant_counts[item.id]))
             )
+            self.presets_table.setItem(
+                row_index, 4, QTableWidgetItem(_yes_no(item.is_launcher_exposed))
+            )
         self.presets_table.resizeColumnsToContents()
+        _populate_collection_table(self.collections_table, self._db_path, "Comments")
         has_presets = bool(all_rows)
         self.empty_state.setVisible(not has_presets)
         self.presets_table.setVisible(has_presets)
@@ -1523,10 +1550,11 @@ class MacroTextsPage(QWidget):
                 values["item_type"],
                 True,
                 launcher_section="Comments",
+                is_launcher_exposed=dialog.launcher_exposed.isChecked(),
             )
             replace_clipboard_variants(connection, item.id, values["bodies"])
         self.refresh_view()
-        self.status_label.setText("MacroText added to Comments.")
+        self.status_label.setText("MacroText added.")
 
     def edit_macrotext(self) -> None:
         item_id = self._selected_item_id()
@@ -1554,6 +1582,7 @@ class MacroTextsPage(QWidget):
                 values["item_type"],
                 True,
                 launcher_section="Comments",
+                is_launcher_exposed=dialog.launcher_exposed.isChecked(),
             )
             replace_clipboard_variants(connection, item_id, values["bodies"])
         self.refresh_view()
@@ -1584,12 +1613,142 @@ class MacroTextsPage(QWidget):
         _success, message = _copy_macrotext(self._db_path, item_id)
         self.status_label.setText(message)
 
+    def create_collection(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            candidates = [
+                item
+                for item_type in ("clipboard", "randomized_clipboard")
+                for item in list_items(connection, item_type)
+                if item.is_launcher_exposed
+                and get_launcher_collection_for_item(connection, item.id) is None
+            ]
+        if len(candidates) < 2:
+            self.status_label.setText(
+                "At least two exposed, ungrouped MacroTexts are required."
+            )
+            return
+
+        dialog = LauncherCollectionCreateDialog("Preset Text", candidates, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        name = dialog.collection_name()
+        item_ids = dialog.selected_item_ids()
+        if not name:
+            self.status_label.setText("Collection name is required.")
+            return
+        if len(item_ids) < 2:
+            self.status_label.setText("Select at least two MacroTexts.")
+            return
+
+        with connect(self._db_path) as connection:
+            collection = create_launcher_collection(connection, name, "Comments")
+            for item_id in item_ids:
+                add_item_to_launcher_collection(connection, collection.id, item_id)
+        self.refresh_view()
+        self.status_label.setText(f"Created collection '{name}'.")
+
+    def edit_collection(self) -> None:
+        collection_id = self._selected_collection_id()
+        if collection_id is None:
+            self.status_label.setText("Select a Preset Text collection to edit.")
+            return
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            collection = get_launcher_collection(connection, collection_id)
+            members = list_launcher_collection_members(connection, collection_id)
+            items = [get_item(connection, member.macro_item_id) for member in members]
+        if collection is None:
+            self.status_label.setText("Collection not found.")
+            return
+
+        dialog = LauncherCollectionEditorDialog(
+            collection.name,
+            [entry for entry in items if entry is not None],
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if not dialog.collection_name():
+            self.status_label.setText("Collection name is required.")
+            return
+
+        member_ids = dialog.member_item_ids()
+        with connect(self._db_path) as connection:
+            current = get_launcher_collection(connection, collection_id)
+            if current is None:
+                self.status_label.setText("Collection not found.")
+                return
+            rename_launcher_collection(connection, collection_id, dialog.collection_name())
+            original_ids = [
+                member.macro_item_id
+                for member in list_launcher_collection_members(connection, collection_id)
+            ]
+            insert_position = current.launcher_position + 1
+            for removed_id in [item_id for item_id in original_ids if item_id not in member_ids]:
+                removed, _collapsed_item_id = remove_item_from_launcher_collection(
+                    connection, collection_id, removed_id
+                )
+                if removed:
+                    update_item_launcher_placement(
+                        connection, removed_id, "Comments", insert_position
+                    )
+                    insert_position += 1
+            if get_launcher_collection(connection, collection_id) is not None:
+                reorder_launcher_collection_members(connection, collection_id, member_ids)
+        self.refresh_view()
+        self.status_label.setText("Preset Text collection updated.")
+
+    def unpack_collection(self) -> None:
+        collection_id = self._selected_collection_id()
+        if collection_id is None:
+            self.status_label.setText("Select a Preset Text collection to unpack.")
+            return
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            collection = get_launcher_collection(connection, collection_id)
+            members = list_launcher_collection_members(connection, collection_id)
+        if collection is None:
+            self.status_label.setText("Collection not found.")
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Unpack collection",
+                f"Unpack collection '{collection.name}' into simple launcher items?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        with connect(self._db_path) as connection:
+            delete_launcher_collection(connection, collection_id)
+            for offset, member in enumerate(members):
+                update_item_launcher_placement(
+                    connection,
+                    member.macro_item_id,
+                    "Comments",
+                    collection.launcher_position + offset,
+                )
+        self.refresh_view()
+        self.status_label.setText(f"Unpacked '{collection.name}'.")
+
     def _selected_item_id(self) -> int | None:
         selected = self.presets_table.selectedItems()
         if not selected:
             return None
         id_item = self.presets_table.item(selected[0].row(), 0)
         return int(id_item.text()) if id_item is not None else None
+
+    def _selected_collection_id(self) -> int | None:
+        selected = self.collections_table.selectedItems()
+        if not selected:
+            return None
+        id_item = self.collections_table.item(selected[0].row(), 0)
+        if id_item is None:
+            return None
+        return int(id_item.text())
 
     def _validate_values(self, values: dict) -> bool:
         if not values["name"]:
@@ -1615,6 +1774,10 @@ class MacroTextDialog(QDialog):
         self.randomized.setChecked(
             item is not None and item.item_type == "randomized_clipboard"
         )
+        self.launcher_exposed = QCheckBox()
+        self.launcher_exposed.setChecked(
+            getattr(item, "is_launcher_exposed", True) if item is not None else True
+        )
         self.content = QPlainTextEdit()
         self.content.setPlaceholderText("Enter text to copy.")
         self.content.setPlainText(
@@ -1626,6 +1789,7 @@ class MacroTextDialog(QDialog):
         form = QFormLayout()
         form.addRow("Name", self.name)
         form.addRow("Mode", self.randomized)
+        form.addRow("Exposed in Launcher", self.launcher_exposed)
         form.addRow("Text", self.content)
 
         buttons = QDialogButtonBox(
@@ -1683,6 +1847,54 @@ class MacroTextDialog(QDialog):
 
 
 PresetsPage = MacroTextsPage
+
+
+class LauncherCollectionCreateDialog(QDialog):
+    def __init__(
+        self,
+        item_label: str,
+        items: list,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Create {item_label} collection")
+        self.name_input = QLineEdit()
+        self.items_list = QListWidget()
+        for entry in items:
+            item = QListWidgetItem(entry.name)
+            item.setData(Qt.ItemDataRole.UserRole, entry.id)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.items_list.addItem(item)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        form = QFormLayout()
+        form.addRow("Collection name", self.name_input)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(QLabel(f"Select at least two {item_label}s"))
+        layout.addWidget(self.items_list)
+        layout.addWidget(buttons)
+        self.resize(440, 420)
+
+    def collection_name(self) -> str:
+        return self.name_input.text().strip()
+
+    def selected_item_ids(self) -> list[int]:
+        selected: list[int] = []
+        for row in range(self.items_list.count()):
+            item = self.items_list.item(row)
+            if item.checkState() != Qt.CheckState.Checked:
+                continue
+            item_id = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(item_id, int):
+                selected.append(item_id)
+        return selected
 
 
 class LauncherCollectionChooserDialog(QDialog):
@@ -1988,8 +2200,10 @@ class ReorderableMacroTable(QTableWidget):
 
 
 def _create_macro_table() -> QTableWidget:
-    table = ReorderableMacroTable(0, 4)
-    table.setHorizontalHeaderLabels(["id", "name", "EMR profile", "executable"])
+    table = ReorderableMacroTable(0, 5)
+    table.setHorizontalHeaderLabels(
+        ["id", "name", "EMR profile", "executable", "exposed"]
+    )
     table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -2104,13 +2318,22 @@ def _populate_macro_table(
             table.setItem(
                 row_index, 3, QTableWidgetItem(_yes_no(macro.is_enabled))
             )
+            table.setItem(
+                row_index,
+                4,
+                QTableWidgetItem(_yes_no(macro.is_launcher_exposed)),
+            )
     table.resizeColumnsToContents()
 
 
-def _populate_collection_table(table: QTableWidget, db_path: Path | None) -> None:
+def _populate_collection_table(
+    table: QTableWidget,
+    db_path: Path | None,
+    launcher_section: str = "Macro",
+) -> None:
     initialize_database(db_path)
     with connect(db_path) as connection:
-        collections = list_launcher_collections(connection, "Macro")
+        collections = list_launcher_collections(connection, launcher_section)
         member_counts = {
             collection.id: len(list_launcher_collection_members(connection, collection.id))
             for collection in collections
