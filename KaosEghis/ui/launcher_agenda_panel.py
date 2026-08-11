@@ -37,8 +37,10 @@ class AgendaSuppliesPanel(QWidget):
         self.status_label = QLabel("Not loaded yet.")
         self.status_label.setObjectName("secondaryText")
         self.reload_button = QPushButton("Reload")
+        self.reload_button.setFlat(True)
         self.reload_button.clicked.connect(self.reload)
         self.open_external_button = QPushButton("Open in Browser")
+        self.open_external_button.setFlat(True)
         self.open_external_button.clicked.connect(self.open_external)
 
         controls = QHBoxLayout()

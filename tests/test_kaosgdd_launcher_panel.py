@@ -30,6 +30,8 @@ def test_launcher_embed_defers_loading_until_activation(monkeypatch) -> None:
     assert panel.web_view is not None
     assert panel.web_view.loaded_urls == []
     assert panel.status_label.text() == "Not loaded yet."
+    assert panel.reload_button.isFlat() is True
+    assert panel.open_external_button.isFlat() is True
 
     panel.ensure_loaded()
 
