@@ -1798,7 +1798,7 @@ class LauncherListWidget(QListWidget):
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
-        self.setDefaultDropAction(Qt.DropAction.CopyAction)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setDragDropOverwriteMode(False)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
@@ -1857,20 +1857,20 @@ class LauncherListWidget(QListWidget):
         mime_data.setData(self.MIME_TYPE, str(source_row).encode("utf-8"))
         drag = QDrag(self)
         drag.setMimeData(mime_data)
-        drag.exec(Qt.DropAction.CopyAction)
+        drag.exec(Qt.DropAction.MoveAction)
         self._dragged_item_payload = None
         self._drag_start_pos = None
 
     def supportedDropActions(self):
-        return Qt.DropAction.CopyAction | Qt.DropAction.MoveAction
+        return Qt.DropAction.MoveAction
 
     def supportedDragActions(self):
-        return Qt.DropAction.CopyAction | Qt.DropAction.MoveAction
+        return Qt.DropAction.MoveAction
 
     def dragEnterEvent(self, event) -> None:
         if event.source() is self and event.mimeData().hasFormat(self.MIME_TYPE):
             self._debug_drag("dragEnter accepted")
-            event.setDropAction(Qt.DropAction.CopyAction)
+            event.setDropAction(Qt.DropAction.MoveAction)
             event.accept()
             return
         self._debug_drag("dragEnter passed to super")
@@ -1881,7 +1881,7 @@ class LauncherListWidget(QListWidget):
             self._debug_drag(
                 f"dragMove accepted at pos={event.position().toPoint()}"
             )
-            event.setDropAction(Qt.DropAction.CopyAction)
+            event.setDropAction(Qt.DropAction.MoveAction)
             event.accept()
             return
         self._debug_drag("dragMove passed to super")
@@ -1892,92 +1892,10 @@ class LauncherListWidget(QListWidget):
         if isinstance(source, LauncherListWidget) and source is not self:
             event.ignore()
             return
-        drop_point = event.position().toPoint()
-        target_item = self._target_item_for_collection_drop(drop_point)
-        self._debug_drag(
-            f"dropEvent source_self={source is self} pos={drop_point} "
-            f"target={target_item.text() if target_item else None!r}"
-        )
-        if (
-            source is self
-            and event.mimeData().hasFormat(self.MIME_TYPE)
-            and (
-                target_item is None
-                or target_item is self.currentItem()
-            )
-        ):
+        if source is self and event.mimeData().hasFormat(self.MIME_TYPE):
             self._debug_drag("dropEvent -> internal reorder path")
             self._handle_internal_reorder_drop(event)
             return
-        if (
-            source is self
-            and target_item is not None
-        ):
-            source_payload = (
-                source._dragged_item_payload
-                if isinstance(source, LauncherListWidget)
-                else None
-            )
-            if source_payload is not None:
-                source_kind = source_payload.get("kind") or "item"
-                source_type = source_payload.get("type")
-                target_kind = target_item.data(self.ENTRY_KIND_ROLE) or "item"
-                target_type = target_item.data(self.ITEM_TYPE_ROLE)
-                source_id = source_payload.get("id")
-                target_id = target_item.data(self.ITEM_ID_ROLE)
-                if (
-                    source_kind == "item"
-                    and source_type in {"macro", "clipboard", "randomized_clipboard"}
-                    and isinstance(source_id, int)
-                    and source_id > 0
-                    and isinstance(target_id, int)
-                    and target_id > 0
-                ):
-                    if (
-                        target_kind == "item"
-                        and (
-                            (source_type == "macro" and target_type == "macro")
-                            or (
-                                source_type in {"clipboard", "randomized_clipboard"}
-                                and target_type in {"clipboard", "randomized_clipboard"}
-                            )
-                        )
-                    ):
-                        row = self.row(target_item)
-                        handled = self.launcher_page.create_collection_from_drop(
-                            source_id,
-                            target_id,
-                            self.section,
-                            row + 1,
-                        )
-                        if handled:
-                            self._debug_drag(
-                                f"dropEvent -> created collection source={source_id} target={target_id}"
-                            )
-                            event.acceptProposedAction()
-                            return
-                    if target_kind == "collection":
-                        handled = self.launcher_page.add_item_to_collection_from_drop(
-                            source_id,
-                            target_id,
-                        )
-                        if handled:
-                            self._debug_drag(
-                                f"dropEvent -> added source={source_id} to collection={target_id}"
-                            )
-                            event.acceptProposedAction()
-                            return
-            if (
-                source is self
-                and target_item is not None
-                and (
-                    source_payload is None
-                    or source_payload.get("id") == target_item.data(self.ITEM_ID_ROLE)
-                )
-            ):
-                self._debug_drag("dropEvent -> internal reorder via target item path")
-                self._handle_internal_reorder_drop(event)
-                return
         if isinstance(source, LauncherListWidget):
             source_item = source.currentItem()
             item_type = (
@@ -2045,7 +1963,7 @@ class LauncherListWidget(QListWidget):
             f"final_row={final_row}"
         )
         self._move_item(source_row, final_row)
-        event.setDropAction(Qt.DropAction.CopyAction)
+        event.setDropAction(Qt.DropAction.MoveAction)
         event.accept()
         QTimer.singleShot(0, self.launcher_page.persist_launcher_layout)
 
@@ -2108,7 +2026,7 @@ class ReorderableMacroTable(QTableWidget):
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
-        self.setDefaultDropAction(Qt.DropAction.CopyAction)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setDragDropOverwriteMode(False)
         self.viewport().installEventFilter(self)
 
@@ -2145,19 +2063,19 @@ class ReorderableMacroTable(QTableWidget):
         mime_data.setData(self.MIME_TYPE, str(source_row).encode("utf-8"))
         drag = QDrag(self)
         drag.setMimeData(mime_data)
-        drag.exec(Qt.DropAction.CopyAction)
+        drag.exec(Qt.DropAction.MoveAction)
         self._drag_start_pos = None
 
     def supportedDropActions(self):
-        return Qt.DropAction.CopyAction | Qt.DropAction.MoveAction
+        return Qt.DropAction.MoveAction
 
     def supportedDragActions(self):
-        return Qt.DropAction.CopyAction | Qt.DropAction.MoveAction
+        return Qt.DropAction.MoveAction
 
     def dragEnterEvent(self, event) -> None:
         if event.source() is self and event.mimeData().hasFormat(self.MIME_TYPE):
             self._debug_drag("dragEnter accepted")
-            event.setDropAction(Qt.DropAction.CopyAction)
+            event.setDropAction(Qt.DropAction.MoveAction)
             event.accept()
             return
         self._debug_drag("dragEnter passed to super")
@@ -2166,7 +2084,7 @@ class ReorderableMacroTable(QTableWidget):
     def dragMoveEvent(self, event) -> None:
         if event.source() is self and event.mimeData().hasFormat(self.MIME_TYPE):
             self._debug_drag(f"dragMove accepted at pos={event.position().toPoint()}")
-            event.setDropAction(Qt.DropAction.CopyAction)
+            event.setDropAction(Qt.DropAction.MoveAction)
             event.accept()
             return
         self._debug_drag("dragMove passed to super")
@@ -2206,7 +2124,7 @@ class ReorderableMacroTable(QTableWidget):
             f"final_row={final_row}"
         )
         self.move_row(source_row, final_row)
-        event.setDropAction(Qt.DropAction.CopyAction)
+        event.setDropAction(Qt.DropAction.MoveAction)
         event.accept()
 
     def move_row(self, source_row: int, destination_row: int) -> None:

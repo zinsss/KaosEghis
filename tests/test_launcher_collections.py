@@ -162,11 +162,14 @@ def test_launcher_comment_collection_hides_member_items_from_direct_comments_lis
     ]
 
 
-def test_launcher_collection_drop_uses_dragged_source_payload(tmp_path, monkeypatch) -> None:
+def test_launcher_same_list_drop_reorders_instead_of_creating_collection(
+    tmp_path, monkeypatch
+) -> None:
     _app()
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
     from PySide6.QtCore import QMimeData, QPointF
+    from PySide6.QtWidgets import QAbstractItemView
 
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import create_item
@@ -190,20 +193,19 @@ def test_launcher_collection_drop_uses_dragged_source_payload(tmp_path, monkeypa
         "row": 0,
     }
 
-    called: list[tuple[int, int]] = []
+    mime_data = QMimeData()
+    mime_data.setData(macro_list.MIME_TYPE, b"0")
+
     monkeypatch.setattr(
-        page,
-        "create_collection_from_drop",
-        lambda source_id, target_id, launcher_section, launcher_position: called.append((source_id, target_id)) or True,
+        macro_list,
+        "indexAt",
+        lambda _pos: macro_list.model().index(1, 0),
     )
     monkeypatch.setattr(
         macro_list,
-        "_target_item_for_collection_drop",
-        lambda _pos: target_item,
+        "dropIndicatorPosition",
+        lambda: QAbstractItemView.DropIndicatorPosition.BelowItem,
     )
-
-    mime_data = QMimeData()
-    mime_data.setData(macro_list.MIME_TYPE, b"0")
 
     class _FakeDropEvent:
         def __init__(self) -> None:
@@ -218,6 +220,12 @@ def test_launcher_collection_drop_uses_dragged_source_payload(tmp_path, monkeypa
         def mimeData(self):
             return mime_data
 
+        def setDropAction(self, _action):
+            return None
+
+        def accept(self):
+            self._accepted = True
+
         def acceptProposedAction(self):
             self._accepted = True
 
@@ -227,13 +235,9 @@ def test_launcher_collection_drop_uses_dragged_source_payload(tmp_path, monkeypa
     event = _FakeDropEvent()
     macro_list.dropEvent(event)
 
-    assert called == [
-        (
-            source_item.data(macro_list.ITEM_ID_ROLE),
-            target_item.data(macro_list.ITEM_ID_ROLE),
-        )
-    ]
     assert event.isAccepted() is True
+    assert macro_list.item(0).text() == target_item.text()
+    assert macro_list.item(1).text() == source_item.text()
 
 
 def test_launcher_internal_drop_reorders_items(tmp_path, monkeypatch) -> None:
