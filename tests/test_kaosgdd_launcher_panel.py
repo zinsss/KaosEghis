@@ -1,187 +1,123 @@
 from __future__ import annotations
 
-import json
-
-from PySide6.QtCore import QByteArray, QObject, Signal
-from PySide6.QtNetwork import QNetworkReply
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QUrl, Signal
+from PySide6.QtWidgets import QApplication, QWidget
 
 
 def _app() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-class FakeKaosGddClient(QObject):
-    request_succeeded = Signal(str, object)
-    request_failed = Signal(str, str)
+class FakeWebView(QWidget):
+    loadStarted = Signal()
+    loadFinished = Signal(bool)
 
     def __init__(self) -> None:
         super().__init__()
-        self.calls: list[tuple] = []
+        self.loaded_urls: list[str] = []
 
-    def load_calendar(self) -> None:
-        self.calls.append(("load_calendar",))
-
-    def create_task(self, payload: dict) -> None:
-        self.calls.append(("create_task", payload))
-
-    def update_task(self, payload: dict) -> None:
-        self.calls.append(("update_task", payload))
-
-    def load_supplies(self, mode: str) -> None:
-        self.calls.append(("load_supplies", mode))
-
-    def create_supply(self, title: str) -> None:
-        self.calls.append(("create_supply", title))
-
-    def set_supply_status(self, supply_id: str, status: str) -> None:
-        self.calls.append(("set_supply_status", supply_id, status))
-
-    def delete_supply(self, supply_id: str) -> None:
-        self.calls.append(("delete_supply", supply_id))
+    def setUrl(self, url: QUrl) -> None:
+        self.loaded_urls.append(url.toString())
 
 
-class FakeReply(QObject):
-    finished = Signal()
-
-    def error(self):
-        return QNetworkReply.NetworkError.NoError
-
-    def readAll(self):
-        return QByteArray(b'{"items": []}')
-
-    def deleteLater(self) -> None:
-        pass
-
-
-class FakeNetworkManager:
-    def __init__(self) -> None:
-        self.requests: list[tuple] = []
-
-    def get(self, request):
-        self.requests.append(("GET", request, QByteArray()))
-        return FakeReply()
-
-    def post(self, request, body):
-        self.requests.append(("POST", request, body))
-        return FakeReply()
-
-    def sendCustomRequest(self, request, method, body):
-        self.requests.append((bytes(method).decode("ascii"), request, body))
-        return FakeReply()
-
-
-def test_launcher_panel_defers_calendar_load_until_activation() -> None:
+def test_launcher_embed_defers_loading_until_activation(monkeypatch) -> None:
     _app()
-    from KaosEghis.ui.launcher_agenda_panel import AgendaSuppliesPanel
+    import KaosEghis.ui.launcher_agenda_panel as panel_module
 
-    client = FakeKaosGddClient()
-    panel = AgendaSuppliesPanel(client)
+    monkeypatch.setattr(panel_module, "QWebEngineView", FakeWebView)
+    panel = panel_module.AgendaSuppliesPanel()
 
-    assert client.calls == []
-    assert panel.stacked_widget.currentWidget() is panel.agenda_page
-    assert list(panel.page_buttons) == ["Agenda", "Supplies"]
+    assert panel.web_view is not None
+    assert panel.web_view.loaded_urls == []
+    assert panel.status_label.text() == "Not loaded yet."
 
     panel.ensure_loaded()
-    assert client.calls == [("load_calendar",)]
+
+    assert panel.web_view.loaded_urls == [
+        "http://100.94.208.16:8090/embed/agenda-supplies"
+    ]
 
 
-def test_agenda_renders_kaosgdd_events_and_tasks() -> None:
+def test_reload_uses_configured_internal_embed_url(monkeypatch) -> None:
     _app()
-    from KaosEghis.ui.launcher_agenda_panel import AgendaSuppliesPanel
+    import KaosEghis.ui.launcher_agenda_panel as panel_module
 
-    client = FakeKaosGddClient()
-    panel = AgendaSuppliesPanel(client)
-    selected = panel.calendar.selectedDate().toString("yyyy-MM-dd")
-
-    client.request_succeeded.emit(
-        "calendar",
-        {
-            "configured": True,
-            "live": True,
-            "collections": [
-                {"id": "tasks", "name": "Tasks", "components": ["VTODO"]}
-            ],
-            "events": [
-                {
-                    "uid": "event-1",
-                    "summary": "Clinic event",
-                    "startDate": selected,
-                    "endDate": selected,
-                    "startTime": "09:00",
-                }
-            ],
-            "tasks": [
-                {
-                    "uid": "task-1",
-                    "collection": "tasks",
-                    "summary": "Call supplier",
-                    "due": selected,
-                    "status": "NEEDS-ACTION",
-                }
-            ],
-        },
+    monkeypatch.setattr(panel_module, "QWebEngineView", FakeWebView)
+    panel = panel_module.AgendaSuppliesPanel(
+        "http://100.64.0.10:9000/embed/agenda-supplies"
     )
 
-    assert "Clinic event" in panel.events_list.item(0).text()
-    assert "Call supplier" in panel.tasks_list.item(0).text()
-    assert "1 events, 1 tasks" in panel.agenda_status.text()
+    panel.reload_button.click()
+    panel.reload_button.click()
+
+    assert panel.web_view.loaded_urls == [
+        "http://100.64.0.10:9000/embed/agenda-supplies",
+        "http://100.64.0.10:9000/embed/agenda-supplies",
+    ]
 
 
-def test_supplies_page_uses_kaosgdd_supply_api() -> None:
+def test_open_external_browser_uses_internal_embed_url(monkeypatch) -> None:
     _app()
-    from KaosEghis.ui.launcher_agenda_panel import AgendaSuppliesPanel
+    import KaosEghis.ui.launcher_agenda_panel as panel_module
 
-    client = FakeKaosGddClient()
-    panel = AgendaSuppliesPanel(client)
-
-    panel.page_buttons["Supplies"].click()
-    assert client.calls[-1] == ("load_supplies", "active")
-
-    client.request_succeeded.emit(
-        "supplies_active",
-        {
-            "items": [
-                {
-                    "id": "supply-1",
-                    "title": "Printer labels",
-                    "status": "active",
-                }
-            ]
-        },
+    monkeypatch.setattr(panel_module, "QWebEngineView", FakeWebView)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        panel_module.QDesktopServices,
+        "openUrl",
+        lambda url: opened.append(url.toString()) or True,
     )
-    assert panel.supplies_list.item(0).text() == "Printer labels"
+    panel = panel_module.AgendaSuppliesPanel()
 
-    panel.supplies_list.setCurrentRow(0)
-    panel.toggle_selected_supply()
-    assert client.calls[-1] == ("set_supply_status", "supply-1", "done")
+    panel.open_external_button.click()
 
-    panel.supply_name_input.setText("Syringes")
-    panel.add_supply()
-    assert client.calls[-1] == ("create_supply", "Syringes")
+    assert opened == ["http://100.94.208.16:8090/embed/agenda-supplies"]
 
 
-def test_kaosgdd_client_uses_utf8_json_and_main_profile_header() -> None:
+def test_embed_load_result_updates_status(monkeypatch) -> None:
     _app()
-    from KaosEghis.core.kaosgdd_client import KaosGddApiClient
+    import KaosEghis.ui.launcher_agenda_panel as panel_module
 
-    manager = FakeNetworkManager()
-    client = KaosGddApiClient(
-        "http://brain.test:8092/",
-        network_manager=manager,
+    monkeypatch.setattr(panel_module, "QWebEngineView", FakeWebView)
+    panel = panel_module.AgendaSuppliesPanel()
+
+    panel.web_view.loadFinished.emit(True)
+    assert panel.status_label.text() == "KaosGDD Agenda: embedded web view"
+
+    panel.web_view.loadFinished.emit(False)
+    assert panel.status_label.text() == "KaosGDD Agenda unavailable."
+
+
+def test_embed_fallback_is_available_without_qt_webengine(monkeypatch) -> None:
+    _app()
+    import KaosEghis.ui.launcher_agenda_panel as panel_module
+
+    monkeypatch.setattr(panel_module, "QWebEngineView", None)
+    panel = panel_module.AgendaSuppliesPanel()
+
+    assert panel.web_view is None
+    assert panel.fallback_label is not None
+    assert "100.94.208.16:8090" in panel.fallback_label.text()
+    assert panel.reload_button.isEnabled() is False
+    assert panel.open_external_button.isEnabled() is True
+
+
+def test_embed_url_supports_environment_override(monkeypatch) -> None:
+    from KaosEghis.ui.launcher_agenda_panel import kaosgdd_embed_url
+
+    monkeypatch.setenv(
+        "KAOSGDD_EMBED_URL",
+        "http://100.64.0.20:8090/embed/agenda-supplies",
     )
 
-    client.create_supply("한글 라벨")
-
-    method, request, body = manager.requests[-1]
-    assert method == "POST"
-    assert request.url().toString() == "http://brain.test:8092/api/supplies"
-    assert bytes(request.rawHeader("X-Forwarded-Host")) == b"kaosgdd.net"
-    assert json.loads(bytes(body).decode("utf-8")) == {"title": "한글 라벨"}
+    assert (
+        kaosgdd_embed_url()
+        == "http://100.64.0.20:8090/embed/agenda-supplies"
+    )
 
 
-def test_kaosgdd_brain_url_supports_environment_override(monkeypatch) -> None:
-    from KaosEghis.core.kaosgdd_client import kaosgdd_brain_url
+def test_native_kaosgdd_api_client_was_removed() -> None:
+    from pathlib import Path
 
-    monkeypatch.setenv("KAOSGDD_BRAIN_URL", "http://brain.example:9000/")
-    assert kaosgdd_brain_url() == "http://brain.example:9000"
+    project_root = Path(__file__).resolve().parents[1]
+    assert not (project_root / "KaosEghis" / "core" / "kaosgdd_client.py").exists()
