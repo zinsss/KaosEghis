@@ -98,11 +98,11 @@ def test_launcher_collection_activation_runs_selected_macro(tmp_path, monkeypatc
     assert "Completed 'Second Macro'." in page.log.toPlainText()
 
 
-def test_launcher_collection_drop_target_prefers_item_center(tmp_path, monkeypatch) -> None:
+def test_launcher_uses_native_same_list_drag_mode(tmp_path, monkeypatch) -> None:
     _app()
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
-    from PySide6.QtCore import QPoint, QRect
+    from PySide6.QtWidgets import QAbstractItemView
 
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import create_item
@@ -116,18 +116,62 @@ def test_launcher_collection_drop_target_prefers_item_center(tmp_path, monkeypat
 
     page = LauncherPage(db_path)
     macro_list = page.launcher_lists["Macro"]
-    item = macro_list.item(0)
-    rect = QRect(0, 0, 200, 40)
-    monkeypatch.setattr(macro_list, "itemAt", lambda _pos: item)
-    monkeypatch.setattr(macro_list, "visualItemRect", lambda _item: rect)
 
-    center_target = macro_list._target_item_for_collection_drop(rect.center())
-    edge_target = macro_list._target_item_for_collection_drop(
-        QPoint(rect.left() + 1, rect.top() + 1)
+    assert macro_list.dragDropMode() == QAbstractItemView.DragDropMode.InternalMove
+    assert macro_list.dragEnabled() is True
+    assert macro_list.acceptDrops() is True
+
+
+def test_launcher_mouse_gesture_starts_native_drag() -> None:
+    app = _app()
+
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QListWidgetItem, QWidget
+
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherListWidget
+
+    class _Page(QWidget):
+        def persist_launcher_layout(self) -> None:
+            pass
+
+        def show_collection_context_menu(self, *_args) -> None:
+            pass
+
+    class _ProbeList(LauncherListWidget):
+        def __init__(self) -> None:
+            super().__init__("Macro", _Page())
+            self.drag_starts = 0
+
+        def startDrag(self, _supported_actions) -> None:
+            self.drag_starts += 1
+
+    launcher_list = _ProbeList()
+    launcher_list.addItem(QListWidgetItem("First"))
+    launcher_list.addItem(QListWidgetItem("Second"))
+    launcher_list.resize(300, 160)
+    launcher_list.show()
+    launcher_list.setFocus()
+    app.processEvents()
+
+    start = launcher_list.visualItemRect(launcher_list.item(0)).center()
+    end = start + QPoint(app.startDragDistance() + 5, 0)
+    QTest.mousePress(
+        launcher_list.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        start,
     )
+    QTest.mouseMove(launcher_list.viewport(), end, 10)
+    QTest.mouseRelease(
+        launcher_list.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        end,
+    )
+    app.processEvents()
 
-    assert center_target is item
-    assert edge_target is None
+    assert launcher_list.drag_starts == 1
 
 
 def test_launcher_comment_collection_hides_member_items_from_direct_comments_list(
@@ -168,9 +212,6 @@ def test_launcher_same_list_drop_reorders_instead_of_creating_collection(
     _app()
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
-    from PySide6.QtCore import QMimeData, QPointF
-    from PySide6.QtWidgets import QAbstractItemView
-
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import create_item
     from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
@@ -185,132 +226,15 @@ def test_launcher_same_list_drop_reorders_instead_of_creating_collection(
     macro_list = page.launcher_lists["Macro"]
     source_item = macro_list.item(0)
     target_item = macro_list.item(1)
-    macro_list.setCurrentItem(source_item)
-    macro_list._dragged_item_payload = {
-        "id": source_item.data(macro_list.ITEM_ID_ROLE),
-        "kind": source_item.data(macro_list.ENTRY_KIND_ROLE) or "item",
-        "type": source_item.data(macro_list.ITEM_TYPE_ROLE),
-        "row": 0,
-    }
+    macro_list._move_item(0, 1)
 
-    mime_data = QMimeData()
-    mime_data.setData(macro_list.MIME_TYPE, b"0")
-
-    monkeypatch.setattr(
-        macro_list,
-        "indexAt",
-        lambda _pos: macro_list.model().index(1, 0),
-    )
-    monkeypatch.setattr(
-        macro_list,
-        "dropIndicatorPosition",
-        lambda: QAbstractItemView.DropIndicatorPosition.BelowItem,
-    )
-
-    class _FakeDropEvent:
-        def __init__(self) -> None:
-            self._accepted = False
-
-        def source(self):
-            return macro_list
-
-        def position(self):
-            return QPointF(5, 5)
-
-        def mimeData(self):
-            return mime_data
-
-        def setDropAction(self, _action):
-            return None
-
-        def accept(self):
-            self._accepted = True
-
-        def acceptProposedAction(self):
-            self._accepted = True
-
-        def isAccepted(self):
-            return self._accepted
-
-    event = _FakeDropEvent()
-    macro_list.dropEvent(event)
-
-    assert event.isAccepted() is True
     assert macro_list.item(0).text() == target_item.text()
     assert macro_list.item(1).text() == source_item.text()
-
-
-def test_launcher_internal_drop_reorders_items(tmp_path, monkeypatch) -> None:
-    _app()
-    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
-
-    from PySide6.QtCore import QMimeData, QPoint, QPointF, QRect
-    from PySide6.QtWidgets import QAbstractItemView
-
-    from KaosEghis.db.database import connect, initialize_database
-    from KaosEghis.db.repositories import create_item
-    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
-
-    db_path = tmp_path / "KaosEghis.sqlite"
-    initialize_database(db_path)
-    with connect(db_path) as connection:
-        create_item(connection, "First Macro", "macro", True)
-        create_item(connection, "Second Macro", "macro", True)
-
-    page = LauncherPage(db_path)
-    macro_list = page.launcher_lists["Macro"]
-    first = macro_list.item(0)
-    second = macro_list.item(1)
-
-    mime_data = QMimeData()
-    mime_data.setData(macro_list.MIME_TYPE, b"0")
-
-    monkeypatch.setattr(
-        macro_list,
-        "indexAt",
-        lambda _pos: macro_list.model().index(1, 0),
-    )
-    monkeypatch.setattr(
-        macro_list,
-        "dropIndicatorPosition",
-        lambda: QAbstractItemView.DropIndicatorPosition.BelowItem,
-    )
-
-    class _FakeDropEvent:
-        def __init__(self) -> None:
-            self._accepted = False
-
-        def source(self):
-            return macro_list
-
-        def position(self):
-            return QPointF(5, 50)
-
-        def mimeData(self):
-            return mime_data
-
-        def setDropAction(self, _action):
-            pass
-
-        def accept(self):
-            self._accepted = True
-
-        def ignore(self):
-            self._accepted = False
-
-    event = _FakeDropEvent()
-    macro_list._handle_internal_reorder_drop(event)
-
-    assert event._accepted is True
-    assert macro_list.item(0).text() == second.text()
-    assert macro_list.item(1).text() == first.text()
 
 
 def test_launcher_cross_list_drop_is_ignored(tmp_path, monkeypatch) -> None:
     _app()
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
-
-    from PySide6.QtCore import QMimeData, QPointF
 
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import create_item
@@ -326,18 +250,6 @@ def test_launcher_cross_list_drop_is_ignored(tmp_path, monkeypatch) -> None:
     macro_list = page.launcher_lists["Macro"]
     comments_list = page.launcher_lists["Comments"]
 
-    source_item = comments_list.item(0)
-    comments_list.setCurrentItem(source_item)
-    comments_list._dragged_item_payload = {
-        "id": source_item.data(comments_list.ITEM_ID_ROLE),
-        "kind": source_item.data(comments_list.ENTRY_KIND_ROLE) or "item",
-        "type": source_item.data(comments_list.ITEM_TYPE_ROLE),
-        "row": 0,
-    }
-
-    mime_data = QMimeData()
-    mime_data.setData(comments_list.MIME_TYPE, b"0")
-
     class _FakeDropEvent:
         def __init__(self) -> None:
             self._accepted = False
@@ -345,15 +257,6 @@ def test_launcher_cross_list_drop_is_ignored(tmp_path, monkeypatch) -> None:
 
         def source(self):
             return comments_list
-
-        def position(self):
-            return QPointF(5, 5)
-
-        def mimeData(self):
-            return mime_data
-
-        def acceptProposedAction(self):
-            self._accepted = True
 
         def ignore(self):
             self._ignored = True

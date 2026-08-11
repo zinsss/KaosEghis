@@ -1786,23 +1786,20 @@ class LauncherListWidget(QListWidget):
     ITEM_ID_ROLE = 256
     ITEM_TYPE_ROLE = 257
     ENTRY_KIND_ROLE = 258
-    MIME_TYPE = "application/x-kaoseghis-launcher-row"
 
     def __init__(self, section: str, launcher_page: LauncherPage) -> None:
         super().__init__()
         self.section = section
         self.launcher_page = launcher_page
-        self._drag_start_pos: QPoint | None = None
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setDragDropOverwriteMode(False)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
-        self.viewport().installEventFilter(self)
         self.setStyleSheet(
             "QListWidget {"
             " border: 1px solid #4c566a;"
@@ -1811,55 +1808,6 @@ class LauncherListWidget(QListWidget):
             " background-color: #2e3440;"
             "}"
         )
-        self._dragged_item_payload: dict[str, object] | None = None
-
-    def eventFilter(self, watched, event) -> bool:
-        if watched is self.viewport():
-            if event.type() == QEvent.Type.MouseButtonPress:
-                if event.button() == Qt.MouseButton.LeftButton:
-                    self._drag_start_pos = event.position().toPoint()
-            elif event.type() == QEvent.Type.MouseMove:
-                if (
-                    self._drag_start_pos is not None
-                    and event.buttons() & Qt.MouseButton.LeftButton
-                    and (
-                        event.position().toPoint() - self._drag_start_pos
-                    ).manhattanLength()
-                    >= QApplication.startDragDistance()
-                ):
-                    self._begin_drag()
-                    return True
-            elif event.type() == QEvent.Type.MouseButtonRelease:
-                self._drag_start_pos = None
-        return super().eventFilter(watched, event)
-
-    def _begin_drag(self) -> None:
-        source_row = self.currentRow()
-        if source_row < 0:
-            source_row = self.indexAt(self._drag_start_pos or QPoint()).row()
-        if source_row < 0:
-            self._drag_start_pos = None
-            return
-
-        dragged_item = self.item(source_row)
-        if dragged_item is None:
-            self._drag_start_pos = None
-            return
-
-        self.setCurrentRow(source_row)
-        self._dragged_item_payload = {
-            "id": dragged_item.data(self.ITEM_ID_ROLE),
-            "kind": dragged_item.data(self.ENTRY_KIND_ROLE) or "item",
-            "type": dragged_item.data(self.ITEM_TYPE_ROLE),
-            "row": source_row,
-        }
-        mime_data = QMimeData()
-        mime_data.setData(self.MIME_TYPE, str(source_row).encode("utf-8"))
-        drag = QDrag(self)
-        drag.setMimeData(mime_data)
-        drag.exec(Qt.DropAction.MoveAction)
-        self._dragged_item_payload = None
-        self._drag_start_pos = None
 
     def supportedDropActions(self):
         return Qt.DropAction.MoveAction
@@ -1867,105 +1815,14 @@ class LauncherListWidget(QListWidget):
     def supportedDragActions(self):
         return Qt.DropAction.MoveAction
 
-    def dragEnterEvent(self, event) -> None:
-        if event.source() is self and event.mimeData().hasFormat(self.MIME_TYPE):
-            self._debug_drag("dragEnter accepted")
-            event.setDropAction(Qt.DropAction.MoveAction)
-            event.accept()
-            return
-        self._debug_drag("dragEnter passed to super")
-        super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event) -> None:
-        if event.source() is self and event.mimeData().hasFormat(self.MIME_TYPE):
-            self._debug_drag(
-                f"dragMove accepted at pos={event.position().toPoint()}"
-            )
-            event.setDropAction(Qt.DropAction.MoveAction)
-            event.accept()
-            return
-        self._debug_drag("dragMove passed to super")
-        super().dragMoveEvent(event)
-
     def dropEvent(self, event) -> None:
         source = event.source()
-        if isinstance(source, LauncherListWidget) and source is not self:
+        if source is not self:
             event.ignore()
             return
-        if source is self and event.mimeData().hasFormat(self.MIME_TYPE):
-            self._debug_drag("dropEvent -> internal reorder path")
-            self._handle_internal_reorder_drop(event)
-            return
-        if isinstance(source, LauncherListWidget):
-            source_item = source.currentItem()
-            item_type = (
-                source_item.data(self.ITEM_TYPE_ROLE)
-                if source_item is not None
-                else None
-            )
-            item_id = (
-                source_item.data(self.ITEM_ID_ROLE)
-                if source_item is not None
-                else None
-            )
-            if isinstance(item_id, int) and item_id < 0:
-                event.ignore()
-                return
-            if (
-                item_type in {"clipboard", "randomized_clipboard"}
-                and self.section != "Comments"
-            ):
-                event.ignore()
-                return
-            if item_type == "macro" and self.section != "Macro":
-                event.ignore()
-                return
-            if item_type == "action":
-                self._debug_drag("dropEvent ignored: action item")
-                event.ignore()
-                return
-        self._debug_drag("dropEvent -> super")
         super().dropEvent(event)
         if event.isAccepted():
-            self._debug_drag("dropEvent accepted by super")
             QTimer.singleShot(0, self.launcher_page.persist_launcher_layout)
-        else:
-            self._debug_drag("dropEvent not accepted")
-
-    def _handle_internal_reorder_drop(self, event) -> None:
-        try:
-            source_row = int(bytes(event.mimeData().data(self.MIME_TYPE)).decode("utf-8"))
-        except Exception:
-            self._debug_drag("internal reorder ignored: invalid mime payload")
-            event.ignore()
-            return
-        if not 0 <= source_row < self.count():
-            self._debug_drag(
-                f"internal reorder ignored: source_row={source_row} count={self.count()}"
-            )
-            event.ignore()
-            return
-
-        target_index = self.indexAt(event.position().toPoint())
-        if target_index.isValid():
-            insertion_row = target_index.row()
-            if (
-                self.dropIndicatorPosition()
-                == QAbstractItemView.DropIndicatorPosition.BelowItem
-            ):
-                insertion_row += 1
-        else:
-            insertion_row = self.count()
-
-        final_row = insertion_row - (1 if insertion_row > source_row else 0)
-        self._debug_drag(
-            f"internal reorder source_row={source_row} insertion_row={insertion_row} "
-            f"final_row={final_row}"
-        )
-        self._move_item(source_row, final_row)
-        event.setDropAction(Qt.DropAction.MoveAction)
-        event.accept()
-        QTimer.singleShot(0, self.launcher_page.persist_launcher_layout)
 
     def _move_item(self, source_row: int, destination_row: int) -> None:
         if not 0 <= source_row < self.count():
@@ -1976,31 +1833,9 @@ class LauncherListWidget(QListWidget):
 
         item = self.takeItem(source_row)
         if item is None:
-            self._debug_drag(f"_move_item aborted: no item at row={source_row}")
             return
         self.insertItem(destination_row, item)
         self.setCurrentItem(item)
-        self._debug_drag(
-            f"_move_item completed: source_row={source_row} destination_row={destination_row} "
-            f"text={item.text()!r}"
-        )
-
-    def _target_item_for_collection_drop(self, pos):
-        item = self.itemAt(pos)
-        if item is None:
-            return None
-        rect = self.visualItemRect(item)
-        if not rect.isValid():
-            return None
-        inset_x = min(16, max(6, rect.width() // 8))
-        inset_y = min(10, max(6, rect.height() // 4))
-        collection_zone = rect.adjusted(inset_x, inset_y, -inset_x, -inset_y)
-        if collection_zone.contains(pos):
-            return item
-        return None
-
-    def _debug_drag(self, message: str) -> None:
-        print(f"[LauncherDrag:{self.section}] {message}")
 
     def _show_context_menu(self, pos) -> None:
         item = self.itemAt(pos)
