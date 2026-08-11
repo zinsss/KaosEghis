@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 from KaosEghis.core.clipboard_service import copy_text
 from KaosEghis.core.macro_runner import MacroRunner
 from KaosEghis.ui.drag_hover_switch import ButtonFileHoverFilter
+from KaosEghis.ui.launcher_agenda_panel import AgendaSuppliesPanel
 from KaosEghis.core.eghis_connector import (
     build_connector_settings,
     clear_cached_eghis_state,
@@ -344,13 +345,9 @@ class LauncherPage(QWidget):
             columns.setColumnStretch(index, self.LAUNCHER_COLUMN_STRETCH)
 
         notes_index = len(LAUNCHER_SECTIONS)
-        self.agenda_label = QLabel("Agenda")
+        self.agenda_label = QLabel("Agenda / Supplies")
         self.agenda_label.setObjectName("launcherSectionTitle")
-        self.agenda_panel = QPlainTextEdit()
-        self.agenda_panel.setReadOnly(True)
-        self.agenda_panel.setPlainText(
-            "Agenda is not implemented yet.\n\nCalendar and task surfaces will appear here."
-        )
+        self.agenda_panel = AgendaSuppliesPanel()
         columns.addWidget(self.agenda_label, 0, notes_index)
         columns.addWidget(self.agenda_panel, 1, notes_index)
         columns.setColumnStretch(notes_index, self.AGENDA_COLUMN_STRETCH)
@@ -387,6 +384,9 @@ class LauncherPage(QWidget):
         launcher_entries = _load_launcher_entries(self._db_path)
         self._populate_launcher_lists(launcher_entries)
         self._refresh_connection_status()
+
+    def activate_page(self) -> None:
+        self.agenda_panel.ensure_loaded()
 
     def toggle_connection(self, checked: bool) -> None:
         if checked:
