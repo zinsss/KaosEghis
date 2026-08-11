@@ -72,7 +72,7 @@ def test_launcher_collection_activation_runs_selected_macro(tmp_path, monkeypatc
 
             return QDialog.DialogCode.Accepted
 
-        def selected_macro_id(self):
+        def selected_item_id(self):
             return second.id
 
     monkeypatch.setattr(tab_module, "LauncherCollectionChooserDialog", FakeDialog)
@@ -91,7 +91,7 @@ def test_launcher_collection_activation_runs_selected_macro(tmp_path, monkeypatc
     macro_list = page.launcher_lists["Macro"]
 
     assert macro_list.count() == 1
-    assert macro_list.item(0).text() == "Grouped >"
+    assert macro_list.item(0).text() == "[+] Grouped"
 
     page.activate_launcher_item(macro_list, macro_list.item(0))
 
@@ -128,3 +128,239 @@ def test_launcher_collection_drop_target_prefers_item_center(tmp_path, monkeypat
 
     assert center_target is item
     assert edge_target is None
+
+
+def test_launcher_comment_collection_hides_member_items_from_direct_comments_list(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        add_item_to_launcher_collection,
+        create_item,
+        create_launcher_collection,
+        list_launcher_entries,
+        list_launcher_items,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        first = create_item(connection, "Comment A", "clipboard", True)
+        second = create_item(connection, "Comment B", "randomized_clipboard", True)
+        collection = create_launcher_collection(connection, "Comment Pack", "Comments", 1)
+        add_item_to_launcher_collection(connection, collection.id, first.id)
+        add_item_to_launcher_collection(connection, collection.id, second.id)
+
+        direct_items = list_launcher_items(connection, "Comments")
+        entries = list_launcher_entries(connection, "Comments")
+
+    assert [item.name for item in direct_items] == []
+    assert [(entry.entry_type, entry.name) for entry in entries] == [
+        ("collection", "Comment Pack")
+    ]
+
+
+def test_launcher_collection_drop_uses_dragged_source_payload(tmp_path, monkeypatch) -> None:
+    _app()
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from PySide6.QtCore import QMimeData, QPointF
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_item(connection, "First Macro", "macro", True)
+        create_item(connection, "Second Macro", "macro", True)
+
+    page = LauncherPage(db_path)
+    macro_list = page.launcher_lists["Macro"]
+    source_item = macro_list.item(0)
+    target_item = macro_list.item(1)
+    macro_list.setCurrentItem(source_item)
+    macro_list._dragged_item_payload = {
+        "id": source_item.data(macro_list.ITEM_ID_ROLE),
+        "kind": source_item.data(macro_list.ENTRY_KIND_ROLE) or "item",
+        "type": source_item.data(macro_list.ITEM_TYPE_ROLE),
+        "row": 0,
+    }
+
+    called: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        page,
+        "create_collection_from_drop",
+        lambda source_id, target_id, launcher_section, launcher_position: called.append((source_id, target_id)) or True,
+    )
+    monkeypatch.setattr(
+        macro_list,
+        "_target_item_for_collection_drop",
+        lambda _pos: target_item,
+    )
+
+    mime_data = QMimeData()
+    mime_data.setData(macro_list.MIME_TYPE, b"0")
+
+    class _FakeDropEvent:
+        def __init__(self) -> None:
+            self._accepted = False
+
+        def source(self):
+            return macro_list
+
+        def position(self):
+            return QPointF(5, 5)
+
+        def mimeData(self):
+            return mime_data
+
+        def acceptProposedAction(self):
+            self._accepted = True
+
+        def isAccepted(self):
+            return self._accepted
+
+    event = _FakeDropEvent()
+    macro_list.dropEvent(event)
+
+    assert called == [
+        (
+            source_item.data(macro_list.ITEM_ID_ROLE),
+            target_item.data(macro_list.ITEM_ID_ROLE),
+        )
+    ]
+    assert event.isAccepted() is True
+
+
+def test_launcher_internal_drop_reorders_items(tmp_path, monkeypatch) -> None:
+    _app()
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from PySide6.QtCore import QMimeData, QPoint, QPointF, QRect
+    from PySide6.QtWidgets import QAbstractItemView
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_item(connection, "First Macro", "macro", True)
+        create_item(connection, "Second Macro", "macro", True)
+
+    page = LauncherPage(db_path)
+    macro_list = page.launcher_lists["Macro"]
+    first = macro_list.item(0)
+    second = macro_list.item(1)
+
+    mime_data = QMimeData()
+    mime_data.setData(macro_list.MIME_TYPE, b"0")
+
+    monkeypatch.setattr(
+        macro_list,
+        "indexAt",
+        lambda _pos: macro_list.model().index(1, 0),
+    )
+    monkeypatch.setattr(
+        macro_list,
+        "dropIndicatorPosition",
+        lambda: QAbstractItemView.DropIndicatorPosition.BelowItem,
+    )
+
+    class _FakeDropEvent:
+        def __init__(self) -> None:
+            self._accepted = False
+
+        def source(self):
+            return macro_list
+
+        def position(self):
+            return QPointF(5, 50)
+
+        def mimeData(self):
+            return mime_data
+
+        def setDropAction(self, _action):
+            pass
+
+        def accept(self):
+            self._accepted = True
+
+        def ignore(self):
+            self._accepted = False
+
+    event = _FakeDropEvent()
+    macro_list._handle_internal_reorder_drop(event)
+
+    assert event._accepted is True
+    assert macro_list.item(0).text() == second.text()
+    assert macro_list.item(1).text() == first.text()
+
+
+def test_launcher_cross_list_drop_is_ignored(tmp_path, monkeypatch) -> None:
+    _app()
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    from PySide6.QtCore import QMimeData, QPointF
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_item(connection, "Macro A", "macro", True)
+        create_item(connection, "Comment A", "clipboard", True)
+
+    page = LauncherPage(db_path)
+    macro_list = page.launcher_lists["Macro"]
+    comments_list = page.launcher_lists["Comments"]
+
+    source_item = comments_list.item(0)
+    comments_list.setCurrentItem(source_item)
+    comments_list._dragged_item_payload = {
+        "id": source_item.data(comments_list.ITEM_ID_ROLE),
+        "kind": source_item.data(comments_list.ENTRY_KIND_ROLE) or "item",
+        "type": source_item.data(comments_list.ITEM_TYPE_ROLE),
+        "row": 0,
+    }
+
+    mime_data = QMimeData()
+    mime_data.setData(comments_list.MIME_TYPE, b"0")
+
+    class _FakeDropEvent:
+        def __init__(self) -> None:
+            self._accepted = False
+            self._ignored = False
+
+        def source(self):
+            return comments_list
+
+        def position(self):
+            return QPointF(5, 5)
+
+        def mimeData(self):
+            return mime_data
+
+        def acceptProposedAction(self):
+            self._accepted = True
+
+        def ignore(self):
+            self._ignored = True
+
+        def isAccepted(self):
+            return self._accepted
+
+    event = _FakeDropEvent()
+    macro_list.dropEvent(event)
+
+    assert event.isAccepted() is False
+    assert event._ignored is True
+    assert macro_list.count() == 1
+    assert comments_list.count() == 1
