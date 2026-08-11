@@ -32,6 +32,10 @@ def test_launcher_embed_defers_loading_until_activation(monkeypatch) -> None:
     assert panel.status_label.text() == "Not loaded yet."
     assert panel.reload_button.isFlat() is True
     assert panel.open_external_button.isFlat() is True
+    assert "background: transparent" in panel.reload_button.styleSheet()
+    assert "border: none" in panel.reload_button.styleSheet()
+    assert "background: transparent" in panel.open_external_button.styleSheet()
+    assert "border: none" in panel.open_external_button.styleSheet()
 
     panel.ensure_loaded()
 

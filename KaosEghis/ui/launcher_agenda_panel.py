@@ -15,6 +15,29 @@ except ImportError:  # pragma: no cover - depends on optional Qt WebEngine insta
 DEFAULT_KAOSGDD_EMBED_URL = (
     "http://100.94.208.16:8090/embed/agenda-supplies"
 )
+FLAT_TEXT_BUTTON_STYLE = """
+QPushButton {
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    color: #d8dee9;
+}
+QPushButton:hover {
+    background: transparent;
+    border: none;
+    color: #88c0d0;
+}
+QPushButton:pressed {
+    background: transparent;
+    border: none;
+    color: #81a1c1;
+}
+QPushButton:disabled {
+    background: transparent;
+    border: none;
+    color: #4c566a;
+}
+"""
 
 
 def kaosgdd_embed_url() -> str:
@@ -38,9 +61,11 @@ class AgendaSuppliesPanel(QWidget):
         self.status_label.setObjectName("secondaryText")
         self.reload_button = QPushButton("Reload")
         self.reload_button.setFlat(True)
+        self.reload_button.setStyleSheet(FLAT_TEXT_BUTTON_STYLE)
         self.reload_button.clicked.connect(self.reload)
         self.open_external_button = QPushButton("Open in Browser")
         self.open_external_button.setFlat(True)
+        self.open_external_button.setStyleSheet(FLAT_TEXT_BUTTON_STYLE)
         self.open_external_button.clicked.connect(self.open_external)
 
         controls = QHBoxLayout()
