@@ -316,9 +316,11 @@ Collection:
 
 Drag/drop:
 
-- onto empty space = reorder/move
-- macro onto macro = confirm collection creation, then ask name
-- macro onto collection = confirm add to collection
+- drop on an insertion line or empty space = reorder/move
+- drop in the middle of another macro or MacroText = confirm collection creation,
+  then ask for its name
+- drop in the middle of a compatible collection = confirm add to collection
+- collections and Actions remain reorder-only
 
 ## Documentation Rule
 

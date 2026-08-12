@@ -708,6 +708,7 @@ class LauncherPage(QWidget):
             list_widget.clear()
             for launcher_item in by_section.get(section, []):
                 item = QListWidgetItem(launcher_item.name)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDropEnabled)
                 entry_id = getattr(launcher_item, "id", getattr(launcher_item, "entry_id", None))
                 item.setData(list_widget.ITEM_ID_ROLE, entry_id)
                 item.setData(
@@ -2032,9 +2033,73 @@ class LauncherListWidget(QListWidget):
         if source is not self:
             event.ignore()
             return
+
+        source_item = self.currentItem()
+        drop_point = self._event_position(event)
+        target_item = self.itemAt(drop_point)
+        if self._is_collection_drop(source_item, target_item, drop_point):
+            source_id = source_item.data(self.ITEM_ID_ROLE)
+            target_id = target_item.data(self.ITEM_ID_ROLE)
+            target_kind = target_item.data(self.ENTRY_KIND_ROLE) or "item"
+            handled = False
+            if isinstance(source_id, int) and isinstance(target_id, int):
+                if target_kind == "collection":
+                    handled = self.launcher_page.add_item_to_collection_from_drop(
+                        source_id,
+                        target_id,
+                    )
+                else:
+                    handled = self.launcher_page.create_collection_from_drop(
+                        source_id,
+                        target_id,
+                        self.section,
+                        self.row(target_item) + 1,
+                    )
+            if handled:
+                event.setDropAction(Qt.DropAction.MoveAction)
+                event.accept()
+            else:
+                event.ignore()
+            return
+
         super().dropEvent(event)
         if event.isAccepted():
             QTimer.singleShot(0, self.launcher_page.persist_launcher_layout)
+
+    def _is_collection_drop(
+        self,
+        source_item: QListWidgetItem | None,
+        target_item: QListWidgetItem | None,
+        drop_point: QPoint,
+    ) -> bool:
+        if source_item is None or target_item is None or source_item is target_item:
+            return False
+        if self.section == "Actions":
+            return False
+        if (source_item.data(self.ENTRY_KIND_ROLE) or "item") != "item":
+            return False
+        if (
+            self.dropIndicatorPosition()
+            == QAbstractItemView.DropIndicatorPosition.OnItem
+        ):
+            return True
+        target_rect = self.visualItemRect(target_item)
+        center_margin = max(2, target_rect.height() // 4)
+        return (
+            target_rect.top() + center_margin
+            <= drop_point.y()
+            <= target_rect.bottom() - center_margin
+        )
+
+    @staticmethod
+    def _event_position(event) -> QPoint:
+        position = getattr(event, "position", None)
+        if callable(position):
+            return position().toPoint()
+        legacy_position = getattr(event, "pos", None)
+        if callable(legacy_position):
+            return legacy_position()
+        return QPoint()
 
     def _move_item(self, source_row: int, destination_row: int) -> None:
         if not 0 <= source_row < self.count():

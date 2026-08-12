@@ -102,6 +102,7 @@ def test_launcher_uses_native_same_list_drag_mode(tmp_path, monkeypatch) -> None
     _app()
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QAbstractItemView
 
     from KaosEghis.db.database import connect, initialize_database
@@ -120,6 +121,7 @@ def test_launcher_uses_native_same_list_drag_mode(tmp_path, monkeypatch) -> None
     assert macro_list.dragDropMode() == QAbstractItemView.DragDropMode.InternalMove
     assert macro_list.dragEnabled() is True
     assert macro_list.acceptDrops() is True
+    assert macro_list.item(0).flags() & Qt.ItemFlag.ItemIsDropEnabled
 
 
 def test_launcher_mouse_gesture_starts_native_drag() -> None:
@@ -458,3 +460,157 @@ def test_macro_and_macrotext_dialogs_expose_launcher_checkbox(
     assert macro_dialog.launcher_exposed.isChecked() is True
     assert macro_dialog.values()["is_launcher_exposed"] is True
     assert macrotext_dialog.launcher_exposed.isChecked() is True
+
+
+def test_launcher_drop_on_item_routes_to_collection_creation() -> None:
+    app = _app()
+
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtWidgets import QAbstractItemView, QListWidgetItem, QWidget
+
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherListWidget
+
+    class _Page(QWidget):
+        def __init__(self) -> None:
+            super().__init__()
+            self.created = None
+
+        def create_collection_from_drop(
+            self, source_id, target_id, section, position
+        ) -> bool:
+            self.created = (source_id, target_id, section, position)
+            return True
+
+        def add_item_to_collection_from_drop(self, *_args) -> bool:
+            return False
+
+        def persist_launcher_layout(self) -> None:
+            pass
+
+        def show_collection_context_menu(self, *_args) -> None:
+            pass
+
+    class _OnItemList(LauncherListWidget):
+        def dropIndicatorPosition(self):
+            return QAbstractItemView.DropIndicatorPosition.OnItem
+
+    class _DropEvent:
+        def __init__(self, source, position) -> None:
+            self._source = source
+            self._position = QPointF(position)
+            self.accepted = False
+            self.ignored = False
+            self.drop_action = None
+
+        def source(self):
+            return self._source
+
+        def position(self):
+            return self._position
+
+        def setDropAction(self, action) -> None:
+            self.drop_action = action
+
+        def accept(self) -> None:
+            self.accepted = True
+
+        def ignore(self) -> None:
+            self.ignored = True
+
+    page = _Page()
+    launcher_list = _OnItemList("Comments", page)
+    for item_id, name in ((11, "First text"), (12, "Second text")):
+        item = QListWidgetItem(name)
+        item.setData(launcher_list.ITEM_ID_ROLE, item_id)
+        item.setData(launcher_list.ITEM_TYPE_ROLE, "clipboard")
+        item.setData(launcher_list.ENTRY_KIND_ROLE, "item")
+        launcher_list.addItem(item)
+    launcher_list.resize(300, 160)
+    launcher_list.show()
+    launcher_list.setCurrentRow(0)
+    app.processEvents()
+
+    target_position = launcher_list.visualItemRect(launcher_list.item(1)).center()
+    event = _DropEvent(launcher_list, target_position)
+    launcher_list.dropEvent(event)
+
+    assert page.created == (11, 12, "Comments", 2)
+    assert event.accepted is True
+    assert event.drop_action == Qt.DropAction.MoveAction
+
+
+def test_launcher_drop_on_collection_routes_to_add_item() -> None:
+    app = _app()
+
+    from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QAbstractItemView, QListWidgetItem, QWidget
+
+    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherListWidget
+
+    class _Page(QWidget):
+        def __init__(self) -> None:
+            super().__init__()
+            self.added = None
+
+        def create_collection_from_drop(self, *_args) -> bool:
+            return False
+
+        def add_item_to_collection_from_drop(self, item_id, collection_id) -> bool:
+            self.added = (item_id, collection_id)
+            return True
+
+        def persist_launcher_layout(self) -> None:
+            pass
+
+        def show_collection_context_menu(self, *_args) -> None:
+            pass
+
+    class _OnItemList(LauncherListWidget):
+        def dropIndicatorPosition(self):
+            return QAbstractItemView.DropIndicatorPosition.OnItem
+
+    class _DropEvent:
+        def __init__(self, source, position) -> None:
+            self._source = source
+            self._position = QPointF(position)
+            self.accepted = False
+
+        def source(self):
+            return self._source
+
+        def position(self):
+            return self._position
+
+        def setDropAction(self, _action) -> None:
+            pass
+
+        def accept(self) -> None:
+            self.accepted = True
+
+        def ignore(self) -> None:
+            pass
+
+    page = _Page()
+    launcher_list = _OnItemList("Macro", page)
+    source = QListWidgetItem("Macro")
+    source.setData(launcher_list.ITEM_ID_ROLE, 21)
+    source.setData(launcher_list.ITEM_TYPE_ROLE, "macro")
+    source.setData(launcher_list.ENTRY_KIND_ROLE, "item")
+    collection = QListWidgetItem("[+] Collection")
+    collection.setData(launcher_list.ITEM_ID_ROLE, 31)
+    collection.setData(launcher_list.ENTRY_KIND_ROLE, "collection")
+    launcher_list.addItem(source)
+    launcher_list.addItem(collection)
+    launcher_list.resize(300, 160)
+    launcher_list.show()
+    launcher_list.setCurrentItem(source)
+    app.processEvents()
+
+    event = _DropEvent(
+        launcher_list,
+        launcher_list.visualItemRect(collection).center(),
+    )
+    launcher_list.dropEvent(event)
+
+    assert page.added == (21, 31)
+    assert event.accepted is True
