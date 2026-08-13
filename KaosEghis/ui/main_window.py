@@ -19,10 +19,14 @@ from pywinauto.keyboard import send_keys
 from KaosEghis.core.credential_vault import CredentialEntry
 from KaosEghis.core.emr_patient_alert import (
     EmrPatientAlertMonitor,
+    EmrPatientAlertProbe,
     EmrPatientAlertResult,
+    patient_alert_configuration_from_settings,
 )
 from KaosEghis.core.pw_runtime import ForegroundWindowContext, PwRuntime
 from KaosEghis.core.scheduler import SchedulerRuntime
+from KaosEghis.db.database import connect, initialize_database
+from KaosEghis.db.repositories import get_settings
 from KaosEghis.ui.drag_hover_switch import TabBarFileHoverFilter
 from KaosEghis.ui.plugins.pacs_panel import PacsPanel
 from KaosEghis.ui.dialogs.master_password_dialog import MasterPasswordDialog
@@ -86,7 +90,9 @@ class MainWindow(QMainWindow):
         self.setFixedSize(1438, 1194)
         self.pw_runtime = PwRuntime(self)
         self.patient_alert_popup = EmrPatientAlertPopup()
-        self.patient_alert_monitor = EmrPatientAlertMonitor(parent=self)
+        self.patient_alert_monitor = EmrPatientAlertMonitor(
+            probe=self._create_patient_alert_probe(), parent=self
+        )
         self.patient_alert_monitor.result_changed.connect(
             self._handle_patient_alert_result
         )
@@ -109,6 +115,9 @@ class MainWindow(QMainWindow):
         self.macros_tab = MacrosTab(scheduler_runtime=self.scheduler_runtime)
         tabs.addTab(self.macros_tab, "Macros")
         self.settings_tab = SettingsTab()
+        self.settings_tab.general_settings_saved.connect(
+            self._reload_patient_alert_configuration
+        )
         tabs.addTab(self.settings_tab, "Settings")
         self._file_hover_tab_filter = TabBarFileHoverFilter(tabs.setCurrentIndex)
         tabs.tabBar().setAcceptDrops(True)
@@ -159,6 +168,18 @@ class MainWindow(QMainWindow):
                 )
             return
         self.patient_alert_popup.clear_alert()
+
+    def _create_patient_alert_probe(self) -> EmrPatientAlertProbe:
+        initialize_database()
+        with connect() as connection:
+            settings = get_settings(connection)
+        return EmrPatientAlertProbe(
+            configuration=patient_alert_configuration_from_settings(settings)
+        )
+
+    def _reload_patient_alert_configuration(self) -> None:
+        self.patient_alert_popup.clear_alert()
+        self.patient_alert_monitor.replace_probe(self._create_patient_alert_probe())
 
     def prompt_startup_master_password(self) -> None:
         if os.environ.get("QT_QPA_PLATFORM", "").strip().lower() == "offscreen":

@@ -202,17 +202,21 @@ That means:
 
 ## Patient Note Alert Monitor
 
-KaosEghis performs one narrowly scoped read-only safety check while an EMR connection
-is cached. It resolves the `eghisRichTextBox` inside the
-`TreatmentPtntMemoDoctor` scope and checks only whether the text contains the marker
-`***`.
+KaosEghis polls only the configured current-patient chart-number UIA target while an
+EMR connection is cached. The default chart Automation ID is `lblChartNo`. When that
+value changes, the monitor waits briefly for the patient view to settle, resolves the
+configured memo target, and reads that memo once for the new patient. The default memo
+path is the `eghisRichTextBox` target inside the `TreatmentPtntMemoDoctor` scope.
+Automation IDs and exact UIA Name properties for both targets are editable under
+Settings > General.
 
 When the marker is present, a large red always-on-top warning asks the operator to
 review the patient memo in EMR. The popup does not display the memo contents, does not
 retain them, and hides automatically when the marker is absent or EMR disconnects.
-The UIA check runs on a dedicated background monitor thread and reuses the resolved
-memo element for that EMR connection. It does not focus EMR, write text, run macros,
-or perform full-window descendant scans on every check.
+The chart number remains transient in memory and is used only as a change token. It is
+not logged, displayed, or persisted. The UIA check runs on a dedicated background
+monitor thread and reuses resolved elements for that EMR connection. It does not focus
+EMR, write text, run macros, or perform full-window descendant scans on every check.
 
 ## Read-Only Database Automation
 

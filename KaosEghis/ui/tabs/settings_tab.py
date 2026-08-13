@@ -1,4 +1,5 @@
 from pathlib import Path
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFormLayout,
@@ -20,6 +21,8 @@ from KaosEghis.core.kaospacs_client import check_kaospacs_health
 
 
 class SettingsTab(QWidget):
+    general_settings_saved = Signal()
+
     TOP_PAGES = ["General", "PACS"]
     PACS_DEFAULTS = {
         "eghis_db_connection_string": DEFAULT_SETTINGS["eghis_db_connection_string"],
@@ -50,6 +53,13 @@ class SettingsTab(QWidget):
 
         self.process_name = QLineEdit()
         self.window_title = QLineEdit()
+        self.patient_alert_enabled = QCheckBox("Enable *** patient-note alert")
+        self.patient_alert_chart_scope_automation_id = QLineEdit()
+        self.patient_alert_chart_automation_id = QLineEdit()
+        self.patient_alert_chart_name = QLineEdit()
+        self.patient_alert_memo_scope_automation_id = QLineEdit()
+        self.patient_alert_memo_automation_id = QLineEdit()
+        self.patient_alert_memo_name = QLineEdit()
         self.kaosgdd_url = QLineEdit()
         self.memos_url = QLineEdit()
         self.paperless_url = QLineEdit()
@@ -106,6 +116,24 @@ class SettingsTab(QWidget):
         form = QFormLayout()
         form.addRow("Eghis process name", self.process_name)
         form.addRow("Eghis window title contains", self.window_title)
+        form.addRow(self.patient_alert_enabled)
+        form.addRow(
+            "Chart No scope Automation ID",
+            self.patient_alert_chart_scope_automation_id,
+        )
+        form.addRow(
+            "Chart No Automation ID", self.patient_alert_chart_automation_id
+        )
+        form.addRow("Chart No UIA name", self.patient_alert_chart_name)
+        form.addRow(
+            "Patient memo scope Automation ID",
+            self.patient_alert_memo_scope_automation_id,
+        )
+        form.addRow(
+            "Patient memo textbox Automation ID",
+            self.patient_alert_memo_automation_id,
+        )
+        form.addRow("Patient memo textbox UIA name", self.patient_alert_memo_name)
         form.addRow("KaosGDD URL", self.kaosgdd_url)
         form.addRow("Memos URL", self.memos_url)
         form.addRow("Paperless URL", self.paperless_url)
@@ -200,6 +228,27 @@ class SettingsTab(QWidget):
         )
         self.process_name.setText(settings["eghis_process_name"])
         self.window_title.setText(settings["eghis_window_title_contains"])
+        self.patient_alert_enabled.setChecked(
+            settings["eghis_patient_alert_enabled"].strip().lower() == "true"
+        )
+        self.patient_alert_chart_scope_automation_id.setText(
+            settings["eghis_patient_alert_chart_scope_automation_id"]
+        )
+        self.patient_alert_chart_automation_id.setText(
+            settings["eghis_patient_alert_chart_automation_id"]
+        )
+        self.patient_alert_chart_name.setText(
+            settings["eghis_patient_alert_chart_name"]
+        )
+        self.patient_alert_memo_scope_automation_id.setText(
+            settings["eghis_patient_alert_memo_scope_automation_id"]
+        )
+        self.patient_alert_memo_automation_id.setText(
+            settings["eghis_patient_alert_memo_automation_id"]
+        )
+        self.patient_alert_memo_name.setText(
+            settings["eghis_patient_alert_memo_name"]
+        )
         self.kaosgdd_url.setText(settings["kaosgdd_url"])
         self.memos_url.setText(settings["memos_url"])
         self.paperless_url.setText(settings["paperless_url"])
@@ -243,6 +292,27 @@ class SettingsTab(QWidget):
         values = {
             "eghis_process_name": self.process_name.text().strip(),
             "eghis_window_title_contains": self.window_title.text().strip(),
+            "eghis_patient_alert_enabled": (
+                "true" if self.patient_alert_enabled.isChecked() else "false"
+            ),
+            "eghis_patient_alert_chart_scope_automation_id": (
+                self.patient_alert_chart_scope_automation_id.text().strip()
+            ),
+            "eghis_patient_alert_chart_automation_id": (
+                self.patient_alert_chart_automation_id.text().strip()
+            ),
+            "eghis_patient_alert_chart_name": (
+                self.patient_alert_chart_name.text().strip()
+            ),
+            "eghis_patient_alert_memo_scope_automation_id": (
+                self.patient_alert_memo_scope_automation_id.text().strip()
+            ),
+            "eghis_patient_alert_memo_automation_id": (
+                self.patient_alert_memo_automation_id.text().strip()
+            ),
+            "eghis_patient_alert_memo_name": (
+                self.patient_alert_memo_name.text().strip()
+            ),
             "kaosgdd_url": self.kaosgdd_url.text().strip(),
             "memos_url": self.memos_url.text().strip(),
             "paperless_url": self.paperless_url.text().strip(),
@@ -256,6 +326,7 @@ class SettingsTab(QWidget):
         with connect(self._db_path) as connection:
             set_settings(connection, values)
         self.general_status.setText("Settings saved.")
+        self.general_settings_saved.emit()
 
     def save_pacs_settings(self) -> None:
         validation_error = self._validate_pacs_settings()

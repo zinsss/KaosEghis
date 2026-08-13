@@ -23,6 +23,43 @@ def test_settings_panel_instantiates(tmp_path) -> None:
     assert tab.eghis_db_connection_string.echoMode() == tab.eghis_db_connection_string.EchoMode.Password
     assert tab.kaospacs_gateway_api_token.echoMode() == tab.kaospacs_gateway_api_token.EchoMode.Password
     assert tab.kaospacs_integration_token.echoMode() == tab.kaospacs_integration_token.EchoMode.Password
+    assert tab.patient_alert_enabled.isChecked() is True
+    assert tab.patient_alert_chart_automation_id.text() == "lblChartNo"
+    assert (
+        tab.patient_alert_memo_scope_automation_id.text()
+        == "TreatmentPtntMemoDoctor"
+    )
+    assert tab.patient_alert_memo_automation_id.text() == "eghisRichTextBox"
+
+
+def test_save_general_settings_persists_patient_alert_targets(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect
+    from KaosEghis.db.repositories import get_settings
+    from KaosEghis.ui.tabs.settings_tab import SettingsTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    tab = SettingsTab(db_path=db_path)
+    tab.patient_alert_enabled.setChecked(True)
+    tab.patient_alert_chart_scope_automation_id.setText("PatientHeader")
+    tab.patient_alert_chart_automation_id.setText("ChartId")
+    tab.patient_alert_chart_name.setText("Chart No")
+    tab.patient_alert_memo_scope_automation_id.setText("MemoArea")
+    tab.patient_alert_memo_automation_id.setText("MemoText")
+    tab.patient_alert_memo_name.setText("Patient memo")
+    tab.save_general_settings()
+
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+
+    assert settings["eghis_patient_alert_enabled"] == "true"
+    assert settings["eghis_patient_alert_chart_scope_automation_id"] == "PatientHeader"
+    assert settings["eghis_patient_alert_chart_automation_id"] == "ChartId"
+    assert settings["eghis_patient_alert_chart_name"] == "Chart No"
+    assert settings["eghis_patient_alert_memo_scope_automation_id"] == "MemoArea"
+    assert settings["eghis_patient_alert_memo_automation_id"] == "MemoText"
+    assert settings["eghis_patient_alert_memo_name"] == "Patient memo"
 
 
 def test_settings_internal_pages_are_reachable(tmp_path) -> None:

@@ -9,8 +9,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel
 
 from KaosEghis.core.emr_patient_alert import (
+    EmrPatientAlertConfiguration,
     EmrPatientAlertProbe,
     EmrPatientAlertResult,
+    patient_alert_configuration_from_settings,
 )
 
 
@@ -30,11 +32,19 @@ class _Node:
     def __init__(self, children=None) -> None:
         self.children = children or {}
         self.child_lookups = 0
+        self.last_criteria = None
 
     def child_window(self, **criteria):
         self.child_lookups += 1
-        key = (criteria.get("auto_id"), criteria.get("control_type"))
-        child = self.children.get(key) or self.children.get((key[0], None))
+        self.last_criteria = criteria
+        key = (
+            criteria.get("auto_id"),
+            criteria.get("title"),
+            criteria.get("control_type"),
+        )
+        child = self.children.get(key)
+        if child is None:
+            child = self.children.get((key[0], key[1], None))
         if child is None:
             raise RuntimeError("not found")
         return _Specification(child)
@@ -48,9 +58,21 @@ class _Desktop:
         return _Specification(self.root)
 
 
+class _ValueInterface:
+    def __init__(self, owner) -> None:
+        self._owner = owner
+
+    @property
+    def CurrentValue(self):
+        self._owner.read_count += 1
+        return self._owner.value
+
+
 class _ValueElement:
     def __init__(self, value: str) -> None:
-        self.iface_value = SimpleNamespace(CurrentValue=value)
+        self.value = value
+        self.read_count = 0
+        self.iface_value = _ValueInterface(self)
 
 
 def _connected_state():
@@ -62,41 +84,72 @@ def _connected_state():
     )
 
 
-def test_patient_alert_probe_detects_marker_without_returning_memo_text() -> None:
-    memo = _ValueElement("private patient note *** private detail")
-    scope = _Node({("eghisRichTextBox", "Edit"): memo})
-    root = _Node({("TreatmentPtntMemoDoctor", None): scope})
+def _probe_fixture(*, chart_value="2735", memo_value="note *** detail"):
+    chart = _ValueElement(chart_value)
+    memo = _ValueElement(memo_value)
+    memo_scope = _Node({("eghisRichTextBox", "Memo field", "Edit"): memo})
+    root = _Node(
+        {
+            ("lblChartNo", "Chart number", None): chart,
+            ("TreatmentPtntMemoDoctor", None, None): memo_scope,
+        }
+    )
+    configuration = EmrPatientAlertConfiguration(
+        chart_automation_id="lblChartNo",
+        chart_name="Chart number",
+        memo_scope_automation_id="TreatmentPtntMemoDoctor",
+        memo_automation_id="eghisRichTextBox",
+        memo_name="Memo field",
+    )
     probe = EmrPatientAlertProbe(
+        configuration=configuration,
         state_provider=_connected_state,
         desktop_factory=lambda **_kwargs: _Desktop(root),
+        patient_settle_seconds=0,
     )
+    return probe, chart, memo, root, memo_scope
 
-    result = probe.check()
 
-    assert result == EmrPatientAlertResult(
+def test_patient_alert_reads_memo_once_for_current_patient() -> None:
+    probe, chart, memo, root, memo_scope = _probe_fixture()
+
+    changed = probe.check()
+    first_result = probe.check()
+    repeated_result = probe.check()
+
+    assert changed.marker_found is False
+    assert changed.message == "Patient change detected; waiting for patient memo."
+    assert first_result == EmrPatientAlertResult(
         connected=True,
         available=True,
         marker_found=True,
         message="Important patient-note marker detected.",
     )
-    assert "private" not in result.message
-    assert not hasattr(result, "text_value")
+    assert repeated_result == first_result
+    assert chart.read_count == 3
+    assert memo.read_count == 1
+    assert root.child_lookups == 2
+    assert memo_scope.child_lookups == 1
+    assert not hasattr(first_result, "patient_chart_no")
+    assert not hasattr(first_result, "text_value")
 
 
-def test_patient_alert_probe_reuses_resolved_element_for_same_connection() -> None:
-    memo = _ValueElement("no marker")
-    scope = _Node({("eghisRichTextBox", "Edit"): memo})
-    root = _Node({("TreatmentPtntMemoDoctor", None): scope})
-    probe = EmrPatientAlertProbe(
-        state_provider=_connected_state,
-        desktop_factory=lambda **_kwargs: _Desktop(root),
-    )
+def test_patient_change_clears_old_alert_and_reads_new_memo_once() -> None:
+    probe, chart, memo, _root, _memo_scope = _probe_fixture()
+    probe.check()
+    assert probe.check().marker_found is True
 
-    assert probe.check().available is True
-    assert probe.check().available is True
+    chart.value = "9999"
+    memo.value = "ordinary note"
 
-    assert root.child_lookups == 1
-    assert scope.child_lookups == 1
+    changed = probe.check()
+    new_patient = probe.check()
+    repeated = probe.check()
+
+    assert changed.marker_found is False
+    assert new_patient.marker_found is False
+    assert repeated.marker_found is False
+    assert memo.read_count == 2
 
 
 def test_patient_alert_probe_does_not_inspect_when_emr_disconnected() -> None:
@@ -113,7 +166,7 @@ def test_patient_alert_probe_does_not_inspect_when_emr_disconnected() -> None:
     assert desktop_calls == []
 
 
-def test_patient_alert_probe_backs_off_after_failed_resolution() -> None:
+def test_patient_alert_probe_backs_off_after_failed_chart_resolution() -> None:
     now = [100.0]
     root = _Node()
     probe = EmrPatientAlertProbe(
@@ -132,15 +185,37 @@ def test_patient_alert_probe_backs_off_after_failed_resolution() -> None:
     assert root.child_lookups == 2
 
 
+def test_patient_alert_configuration_uses_editable_uia_fields() -> None:
+    configuration = patient_alert_configuration_from_settings(
+        {
+            "eghis_patient_alert_enabled": "false",
+            "eghis_patient_alert_chart_scope_automation_id": "PatientHeader",
+            "eghis_patient_alert_chart_automation_id": "ChartId",
+            "eghis_patient_alert_chart_name": "Chart No",
+            "eghis_patient_alert_memo_scope_automation_id": "MemoArea",
+            "eghis_patient_alert_memo_automation_id": "MemoText",
+            "eghis_patient_alert_memo_name": "Important memo",
+        }
+    )
+
+    assert configuration == EmrPatientAlertConfiguration(
+        enabled=False,
+        chart_scope_automation_id="PatientHeader",
+        chart_automation_id="ChartId",
+        chart_name="Chart No",
+        memo_scope_automation_id="MemoArea",
+        memo_automation_id="MemoText",
+        memo_name="Important memo",
+    )
+
+
 def test_patient_alert_popup_is_always_on_top_and_contains_no_memo_text() -> None:
     _app()
 
     from KaosEghis.ui.emr_patient_alert import EmrPatientAlertPopup
 
     popup = EmrPatientAlertPopup()
-    labels = " ".join(
-        label.text() for label in popup.findChildren(QLabel)
-    )
+    labels = " ".join(label.text() for label in popup.findChildren(QLabel))
 
     assert (
         popup.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
