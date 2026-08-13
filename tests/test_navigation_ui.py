@@ -245,8 +245,8 @@ def test_launcher_compact_socl_panel_is_visible(tmp_path, monkeypatch) -> None:
 
     page = LauncherPage(db_path)
     assert page.socl_label.text() == "SOCL"
-    assert page.socl_panel.subjective_tree.topLevelItemCount() > 0
-    assert page.socl_panel.objective_tree.topLevelItemCount() > 0
+    assert page.socl_panel.finding_count("subjective") > 0
+    assert page.socl_panel.finding_count("objective") > 0
 
 
 def test_launcher_cross_column_move_keeps_macro_out_of_actions_after_reload(tmp_path, monkeypatch) -> None:

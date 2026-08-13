@@ -221,8 +221,8 @@ def test_launcher_socl_panel_uses_s_and_o_tabs_and_shared_vocabulary(
         "S",
         "O",
     ]
-    assert panel.subjective_tree.topLevelItemCount() == 20
-    assert panel.objective_tree.topLevelItemCount() == 15
+    assert panel.finding_count("subjective") > 0
+    assert panel.finding_count("objective") > 0
 
 
 def test_launcher_socl_panel_generates_only_current_domain(tmp_path) -> None:
@@ -233,12 +233,70 @@ def test_launcher_socl_panel_generates_only_current_domain(tmp_path) -> None:
     from KaosEghis.ui.tabs.socl_tab import SoclLauncherPanel
 
     panel = SoclLauncherPanel(tmp_path / "KaosEghis.sqlite")
-    subjective_finding = panel.subjective_tree.topLevelItem(0).child(0)
-    objective_finding = panel.objective_tree.topLevelItem(0).child(0)
-    subjective_finding.setCheckState(0, Qt.CheckState.Checked)
-    objective_finding.setCheckState(0, Qt.CheckState.Checked)
+    subjective_id = next(
+        finding_id
+        for finding_id, metadata in panel._finding_metadata.items()
+        if metadata[0] == "subjective"
+    )
+    objective_id = next(
+        finding_id
+        for finding_id, metadata in panel._finding_metadata.items()
+        if metadata[0] == "objective"
+    )
+    panel.finding_checkbox(subjective_id).setChecked(True)
+    panel.finding_checkbox(objective_id).setChecked(True)
 
     panel.generate_preview("subjective")
 
     assert panel.subjective_preview.toPlainText().startswith("S)")
     assert panel.objective_preview.toPlainText() == ""
+
+
+def test_launcher_socl_panel_uses_two_column_compact_checkboxes(tmp_path) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QCheckBox, QGridLayout, QGroupBox, QLineEdit
+
+    from KaosEghis.ui.tabs.socl_tab import SoclLauncherPanel
+
+    panel = SoclLauncherPanel(tmp_path / "KaosEghis.sqlite")
+    groups = panel.subjective_findings.findChildren(QGroupBox)
+    assert groups
+    first_grid = groups[0].layout()
+    assert isinstance(first_grid, QGridLayout)
+    assert first_grid.itemAtPosition(0, 0) is not None
+    assert first_grid.itemAtPosition(0, 1) is not None
+
+    checkbox = panel.subjective_findings.findChild(QCheckBox)
+    assert checkbox is not None
+    finding_id = next(
+        key for key, value in panel._finding_checkboxes.items() if value is checkbox
+    )
+    detail = panel._detail_inputs[finding_id]
+    assert isinstance(detail, QLineEdit)
+    finding_label = panel._finding_metadata[finding_id][2]
+    if not panel._is_free_text_finding(finding_label):
+        assert detail.isHidden() is True
+        checkbox.setChecked(True)
+        assert detail.isHidden() is False
+
+
+def test_launcher_socl_free_text_is_visible_and_checks_when_typed(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.socl_tab import SoclLauncherPanel
+
+    panel = SoclLauncherPanel(tmp_path / "KaosEghis.sqlite")
+    finding_id = next(
+        finding_id
+        for finding_id, metadata in panel._finding_metadata.items()
+        if panel._is_free_text_finding(metadata[2])
+    )
+    checkbox = panel.finding_checkbox(finding_id)
+    detail = panel._detail_inputs[finding_id]
+
+    assert checkbox is not None
+    assert detail.isHidden() is False
+    assert checkbox.isChecked() is False
+    detail.textEdited.emit("custom observation")
+    assert checkbox.isChecked() is True

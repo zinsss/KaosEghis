@@ -1,6 +1,6 @@
 # KaosEghis-SOCL
 
-Last updated: 2026-08-04
+Last updated: 2026-08-13
 
 ## Status
 
@@ -42,6 +42,20 @@ Generation is explicit. Editing a checkbox or detail field does not silently rep
 the physician's current preview. `Generate preview` deterministically rebuilds the
 preview from the current explicit selections; the physician may then edit the result
 before copying it.
+
+### Launcher Composer
+
+The Launcher contains a compact composer using the same vocabulary and deterministic
+renderer:
+
+- separate `S` and `O` tabs
+- two checkbox columns inside each clinical collection
+- ordinary optional-detail fields remain hidden until their finding is checked
+- free-text/other detail fields remain visible and typing in one checks its finding
+- Generate, Copy, and Clear operate only on the current S or O domain
+
+The compact layout changes presentation only. It does not persist encounter selections
+or introduce clinical inference.
 
 ### Edit vocabulary
 

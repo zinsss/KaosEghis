@@ -5,10 +5,14 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -18,6 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTabWidget,
     QTableWidget,
@@ -54,6 +59,15 @@ FINDING_ID_ROLE = Qt.ItemDataRole.UserRole
 RENDER_TEXT_ROLE = Qt.ItemDataRole.UserRole + 1
 COLLECTION_NAME_ROLE = Qt.ItemDataRole.UserRole + 2
 DOMAIN_ROLE = Qt.ItemDataRole.UserRole + 3
+
+
+class _CheckboxLabel(QLabel):
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
 
 
 def _create_socl_selection_tree(accessible_name: str) -> QTreeWidget:
@@ -137,11 +151,15 @@ class SoclLauncherPanel(QWidget):
         super().__init__()
         self._db_path = db_path
         self._detail_inputs: dict[int, QLineEdit] = {}
+        self._finding_checkboxes: dict[int, QCheckBox] = {}
+        self._finding_metadata: dict[int, tuple[str, str, str, str]] = {}
         self.pages = QTabWidget()
         self.status_label = QLabel("Ready. Nothing is selected by default.")
 
-        self.subjective_tree = _create_socl_selection_tree("Subjective findings")
-        self.objective_tree = _create_socl_selection_tree("Physical examination")
+        self.subjective_findings = QWidget()
+        self.objective_findings = QWidget()
+        self.subjective_findings.setAccessibleName("Subjective findings")
+        self.objective_findings.setAccessibleName("Physical examination")
         self.subjective_preview = QPlainTextEdit()
         self.objective_preview = QPlainTextEdit()
         self.subjective_preview.setPlaceholderText("Editable Subjective preview")
@@ -149,13 +167,13 @@ class SoclLauncherPanel(QWidget):
 
         self.pages.addTab(
             self._build_domain_page(
-                "subjective", self.subjective_tree, self.subjective_preview
+                "subjective", self.subjective_findings, self.subjective_preview
             ),
             "S",
         )
         self.pages.addTab(
             self._build_domain_page(
-                "objective", self.objective_tree, self.objective_preview
+                "objective", self.objective_findings, self.objective_preview
             ),
             "O",
         )
@@ -171,7 +189,7 @@ class SoclLauncherPanel(QWidget):
     def _build_domain_page(
         self,
         domain: str,
-        tree: QTreeWidget,
+        findings_widget: QWidget,
         preview: QPlainTextEdit,
     ) -> QWidget:
         page = QWidget()
@@ -190,7 +208,12 @@ class SoclLauncherPanel(QWidget):
 
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.addWidget(tree, 3)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(findings_widget)
+        layout.addWidget(scroll, 3)
         layout.addLayout(controls)
         layout.addWidget(preview, 1)
         return page
@@ -202,19 +225,16 @@ class SoclLauncherPanel(QWidget):
         path = self._effective_path()
         initialize_database(path)
         self._detail_inputs.clear()
-        _populate_socl_tree(
-            path, "subjective", self.subjective_tree, self._detail_inputs
-        )
-        _populate_socl_tree(
-            path, "objective", self.objective_tree, self._detail_inputs
-        )
+        self._finding_checkboxes.clear()
+        self._finding_metadata.clear()
+        self._populate_compact_domain("subjective", self.subjective_findings)
+        self._populate_compact_domain("objective", self.objective_findings)
         self.subjective_preview.clear()
         self.objective_preview.clear()
         self.status_label.setText("Vocabulary loaded. Selections were cleared.")
 
     def generate_preview(self, domain: str) -> None:
-        tree = self._tree_for_domain(domain)
-        selections = _selected_findings_from_tree(tree, self._detail_inputs)
+        selections = self._selected_findings(domain)
         rendered = render_socl_note(selections)
         preview = self._preview_for_domain(domain)
         preview.setPlainText(
@@ -240,20 +260,139 @@ class SoclLauncherPanel(QWidget):
         self.notification_requested.emit(f"SOCL: Copied {label}", "success")
 
     def clear_domain(self, domain: str) -> None:
-        tree = self._tree_for_domain(domain)
-        for collection_index in range(tree.topLevelItemCount()):
-            collection_item = tree.topLevelItem(collection_index)
-            for finding_index in range(collection_item.childCount()):
-                item = collection_item.child(finding_index)
-                item.setCheckState(0, Qt.CheckState.Unchecked)
-                detail_input = self._detail_inputs.get(item.data(0, FINDING_ID_ROLE))
-                if detail_input is not None:
-                    detail_input.clear()
+        for finding_id, checkbox in self._finding_checkboxes.items():
+            metadata = self._finding_metadata.get(finding_id)
+            if metadata is None or metadata[0] != domain:
+                continue
+            checkbox.setChecked(False)
+            detail_input = self._detail_inputs.get(finding_id)
+            if detail_input is not None:
+                detail_input.clear()
         self._preview_for_domain(domain).clear()
         self.status_label.setText(f"Cleared {self._short_label(domain)}.")
 
-    def _tree_for_domain(self, domain: str) -> QTreeWidget:
-        return self.subjective_tree if domain == "subjective" else self.objective_tree
+    def finding_checkbox(self, finding_id: int) -> QCheckBox | None:
+        return self._finding_checkboxes.get(finding_id)
+
+    def finding_count(self, domain: str) -> int:
+        return sum(
+            1 for metadata in self._finding_metadata.values() if metadata[0] == domain
+        )
+
+    def _populate_compact_domain(self, domain: str, container: QWidget) -> None:
+        layout = container.layout()
+        if layout is None:
+            layout = QVBoxLayout(container)
+            layout.setContentsMargins(2, 2, 2, 2)
+            layout.setSpacing(6)
+        else:
+            self._clear_layout(layout)
+        with connect(self._effective_path()) as connection:
+            collections = list_socl_collections(connection, domain)
+            for collection in collections:
+                group = QGroupBox(collection.name)
+                grid = QGridLayout(group)
+                grid.setContentsMargins(6, 6, 6, 6)
+                grid.setHorizontalSpacing(10)
+                grid.setVerticalSpacing(3)
+                findings = list_socl_findings(connection, collection.id)
+                for index, finding in enumerate(findings):
+                    row, column = divmod(index, 2)
+                    grid.addWidget(
+                        self._create_compact_finding(
+                            domain,
+                            collection.name,
+                            finding,
+                        ),
+                        row,
+                        column,
+                    )
+                grid.setColumnStretch(0, 1)
+                grid.setColumnStretch(1, 1)
+                layout.addWidget(group)
+        layout.addStretch()
+
+    def _create_compact_finding(
+        self,
+        domain: str,
+        collection_name: str,
+        finding: SoclFindingRecord,
+    ) -> QWidget:
+        container = QWidget()
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+
+        checkbox = QCheckBox()
+        checkbox.setAccessibleName(finding.label)
+        checkbox.setToolTip(finding.label)
+        finding_label = _CheckboxLabel(finding.label)
+        finding_label.setWordWrap(True)
+        finding_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        finding_label.clicked.connect(checkbox.toggle)
+        detail_input = QLineEdit()
+        detail_input.setPlaceholderText("detail")
+        detail_input.setMaximumWidth(130)
+        detail_input.setVisible(self._is_free_text_finding(finding.label))
+        checkbox.toggled.connect(
+            lambda checked, editor=detail_input, label=finding.label: editor.setVisible(
+                checked or self._is_free_text_finding(label)
+            )
+        )
+        detail_input.textEdited.connect(
+            lambda text, option=checkbox: option.setChecked(bool(text.strip()))
+        )
+
+        row.addWidget(checkbox, 0, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(finding_label, 1)
+        row.addWidget(detail_input)
+        self._finding_checkboxes[finding.id] = checkbox
+        self._detail_inputs[finding.id] = detail_input
+        self._finding_metadata[finding.id] = (
+            domain,
+            collection_name,
+            finding.label,
+            finding.render_text,
+        )
+        return container
+
+    def _selected_findings(self, domain: str) -> list[SoclSelectedFinding]:
+        selected: list[SoclSelectedFinding] = []
+        for finding_id, checkbox in self._finding_checkboxes.items():
+            metadata = self._finding_metadata.get(finding_id)
+            if metadata is None or metadata[0] != domain or not checkbox.isChecked():
+                continue
+            _domain, collection_name, finding_label, render_text = metadata
+            detail_input = self._detail_inputs.get(finding_id)
+            selected.append(
+                SoclSelectedFinding(
+                    domain=domain,
+                    collection_name=collection_name,
+                    finding_label=finding_label,
+                    render_text=render_text,
+                    detail=detail_input.text() if detail_input is not None else "",
+                )
+            )
+        return selected
+
+    @staticmethod
+    def _is_free_text_finding(label: str) -> bool:
+        normalized = label.casefold()
+        return any(
+            marker in normalized
+            for marker in ("custom", "own wording", "unrestricted", "other")
+        )
+
+    @classmethod
+    def _clear_layout(cls, layout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            child_layout = item.layout()
+            widget = item.widget()
+            if child_layout is not None:
+                cls._clear_layout(child_layout)
+            if widget is not None:
+                widget.deleteLater()
 
     def _preview_for_domain(self, domain: str) -> QPlainTextEdit:
         return (

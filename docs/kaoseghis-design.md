@@ -68,6 +68,8 @@ Primary daily-use tab.
   a confirmation dialog
 - the right side of Launcher contains a compact SOCL composer with `S` and `O` tabs;
   it shares the same local vocabulary as the full SOCL editor
+- each Launcher SOCL group uses a dense two-column checkbox layout; optional detail
+  fields expand for checked findings, while free-text/other fields remain visible
 - Launcher no longer embeds or loads KaosGDD Calendar, Tasks, or Supplies
 - the Launcher now supports both direct executable macros and launcher
   collections
