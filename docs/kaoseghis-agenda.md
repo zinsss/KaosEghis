@@ -1,60 +1,40 @@
-# KaosEghis Agenda and Supplies
+# KaosEghis Agenda and Supplies (Removed from Launcher)
 
 ## Purpose
 
-The Launcher page embeds KaosGDD's compact Agenda and Supplies web surface.
-KaosEghis does not reproduce KaosGDD calendar, task, or supplies behavior.
+The Launcher previously embedded KaosGDD's compact Agenda and Supplies web surface.
+That embedded surface was removed from Launcher after KaosGDD changed and the daily
+KaosEghis workflow no longer required it there.
 
-The embedded page contains three KaosGDD-owned pages:
+The released Launcher layout now uses that space for a compact SOCL composer with
+separate `S` and `O` tabs. KaosEghis still does not reproduce or store KaosGDD
+calendar, task, or supplies data.
+
+The removed embedded page contained three KaosGDD-owned pages:
 
 - **Calendar**: default month view and selected-day events;
 - **Tasks**: Active/Done filtering, ordering, add/edit/delete, and
   complete/reopen actions;
 - **Supplies**: the existing KaosGDD supply workflow.
 
-## Internal Architecture
+## Current Architecture
 
 ```text
-KaosEghis Launcher QWebEngineView
-        |
-        | private HTTP
-        v
-KaosGDD internal embed listener :8090
-        |
-        v
-KaosGDD Brain and calendar adapters
-        |
-        v
-Radicale calendar and VTODO collections
+KaosEghis Launcher -> local compact SOCL S/O composer
+
+KaosGDD -> its own calendar, task, and supplies surfaces
 ```
 
 KaosGDD remains authoritative for presentation, calendar events, normal tasks,
 and the `Kaos_Supplies` collection. KaosEghis stores none of these records in
 its SQLite database.
 
-## Internal URL
+## Removal Behavior
 
-The default URL is:
-
-```text
-http://100.94.208.16:8090/embed/agenda-supplies
-```
-
-This endpoint is intended for the private network only. KaosEghis does not use
-the public `kaosgdd.net` hostname for the embedded Launcher surface.
-
-Set `KAOSGDD_EMBED_URL` before starting KaosEghis to override the endpoint.
-The override must point to the internal KaosGDD embed route.
-
-## Runtime Behavior
-
-- The web view does not load during widget construction.
-- KaosEghis loads it asynchronously when the Launcher page is activated.
-- Reload always returns to the configured embed URL.
-- Open in Browser provides an explicit fallback.
-- If Qt WebEngine is unavailable, KaosEghis shows the internal URL and keeps
-  the external-browser fallback available.
-- A failed page load does not block EMR connection or macro execution.
+- The launcher-only web panel module and its dedicated tests were removed.
+- Opening Launcher performs no KaosGDD Agenda/Supplies network request.
+- `KAOSGDD_EMBED_URL` is no longer read by KaosEghis.
+- KaosGDD changes or availability cannot block Launcher or macro execution.
 
 ## Security Boundary
 

@@ -206,3 +206,39 @@ def test_socl_vocabulary_editor_exposes_edit_controls(tmp_path) -> None:
     assert editor.add_finding_button.text() == "Add finding"
     assert editor.edit_finding_button.text() == "Edit"
     assert editor.restore_button.text() == "Restore reviewed defaults"
+
+
+def test_launcher_socl_panel_uses_s_and_o_tabs_and_shared_vocabulary(
+    tmp_path,
+) -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.socl_tab import SoclLauncherPanel
+
+    panel = SoclLauncherPanel(tmp_path / "KaosEghis.sqlite")
+
+    assert [panel.pages.tabText(index) for index in range(panel.pages.count())] == [
+        "S",
+        "O",
+    ]
+    assert panel.subjective_tree.topLevelItemCount() == 20
+    assert panel.objective_tree.topLevelItemCount() == 15
+
+
+def test_launcher_socl_panel_generates_only_current_domain(tmp_path) -> None:
+    _app()
+
+    from PySide6.QtCore import Qt
+
+    from KaosEghis.ui.tabs.socl_tab import SoclLauncherPanel
+
+    panel = SoclLauncherPanel(tmp_path / "KaosEghis.sqlite")
+    subjective_finding = panel.subjective_tree.topLevelItem(0).child(0)
+    objective_finding = panel.objective_tree.topLevelItem(0).child(0)
+    subjective_finding.setCheckState(0, Qt.CheckState.Checked)
+    objective_finding.setCheckState(0, Qt.CheckState.Checked)
+
+    panel.generate_preview("subjective")
+
+    assert panel.subjective_preview.toPlainText().startswith("S)")
+    assert panel.objective_preview.toPlainText() == ""

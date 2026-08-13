@@ -56,6 +56,217 @@ COLLECTION_NAME_ROLE = Qt.ItemDataRole.UserRole + 2
 DOMAIN_ROLE = Qt.ItemDataRole.UserRole + 3
 
 
+def _create_socl_selection_tree(accessible_name: str) -> QTreeWidget:
+    tree = QTreeWidget()
+    tree.setAccessibleName(accessible_name)
+    tree.setColumnCount(2)
+    tree.setHeaderLabels(["Finding", "Encounter detail (optional)"])
+    tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    tree.setAlternatingRowColors(True)
+    tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    return tree
+
+
+def _populate_socl_tree(
+    db_path: Path,
+    domain: str,
+    tree: QTreeWidget,
+    detail_inputs: dict[int, QLineEdit],
+) -> None:
+    tree.clear()
+    with connect(db_path) as connection:
+        for collection in list_socl_collections(connection, domain):
+            collection_item = QTreeWidgetItem([collection.name, ""])
+            collection_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            tree.addTopLevelItem(collection_item)
+            collection_item.setFirstColumnSpanned(True)
+            for finding in list_socl_findings(connection, collection.id):
+                child = QTreeWidgetItem([finding.label, ""])
+                child.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled
+                    | Qt.ItemFlag.ItemIsSelectable
+                    | Qt.ItemFlag.ItemIsUserCheckable
+                )
+                child.setCheckState(0, Qt.CheckState.Unchecked)
+                child.setData(0, FINDING_ID_ROLE, finding.id)
+                child.setData(0, RENDER_TEXT_ROLE, finding.render_text)
+                child.setData(0, COLLECTION_NAME_ROLE, collection.name)
+                child.setData(0, DOMAIN_ROLE, domain)
+                collection_item.addChild(child)
+                detail_input = QLineEdit()
+                detail_input.setPlaceholderText("Optional value or wording")
+                tree.setItemWidget(child, 1, detail_input)
+                detail_inputs[finding.id] = detail_input
+    tree.collapseAll()
+    if tree.topLevelItemCount():
+        tree.topLevelItem(0).setExpanded(True)
+
+
+def _selected_findings_from_tree(
+    tree: QTreeWidget,
+    detail_inputs: dict[int, QLineEdit],
+) -> list[SoclSelectedFinding]:
+    selections: list[SoclSelectedFinding] = []
+    for collection_index in range(tree.topLevelItemCount()):
+        collection_item = tree.topLevelItem(collection_index)
+        for finding_index in range(collection_item.childCount()):
+            item = collection_item.child(finding_index)
+            if item.checkState(0) != Qt.CheckState.Checked:
+                continue
+            finding_id = item.data(0, FINDING_ID_ROLE)
+            detail_input = detail_inputs.get(finding_id)
+            selections.append(
+                SoclSelectedFinding(
+                    domain=str(item.data(0, DOMAIN_ROLE)),
+                    collection_name=str(item.data(0, COLLECTION_NAME_ROLE)),
+                    finding_label=item.text(0),
+                    render_text=str(item.data(0, RENDER_TEXT_ROLE)),
+                    detail=detail_input.text() if detail_input is not None else "",
+                )
+            )
+    return selections
+
+
+class SoclLauncherPanel(QWidget):
+    """Compact S/O composer for the daily Launcher surface."""
+
+    notification_requested = Signal(str, str)
+
+    def __init__(self, db_path: Path | None = None) -> None:
+        super().__init__()
+        self._db_path = db_path
+        self._detail_inputs: dict[int, QLineEdit] = {}
+        self.pages = QTabWidget()
+        self.status_label = QLabel("Ready. Nothing is selected by default.")
+
+        self.subjective_tree = _create_socl_selection_tree("Subjective findings")
+        self.objective_tree = _create_socl_selection_tree("Physical examination")
+        self.subjective_preview = QPlainTextEdit()
+        self.objective_preview = QPlainTextEdit()
+        self.subjective_preview.setPlaceholderText("Editable Subjective preview")
+        self.objective_preview.setPlaceholderText("Editable Objective preview")
+
+        self.pages.addTab(
+            self._build_domain_page(
+                "subjective", self.subjective_tree, self.subjective_preview
+            ),
+            "S",
+        )
+        self.pages.addTab(
+            self._build_domain_page(
+                "objective", self.objective_tree, self.objective_preview
+            ),
+            "O",
+        )
+        self.pages.setTabToolTip(0, "Subjective")
+        self.pages.setTabToolTip(1, "Objective")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.pages, 1)
+        layout.addWidget(self.status_label)
+        self.reload_vocabulary()
+
+    def _build_domain_page(
+        self,
+        domain: str,
+        tree: QTreeWidget,
+        preview: QPlainTextEdit,
+    ) -> QWidget:
+        page = QWidget()
+        generate_button = QPushButton("Generate")
+        generate_button.clicked.connect(lambda: self.generate_preview(domain))
+        copy_button = QPushButton("Copy")
+        copy_button.clicked.connect(lambda: self.copy_preview(domain))
+        clear_button = QPushButton("Clear")
+        clear_button.clicked.connect(lambda: self.clear_domain(domain))
+
+        controls = QHBoxLayout()
+        controls.addWidget(generate_button)
+        controls.addWidget(copy_button)
+        controls.addWidget(clear_button)
+        controls.addStretch()
+
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(tree, 3)
+        layout.addLayout(controls)
+        layout.addWidget(preview, 1)
+        return page
+
+    def _effective_path(self) -> Path:
+        return self._db_path or get_database_path()
+
+    def reload_vocabulary(self) -> None:
+        path = self._effective_path()
+        initialize_database(path)
+        self._detail_inputs.clear()
+        _populate_socl_tree(
+            path, "subjective", self.subjective_tree, self._detail_inputs
+        )
+        _populate_socl_tree(
+            path, "objective", self.objective_tree, self._detail_inputs
+        )
+        self.subjective_preview.clear()
+        self.objective_preview.clear()
+        self.status_label.setText("Vocabulary loaded. Selections were cleared.")
+
+    def generate_preview(self, domain: str) -> None:
+        tree = self._tree_for_domain(domain)
+        selections = _selected_findings_from_tree(tree, self._detail_inputs)
+        rendered = render_socl_note(selections)
+        preview = self._preview_for_domain(domain)
+        preview.setPlainText(
+            rendered.subjective if domain == "subjective" else rendered.objective
+        )
+        self.status_label.setText(
+            f"Generated {self._short_label(domain)} from {len(selections)} findings."
+        )
+
+    def copy_preview(self, domain: str) -> None:
+        label = self._short_label(domain)
+        value = self._preview_for_domain(domain).toPlainText().strip()
+        if not value:
+            self.status_label.setText(f"Nothing to copy for {label}.")
+            return
+        try:
+            copy_text(value)
+        except Exception:
+            self.status_label.setText("Clipboard copy failed.")
+            self.notification_requested.emit("SOCL clipboard copy failed", "error")
+            return
+        self.status_label.setText(f"Copied {label}.")
+        self.notification_requested.emit(f"SOCL: Copied {label}", "success")
+
+    def clear_domain(self, domain: str) -> None:
+        tree = self._tree_for_domain(domain)
+        for collection_index in range(tree.topLevelItemCount()):
+            collection_item = tree.topLevelItem(collection_index)
+            for finding_index in range(collection_item.childCount()):
+                item = collection_item.child(finding_index)
+                item.setCheckState(0, Qt.CheckState.Unchecked)
+                detail_input = self._detail_inputs.get(item.data(0, FINDING_ID_ROLE))
+                if detail_input is not None:
+                    detail_input.clear()
+        self._preview_for_domain(domain).clear()
+        self.status_label.setText(f"Cleared {self._short_label(domain)}.")
+
+    def _tree_for_domain(self, domain: str) -> QTreeWidget:
+        return self.subjective_tree if domain == "subjective" else self.objective_tree
+
+    def _preview_for_domain(self, domain: str) -> QPlainTextEdit:
+        return (
+            self.subjective_preview
+            if domain == "subjective"
+            else self.objective_preview
+        )
+
+    @staticmethod
+    def _short_label(domain: str) -> str:
+        return "S" if domain == "subjective" else "O"
+
+
 class SoclTab(QWidget):
     notification_requested = Signal(str, str)
 
@@ -142,15 +353,7 @@ class SoclTab(QWidget):
 
     @staticmethod
     def _create_selection_tree(accessible_name: str) -> QTreeWidget:
-        tree = QTreeWidget()
-        tree.setAccessibleName(accessible_name)
-        tree.setColumnCount(2)
-        tree.setHeaderLabels(["Finding", "Encounter detail (optional)"])
-        tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        tree.setAlternatingRowColors(True)
-        tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        return tree
+        return _create_socl_selection_tree(accessible_name)
 
     @staticmethod
     def _labeled_widget(label: str, widget: QWidget) -> QWidget:
@@ -167,64 +370,31 @@ class SoclTab(QWidget):
         self.subjective_tree.clear()
         self.objective_tree.clear()
         self._detail_inputs.clear()
-        with connect(effective_path) as connection:
-            for domain, tree in (
-                ("subjective", self.subjective_tree),
-                ("objective", self.objective_tree),
-            ):
-                for collection in list_socl_collections(connection, domain):
-                    collection_item = QTreeWidgetItem([collection.name, ""])
-                    collection_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                    tree.addTopLevelItem(collection_item)
-                    collection_item.setFirstColumnSpanned(True)
-                    for finding in list_socl_findings(connection, collection.id):
-                        child = QTreeWidgetItem([finding.label, ""])
-                        child.setFlags(
-                            Qt.ItemFlag.ItemIsEnabled
-                            | Qt.ItemFlag.ItemIsSelectable
-                            | Qt.ItemFlag.ItemIsUserCheckable
-                        )
-                        child.setCheckState(0, Qt.CheckState.Unchecked)
-                        child.setData(0, FINDING_ID_ROLE, finding.id)
-                        child.setData(0, RENDER_TEXT_ROLE, finding.render_text)
-                        child.setData(0, COLLECTION_NAME_ROLE, collection.name)
-                        child.setData(0, DOMAIN_ROLE, domain)
-                        collection_item.addChild(child)
-                        detail_input = QLineEdit()
-                        detail_input.setPlaceholderText("Optional value or wording")
-                        tree.setItemWidget(child, 1, detail_input)
-                        self._detail_inputs[finding.id] = detail_input
-        self.subjective_tree.collapseAll()
-        self.objective_tree.collapseAll()
-        if self.subjective_tree.topLevelItemCount():
-            self.subjective_tree.topLevelItem(0).setExpanded(True)
-        if self.objective_tree.topLevelItemCount():
-            self.objective_tree.topLevelItem(0).setExpanded(True)
+        _populate_socl_tree(
+            effective_path,
+            "subjective",
+            self.subjective_tree,
+            self._detail_inputs,
+        )
+        _populate_socl_tree(
+            effective_path,
+            "objective",
+            self.objective_tree,
+            self._detail_inputs,
+        )
         self.subjective_preview.clear()
         self.objective_preview.clear()
         self.status_label.setText("Vocabulary loaded. Selections were cleared.")
 
     def selected_findings(self) -> list[SoclSelectedFinding]:
-        selections: list[SoclSelectedFinding] = []
-        for tree in (self.subjective_tree, self.objective_tree):
-            for collection_index in range(tree.topLevelItemCount()):
-                collection_item = tree.topLevelItem(collection_index)
-                for finding_index in range(collection_item.childCount()):
-                    item = collection_item.child(finding_index)
-                    if item.checkState(0) != Qt.CheckState.Checked:
-                        continue
-                    finding_id = item.data(0, FINDING_ID_ROLE)
-                    detail_input = self._detail_inputs.get(finding_id)
-                    selections.append(
-                        SoclSelectedFinding(
-                            domain=str(item.data(0, DOMAIN_ROLE)),
-                            collection_name=str(item.data(0, COLLECTION_NAME_ROLE)),
-                            finding_label=item.text(0),
-                            render_text=str(item.data(0, RENDER_TEXT_ROLE)),
-                            detail=detail_input.text() if detail_input is not None else "",
-                        )
-                    )
-        return selections
+        return [
+            *_selected_findings_from_tree(
+                self.subjective_tree, self._detail_inputs
+            ),
+            *_selected_findings_from_tree(
+                self.objective_tree, self._detail_inputs
+            ),
+        ]
 
     def generate_preview(self) -> None:
         selections = self.selected_findings()

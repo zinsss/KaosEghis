@@ -66,6 +66,9 @@ Primary daily-use tab.
 - `Launcher` is the daily-use macro launcher surface; double-click or its run button
   executes immediately with an in-page `Running '<macro name>'...` status instead of
   a confirmation dialog
+- the right side of Launcher contains a compact SOCL composer with `S` and `O` tabs;
+  it shares the same local vocabulary as the full SOCL editor
+- Launcher no longer embeds or loads KaosGDD Calendar, Tasks, or Supplies
 - the Launcher now supports both direct executable macros and launcher
   collections
 - direct macros run immediately
@@ -103,6 +106,7 @@ Physician-controlled Subjective and Objective note composer.
 - supports local add/edit/delete/reorder for collections, labels, and rendered phrases
 - generates deterministic editable S and O previews from checked findings only
 - copies S, O, or combined S/O to the clipboard
+- provides the same vocabulary through a compact `S`/`O` tabbed composer on Launcher
 - persists vocabulary only; encounter selections and generated notes stay in memory
 - performs no diagnosis inference, EMR automation, or eGHIS database write
 - detailed design: `docs/kaoseghis-socl.md`

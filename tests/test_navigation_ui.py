@@ -85,20 +85,20 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
 
     tab = KaosEghisTab()
 
-    assert list(tab.nav_buttons.keys()) == ["Launcher + Agenda", "SOCL", "Procedures", "Vaccine"]
+    assert list(tab.nav_buttons.keys()) == ["Launcher", "SOCL", "Procedures", "Vaccine"]
     assert isinstance(tab.stacked_widget, QStackedWidget)
     assert tab.stacked_widget.currentWidget() is tab.launcher_page
-    assert tab.nav_buttons["Launcher + Agenda"].isChecked() is True
+    assert tab.nav_buttons["Launcher"].isChecked() is True
     assert list(tab.launcher_page.launcher_lists.keys()) == [
         "Macro",
         "Comments",
         "Actions",
     ]
-    assert tab.launcher_page.agenda_label.text() == "Agenda / Supplies"
+    assert tab.launcher_page.socl_label.text() == "SOCL"
     assert not hasattr(tab.launcher_page, "summary_label")
 
 
-def test_launcher_page_gives_agenda_most_of_the_width() -> None:
+def test_launcher_page_gives_compact_socl_most_of_the_width() -> None:
     _app()
 
     from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
@@ -106,7 +106,7 @@ def test_launcher_page_gives_agenda_most_of_the_width() -> None:
     page = LauncherPage()
 
     assert page.LAUNCHER_COLUMN_STRETCH == 1
-    assert page.AGENDA_COLUMN_STRETCH == 3
+    assert page.SOCL_COLUMN_STRETCH == 3
 
 
 def test_kaoseghis_top_nav_pages_are_reachable() -> None:
@@ -125,7 +125,7 @@ def test_kaoseghis_top_nav_pages_are_reachable() -> None:
     tab.nav_buttons["Vaccine"].click()
     assert tab.stacked_widget.currentWidget() is tab.vaccine_page
 
-    tab.nav_buttons["Launcher + Agenda"].click()
+    tab.nav_buttons["Launcher"].click()
     assert tab.stacked_widget.currentWidget() is tab.launcher_page
 
 
@@ -228,9 +228,12 @@ def test_launcher_page_places_macros_into_three_columns(tmp_path, monkeypatch) -
         page.launcher_lists["Actions"].item(1).text()
         == "Fetch Pt. Info for Vaccination"
     )
-    assert page.agenda_panel.embed_url.endswith("/embed/agenda-supplies")
+    assert [
+        page.socl_panel.pages.tabText(index)
+        for index in range(page.socl_panel.pages.count())
+    ] == ["S", "O"]
 
-def test_launcher_agenda_and_supplies_panel_is_visible(tmp_path, monkeypatch) -> None:
+def test_launcher_compact_socl_panel_is_visible(tmp_path, monkeypatch) -> None:
     _app()
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
@@ -241,8 +244,9 @@ def test_launcher_agenda_and_supplies_panel_is_visible(tmp_path, monkeypatch) ->
     initialize_database(db_path)
 
     page = LauncherPage(db_path)
-    assert page.agenda_label.text() == "Agenda / Supplies"
-    assert page.agenda_panel.status_label.text() == "Not loaded yet."
+    assert page.socl_label.text() == "SOCL"
+    assert page.socl_panel.subjective_tree.topLevelItemCount() > 0
+    assert page.socl_panel.objective_tree.topLevelItemCount() > 0
 
 
 def test_launcher_cross_column_move_keeps_macro_out_of_actions_after_reload(tmp_path, monkeypatch) -> None:

@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
 from KaosEghis.core.clipboard_service import copy_text
 from KaosEghis.core.macro_runner import MacroRunner
 from KaosEghis.ui.drag_hover_switch import ButtonFileHoverFilter
-from KaosEghis.ui.launcher_agenda_panel import AgendaSuppliesPanel
 from KaosEghis.core.eghis_connector import (
     build_connector_settings,
     clear_cached_eghis_state,
@@ -85,7 +84,7 @@ from KaosEghis.ui.tabs.flu_report_tab import FluReportTab
 from KaosEghis.ui.tabs.service_web_tab import ServiceWebTab
 from KaosEghis.ui.tabs.scan_tab import ScanTab
 from KaosEghis.ui.tabs.scheduler_tab import SchedulerTab
-from KaosEghis.ui.tabs.socl_tab import SoclTab
+from KaosEghis.ui.tabs.socl_tab import SoclLauncherPanel, SoclTab
 from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
 from KaosEghis.config import DEFAULT_CONFIG
 
@@ -110,7 +109,7 @@ class PlaceholderPage(QWidget):
 
 
 class KaosEghisTab(QWidget):
-    TOP_PAGES = ["Launcher + Agenda", "SOCL", "Procedures", "Vaccine"]
+    TOP_PAGES = ["Launcher", "SOCL", "Procedures", "Vaccine"]
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -122,6 +121,9 @@ class KaosEghisTab(QWidget):
 
         self.launcher_page = LauncherPage(db_path)
         self.socl_page = SoclTab(db_path)
+        self.socl_page.vocabulary_page.vocabulary_changed.connect(
+            self.launcher_page.socl_panel.reload_vocabulary
+        )
         self.procedures_page = PlaceholderPage(
             "Procedures",
             "Procedures page is not implemented yet.",
@@ -307,7 +309,7 @@ class LauncherPage(QWidget):
     ENTRY_KIND_ROLE = 258
     ITEM_TYPE_ROLE = LauncherListWidget.ITEM_TYPE_ROLE if "LauncherListWidget" in globals() else 257
     LAUNCHER_COLUMN_STRETCH = 1
-    AGENDA_COLUMN_STRETCH = 3
+    SOCL_COLUMN_STRETCH = 3
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -345,13 +347,13 @@ class LauncherPage(QWidget):
             columns.addWidget(section_list, 1, index)
             columns.setColumnStretch(index, self.LAUNCHER_COLUMN_STRETCH)
 
-        notes_index = len(LAUNCHER_SECTIONS)
-        self.agenda_label = QLabel("Agenda / Supplies")
-        self.agenda_label.setObjectName("launcherSectionTitle")
-        self.agenda_panel = AgendaSuppliesPanel()
-        columns.addWidget(self.agenda_label, 0, notes_index)
-        columns.addWidget(self.agenda_panel, 1, notes_index)
-        columns.setColumnStretch(notes_index, self.AGENDA_COLUMN_STRETCH)
+        socl_index = len(LAUNCHER_SECTIONS)
+        self.socl_label = QLabel("SOCL")
+        self.socl_label.setObjectName("launcherSectionTitle")
+        self.socl_panel = SoclLauncherPanel(db_path)
+        columns.addWidget(self.socl_label, 0, socl_index)
+        columns.addWidget(self.socl_panel, 1, socl_index)
+        columns.setColumnStretch(socl_index, self.SOCL_COLUMN_STRETCH)
 
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_view)
@@ -387,7 +389,7 @@ class LauncherPage(QWidget):
         self._refresh_connection_status()
 
     def activate_page(self) -> None:
-        self.agenda_panel.ensure_loaded()
+        pass
 
     def toggle_connection(self, checked: bool) -> None:
         if checked:
