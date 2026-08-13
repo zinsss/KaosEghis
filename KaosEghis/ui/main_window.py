@@ -17,6 +17,10 @@ from PySide6.QtWidgets import (
 from pywinauto.keyboard import send_keys
 
 from KaosEghis.core.credential_vault import CredentialEntry
+from KaosEghis.core.emr_patient_alert import (
+    EmrPatientAlertMonitor,
+    EmrPatientAlertResult,
+)
 from KaosEghis.core.pw_runtime import ForegroundWindowContext, PwRuntime
 from KaosEghis.core.scheduler import SchedulerRuntime
 from KaosEghis.ui.drag_hover_switch import TabBarFileHoverFilter
@@ -26,6 +30,7 @@ from KaosEghis.ui.dialogs.pw_popup_dialog import (
     CredentialEntryDialog,
     CredentialPopupDialog,
 )
+from KaosEghis.ui.emr_patient_alert import EmrPatientAlertPopup
 from KaosEghis.ui.tabs.memos_tab import MemosTab
 from KaosEghis.ui.tabs.kaoseghis_tab import (
     KaosEghisTab,
@@ -80,6 +85,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("KaosEghis")
         self.setFixedSize(1438, 1194)
         self.pw_runtime = PwRuntime(self)
+        self.patient_alert_popup = EmrPatientAlertPopup()
+        self.patient_alert_monitor = EmrPatientAlertMonitor(parent=self)
+        self.patient_alert_monitor.result_changed.connect(
+            self._handle_patient_alert_result
+        )
 
         tabs = QTabWidget()
         self.tabs = tabs
@@ -129,12 +139,26 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setTabToolTip(self.pacs_tab_index, reason)
 
     def closeEvent(self, event) -> None:
+        self.patient_alert_monitor.stop()
+        self.patient_alert_popup.close()
         self.pw_runtime.stop()
         self.scheduler_runtime.stop()
         super().closeEvent(event)
 
     def initialize_runtime_services(self) -> None:
         self.pw_runtime.start()
+        self.patient_alert_monitor.start()
+
+    def _handle_patient_alert_result(self, result: EmrPatientAlertResult) -> None:
+        if result.marker_found:
+            was_visible = self.patient_alert_popup.isVisible()
+            self.patient_alert_popup.show_alert()
+            if not was_visible:
+                self.show_notification(
+                    "Important patient-note marker detected in EMR.", "error"
+                )
+            return
+        self.patient_alert_popup.clear_alert()
 
     def prompt_startup_master_password(self) -> None:
         if os.environ.get("QT_QPA_PLATFORM", "").strip().lower() == "offscreen":

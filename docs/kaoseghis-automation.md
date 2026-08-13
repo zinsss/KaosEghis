@@ -200,6 +200,20 @@ That means:
 - connector validity must hold
 - blocked states must stop execution
 
+## Patient Note Alert Monitor
+
+KaosEghis performs one narrowly scoped read-only safety check while an EMR connection
+is cached. It resolves the `eghisRichTextBox` inside the
+`TreatmentPtntMemoDoctor` scope and checks only whether the text contains the marker
+`***`.
+
+When the marker is present, a large red always-on-top warning asks the operator to
+review the patient memo in EMR. The popup does not display the memo contents, does not
+retain them, and hides automatically when the marker is absent or EMR disconnects.
+The UIA check runs on a dedicated background monitor thread and reuses the resolved
+memo element for that EMR connection. It does not focus EMR, write text, run macros,
+or perform full-window descendant scans on every check.
+
 ## Read-Only Database Automation
 
 The same safety stance applies to PostgreSQL access:
