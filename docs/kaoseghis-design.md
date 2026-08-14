@@ -307,7 +307,8 @@ The design strategy is milestone-based:
 - the EMR patient-note alert is a read-only, in-memory safety surface: it checks only
   once per detected chart-number change for the `***` marker, displays no memo
   contents, persists neither chart number nor memo data, and performs no EMR input or
-  focus action
+  focus action; its generic memo textbox is disambiguated by an optional persisted
+  Inspect.exe ancestor path, which contains UI structure only and no patient data
 
 ## Removed or Superseded Directions
 

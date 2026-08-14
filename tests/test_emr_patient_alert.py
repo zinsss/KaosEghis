@@ -29,10 +29,25 @@ class _Specification:
 
 
 class _Node:
-    def __init__(self, children=None) -> None:
+    def __init__(
+        self,
+        children=None,
+        *,
+        name="",
+        automation_id="",
+        control_type="",
+        descendants=None,
+    ) -> None:
         self.children = children or {}
+        self._descendants = descendants or []
         self.child_lookups = 0
         self.last_criteria = None
+        self.element_info = SimpleNamespace(
+            name=name,
+            automation_id=automation_id,
+            control_type=control_type,
+            class_name="",
+        )
 
     def child_window(self, **criteria):
         self.child_lookups += 1
@@ -48,6 +63,9 @@ class _Node:
         if child is None:
             raise RuntimeError("not found")
         return _Specification(child)
+
+    def descendants(self):
+        return list(self._descendants)
 
 
 class _Desktop:
@@ -195,6 +213,7 @@ def test_patient_alert_configuration_uses_editable_uia_fields() -> None:
             "eghis_patient_alert_memo_scope_automation_id": "MemoArea",
             "eghis_patient_alert_memo_automation_id": "MemoText",
             "eghis_patient_alert_memo_name": "Important memo",
+            "eghis_patient_alert_memo_ancestor_path": "Ancestors:\n\"Memo pane\" pane",
         }
     )
 
@@ -206,7 +225,61 @@ def test_patient_alert_configuration_uses_editable_uia_fields() -> None:
         memo_scope_automation_id="MemoArea",
         memo_automation_id="MemoText",
         memo_name="Important memo",
+        memo_ancestor_path='Ancestors:\n"Memo pane" pane',
     )
+
+
+def test_patient_alert_ancestor_path_scopes_generic_memo_target() -> None:
+    from KaosEghis.core.emr_patient_alert import parse_patient_alert_ancestor_path
+
+    chart = _ValueElement("2735")
+    wrong_memo = _ValueElement("ordinary note")
+    right_memo = _ValueElement("allergy ***")
+    wrong_scope = _Node(
+        {("eghisRichTextBox", "eghisRichTexbox", "Edit"): wrong_memo},
+        name="Other memo",
+        automation_id="OtherMemo",
+        control_type="Pane",
+    )
+    right_scope = _Node(
+        {("eghisRichTextBox", "eghisRichTexbox", "Edit"): right_memo},
+        name="Patient memo",
+        automation_id="TreatmentPtntMemoDoctor",
+        control_type="Pane",
+    )
+    root = _Node(
+        {
+            ("lblChartNo", None, None): chart,
+            ("TreatmentPtntMemoDoctor", None, None): wrong_scope,
+        },
+        name="진료실",
+        automation_id="H2OpdTreatment",
+        control_type="Window",
+        descendants=[wrong_scope, right_scope],
+    )
+    ancestor_text = 'Ancestors:\n"Patient memo" pane\n"진료실" window\n[ No Parent ]'
+    configuration = EmrPatientAlertConfiguration(
+        chart_automation_id="lblChartNo",
+        memo_scope_automation_id="TreatmentPtntMemoDoctor",
+        memo_automation_id="eghisRichTextBox",
+        memo_name="eghisRichTexbox",
+        memo_ancestor_path=ancestor_text,
+    )
+    probe = EmrPatientAlertProbe(
+        configuration=configuration,
+        state_provider=_connected_state,
+        desktop_factory=lambda **_kwargs: _Desktop(root),
+        patient_settle_seconds=0,
+    )
+
+    assert parse_patient_alert_ancestor_path(ancestor_text) == [
+        {"name": "Patient memo", "control_type": "Pane"},
+        {"name": "진료실", "control_type": "Window"},
+    ]
+    assert probe.check().marker_found is False
+    assert probe.check().marker_found is True
+    assert right_memo.read_count == 1
+    assert wrong_memo.read_count == 0
 
 
 def test_patient_alert_popup_is_always_on_top_and_contains_no_memo_text() -> None:

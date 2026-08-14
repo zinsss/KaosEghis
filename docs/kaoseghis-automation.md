@@ -208,7 +208,9 @@ value changes, the monitor waits briefly for the patient view to settle, resolve
 configured memo target, and reads that memo once for the new patient. The default memo
 path is the `eghisRichTextBox` target inside the `TreatmentPtntMemoDoctor` scope.
 Automation IDs and exact UIA Name properties for both targets are editable under
-Settings > General.
+Settings > General. The memo target also accepts a pasted Inspect.exe `Ancestors:`
+block. That ancestor chain is tried first to scope the otherwise generic
+`eghisRichTexbox` name; the single memo scope Automation ID remains a fallback.
 
 When the marker is present, a large red always-on-top warning asks the operator to
 review the patient memo in EMR. The popup does not display the memo contents, does not

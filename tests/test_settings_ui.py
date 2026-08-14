@@ -30,6 +30,8 @@ def test_settings_panel_instantiates(tmp_path) -> None:
         == "TreatmentPtntMemoDoctor"
     )
     assert tab.patient_alert_memo_automation_id.text() == "eghisRichTextBox"
+    assert tab.patient_alert_memo_name.text() == "eghisRichTexbox"
+    assert tab.patient_alert_memo_ancestor_path.toPlainText() == ""
 
 
 def test_save_general_settings_persists_patient_alert_targets(tmp_path) -> None:
@@ -48,6 +50,9 @@ def test_save_general_settings_persists_patient_alert_targets(tmp_path) -> None:
     tab.patient_alert_memo_scope_automation_id.setText("MemoArea")
     tab.patient_alert_memo_automation_id.setText("MemoText")
     tab.patient_alert_memo_name.setText("Patient memo")
+    tab.patient_alert_memo_ancestor_path.setPlainText(
+        'Ancestors:\n"Patient memo" pane\n"진료실" window'
+    )
     tab.save_general_settings()
 
     with connect(db_path) as connection:
@@ -60,6 +65,9 @@ def test_save_general_settings_persists_patient_alert_targets(tmp_path) -> None:
     assert settings["eghis_patient_alert_memo_scope_automation_id"] == "MemoArea"
     assert settings["eghis_patient_alert_memo_automation_id"] == "MemoText"
     assert settings["eghis_patient_alert_memo_name"] == "Patient memo"
+    assert settings["eghis_patient_alert_memo_ancestor_path"] == (
+        'Ancestors:\n"Patient memo" pane\n"진료실" window'
+    )
 
 
 def test_settings_internal_pages_are_reachable(tmp_path) -> None:

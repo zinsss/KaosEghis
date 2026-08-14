@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import re
 import threading
 import time
 from typing import Any, Callable
@@ -15,6 +17,36 @@ DEFAULT_CHART_AUTOMATION_ID = "lblChartNo"
 DEFAULT_MEMO_SCOPE_AUTOMATION_ID = "TreatmentPtntMemoDoctor"
 DEFAULT_MEMO_TEXT_AUTOMATION_ID = "eghisRichTextBox"
 
+_CONTROL_TYPE_SUFFIXES = {
+    "도구 모음": "ToolBar",
+    "콤보 상자": "ComboBox",
+    "탭 항목": "TabItem",
+    "창틀": "Pane",
+    "그룹": "Group",
+    "창": "Window",
+    "단추": "Button",
+    "버튼": "Button",
+    "편집": "Edit",
+    "문서": "Document",
+    "목록": "List",
+    "테이블": "Table",
+    "탭": "Tab",
+    "텍스트": "Text",
+    "toolbar": "ToolBar",
+    "combo box": "ComboBox",
+    "tab item": "TabItem",
+    "window": "Window",
+    "pane": "Pane",
+    "group": "Group",
+    "button": "Button",
+    "edit": "Edit",
+    "document": "Document",
+    "list": "List",
+    "table": "Table",
+    "tab": "Tab",
+    "text": "Text",
+}
+
 
 @dataclass(frozen=True)
 class EmrPatientAlertConfiguration:
@@ -24,7 +56,8 @@ class EmrPatientAlertConfiguration:
     chart_name: str = ""
     memo_scope_automation_id: str = DEFAULT_MEMO_SCOPE_AUTOMATION_ID
     memo_automation_id: str = DEFAULT_MEMO_TEXT_AUTOMATION_ID
-    memo_name: str = ""
+    memo_name: str = "eghisRichTexbox"
+    memo_ancestor_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -157,6 +190,7 @@ class EmrPatientAlertProbe:
                 automation_id=self._configuration.memo_automation_id,
                 name=self._configuration.memo_name,
                 preferred_control_type="Edit",
+                ancestor_path=self._configuration.memo_ancestor_path,
             )
         if self._memo_element is None:
             self._next_memo_resolution_at = (
@@ -208,6 +242,7 @@ class EmrPatientAlertProbe:
                 automation_id=self._configuration.chart_automation_id,
                 name=self._configuration.chart_name,
                 preferred_control_type=None,
+                ancestor_path="",
             )
         if self._chart_element is None:
             self._next_chart_resolution_at = (
@@ -236,6 +271,7 @@ class EmrPatientAlertProbe:
         automation_id: str,
         name: str,
         preferred_control_type: str | None,
+        ancestor_path: str,
     ) -> Any | None:
         desktop_factory = self._desktop_factory
         if desktop_factory is None:
@@ -261,13 +297,24 @@ class EmrPatientAlertProbe:
             root = desktop_factory(backend="uia").window(
                 handle=root_handle
             ).wrapper_object()
-            scope = (
-                root.child_window(auto_id=normalized_scope).wrapper_object()
-                if normalized_scope
-                else root
-            )
         except Exception:
             return None
+
+        scopes: list[Any] = []
+        if ancestor_path.strip():
+            ancestor_scope = _resolve_ancestor_scope(root, ancestor_path)
+            if ancestor_scope is not None:
+                scopes.append(ancestor_scope)
+
+        if normalized_scope:
+            try:
+                scope = root.child_window(auto_id=normalized_scope).wrapper_object()
+                if all(scope is not existing for existing in scopes):
+                    scopes.append(scope)
+            except Exception:
+                pass
+        if not scopes:
+            scopes.append(root)
 
         criteria: dict[str, str] = {}
         if normalized_automation_id:
@@ -277,11 +324,12 @@ class EmrPatientAlertProbe:
         candidates = [criteria]
         if preferred_control_type:
             candidates.insert(0, {**criteria, "control_type": preferred_control_type})
-        for candidate in candidates:
-            try:
-                return scope.child_window(**candidate).wrapper_object()
-            except Exception:
-                continue
+        for scope in scopes:
+            for candidate in candidates:
+                try:
+                    return scope.child_window(**candidate).wrapper_object()
+                except Exception:
+                    continue
         return None
 
 
@@ -306,6 +354,118 @@ def patient_alert_configuration_from_settings(
             DEFAULT_MEMO_TEXT_AUTOMATION_ID,
         ).strip(),
         memo_name=settings.get("eghis_patient_alert_memo_name", "").strip(),
+        memo_ancestor_path=settings.get(
+            "eghis_patient_alert_memo_ancestor_path", ""
+        ).strip(),
+    )
+
+
+def parse_patient_alert_ancestor_path(value: str) -> list[dict[str, str]]:
+    text = value.strip()
+    if not text:
+        return []
+    try:
+        raw_nodes = json.loads(text)
+    except json.JSONDecodeError:
+        raw_nodes = None
+    if isinstance(raw_nodes, list):
+        nodes: list[dict[str, str]] = []
+        for node in raw_nodes:
+            if not isinstance(node, dict):
+                continue
+            normalized = _normalized_ancestor_node(node)
+            if normalized:
+                nodes.append(normalized)
+        return nodes
+
+    nodes: list[dict[str, str]] = []
+    in_ancestors = not any(
+        line.strip().lower().startswith("ancestors:") for line in text.splitlines()
+    )
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("ancestors:"):
+            in_ancestors = True
+            line = line.partition(":")[2].strip()
+            if not line:
+                continue
+        if not in_ancestors:
+            continue
+        if line.startswith("[") and "no parent" in line.casefold():
+            continue
+        name_match = re.match(r'^"([^"]*)"', line)
+        if not name_match:
+            continue
+        name = name_match.group(1).strip()
+        if not name:
+            continue
+        node: dict[str, str] = {"name": name}
+        remainder = line[name_match.end() :].strip()
+        for suffix, control_type in _CONTROL_TYPE_SUFFIXES.items():
+            if remainder.casefold().endswith(suffix.casefold()):
+                node["control_type"] = control_type
+                break
+        auto_match = re.search(
+            r"(?:automation[_ ]?id|auto[_ ]?id)\s*[=:]\s*[\"']?([^\s\"']+)",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if auto_match:
+            node["automation_id"] = auto_match.group(1).strip()
+        nodes.append(node)
+    return nodes
+
+
+def _resolve_ancestor_scope(root: Any, ancestor_path: str) -> Any | None:
+    nodes = parse_patient_alert_ancestor_path(ancestor_path)
+    if not nodes:
+        return None
+    ordered = list(reversed(nodes))
+    for start_index in range(len(ordered)):
+        current = root
+        failed = False
+        for node in ordered[start_index:]:
+            if _matches_ancestor(current, node):
+                continue
+            try:
+                descendants = current.descendants()
+            except Exception:
+                failed = True
+                break
+            matches = [
+                element for element in descendants if _matches_ancestor(element, node)
+            ]
+            if len(matches) != 1:
+                failed = True
+                break
+            current = matches[0]
+        if not failed:
+            return current
+    return None
+
+
+def _normalized_ancestor_node(node: dict[str, Any]) -> dict[str, str]:
+    return {
+        key: str(value).strip()
+        for key, value in node.items()
+        if key in {"name", "automation_id", "control_type", "class_name"}
+        and str(value).strip()
+    }
+
+
+def _matches_ancestor(element: Any, node: dict[str, str]) -> bool:
+    info = getattr(element, "element_info", None)
+    values = {
+        "name": str(getattr(info, "name", "") or "").strip(),
+        "automation_id": str(getattr(info, "automation_id", "") or "").strip(),
+        "control_type": str(getattr(info, "control_type", "") or "").strip(),
+        "class_name": str(getattr(info, "class_name", "") or "").strip(),
+    }
+    return all(
+        values.get(key, "").casefold() == expected.casefold()
+        for key, expected in node.items()
     )
 
 

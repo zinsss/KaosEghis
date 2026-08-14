@@ -60,6 +60,11 @@ class SettingsTab(QWidget):
         self.patient_alert_memo_scope_automation_id = QLineEdit()
         self.patient_alert_memo_automation_id = QLineEdit()
         self.patient_alert_memo_name = QLineEdit()
+        self.patient_alert_memo_ancestor_path = QPlainTextEdit()
+        self.patient_alert_memo_ancestor_path.setPlaceholderText(
+            "Paste the Ancestors section from Inspect.exe here."
+        )
+        self.patient_alert_memo_ancestor_path.setMaximumHeight(110)
         self.kaosgdd_url = QLineEdit()
         self.memos_url = QLineEdit()
         self.paperless_url = QLineEdit()
@@ -134,6 +139,10 @@ class SettingsTab(QWidget):
             self.patient_alert_memo_automation_id,
         )
         form.addRow("Patient memo textbox UIA name", self.patient_alert_memo_name)
+        form.addRow(
+            "Patient memo ancestor path",
+            self.patient_alert_memo_ancestor_path,
+        )
         form.addRow("KaosGDD URL", self.kaosgdd_url)
         form.addRow("Memos URL", self.memos_url)
         form.addRow("Paperless URL", self.paperless_url)
@@ -249,6 +258,9 @@ class SettingsTab(QWidget):
         self.patient_alert_memo_name.setText(
             settings["eghis_patient_alert_memo_name"]
         )
+        self.patient_alert_memo_ancestor_path.setPlainText(
+            settings["eghis_patient_alert_memo_ancestor_path"]
+        )
         self.kaosgdd_url.setText(settings["kaosgdd_url"])
         self.memos_url.setText(settings["memos_url"])
         self.paperless_url.setText(settings["paperless_url"])
@@ -312,6 +324,9 @@ class SettingsTab(QWidget):
             ),
             "eghis_patient_alert_memo_name": (
                 self.patient_alert_memo_name.text().strip()
+            ),
+            "eghis_patient_alert_memo_ancestor_path": (
+                self.patient_alert_memo_ancestor_path.toPlainText().strip()
             ),
             "kaosgdd_url": self.kaosgdd_url.text().strip(),
             "memos_url": self.memos_url.text().strip(),
