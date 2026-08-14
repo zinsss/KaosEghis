@@ -229,6 +229,15 @@ def test_patient_alert_configuration_uses_editable_uia_fields() -> None:
     )
 
 
+def test_patient_alert_configuration_uses_verified_direct_target_defaults() -> None:
+    configuration = patient_alert_configuration_from_settings({})
+
+    assert configuration.chart_automation_id == "792028"
+    assert configuration.memo_scope_automation_id == ""
+    assert configuration.memo_automation_id == "TreatmentPtntMemo"
+    assert configuration.memo_name == ""
+
+
 def test_patient_alert_ancestor_path_scopes_generic_memo_target() -> None:
     from KaosEghis.core.emr_patient_alert import parse_patient_alert_ancestor_path
 

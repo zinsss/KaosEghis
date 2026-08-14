@@ -13,9 +13,9 @@ from KaosEghis.core.eghis_connector import get_cached_eghis_state
 
 
 DEFAULT_ALERT_MARKER = "***"
-DEFAULT_CHART_AUTOMATION_ID = "lblChartNo"
-DEFAULT_MEMO_SCOPE_AUTOMATION_ID = "TreatmentPtntMemoDoctor"
-DEFAULT_MEMO_TEXT_AUTOMATION_ID = "eghisRichTextBox"
+DEFAULT_CHART_AUTOMATION_ID = "792028"
+DEFAULT_MEMO_SCOPE_AUTOMATION_ID = ""
+DEFAULT_MEMO_TEXT_AUTOMATION_ID = "TreatmentPtntMemo"
 
 _CONTROL_TYPE_SUFFIXES = {
     "도구 모음": "ToolBar",
@@ -56,7 +56,7 @@ class EmrPatientAlertConfiguration:
     chart_name: str = ""
     memo_scope_automation_id: str = DEFAULT_MEMO_SCOPE_AUTOMATION_ID
     memo_automation_id: str = DEFAULT_MEMO_TEXT_AUTOMATION_ID
-    memo_name: str = "eghisRichTexbox"
+    memo_name: str = ""
     memo_ancestor_path: str = ""
 
 

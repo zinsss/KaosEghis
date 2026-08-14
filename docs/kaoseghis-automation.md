@@ -203,14 +203,16 @@ That means:
 ## Patient Note Alert Monitor
 
 KaosEghis polls only the configured current-patient chart-number UIA target while an
-EMR connection is cached. The default chart Automation ID is `lblChartNo`. When that
+EMR connection is cached. The verified chart Automation ID is `792028`. When that
 value changes, the monitor waits briefly for the patient view to settle, resolves the
 configured memo target, and reads that memo once for the new patient. The default memo
-path is the `eghisRichTextBox` target inside the `TreatmentPtntMemoDoctor` scope.
+path is the directly readable `TreatmentPtntMemo` target. Scope, Name, and an
+Inspect.exe ancestor path remain optional fallbacks if a future eGHIS update changes
+the control tree.
 Automation IDs and exact UIA Name properties for both targets are editable under
 Settings > General. The memo target also accepts a pasted Inspect.exe `Ancestors:`
-block. That ancestor chain is tried first to scope the otherwise generic
-`eghisRichTexbox` name; the single memo scope Automation ID remains a fallback.
+block. That ancestor chain is tried first when configured; a single memo scope
+Automation ID remains available as a fallback for future control-tree changes.
 
 When the marker is present, a large red always-on-top warning asks the operator to
 review the patient memo in EMR. The popup does not display the memo contents, does not

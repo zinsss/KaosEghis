@@ -6,6 +6,19 @@ from dataclasses import dataclass
 DEFAULT_KAOSPACS_WEB_ADMIN_URL = "http://192.168.0.200:8070/imaging/worklist"
 LEGACY_KAOSPACS_WEB_ADMIN_URL = "http://192.168.0.200/admin/worklist"
 
+LEGACY_PATIENT_ALERT_DEFAULTS = {
+    "eghis_patient_alert_chart_automation_id": "lblChartNo",
+    "eghis_patient_alert_memo_scope_automation_id": "TreatmentPtntMemoDoctor",
+    "eghis_patient_alert_memo_automation_id": "eghisRichTextBox",
+    "eghis_patient_alert_memo_name": "eghisRichTexbox",
+}
+PATIENT_ALERT_DEFAULTS = {
+    "eghis_patient_alert_chart_automation_id": "792028",
+    "eghis_patient_alert_memo_scope_automation_id": "",
+    "eghis_patient_alert_memo_automation_id": "TreatmentPtntMemo",
+    "eghis_patient_alert_memo_name": "",
+}
+
 DEFAULT_SETTINGS = {
     "eghis_process_name": "Eghis.exe",
     "eghis_executable_path": "",
@@ -13,11 +26,11 @@ DEFAULT_SETTINGS = {
     "eghis_patient_status_tab_automation_id": "tabProc",
     "eghis_patient_alert_enabled": "true",
     "eghis_patient_alert_chart_scope_automation_id": "",
-    "eghis_patient_alert_chart_automation_id": "lblChartNo",
+    "eghis_patient_alert_chart_automation_id": "792028",
     "eghis_patient_alert_chart_name": "",
-    "eghis_patient_alert_memo_scope_automation_id": "TreatmentPtntMemoDoctor",
-    "eghis_patient_alert_memo_automation_id": "eghisRichTextBox",
-    "eghis_patient_alert_memo_name": "eghisRichTexbox",
+    "eghis_patient_alert_memo_scope_automation_id": "",
+    "eghis_patient_alert_memo_automation_id": "TreatmentPtntMemo",
+    "eghis_patient_alert_memo_name": "",
     "eghis_patient_alert_memo_ancestor_path": "",
     "launcher_quick_notes": "",
     "kaosgdd_url": "https://kaosgdd.net",
@@ -423,6 +436,11 @@ def get_settings(connection: sqlite3.Connection) -> dict[str, str]:
         "SELECT key, value FROM app_settings"
     )
     settings = DEFAULT_SETTINGS | dict(rows)
+    if all(
+        settings.get(key) == value
+        for key, value in LEGACY_PATIENT_ALERT_DEFAULTS.items()
+    ):
+        settings.update(PATIENT_ALERT_DEFAULTS)
     web_admin_url = (settings.get("kaospacs_web_admin_url") or "").strip()
     if not web_admin_url or web_admin_url == LEGACY_KAOSPACS_WEB_ADMIN_URL:
         settings["kaospacs_web_admin_url"] = DEFAULT_KAOSPACS_WEB_ADMIN_URL

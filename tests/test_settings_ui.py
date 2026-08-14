@@ -24,13 +24,10 @@ def test_settings_panel_instantiates(tmp_path) -> None:
     assert tab.kaospacs_gateway_api_token.echoMode() == tab.kaospacs_gateway_api_token.EchoMode.Password
     assert tab.kaospacs_integration_token.echoMode() == tab.kaospacs_integration_token.EchoMode.Password
     assert tab.patient_alert_enabled.isChecked() is True
-    assert tab.patient_alert_chart_automation_id.text() == "lblChartNo"
-    assert (
-        tab.patient_alert_memo_scope_automation_id.text()
-        == "TreatmentPtntMemoDoctor"
-    )
-    assert tab.patient_alert_memo_automation_id.text() == "eghisRichTextBox"
-    assert tab.patient_alert_memo_name.text() == "eghisRichTexbox"
+    assert tab.patient_alert_chart_automation_id.text() == "792028"
+    assert tab.patient_alert_memo_scope_automation_id.text() == ""
+    assert tab.patient_alert_memo_automation_id.text() == "TreatmentPtntMemo"
+    assert tab.patient_alert_memo_name.text() == ""
     assert tab.patient_alert_memo_ancestor_path.toPlainText() == ""
 
 
@@ -68,6 +65,32 @@ def test_save_general_settings_persists_patient_alert_targets(tmp_path) -> None:
     assert settings["eghis_patient_alert_memo_ancestor_path"] == (
         'Ancestors:\n"Patient memo" pane\n"진료실" window'
     )
+
+
+def test_previous_patient_alert_defaults_upgrade_to_verified_targets(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "eghis_patient_alert_chart_automation_id": "lblChartNo",
+                "eghis_patient_alert_memo_scope_automation_id": (
+                    "TreatmentPtntMemoDoctor"
+                ),
+                "eghis_patient_alert_memo_automation_id": "eghisRichTextBox",
+                "eghis_patient_alert_memo_name": "eghisRichTexbox",
+            },
+        )
+        settings = get_settings(connection)
+
+    assert settings["eghis_patient_alert_chart_automation_id"] == "792028"
+    assert settings["eghis_patient_alert_memo_scope_automation_id"] == ""
+    assert settings["eghis_patient_alert_memo_automation_id"] == "TreatmentPtntMemo"
+    assert settings["eghis_patient_alert_memo_name"] == ""
 
 
 def test_settings_internal_pages_are_reachable(tmp_path) -> None:
