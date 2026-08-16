@@ -809,18 +809,21 @@ def _resolve_cached_grid_handles(
 ) -> dict[str, int] | None:
     if scope_handle is None:
         return None
+    handles: dict[str, int] = {}
     for backend in ("win32", "uia"):
         try:
-            handles = _resolve_cached_grid_handles_for_backend(
+            backend_handles = _resolve_cached_grid_handles_for_backend(
                 scope_handle,
                 backend,
                 grid_automation_ids,
             )
         except Exception:
-            handles = {}
-        if handles:
-            return handles
-    return None
+            backend_handles = {}
+        for automation_id, handle in backend_handles.items():
+            handles.setdefault(automation_id, handle)
+        if all(automation_id in handles for automation_id in grid_automation_ids):
+            break
+    return handles or None
 
 
 def _grid_handles_for_state(

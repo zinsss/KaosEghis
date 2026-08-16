@@ -1694,6 +1694,37 @@ def test_discover_eghis_eager_grid_cache_access_denied_does_not_block_connect(
     assert state.cached_grid_handles is None
 
 
+def test_grid_cache_combines_partial_win32_and_uia_results(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    calls: list[str] = []
+
+    def resolve_backend(_scope_handle, backend, _grid_ids):
+        calls.append(backend)
+        if backend == "win32":
+            return {"tree처방": 101, "grdSymp": 102}
+        return {"grdSymp": 202, "tree상병": 103, "grdOpdList": 104}
+
+    monkeypatch.setattr(
+        connector,
+        "_resolve_cached_grid_handles_for_backend",
+        resolve_backend,
+    )
+
+    handles = connector._resolve_cached_grid_handles(
+        77,
+        ("tree처방", "grdSymp", "tree상병", "grdOpdList"),
+    )
+
+    assert calls == ["win32", "uia"]
+    assert handles == {
+        "tree처방": 101,
+        "grdSymp": 102,
+        "tree상병": 103,
+        "grdOpdList": 104,
+    }
+
+
 
 
 def test_resolve_main_window_handle_falls_back_to_named_mdi_child(monkeypatch) -> None:

@@ -62,6 +62,11 @@ Ancestor-path support:
 - EMR UI targets can now store a normalized Inspector ancestor chain
 - the chain is parsed from pasted Inspector text and saved with the target definition
 - EMR UI targets can also store an explicit intermediate scope anchor such as `grdOpdList`
+- Explicit EMR connect/reconnect eagerly caches the configured patient-status tab and
+  prescription, symptom, diagnosis, and patient-list grid handles. Partial Win32 and
+  UIA results are merged so a grid exposed through only one backend is still cached.
+  Macro readiness validates and reuses these handles without repeating the descendant
+  scan; reconnect is required after the underlying handles become stale.
 - noisy top-level wrappers such as Desktop or duplicate outer windows are ignored
 - resolution walks from the first stable inner ancestor down to the final target
 - when a stable intermediate scope anchor exists, prefer it over a long ancestor chain

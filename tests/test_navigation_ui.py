@@ -565,23 +565,26 @@ def test_launcher_auto_connect_runs_once_on_startup_and_does_not_retry_after_fai
 
     import KaosEghis.ui.tabs.kaoseghis_tab as tab_module
 
-    calls: list[str] = []
+    calls: list[tuple[str, bool]] = []
     monkeypatch.setattr(tab_module, "get_active_emr_target_profile", lambda connection: _Profile())
     monkeypatch.setattr(tab_module, "get_settings", lambda connection: {})
     monkeypatch.setattr(
         tab_module,
         "refresh_cached_eghis_state",
-        lambda settings, **kwargs: calls.append("refresh") or _State(),
+        lambda settings, **kwargs: calls.append(
+            ("refresh", bool(kwargs.get("eager_grid_cache")))
+        )
+        or _State(),
     )
     monkeypatch.setattr(tab_module, "get_cached_eghis_state", lambda: None)
 
     page = LauncherPage(db_path)
 
-    assert calls == ["refresh"]
+    assert calls == [("refresh", True)]
 
     page.refresh_view()
 
-    assert calls == ["refresh"]
+    assert calls == [("refresh", True)]
     assert page.connection_toggle.isChecked() is False
 
 
