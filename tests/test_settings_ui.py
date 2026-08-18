@@ -93,6 +93,40 @@ def test_previous_patient_alert_defaults_upgrade_to_verified_targets(tmp_path) -
     assert settings["eghis_patient_alert_memo_name"] == ""
 
 
+def test_reversed_chart_target_settings_are_normalized(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "eghis_patient_alert_chart_automation_id": "lblChartNo",
+                "eghis_patient_alert_chart_name": "792028",
+                "eghis_patient_alert_memo_scope_automation_id": "",
+                "eghis_patient_alert_memo_automation_id": "TreatmentPtntMemo",
+                "eghis_patient_alert_memo_name": "",
+            },
+        )
+        settings = get_settings(connection)
+
+    assert settings["eghis_patient_alert_chart_automation_id"] == "792028"
+    assert settings["eghis_patient_alert_chart_name"] == ""
+
+
+def test_chart_target_placeholders_distinguish_id_from_patient_value(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.settings_tab import SettingsTab
+
+    tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
+
+    assert "AutomationId" in tab.patient_alert_chart_automation_id.placeholderText()
+    assert "do not enter" in tab.patient_alert_chart_name.placeholderText()
+
+
 def test_settings_internal_pages_are_reachable(tmp_path) -> None:
     _app()
 

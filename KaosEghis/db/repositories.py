@@ -18,6 +18,10 @@ PATIENT_ALERT_DEFAULTS = {
     "eghis_patient_alert_memo_automation_id": "TreatmentPtntMemo",
     "eghis_patient_alert_memo_name": "",
 }
+REVERSED_PATIENT_ALERT_CHART_TARGET = {
+    "eghis_patient_alert_chart_automation_id": "lblChartNo",
+    "eghis_patient_alert_chart_name": "792028",
+}
 
 DEFAULT_SETTINGS = {
     "eghis_process_name": "Eghis.exe",
@@ -441,6 +445,12 @@ def get_settings(connection: sqlite3.Connection) -> dict[str, str]:
         for key, value in LEGACY_PATIENT_ALERT_DEFAULTS.items()
     ):
         settings.update(PATIENT_ALERT_DEFAULTS)
+    if all(
+        settings.get(key) == value
+        for key, value in REVERSED_PATIENT_ALERT_CHART_TARGET.items()
+    ):
+        settings["eghis_patient_alert_chart_automation_id"] = "792028"
+        settings["eghis_patient_alert_chart_name"] = ""
     web_admin_url = (settings.get("kaospacs_web_admin_url") or "").strip()
     if not web_admin_url or web_admin_url == LEGACY_KAOSPACS_WEB_ADMIN_URL:
         settings["kaospacs_web_admin_url"] = DEFAULT_KAOSPACS_WEB_ADMIN_URL

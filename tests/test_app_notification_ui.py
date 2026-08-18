@@ -64,3 +64,28 @@ def test_main_window_places_notification_in_tab_bar_corner(tmp_path, monkeypatch
     assert window.notification_area.text.text() == "Captured and copied"
     assert window.notification_area.text.property("notificationTone") == "success"
     window.close()
+
+
+def test_patient_alert_target_failure_is_operator_visible(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from KaosEghis.core.emr_patient_alert import EmrPatientAlertResult
+    from KaosEghis.ui.main_window import MainWindow
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    window = MainWindow()
+
+    window._handle_patient_alert_result(
+        EmrPatientAlertResult(
+            connected=True,
+            available=False,
+            marker_found=False,
+            message="Current patient chart-number field is not available.",
+        )
+    )
+
+    assert window.notification_area.text.text() == (
+        "Patient alert monitor unavailable. Check EMR target settings."
+    )
+    assert window.notification_area.text.property("notificationTone") == "warning"
+    window.close()

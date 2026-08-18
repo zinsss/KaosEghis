@@ -56,7 +56,13 @@ class SettingsTab(QWidget):
         self.patient_alert_enabled = QCheckBox("Enable *** patient-note alert")
         self.patient_alert_chart_scope_automation_id = QLineEdit()
         self.patient_alert_chart_automation_id = QLineEdit()
+        self.patient_alert_chart_automation_id.setPlaceholderText(
+            "Inspect.exe AutomationId, for example 792028"
+        )
         self.patient_alert_chart_name = QLineEdit()
+        self.patient_alert_chart_name.setPlaceholderText(
+            "Optional stable UIA Name; do not enter a patient's chart number"
+        )
         self.patient_alert_memo_scope_automation_id = QLineEdit()
         self.patient_alert_memo_automation_id = QLineEdit()
         self.patient_alert_memo_name = QLineEdit()

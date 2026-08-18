@@ -222,6 +222,9 @@ Automation IDs and exact UIA Name properties for both targets are editable under
 Settings > General. The memo target also accepts a pasted Inspect.exe `Ancestors:`
 block. That ancestor chain is tried first when configured; a single memo scope
 Automation ID remains available as a fallback for future control-tree changes.
+The chart UIA Name is optional and must be a stable Inspect.exe property. A patient's
+current chart number must never be entered as the Name criterion because that value
+changes when the selected patient changes.
 
 When the marker is present, a large red always-on-top warning asks the operator to
 review the patient memo in EMR. The popup does not display the memo contents, does not
@@ -230,6 +233,9 @@ The chart number remains transient in memory and is used only as a change token.
 not logged, displayed, or persisted. The UIA check runs on a dedicated background
 monitor thread and reuses resolved elements for that EMR connection. It does not focus
 EMR, write text, run macros, or perform full-window descendant scans on every check.
+If the connected EMR chart or memo target cannot be read, the top notification area
+shows a generic monitor-unavailable warning. No chart number or memo content is
+included in that warning.
 
 ## Read-Only Database Automation
 

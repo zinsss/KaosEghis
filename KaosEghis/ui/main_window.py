@@ -168,6 +168,11 @@ class MainWindow(QMainWindow):
                 )
             return
         self.patient_alert_popup.clear_alert()
+        if result.connected and not result.available:
+            self.show_notification(
+                "Patient alert monitor unavailable. Check EMR target settings.",
+                "warning",
+            )
 
     def _create_patient_alert_probe(self) -> EmrPatientAlertProbe:
         initialize_database()
