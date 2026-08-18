@@ -3055,7 +3055,8 @@ def test_parent_scoped_name_pattern_prefers_uia_backend(monkeypatch) -> None:
     result = inspect_target_readonly({"eghis_window_title_contains": "Eghis"}, target)
 
     assert result.found is True
-    assert uia_parent.descendants_calls >= 1
+    assert uia_parent.descendants_calls == 0
+    assert win32_window.descendants_calls == 0
     assert win32_window.descendants_calls == 0
 
 
@@ -3651,6 +3652,47 @@ def test_inspect_target_readonly_can_resolve_grid_row_target_from_ancestor_scope
     assert result.found is True
     assert result.parent_found is True
     assert "row 1" in result.message.casefold()
+    assert outpatient_list.descendants_calls == 0
+
+
+def test_parent_scoped_name_pattern_prefers_immediate_children(monkeypatch) -> None:
+    from KaosEghis.core.uia_inspector import inspect_target_readonly
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    completed_tab = _FakeElement(
+        "",
+        name="완료 (7)",
+        control_type="TabItem",
+    )
+    tab_scope = _FakeElement(
+        "tabProc",
+        name="환자목록",
+        control_type="Tab",
+        children=[completed_tab],
+    )
+    window = _FakeWindow("Eghis", [tab_scope])
+    _install_fake_pywinauto(monkeypatch, [window])
+
+    target = UiTargetRecord(
+        1,
+        "donePt",
+        None,
+        "tabProc",
+        None,
+        "prefix:완료 (",
+        None,
+        None,
+        "now",
+    )
+
+    result = inspect_target_readonly(
+        {"eghis_window_title_contains": "Eghis"},
+        target,
+    )
+
+    assert result.found is True
+    assert result.parent_found is True
+    assert tab_scope.descendants_calls == 0
 
 
 class _FakeElementInfo:

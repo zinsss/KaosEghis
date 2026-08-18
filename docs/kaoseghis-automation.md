@@ -67,6 +67,10 @@ Ancestor-path support:
   UIA results are merged so a grid exposed through only one backend is still cached.
   Macro readiness validates and reuses these handles without repeating the descendant
   scan; reconnect is required after the underlying handles become stale.
+- Cached grid-row targets resolve directly to the configured row proxy without
+  enumerating every UIA cell. Parent-scoped name patterns first inspect immediate
+  children, which keeps dynamic patient-status tabs such as `완료 (...)` on the fast
+  path while retaining descendant and ancestor fallbacks for other controls.
 - noisy top-level wrappers such as Desktop or duplicate outer windows are ignored
 - resolution walks from the first stable inner ancestor down to the final target
 - when a stable intermediate scope anchor exists, prefer it over a long ancestor chain

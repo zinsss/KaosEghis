@@ -388,6 +388,14 @@ def _resolve_target_element(
                     return grid_match, grid_parent_found, grid_message
                 return None, parent_found, fallback_message
             return None, False, message
+        grid_match, grid_parent_found, grid_message = _resolve_grid_row_target_in_scope(
+            parent,
+            target,
+            ancestor_path,
+            parent_found=True,
+        )
+        if grid_match is not None:
+            return grid_match, grid_parent_found, grid_message
         match, parent_found, scoped_message = _resolve_target_inside_parent_scope(
             parent,
             target,
@@ -708,6 +716,14 @@ def _resolve_target_inside_parent_scope(
     if direct_match is not None:
         return direct_match, True, "Target found."
 
+    immediate_match, _immediate_message = _find_immediate_child_match(
+        parent,
+        target,
+        scope_description=scope_description,
+    )
+    if immediate_match is not None:
+        return immediate_match, True, "Target found."
+
     try:
         parent_elements = parent.descendants()
     except Exception as error:
@@ -778,6 +794,23 @@ def _find_direct_child_match(
     if match is None:
         return None, ""
     return match, f"automation_id '{automation_id}' {scope_description}"
+
+
+def _find_immediate_child_match(
+    scope: Any,
+    target: UiTargetRecord,
+    *,
+    scope_description: str,
+) -> tuple[Any | None, str]:
+    try:
+        children = scope.children()
+    except Exception:
+        return None, ""
+    return _find_target_element(
+        children,
+        target,
+        scope_description=scope_description,
+    )
 
 
 def _resolve_ancestor_path_scope(
