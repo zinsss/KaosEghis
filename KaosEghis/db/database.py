@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -56,6 +57,7 @@ def initialize_database(path: Path | None = None) -> None:
         _seed_default_emr_target_profile(connection)
         _seed_default_socl_vocabulary(connection)
         _seed_default_vaccine_types(connection)
+        _seed_default_vaccine_program_seasons(connection)
         connection.commit()
 
 
@@ -453,6 +455,29 @@ def _migrate_vaccine_tables(connection: sqlite3.Connection) -> None:
     )
     connection.execute(
         """
+        CREATE TABLE IF NOT EXISTS vaccine_program_seasons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            program TEXT NOT NULL CHECK (program IN ('influenza', 'covid')),
+            season_name TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 0,
+            daily_cap INTEGER NOT NULL DEFAULT 100 CHECK (daily_cap >= 0),
+            schedule_json TEXT NOT NULL DEFAULT '{}',
+            age_groups_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (program, season_name)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_vaccine_program_seasons_one_active
+        ON vaccine_program_seasons(program)
+        WHERE is_active = 1
+        """
+    )
+    connection.execute(
+        """
         CREATE TABLE IF NOT EXISTS vaccine_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             vaccine_type_id INTEGER,
@@ -489,6 +514,71 @@ def _seed_default_vaccine_types(connection: sqlite3.Connection) -> None:
             ("COVID-19", "covid", "코로나19 예방접종 시행함.", 1, 2),
         ),
     )
+
+
+def _seed_default_vaccine_program_seasons(connection: sqlite3.Connection) -> None:
+    count_row = connection.execute(
+        "SELECT COUNT(*) FROM vaccine_program_seasons"
+    ).fetchone()
+    if count_row is not None and int(count_row[0] or 0) > 0:
+        return
+
+    settings = get_settings(connection)
+    try:
+        schedules = json.loads(settings.get("vaccine_schedule_rules_json", "{}"))
+    except (TypeError, json.JSONDecodeError):
+        schedules = {}
+    try:
+        age_groups = json.loads(settings.get("vaccine_age_groups_json", "[]"))
+    except (TypeError, json.JSONDecodeError):
+        age_groups = []
+    if not isinstance(schedules, dict):
+        schedules = {}
+    if not isinstance(age_groups, list):
+        age_groups = []
+
+    for program, fallback_name in (
+        ("influenza", "Influenza imported season"),
+        ("covid", "COVID imported season"),
+    ):
+        raw_schedule = schedules.get(program)
+        schedule = dict(raw_schedule) if isinstance(raw_schedule, dict) else {}
+        season_name = str(schedule.get("season_name") or fallback_name).strip()
+        enabled = str(schedule.get("program_enabled", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        try:
+            daily_cap = max(0, int(schedule.get("daily_cap", 100)))
+        except (TypeError, ValueError):
+            daily_cap = 100
+        program_groups = [
+            group
+            for group in age_groups
+            if isinstance(group, dict)
+            and str(group.get("vaccine", "")).strip().lower() == program
+        ]
+        schedule["program_enabled"] = enabled
+        schedule["daily_cap"] = daily_cap
+        connection.execute(
+            """
+            INSERT INTO vaccine_program_seasons (
+                program, season_name, is_active, daily_cap,
+                schedule_json, age_groups_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                program,
+                season_name,
+                int(enabled),
+                daily_cap,
+                json.dumps(schedule, ensure_ascii=False, indent=2),
+                json.dumps(program_groups, ensure_ascii=False, indent=2),
+            ),
+        )
 
 
 def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:

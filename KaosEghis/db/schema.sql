@@ -272,3 +272,20 @@ CREATE TABLE IF NOT EXISTS vaccine_records (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (vaccine_type_id) REFERENCES vaccine_types(id)
 );
+
+CREATE TABLE IF NOT EXISTS vaccine_program_seasons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    program TEXT NOT NULL CHECK (program IN ('influenza', 'covid')),
+    season_name TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 0,
+    daily_cap INTEGER NOT NULL DEFAULT 100 CHECK (daily_cap >= 0),
+    schedule_json TEXT NOT NULL DEFAULT '{}',
+    age_groups_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (program, season_name)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vaccine_program_seasons_one_active
+    ON vaccine_program_seasons(program)
+    WHERE is_active = 1;

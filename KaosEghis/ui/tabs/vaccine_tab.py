@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 
@@ -47,10 +46,10 @@ from KaosEghis.db.repositories import (
     list_vaccine_records,
     list_vaccine_types,
     reorder_vaccine_types,
-    set_settings,
     update_vaccine_record,
     update_vaccine_type,
 )
+from KaosEghis.ui.tabs.vaccine_settings_page import VaccineSettingsPage
 
 
 VACCINE_TARGET_KEYS = {
@@ -191,20 +190,6 @@ class VaccineTab(QWidget):
             lambda _text: self._reset_influenza_check()
         )
 
-        self.schedule_rules_input = QPlainTextEdit()
-        self.schedule_rules_input.setPlaceholderText(
-            "Editable JSON for influenza / COVID schedule windows."
-        )
-        self.age_groups_input = QPlainTextEdit()
-        self.age_groups_input.setPlaceholderText(
-            "Editable JSON for legacy-style inclusive birthday groups."
-        )
-
-        self.save_settings_button = QPushButton("Save vaccine settings")
-        self.save_settings_button.clicked.connect(self.save_vaccine_settings)
-        self.reload_settings_button = QPushButton("Reload vaccine settings")
-        self.reload_settings_button.clicked.connect(self.load_vaccine_settings)
-
         self.records_table = self._create_records_table()
         self.general_records_table = self._create_records_table()
         self.flu_records_table = self._create_records_table()
@@ -225,7 +210,10 @@ class VaccineTab(QWidget):
 
         self.main_page = self._build_main_page(patient_form, vaccine_type_controls)
         self.db_page = self._build_db_page()
-        self.settings_page = self._build_settings_page()
+        self.settings_page = VaccineSettingsPage(self._db_path)
+        self.settings_page.settings_changed.connect(
+            self._handle_vaccine_settings_changed
+        )
         for page in (self.main_page, self.db_page, self.settings_page):
             self.stacked_widget.addWidget(page)
 
@@ -257,6 +245,8 @@ class VaccineTab(QWidget):
         self.stacked_widget.setCurrentIndex(index)
         for button_index, name in enumerate(self.TOP_PAGES):
             self.nav_buttons[name].setChecked(button_index == index)
+        if self.stacked_widget.currentWidget() is self.settings_page:
+            self.settings_page.reload()
 
     def refresh_view(self) -> None:
         initialize_database(self._db_path)
@@ -273,7 +263,6 @@ class VaccineTab(QWidget):
         self._populate_records(self.general_records_table, self._filter_records(records, "general"))
         self._populate_records(self.flu_records_table, self._filter_records(records, "flu"))
         self._populate_records(self.covid_records_table, self._filter_records(records, "covid"))
-        self._apply_vaccine_settings(settings)
         self._update_today_counts(settings, counts)
         self._refresh_previews()
 
@@ -487,50 +476,12 @@ class VaccineTab(QWidget):
         self.status_label.setText("Form cleared.")
 
     def save_vaccine_settings(self) -> None:
-        schedule_text = self.schedule_rules_input.toPlainText().strip()
-        age_group_text = self.age_groups_input.toPlainText().strip()
-        try:
-            schedule_data = json.loads(schedule_text or "{}")
-            age_group_data = json.loads(age_group_text or "[]")
-        except json.JSONDecodeError as error:
-            self.status_label.setText(f"Vaccine settings JSON is invalid: line {error.lineno}.")
-            return
-        if not isinstance(schedule_data, dict):
-            self.status_label.setText("Vaccine schedules must be a JSON object.")
-            return
-        if not isinstance(age_group_data, list):
-            self.status_label.setText("Vaccine age groups must be a JSON array.")
-            return
-
-        influenza_daily_cap = self._extract_daily_cap(schedule_data, "influenza")
-        covid_daily_cap = self._extract_daily_cap(schedule_data, "covid")
-        initialize_database(self._db_path)
-        with connect(self._db_path) as connection:
-            settings = {
-                "vaccine_schedule_rules_json": json.dumps(
-                    schedule_data,
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                "vaccine_age_groups_json": json.dumps(
-                    age_group_data,
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                "vaccine_influenza_daily_cap": str(influenza_daily_cap),
-                "vaccine_covid_daily_cap": str(covid_daily_cap),
-            }
-            set_settings(connection, settings)
-            counts = get_today_vaccine_counts(
-                connection,
-                datetime.now().date().isoformat(),
-            )
-            refreshed_settings = get_settings(connection)
-        self._apply_vaccine_settings(refreshed_settings)
-        self._update_today_counts(refreshed_settings, counts)
-        self.status_label.setText("Vaccine settings saved.")
+        editor = self.settings_page.tabs.currentWidget()
+        if hasattr(editor, "save_season") and editor.save_season():
+            self._handle_vaccine_settings_changed()
 
     def load_vaccine_settings(self) -> None:
+        self.settings_page.reload()
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
@@ -538,9 +489,20 @@ class VaccineTab(QWidget):
                 connection,
                 datetime.now().date().isoformat(),
             )
-        self._apply_vaccine_settings(settings)
         self._update_today_counts(settings, counts)
         self.status_label.setText("Vaccine settings loaded.")
+
+    def _handle_vaccine_settings_changed(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+            counts = get_today_vaccine_counts(
+                connection,
+                datetime.now().date().isoformat(),
+            )
+        self._update_today_counts(settings, counts)
+        self._reset_influenza_check()
+        self.status_label.setText("Vaccine season settings updated.")
 
     def add_vaccine_type(self) -> None:
         dialog = VaccineTypeDialog(self)
@@ -690,14 +652,6 @@ class VaccineTab(QWidget):
         )
         self._refresh_previews()
 
-    def _apply_vaccine_settings(self, settings: dict[str, str]) -> None:
-        self.schedule_rules_input.setPlainText(
-            settings.get("vaccine_schedule_rules_json", "").strip()
-        )
-        self.age_groups_input.setPlainText(
-            settings.get("vaccine_age_groups_json", "").strip()
-        )
-
     def _update_today_counts(
         self,
         settings: dict[str, str],
@@ -746,18 +700,6 @@ class VaccineTab(QWidget):
         self.influenza_check_result.setProperty("resultState", state)
         self.influenza_check_result.style().unpolish(self.influenza_check_result)
         self.influenza_check_result.style().polish(self.influenza_check_result)
-
-    @staticmethod
-    def _extract_daily_cap(schedule_data: dict[str, object], key: str) -> int:
-        section = schedule_data.get(key)
-        if not isinstance(section, dict):
-            return 100
-        value = section.get("daily_cap", 100)
-        try:
-            cap = int(value)
-        except (TypeError, ValueError):
-            return 100
-        return max(0, cap)
 
     def _build_main_page(
         self,
@@ -823,21 +765,6 @@ class VaccineTab(QWidget):
         layout.addWidget(self.flu_records_table, 1)
         layout.addWidget(QLabel("COVID"))
         layout.addWidget(self.covid_records_table, 1)
-        return page
-
-    def _build_settings_page(self) -> QWidget:
-        page = QWidget()
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.save_settings_button)
-        buttons.addWidget(self.reload_settings_button)
-        buttons.addStretch()
-
-        layout = QVBoxLayout(page)
-        layout.addWidget(QLabel("National flu / COVID schedules"))
-        layout.addWidget(self.schedule_rules_input, 1)
-        layout.addWidget(QLabel("Age groups"))
-        layout.addWidget(self.age_groups_input, 1)
-        layout.addLayout(buttons)
         return page
 
     @staticmethod

@@ -241,46 +241,19 @@ def test_today_vaccine_counts_use_only_today_rows(tmp_path) -> None:
     assert counts == {"flu": 0, "covid": 1}
 
 
-def test_vaccine_tab_saves_and_reloads_schedule_and_age_group_settings(tmp_path) -> None:
+def test_vaccine_tab_uses_structured_program_season_settings(tmp_path) -> None:
     _app()
-
-    import json
-
-    from KaosEghis.db.database import connect, initialize_database
-    from KaosEghis.db.repositories import get_settings
+    from KaosEghis.db.database import initialize_database
     from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
 
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
     page = VaccineTab(db_path)
 
-    schedule_payload = {
-        "influenza": {"daily_cap": 88, "elderly_75_plus_start": "2026-10-11"},
-        "covid": {"daily_cap": 25, "program_start": "2026-09-01"},
-    }
-    age_group_payload = [
-        {"key": "elderly_75_plus", "label": "Elderly 75+", "vaccine": "influenza"}
-    ]
-    page.schedule_rules_input.setPlainText(
-        json.dumps(schedule_payload, ensure_ascii=False, indent=2)
-    )
-    page.age_groups_input.setPlainText(
-        json.dumps(age_group_payload, ensure_ascii=False, indent=2)
-    )
-
-    page.save_vaccine_settings()
-
-    with connect(db_path) as connection:
-        settings = get_settings(connection)
-
-    assert settings["vaccine_influenza_daily_cap"] == "88"
-    assert settings["vaccine_covid_daily_cap"] == "25"
-    assert '"elderly_75_plus_start": "2026-10-11"' in settings["vaccine_schedule_rules_json"]
-    assert '"key": "elderly_75_plus"' in settings["vaccine_age_groups_json"]
-
-    page.load_vaccine_settings()
-    assert "88" in page.today_influenza_count_label.text()
-    assert "25" in page.today_covid_count_label.text()
+    assert page.settings_page.tabs.tabText(0) == "Influenza schedules"
+    assert page.settings_page.tabs.tabText(1) == "COVID schedules"
+    assert not hasattr(page, "schedule_rules_input")
+    assert not hasattr(page, "age_groups_input")
 
 
 def test_vaccine_tab_uses_three_internal_pages(tmp_path) -> None:

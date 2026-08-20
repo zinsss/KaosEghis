@@ -17,8 +17,10 @@ Current implemented pieces:
 - drag/drop ordering for vaccine types
 - EMR-target-based patient context fetch into the Vaccine page
 - visible same-day `Influenza` and `COVID-19` counts
-- editable JSON-backed national schedule settings
-- editable JSON-backed legacy age-group definitions
+- structured multi-year Influenza and COVID season settings
+- date-picker-based program windows and inclusive birth-date ranges
+- one explicitly active season per program
+- one-click next-season duplication with dates shifted forward for review
 - configuration-driven national influenza program preview
 - exact inclusive birth-date and schedule-boundary checks
 - daily-cap, child-dose-review, and elderly-exception-review results
@@ -44,8 +46,8 @@ The current `Vaccine` page now exposes:
 - saved local preparation records
 - today's `Influenza` count with configured cap
 - today's `COVID-19` count with configured cap
-- editable schedule JSON for seasonal rule windows
-- editable age-group JSON for legacy-style inclusive birth-date bands
+- separate `Influenza schedules` and `COVID schedules` settings pages
+- saved current and future seasons with explicit program dates, birth ranges, and caps
 
 The counts are derived from local `vaccine_records.created_at` rows for the current
 day. The influenza preview uses the current total conservatively when checking the
@@ -73,6 +75,33 @@ placeholders, not a claim about the current national program. The operator must 
 and review the official season dates and birth ranges before changing it to `true`.
 This preview performs no printing, counter increment, vaccination-system input, or
 eGHIS write.
+
+## Multi-Year Season Settings
+
+`Vaccine -> Settings` stores Influenza and COVID seasons independently in
+`vaccine_program_seasons`. Each program can retain prior, current, and future seasons,
+but only one season per program can be active for program checks.
+
+Influenza seasons contain:
+
+- staggered 75+, 70-74, and 65-69 start dates with a common elderly end date
+- child two-dose and one-dose start/end windows
+- inclusive birth-date ranges for the three elderly groups and eligible children
+- the elderly exception-review toggle
+- daily cap
+
+COVID seasons contain:
+
+- program start/end dates
+- inclusive national-program birth-date range
+- daily cap
+
+`Duplicate next season` creates an inactive copy, increments a `YYYY-YYYY` season name,
+and shifts configured program dates and birth ranges forward by one year. The copied
+values remain drafts until reviewed and activated. Activating an incomplete season is
+blocked. Existing single-season JSON values are imported once during database
+initialization; the JSON remains an internal compatibility format for the current
+eligibility engine and is no longer the operator editing surface.
 
 ## Confirmed Requirements
 
