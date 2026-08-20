@@ -78,6 +78,8 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - require explicit operator review before enabling each seasonal rule set
 - implementation must remain separate from the existing Flu-Report statistics workflow
 - detailed specification: `docs/kaoseghis-vaccine.md`
+- national schedule and rule reference:
+  `docs/national-vaccination-schedules-and-rules.md`
 
 ### KaosEghis-pw
 

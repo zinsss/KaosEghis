@@ -303,6 +303,8 @@ The design strategy is milestone-based:
 - PACS and flu are product/plugin workflows, not separate executables inside this repo
 - Vaccine maintains one editable current Influenza schedule and one editable current
   COVID schedule in place; it does not keep a multi-year season library
+- Vaccine national-program source, count, exception, and annual activation rules are
+  maintained in `docs/national-vaccination-schedules-and-rules.md`
 - `KaosEghis-pw` should remain a hidden infrastructure module, not a visible top-level tab
 - KaosClip remains a future plugin direction, not a standalone app
 - future `KaosEghis-inj` should keep authoritative injection/laboratory staff-task state

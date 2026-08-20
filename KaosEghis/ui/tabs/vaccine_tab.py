@@ -664,7 +664,6 @@ class VaccineTab(QWidget):
     def _show_influenza_check(self, result: InfluenzaEligibilityResult) -> None:
         labels = {
             "eligible": "Eligible by configured rules",
-            "eligible_exception": "Eligible under rural-area exception",
             "blocked": "Blocked",
             "cap_reached": "Daily cap reached",
             "review_required": "Operator review required",
@@ -680,7 +679,6 @@ class VaccineTab(QWidget):
             lines.append(f"Window: {result.schedule_start} to {result.schedule_end}")
         if result.group_key and result.status in {
             "eligible",
-            "eligible_exception",
             "review_required",
             "cap_reached",
         }:

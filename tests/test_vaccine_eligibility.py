@@ -118,7 +118,7 @@ def test_influenza_gate_blocks_before_group_window_and_after_end() -> None:
     assert after.status == "blocked"
 
 
-def test_influenza_rural_exception_is_eligible_without_consuming_cap() -> None:
+def test_influenza_exception_requires_patient_specific_confirmation() -> None:
     from KaosEghis.core.vaccine_eligibility import (
         evaluate_influenza_program_for_birth_date,
     )
@@ -130,10 +130,10 @@ def test_influenza_rural_exception_is_eligible_without_consuming_cap() -> None:
         on_date=date(2026, 10, 12),
     )
 
-    assert result.status == "eligible_exception"
-    assert result.allowed is True
+    assert result.status == "review_required"
+    assert result.allowed is False
     assert result.counted is False
-    assert result.requires_operator_confirmation is False
+    assert result.requires_operator_confirmation is True
 
 
 def test_influenza_gate_blocks_at_daily_cap() -> None:
@@ -286,11 +286,11 @@ def test_rural_exception_stages_cap_by_elderly_opening_group() -> None:
     }
     assert at_first_open["75_plus"].status == "cap_reached"
     assert at_first_open["75_plus"].counted is True
-    assert at_first_open["70_74"].status == "eligible_exception"
-    assert at_first_open["70_74"].allowed is True
+    assert at_first_open["70_74"].status == "review_required"
+    assert at_first_open["70_74"].allowed is False
     assert at_first_open["70_74"].counted is False
-    assert at_first_open["65_69"].status == "eligible_exception"
-    assert at_first_open["65_69"].allowed is True
+    assert at_first_open["65_69"].status == "review_required"
+    assert at_first_open["65_69"].allowed is False
     assert at_first_open["65_69"].counted is False
 
     at_second_open_70 = evaluate_influenza_program_for_birth_date(
@@ -303,8 +303,8 @@ def test_rural_exception_stages_cap_by_elderly_opening_group() -> None:
     )
     assert at_second_open_70.status == "cap_reached"
     assert at_second_open_70.counted is True
-    assert at_second_open_65.status == "eligible_exception"
-    assert at_second_open_65.allowed is True
+    assert at_second_open_65.status == "review_required"
+    assert at_second_open_65.allowed is False
     assert at_second_open_65.counted is False
 
     at_last_open = evaluate_influenza_program_for_birth_date(

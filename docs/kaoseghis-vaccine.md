@@ -80,10 +80,10 @@ The clinic uses the configured rural-area exception for the three elderly openin
 groups. It changes both eligibility and cap handling:
 
 - when the 75+ window opens, 75+ vaccinations consume the shared 100-dose cap;
-  70-74 and 65-69 are eligible under the configured exception and do not consume that
-  cap yet
+  70-74 and 65-69 require confirmation of a patient-specific exception and do not
+  consume that cap when confirmed
 - when the 70-74 window opens, 75+ and 70-74 consume the shared cap; 65-69 remains the
-  eligible, non-counted exception path
+  patient-confirmed, non-counted exception path
 - when the 65-69 window opens, all three elderly groups consume the shared cap
 
 There is one shared national Influenza cap of 100 per day. Counted elderly and counted
@@ -93,8 +93,13 @@ only until that patient's normal age-group window opens.
 
 Before the first elderly opening date, none of the elderly groups is open. The
 exception behavior is enabled explicitly in Vaccine Settings and is never inferred
-from the workstation location. These are clinic-configured operating rules and must be
-reviewed against the official program notice each year.
+from the clinic or workstation location. The operator must verify a recognized
+patient-specific exception, such as qualifying registered residence or another
+official exception reason. These rules must be reviewed against the official program
+notice each year.
+
+Detailed source, schedule, count, and annual configuration guidance is maintained in
+[`national-vaccination-schedules-and-rules.md`](national-vaccination-schedules-and-rules.md).
 
 ### Pediatric Influenza Opening Rule
 
