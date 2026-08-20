@@ -86,6 +86,11 @@ groups. It changes both eligibility and cap handling:
   eligible, non-counted exception path
 - when the 65-69 window opens, all three elderly groups consume the shared cap
 
+There is one shared national Influenza cap of 100 per day. Counted elderly and counted
+pediatric vaccinations contribute to that same total; there are not separate elderly
+and child caps. Rural-exception elderly vaccinations remain outside the shared total
+only until that patient's normal age-group window opens.
+
 Before the first elderly opening date, none of the elderly groups is open. The
 exception behavior is enabled explicitly in Vaccine Settings and is never inferred
 from the workstation location. These are clinic-configured operating rules and must be
@@ -97,8 +102,9 @@ The configured two-dose pediatric window opens before the one-dose window. Durin
 early interval, KaosEghis must stop before label printing and alert the operator to
 check the vaccination system manually for whether the child is a first-time influenza
 recipient who requires two doses. A confirmed vaccination consumes the shared daily
-cap. Once the one-dose window opens, an age-eligible child can proceed without that
-specific first-window alert, subject to the configured end date and cap.
+Influenza cap together with counted elderly vaccinations. Once the one-dose window
+opens, an age-eligible child can proceed without that specific first-window alert,
+subject to the configured end date and cap.
 
 ## Vaccine Schedule Settings
 

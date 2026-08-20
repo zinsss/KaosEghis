@@ -236,6 +236,33 @@ def test_child_window_is_open_without_dose_alert_after_one_dose_start() -> None:
     assert result.requires_operator_confirmation is False
 
 
+def test_elderly_and_child_vaccinations_share_one_influenza_cap() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    schedule = _schedule(cap=100)
+    child_at_shared_cap = evaluate_influenza_program_for_birth_date(
+        schedule,
+        _child_groups(),
+        date(2022, 1, 1),
+        on_date=date(2026, 10, 20),
+        counted_today=100,
+    )
+    elderly_at_shared_cap = evaluate_influenza_program_for_birth_date(
+        schedule,
+        _age_groups(),
+        date(1950, 1, 1),
+        on_date=date(2026, 10, 20),
+        counted_today=100,
+    )
+
+    assert child_at_shared_cap.status == "cap_reached"
+    assert elderly_at_shared_cap.status == "cap_reached"
+    assert child_at_shared_cap.daily_cap == elderly_at_shared_cap.daily_cap == 100
+    assert child_at_shared_cap.today_count == elderly_at_shared_cap.today_count == 100
+
+
 def test_rural_exception_stages_cap_by_elderly_opening_group() -> None:
     from KaosEghis.core.vaccine_eligibility import (
         evaluate_influenza_program_for_birth_date,
