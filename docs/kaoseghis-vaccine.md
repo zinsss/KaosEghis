@@ -1,6 +1,6 @@
 # KaosEghis-vaccine
 
-Last updated: 2026-08-08
+Last updated: 2026-08-20
 
 ## Status
 
@@ -19,10 +19,12 @@ Current implemented pieces:
 - visible same-day `Influenza` and `COVID-19` counts
 - editable JSON-backed national schedule settings
 - editable JSON-backed legacy age-group definitions
+- configuration-driven national influenza program preview
+- exact inclusive birth-date and schedule-boundary checks
+- daily-cap, child-dose-review, and elderly-exception-review results
 
 Still not implemented in this stage:
 
-- eligibility/date/cap engine
 - thermal label printing
 - vaccination program automation
 - EMR writeback/charting
@@ -45,9 +47,32 @@ The current `Vaccine` page now exposes:
 - editable schedule JSON for seasonal rule windows
 - editable age-group JSON for legacy-style inclusive birth-date bands
 
-The counts are informational at this stage. They are derived from local
-`vaccine_records.created_at` rows for the current day and do not yet enforce the
-eligibility/counter workflow described below.
+The counts are derived from local `vaccine_records.created_at` rows for the current
+day. The influenza preview uses the current total conservatively when checking the
+configured cap, but previewing never increments the count. The later print/completion
+lifecycle must make the durable counter checkpoint explicit before operational use.
+
+## Current Influenza Program Preview
+
+The Main page provides `Check influenza program`. It reads the resident ID only long
+enough to derive a transient birth date, then evaluates:
+
+- the explicitly enabled influenza season
+- the configured inclusive birth-date groups
+- the configured start/end window for the matched group
+- the current local counted total and configured daily cap
+- child one-dose/two-dose ambiguity
+- elderly exception review when that option is explicitly enabled
+
+Possible results are eligible, blocked, cap reached, operator review required,
+private/unmatched, patient context required, and configuration error. The displayed
+result contains no resident ID or patient name.
+
+`program_enabled` defaults to `false`. Existing or seeded dates are configuration
+placeholders, not a claim about the current national program. The operator must enter
+and review the official season dates and birth ranges before changing it to `true`.
+This preview performs no printing, counter increment, vaccination-system input, or
+eGHIS write.
 
 ## Confirmed Requirements
 
@@ -409,7 +434,8 @@ Before operational use, tests must cover:
 
 1. Editable vaccine catalog and local preparation records. Done.
 2. Transient current-patient reader from the connected eGHIS profile. Done as a first EMR-target-based fetch.
-3. Pure eligibility/counter decision engine with boundary tests.
+3. Pure eligibility/counter decision engine with boundary tests. Done as a guarded
+   preview; child-dose confirmation and the print/completion counter checkpoint remain.
 4. Thermal label preview and printing service.
 5. Guarded external vaccination-program preparation.
 6. eGHIS chart-text preparation.

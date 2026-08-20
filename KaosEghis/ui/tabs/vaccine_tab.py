@@ -28,6 +28,10 @@ from PySide6.QtWidgets import (
 
 from KaosEghis.core.eghis_connector import build_connector_settings
 from KaosEghis.core.uia_inspector import inspect_target_readonly
+from KaosEghis.core.vaccine_eligibility import (
+    InfluenzaEligibilityResult,
+    evaluate_influenza_program,
+)
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     create_vaccine_record,
@@ -124,6 +128,11 @@ class VaccineTab(QWidget):
 
         self.today_influenza_count_label = QLabel("Influenza today: 0 / 100")
         self.today_covid_count_label = QLabel("COVID-19 today: 0 / 100")
+        self.influenza_check_button = QPushButton("Check influenza program")
+        self.influenza_check_button.clicked.connect(self.check_influenza_program)
+        self.influenza_check_result = QLabel("Influenza program: Not checked.")
+        self.influenza_check_result.setObjectName("influenzaProgramResult")
+        self.influenza_check_result.setWordWrap(True)
 
         patient_form = QFormLayout()
         patient_form.addRow("Chart No", self.patient_chart_no_input)
@@ -178,6 +187,9 @@ class VaccineTab(QWidget):
             self.patient_address_input,
         ):
             widget.textChanged.connect(self._refresh_previews)
+        self.patient_resident_id_input.textChanged.connect(
+            lambda _text: self._reset_influenza_check()
+        )
 
         self.schedule_rules_input = QPlainTextEdit()
         self.schedule_rules_input.setPlaceholderText(
@@ -347,6 +359,21 @@ class VaccineTab(QWidget):
             "No vaccine patient targets could be read from the active EMR profile."
         )
         return False
+
+    def check_influenza_program(self) -> InfluenzaEligibilityResult:
+        initialize_database(self._db_path)
+        today = datetime.now().date()
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+            counts = get_today_vaccine_counts(connection, today.isoformat())
+        result = evaluate_influenza_program(
+            settings,
+            self.patient_resident_id_input.text(),
+            on_date=today,
+            counted_today=counts.get("flu", 0),
+        )
+        self._show_influenza_check(result)
+        return result
 
     def save_record(self) -> None:
         selected = self.vaccine_types_list.currentItem()
@@ -685,6 +712,41 @@ class VaccineTab(QWidget):
             f"COVID-19 today: {counts.get('covid', 0)} / {covid_cap}"
         )
 
+    def _reset_influenza_check(self) -> None:
+        self.influenza_check_result.setText("Influenza program: Not checked.")
+        self.influenza_check_result.setProperty("resultState", "neutral")
+        self.influenza_check_result.style().unpolish(self.influenza_check_result)
+        self.influenza_check_result.style().polish(self.influenza_check_result)
+
+    def _show_influenza_check(self, result: InfluenzaEligibilityResult) -> None:
+        labels = {
+            "eligible": "Eligible by configured rules",
+            "blocked": "Blocked",
+            "cap_reached": "Daily cap reached",
+            "review_required": "Operator review required",
+            "private_or_unmatched": "No national-program match",
+            "configuration_required": "Configuration review required",
+            "configuration_error": "Configuration error",
+            "patient_context_required": "Patient context required",
+        }
+        lines = [f"Influenza program: {labels.get(result.status, result.status)}"]
+        if result.group_label:
+            lines.append(f"Group: {result.group_label}")
+        if result.schedule_start and result.schedule_end:
+            lines.append(f"Window: {result.schedule_start} to {result.schedule_end}")
+        lines.append(
+            f"Counted today: {result.today_count} / {result.daily_cap} "
+            f"(remaining {result.remaining})"
+        )
+        lines.append(result.message)
+        self.influenza_check_result.setText("\n".join(lines))
+        state = "success" if result.allowed else (
+            "warning" if result.requires_operator_confirmation else "error"
+        )
+        self.influenza_check_result.setProperty("resultState", state)
+        self.influenza_check_result.style().unpolish(self.influenza_check_result)
+        self.influenza_check_result.style().polish(self.influenza_check_result)
+
     @staticmethod
     def _extract_daily_cap(schedule_data: dict[str, object], key: str) -> int:
         section = schedule_data.get(key)
@@ -705,6 +767,7 @@ class VaccineTab(QWidget):
         page = QWidget()
         controls = QHBoxLayout()
         controls.addWidget(self.fetch_button)
+        controls.addWidget(self.influenza_check_button)
         controls.addWidget(self.save_button)
         controls.addWidget(self.clear_button)
         controls.addStretch()
@@ -740,6 +803,7 @@ class VaccineTab(QWidget):
         layout = QVBoxLayout(page)
         layout.addLayout(controls)
         layout.addLayout(counts_row)
+        layout.addWidget(self.influenza_check_result)
         layout.addLayout(content, 1)
         return page
 

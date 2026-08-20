@@ -136,6 +136,8 @@ Placeholder plugin tab.
 
 - no active workflow yet
 - planned editable vaccine catalog and thermal-label workflow
+- includes a guarded national-influenza program preview driven by explicitly enabled
+  schedule and birth-range settings; it performs no print or EMR write
 - preserves the legacy national-influenza age-group, birthday-boundary, schedule,
   exception, and daily-cap model
 - default counted-program cap remains `100`, with seasonal values editable by the

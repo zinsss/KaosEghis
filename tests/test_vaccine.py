@@ -221,7 +221,7 @@ def test_today_vaccine_counts_use_only_today_rows(tmp_path) -> None:
             vaccine_type_name=flu_type.name,
             patient_name="홍길동",
         )
-        create_vaccine_record(
+        covid_record = create_vaccine_record(
             connection,
             vaccine_type_id=covid_type.id,
             vaccine_type_name=covid_type.name,
@@ -230,6 +230,10 @@ def test_today_vaccine_counts_use_only_today_rows(tmp_path) -> None:
         connection.execute(
             "UPDATE vaccine_records SET created_at = '2026-08-09 08:00:00' WHERE id = ?",
             (flu_record.id,),
+        )
+        connection.execute(
+            "UPDATE vaccine_records SET created_at = '2026-08-10 08:00:00' WHERE id = ?",
+            (covid_record.id,),
         )
         connection.commit()
         counts = get_today_vaccine_counts(connection, "2026-08-10")

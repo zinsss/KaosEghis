@@ -84,6 +84,27 @@ QLabel#appNotificationText[notificationTone="error"] {
     color: #bf616a;
 }
 
+QLabel#influenzaProgramResult {
+    background-color: #3b4252;
+    border: 1px solid #4c566a;
+    padding: 8px;
+}
+
+QLabel#influenzaProgramResult[resultState="success"] {
+    border-color: #a3be8c;
+    color: #a3be8c;
+}
+
+QLabel#influenzaProgramResult[resultState="warning"] {
+    border-color: #ebcb8b;
+    color: #ebcb8b;
+}
+
+QLabel#influenzaProgramResult[resultState="error"] {
+    border-color: #bf616a;
+    color: #d8dee9;
+}
+
 QLineEdit,
 QTextEdit,
 QPlainTextEdit,

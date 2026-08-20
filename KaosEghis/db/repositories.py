@@ -65,6 +65,8 @@ DEFAULT_SETTINGS = {
         {
             "influenza": {
                 "season_name": "2026-2027",
+                "program_enabled": False,
+                "allow_elderly_exception": False,
                 "elderly_75_plus_start": "2026-10-11",
                 "elderly_70_74_start": "2026-10-15",
                 "elderly_65_69_start": "2026-10-18",
