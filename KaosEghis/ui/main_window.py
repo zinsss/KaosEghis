@@ -161,7 +161,7 @@ class MainWindow(QMainWindow):
     def initialize_runtime_services(self) -> None:
         if not self.launcher_hotkey_runtime.start():
             self.show_notification(
-                "Launcher shortcut unavailable. Ctrl+Shift+F10 could not be registered.",
+                "Launcher shortcut unavailable. Ctrl+Alt+Shift+F11 could not be registered.",
                 "warning",
             )
         self.pw_runtime.start()
@@ -179,7 +179,7 @@ class MainWindow(QMainWindow):
                 _activate_hwnd(int(self.winId()))
             except Exception:
                 pass
-        self.show_notification("Launcher opened (Ctrl+Shift+F10).", "info")
+        self.show_notification("Launcher opened (Ctrl+Alt+Shift+F11).", "info")
 
     def _handle_patient_alert_result(self, result: EmrPatientAlertResult) -> None:
         if result.marker_found:

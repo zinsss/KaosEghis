@@ -35,10 +35,11 @@ class LauncherHotkeyRuntime(QObject):
 
 class _WindowsLauncherHotkeyListener(QAbstractNativeEventFilter):
     HOTKEY_ID = 0x4B4C
+    MOD_ALT = 0x0001
     MOD_CONTROL = 0x0002
     MOD_SHIFT = 0x0004
     MOD_NOREPEAT = 0x4000
-    VK_F10 = 0x79
+    VK_F11 = 0x7A
     WM_HOTKEY = 0x0312
 
     def __init__(self, callback, *, application=None, user32=None) -> None:
@@ -65,8 +66,11 @@ class _WindowsLauncherHotkeyListener(QAbstractNativeEventFilter):
             user32.RegisterHotKey(
                 None,
                 self.HOTKEY_ID,
-                self.MOD_CONTROL | self.MOD_SHIFT | self.MOD_NOREPEAT,
-                self.VK_F10,
+                self.MOD_CONTROL
+                | self.MOD_ALT
+                | self.MOD_SHIFT
+                | self.MOD_NOREPEAT,
+                self.VK_F11,
             )
         )
         if not registered:

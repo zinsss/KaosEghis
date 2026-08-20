@@ -91,7 +91,7 @@ Screen capture support:
 
 Launcher access:
 
-- global hotkey: `Ctrl+Shift+F10`
+- global hotkey: `Ctrl+Alt+Shift+F11`
 - restores KaosEghis and switches directly to `KaosEghis` -> `Launcher`
 - works while another application is foreground through the Windows native hotkey
   dispatcher

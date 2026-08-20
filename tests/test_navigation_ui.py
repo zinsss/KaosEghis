@@ -157,7 +157,7 @@ def test_global_launcher_action_switches_to_kaoseghis_launcher(
         window.kaoseghis_tab.launcher_page
     )
     assert window.kaoseghis_tab.nav_buttons["Launcher"].isChecked() is True
-    assert "Ctrl+Shift+F10" in window.notification_area.text.text()
+    assert "Ctrl+Alt+Shift+F11" in window.notification_area.text.text()
 
 
 def test_macros_tab_pages_are_reachable(tmp_path, monkeypatch) -> None:

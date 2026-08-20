@@ -5,7 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
-def test_windows_launcher_hotkey_uses_ctrl_shift_f10() -> None:
+def test_windows_launcher_hotkey_uses_ctrl_alt_shift_f11() -> None:
     from KaosEghis.core.launcher_hotkey import _WindowsLauncherHotkeyListener
 
     events: list[str] = []
@@ -47,8 +47,11 @@ def test_windows_launcher_hotkey_uses_ctrl_shift_f10() -> None:
         (
             None,
             listener.HOTKEY_ID,
-            listener.MOD_CONTROL | listener.MOD_SHIFT | listener.MOD_NOREPEAT,
-            listener.VK_F10,
+            listener.MOD_CONTROL
+            | listener.MOD_ALT
+            | listener.MOD_SHIFT
+            | listener.MOD_NOREPEAT,
+            listener.VK_F11,
         )
     ]
 

@@ -73,7 +73,7 @@ Primary daily-use tab.
 - Launcher no longer embeds or loads KaosGDD Calendar, Tasks, or Supplies
 - the Launcher now supports both direct executable macros and launcher
   collections
-- `Ctrl+Shift+F10` restores KaosEghis and opens the Launcher from any foreground
+- `Ctrl+Alt+Shift+F11` restores KaosEghis and opens the Launcher from any foreground
   application; the shortcut navigates only and never executes a launcher item
 - direct macros run immediately
 - launcher collections open a chooser dialog on double-click and expose member
