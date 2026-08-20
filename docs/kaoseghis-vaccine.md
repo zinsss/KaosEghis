@@ -80,10 +80,10 @@ The clinic uses the configured rural-area exception for the three elderly openin
 groups. It changes both eligibility and cap handling:
 
 - when the 75+ window opens, 75+ vaccinations consume the shared 100-dose cap;
-  70-74 and 65-69 may proceed only through the explicit exception-review path and do
-  not consume that cap yet
+  70-74 and 65-69 are eligible under the configured exception and do not consume that
+  cap yet
 - when the 70-74 window opens, 75+ and 70-74 consume the shared cap; 65-69 remains the
-  non-counted exception path
+  eligible, non-counted exception path
 - when the 65-69 window opens, all three elderly groups consume the shared cap
 
 Before the first elderly opening date, none of the elderly groups is open. The

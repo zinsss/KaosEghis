@@ -222,9 +222,11 @@ def evaluate_influenza_program_for_birth_date(
             earliest = _parse_date(influenza_schedule.get("elderly_75_plus_start"))
             if earliest is not None and earliest <= on_date <= end:
                 return _result(
-                    "review_required",
+                    "eligible_exception",
                     "This age group's standard opening date has not arrived. "
-                    "Confirm the medically underserved rural-area exception before proceeding.",
+                    "The configured medically underserved rural-area exception applies "
+                    "without consuming the shared daily cap.",
+                    allowed=True,
                     group_key=group_key,
                     group_label=group_label,
                     schedule_start=start.isoformat(),
@@ -232,7 +234,6 @@ def evaluate_influenza_program_for_birth_date(
                     counted=False,
                     counted_today=counted_today,
                     daily_cap=cap,
-                    requires_operator_confirmation=True,
                 )
         return _result(
             "blocked",
