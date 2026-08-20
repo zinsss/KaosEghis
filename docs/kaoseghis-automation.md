@@ -1,6 +1,6 @@
 # KaosEghis Automation
 
-Last updated: 2026-08-08
+Last updated: 2026-08-20
 
 ## Purpose
 
@@ -88,6 +88,14 @@ Screen capture support:
 - captured details are copied to the clipboard for quick reuse in target setup or
   debugging
 - if global hotkeys are unavailable, the same flow can still be armed from the EMR page
+
+Launcher access:
+
+- global hotkey: `Ctrl+Shift+F10`
+- restores KaosEghis and switches directly to `KaosEghis` -> `Launcher`
+- works while another application is foreground through the Windows native hotkey
+  dispatcher
+- performs navigation only; it never starts a macro automatically
 
 ### Manual Explicit Write Tests
 

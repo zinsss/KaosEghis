@@ -129,6 +129,37 @@ def test_kaoseghis_top_nav_pages_are_reachable() -> None:
     assert tab.stacked_widget.currentWidget() is tab.launcher_page
 
 
+def test_global_launcher_action_switches_to_kaoseghis_launcher(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    monkeypatch.setattr(pacs_panel_module, "check_kaospacs_health", lambda settings: True)
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "run_readonly_query",
+        lambda *_args, **_kwargs: (["?column?"], [(1,)]),
+    )
+
+    from KaosEghis.ui.main_window import MainWindow
+
+    window = MainWindow()
+    window.tabs.setCurrentWidget(window.settings_tab)
+    window.kaoseghis_tab.show_page(2)
+
+    window._handle_launcher_hotkey()
+
+    assert window.tabs.currentWidget() is window.kaoseghis_tab
+    assert window.kaoseghis_tab.stacked_widget.currentWidget() is (
+        window.kaoseghis_tab.launcher_page
+    )
+    assert window.kaoseghis_tab.nav_buttons["Launcher"].isChecked() is True
+    assert "Ctrl+Shift+F10" in window.notification_area.text.text()
+
+
 def test_macros_tab_pages_are_reachable(tmp_path, monkeypatch) -> None:
     _app()
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
