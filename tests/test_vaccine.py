@@ -241,7 +241,7 @@ def test_today_vaccine_counts_use_only_today_rows(tmp_path) -> None:
     assert counts == {"flu": 0, "covid": 1}
 
 
-def test_vaccine_tab_uses_structured_program_season_settings(tmp_path) -> None:
+def test_vaccine_tab_uses_single_structured_program_settings(tmp_path) -> None:
     _app()
     from KaosEghis.db.database import initialize_database
     from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
@@ -250,10 +250,11 @@ def test_vaccine_tab_uses_structured_program_season_settings(tmp_path) -> None:
     initialize_database(db_path)
     page = VaccineTab(db_path)
 
-    assert page.settings_page.tabs.tabText(0) == "Influenza schedules"
-    assert page.settings_page.tabs.tabText(1) == "COVID schedules"
-    assert not hasattr(page, "schedule_rules_input")
-    assert not hasattr(page, "age_groups_input")
+    settings_page = page.settings_page
+    assert settings_page.tabs.tabText(0) == "Influenza schedule"
+    assert settings_page.tabs.tabText(1) == "COVID schedule"
+    assert not hasattr(settings_page.influenza_editor, "season_combo")
+    assert not hasattr(settings_page.influenza_editor, "duplicate_button")
 
 
 def test_vaccine_tab_uses_three_internal_pages(tmp_path) -> None:

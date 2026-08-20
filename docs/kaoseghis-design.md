@@ -138,8 +138,6 @@ Placeholder plugin tab.
 - planned editable vaccine catalog and thermal-label workflow
 - includes a guarded national-influenza program preview driven by explicitly enabled
   schedule and birth-range settings; it performs no print or EMR write
-- Vaccine settings retain multiple Influenza and COVID seasons in structured local
-  records, with one active season per program and inactive next-year duplication
 - preserves the legacy national-influenza age-group, birthday-boundary, schedule,
   exception, and daily-cap model
 - default counted-program cap remains `100`, with seasonal values editable by the
@@ -303,6 +301,8 @@ The design strategy is milestone-based:
 - EMR UI targets can now preserve parsed Inspector ancestor chains for deeper scoped lookup
 - macros can now bind to a specific EMR target profile or fall back to the default profile
 - PACS and flu are product/plugin workflows, not separate executables inside this repo
+- Vaccine maintains one editable current Influenza schedule and one editable current
+  COVID schedule in place; it does not keep a multi-year season library
 - `KaosEghis-pw` should remain a hidden infrastructure module, not a visible top-level tab
 - KaosClip remains a future plugin direction, not a standalone app
 - future `KaosEghis-inj` should keep authoritative injection/laboratory staff-task state

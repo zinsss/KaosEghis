@@ -1,39 +1,28 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import QDate, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDateEdit,
     QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
-    QMessageBox,
-    QPushButton,
     QScrollArea,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
+    QPushButton,
 )
 
 from KaosEghis.db.database import connect, initialize_database
-from KaosEghis.db.repositories import (
-    VaccineProgramSeasonRecord,
-    create_vaccine_program_season,
-    delete_vaccine_program_season,
-    duplicate_vaccine_program_season,
-    get_vaccine_program_season,
-    list_vaccine_program_seasons,
-    sync_active_vaccine_seasons_to_settings,
-    update_vaccine_program_season,
-)
+from KaosEghis.db.repositories import get_settings, set_settings
 
 
 class OptionalDateInput(QWidget):
@@ -67,9 +56,7 @@ class OptionalDateInput(QWidget):
             self.date_edit.setDate(parsed)
 
 
-class VaccineSeasonEditor(QWidget):
-    settings_changed = Signal()
-
+class VaccineProgramEditor(QWidget):
     INFLUENZA_GROUPS = (
         ("elderly_75_plus", "Elderly 75+"),
         ("elderly_70_74", "Elderly 70-74"),
@@ -77,80 +64,42 @@ class VaccineSeasonEditor(QWidget):
         ("child_two_dose", "Eligible child"),
     )
 
-    def __init__(self, program: str, db_path: Path | None = None) -> None:
+    def __init__(self, program: str) -> None:
         super().__init__()
         self.program = program
-        self._db_path = db_path
-        self._current_season_id: int | None = None
-
-        self.season_combo = QComboBox()
-        self.season_combo.currentIndexChanged.connect(self._load_selected_season)
-        self.new_button = QPushButton("New season")
-        self.new_button.clicked.connect(lambda: self.create_season())
-        self.duplicate_button = QPushButton("Duplicate next season")
-        self.duplicate_button.clicked.connect(self.duplicate_season)
-        self.delete_button = QPushButton("Delete season")
-        self.delete_button.clicked.connect(self.delete_season)
-
-        selector = QHBoxLayout()
-        selector.addWidget(QLabel("Season"))
-        selector.addWidget(self.season_combo, 1)
-        selector.addWidget(self.new_button)
-        selector.addWidget(self.duplicate_button)
-        selector.addWidget(self.delete_button)
-
         self.season_name_input = QLineEdit()
-        self.active_check = QCheckBox("Active for program checks")
+        self.program_enabled_check = QCheckBox("Use this schedule for program checks")
         self.daily_cap_input = QSpinBox()
         self.daily_cap_input.setRange(0, 9999)
         self.daily_cap_input.setValue(100)
-
-        common_form = QFormLayout()
-        common_form.addRow("Season name", self.season_name_input)
-        common_form.addRow("State", self.active_check)
-        common_form.addRow("Daily cap", self.daily_cap_input)
-
         self.date_inputs: dict[str, OptionalDateInput] = {}
         self.birth_inputs: dict[str, tuple[OptionalDateInput, OptionalDateInput]] = {}
         self.allow_exception_check: QCheckBox | None = None
 
         editor = QWidget()
         editor_layout = QVBoxLayout(editor)
-        editor_layout.addLayout(common_form)
+        common = QFormLayout()
+        common.addRow("Program year", self.season_name_input)
+        common.addRow("State", self.program_enabled_check)
+        common.addRow("Daily cap", self.daily_cap_input)
+        editor_layout.addLayout(common)
         if program == "influenza":
-            editor_layout.addWidget(self._build_influenza_schedule_group())
-            editor_layout.addWidget(self._build_influenza_birth_group())
+            editor_layout.addWidget(self._build_influenza_dates())
+            editor_layout.addWidget(self._build_influenza_birth_ranges())
         else:
-            editor_layout.addWidget(self._build_covid_schedule_group())
-            editor_layout.addWidget(self._build_covid_birth_group())
+            editor_layout.addWidget(self._build_covid_dates())
+            editor_layout.addWidget(self._build_covid_birth_range())
         editor_layout.addStretch()
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(editor)
-
-        self.save_button = QPushButton("Save season")
-        self.save_button.clicked.connect(self.save_season)
-        self.reload_button = QPushButton("Reload")
-        self.reload_button.clicked.connect(lambda: self.reload())
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.save_button)
-        buttons.addWidget(self.reload_button)
-        buttons.addStretch()
-
-        self.status_label = QLabel("Ready.")
-        self.status_label.setWordWrap(True)
-
         layout = QVBoxLayout(self)
-        layout.addLayout(selector)
-        layout.addWidget(scroll, 1)
-        layout.addLayout(buttons)
-        layout.addWidget(self.status_label)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(scroll)
 
-        self.reload()
-
-    def _build_influenza_schedule_group(self) -> QGroupBox:
-        group = QGroupBox("Influenza program dates")
+    def _build_influenza_dates(self) -> QGroupBox:
+        group = QGroupBox("Program dates")
         grid = QGridLayout(group)
         rows = (
             ("75+ start", "elderly_75_plus_start", None),
@@ -165,19 +114,19 @@ class VaccineSeasonEditor(QWidget):
         grid.addWidget(QLabel("End"), 0, 2)
         for row, (label, start_key, end_key) in enumerate(rows, start=1):
             grid.addWidget(QLabel(label), row, 0)
-            start_input = OptionalDateInput()
-            self.date_inputs[start_key] = start_input
-            grid.addWidget(start_input, row, 1)
+            start = OptionalDateInput()
+            self.date_inputs[start_key] = start
+            grid.addWidget(start, row, 1)
             if end_key:
-                end_input = OptionalDateInput()
-                self.date_inputs[end_key] = end_input
-                grid.addWidget(end_input, row, 2)
+                end = OptionalDateInput()
+                self.date_inputs[end_key] = end
+                grid.addWidget(end, row, 2)
         self.allow_exception_check = QCheckBox("Allow elderly exception review path")
         grid.addWidget(self.allow_exception_check, len(rows) + 1, 0, 1, 3)
         return group
 
-    def _build_influenza_birth_group(self) -> QGroupBox:
-        group = QGroupBox("Influenza birth-date ranges")
+    def _build_influenza_birth_ranges(self) -> QGroupBox:
+        group = QGroupBox("Inclusive birth-date ranges")
         grid = QGridLayout(group)
         grid.addWidget(QLabel("Group"), 0, 0)
         grid.addWidget(QLabel("From"), 0, 1)
@@ -191,8 +140,8 @@ class VaccineSeasonEditor(QWidget):
             grid.addWidget(upper, row, 2)
         return group
 
-    def _build_covid_schedule_group(self) -> QGroupBox:
-        group = QGroupBox("COVID program dates")
+    def _build_covid_dates(self) -> QGroupBox:
+        group = QGroupBox("Program dates")
         form = QFormLayout(group)
         for label, key in (("Program start", "program_start"), ("Program end", "program_end")):
             date_input = OptionalDateInput()
@@ -200,8 +149,8 @@ class VaccineSeasonEditor(QWidget):
             form.addRow(label, date_input)
         return group
 
-    def _build_covid_birth_group(self) -> QGroupBox:
-        group = QGroupBox("COVID birth-date range")
+    def _build_covid_birth_range(self) -> QGroupBox:
+        group = QGroupBox("Inclusive birth-date range")
         grid = QGridLayout(group)
         lower = OptionalDateInput()
         upper = OptionalDateInput()
@@ -212,183 +161,45 @@ class VaccineSeasonEditor(QWidget):
         grid.addWidget(upper, 1, 1)
         return group
 
-    def reload(self, select_id: int | None = None) -> None:
-        initialize_database(self._db_path)
-        with connect(self._db_path) as connection:
-            seasons = list_vaccine_program_seasons(connection, self.program)
-        target_id = select_id if select_id is not None else self._current_season_id
-        self.season_combo.blockSignals(True)
-        self.season_combo.clear()
-        for season in seasons:
-            label = f"{season.season_name}{' [active]' if season.is_active else ''}"
-            self.season_combo.addItem(label, season.id)
-        selected_index = self.season_combo.findData(target_id)
-        self.season_combo.setCurrentIndex(selected_index if selected_index >= 0 else 0)
-        self.season_combo.blockSignals(False)
-        self._load_selected_season()
-
-    def create_season(self, season_name: str | None = None) -> None:
-        name = season_name
-        if name is None:
-            name, accepted = QInputDialog.getText(self, "New vaccine season", "Season name")
-            if not accepted:
-                return
-        name = str(name).strip()
-        if not name:
-            self.status_label.setText("Season name is required.")
-            return
-        try:
-            with connect(self._db_path) as connection:
-                season = create_vaccine_program_season(
-                    connection,
-                    program=self.program,
-                    season_name=name,
-                    schedule=self._empty_schedule(),
-                    age_groups=self._empty_age_groups(),
-                )
-        except Exception as error:
-            self.status_label.setText(self._safe_save_error(error))
-            return
-        self.reload(season.id)
-        self.status_label.setText("Season created. Review all values before activation.")
-
-    def duplicate_season(self) -> None:
-        if self._current_season_id is None:
-            self.status_label.setText("Select a season to duplicate.")
-            return
-        try:
-            with connect(self._db_path) as connection:
-                season = duplicate_vaccine_program_season(
-                    connection, self._current_season_id
-                )
-        except Exception as error:
-            self.status_label.setText(self._safe_save_error(error))
-            return
-        self.reload(season.id)
-        self.status_label.setText(
-            "Next season duplicated and shifted by one year. Review before activation."
+    def load_values(
+        self,
+        schedule: dict[str, object],
+        groups: dict[str, dict[str, object]],
+    ) -> None:
+        self.season_name_input.setText(str(schedule.get("season_name", "")))
+        self.program_enabled_check.setChecked(
+            _as_bool(schedule.get("program_enabled", False))
         )
-
-    def delete_season(self) -> None:
-        if self._current_season_id is None:
-            self.status_label.setText("Select a season to delete.")
-            return
-        if (
-            QMessageBox.question(
-                self,
-                "Delete vaccine season",
-                f"Delete '{self.season_name_input.text().strip()}'?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            != QMessageBox.StandardButton.Yes
-        ):
-            return
-        with connect(self._db_path) as connection:
-            delete_vaccine_program_season(connection, self._current_season_id)
-            sync_active_vaccine_seasons_to_settings(connection)
-        self._current_season_id = None
-        self.reload()
-        self.settings_changed.emit()
-        self.status_label.setText("Season deleted.")
-
-    def save_season(self) -> bool:
-        if self._current_season_id is None:
-            self.status_label.setText("Select or create a season first.")
-            return False
-        season_name = self.season_name_input.text().strip()
-        if not season_name:
-            self.status_label.setText("Season name is required.")
-            return False
-        schedule = self._collect_schedule()
-        age_groups = self._collect_age_groups()
-        validation_error = self._validate_active_values(schedule, age_groups)
-        if validation_error:
-            self.status_label.setText(validation_error)
-            return False
         try:
-            with connect(self._db_path) as connection:
-                updated = update_vaccine_program_season(
-                    connection,
-                    self._current_season_id,
-                    season_name=season_name,
-                    daily_cap=self.daily_cap_input.value(),
-                    schedule=schedule,
-                    age_groups=age_groups,
-                    is_active=self.active_check.isChecked(),
-                )
-                sync_active_vaccine_seasons_to_settings(connection)
-        except Exception as error:
-            self.status_label.setText(self._safe_save_error(error))
-            return False
-        if updated is None:
-            self.status_label.setText("Season was not found.")
-            return False
-        self.reload(updated.id)
-        self.settings_changed.emit()
-        self.status_label.setText("Vaccine season saved.")
-        return True
-
-    def _load_selected_season(self, _index: int | None = None) -> None:
-        season_id = self.season_combo.currentData()
-        if not isinstance(season_id, int):
-            self._current_season_id = None
-            self._clear_editor()
-            return
-        with connect(self._db_path) as connection:
-            season = get_vaccine_program_season(connection, season_id)
-        if season is None:
-            self._current_season_id = None
-            self._clear_editor()
-            return
-        self._current_season_id = season.id
-        self._load_record(season)
-
-    def _load_record(self, season: VaccineProgramSeasonRecord) -> None:
-        self.season_name_input.setText(season.season_name)
-        self.active_check.setChecked(season.is_active)
-        self.daily_cap_input.setValue(season.daily_cap)
+            daily_cap = int(schedule.get("daily_cap", 100))
+        except (TypeError, ValueError):
+            daily_cap = 100
+        self.daily_cap_input.setValue(max(0, daily_cap))
         for key, date_input in self.date_inputs.items():
-            date_input.set_value(season.schedule.get(key))
+            date_input.set_value(schedule.get(key))
         if self.allow_exception_check is not None:
             self.allow_exception_check.setChecked(
-                self._as_bool(
-                    season.schedule.get("allow_elderly_exception", False)
-                )
+                _as_bool(schedule.get("allow_elderly_exception", False))
             )
-        groups = {
-            str(group.get("key", "")): group for group in season.age_groups
-        }
         for key, (lower, upper) in self.birth_inputs.items():
-            group = groups.get(key)
-            if key == "child_two_dose" and group is None:
-                group = groups.get("child_one_dose")
-            lower.set_value(group.get("birth_date_from") if group else "")
-            upper.set_value(group.get("birth_date_to") if group else "")
+            source = groups.get(key, {})
+            if key == "child_two_dose" and not source:
+                source = groups.get("child_one_dose", {})
+            lower.set_value(source.get("birth_date_from"))
+            upper.set_value(source.get("birth_date_to"))
 
-    def _clear_editor(self) -> None:
-        self.season_name_input.clear()
-        self.active_check.setChecked(False)
-        self.daily_cap_input.setValue(100)
-        for date_input in self.date_inputs.values():
-            date_input.set_value("")
-        for lower, upper in self.birth_inputs.values():
-            lower.set_value("")
-            upper.set_value("")
-        if self.allow_exception_check is not None:
-            self.allow_exception_check.setChecked(False)
-
-    def _collect_schedule(self) -> dict[str, object]:
-        schedule: dict[str, object] = {
-            key: date_input.value() for key, date_input in self.date_inputs.items()
+    def schedule_values(self) -> dict[str, object]:
+        values: dict[str, object] = {
+            "season_name": self.season_name_input.text().strip(),
+            "program_enabled": self.program_enabled_check.isChecked(),
+            "daily_cap": self.daily_cap_input.value(),
         }
+        values.update({key: widget.value() for key, widget in self.date_inputs.items()})
         if self.allow_exception_check is not None:
-            schedule["allow_elderly_exception"] = (
-                self.allow_exception_check.isChecked()
-            )
-        return schedule
+            values["allow_elderly_exception"] = self.allow_exception_check.isChecked()
+        return values
 
-    def _collect_age_groups(self) -> list[dict[str, object]]:
+    def age_group_values(self) -> list[dict[str, object]]:
         if self.program == "covid":
             lower, upper = self.birth_inputs["national_covid"]
             return [
@@ -400,59 +211,40 @@ class VaccineSeasonEditor(QWidget):
                     "birth_date_to": upper.value(),
                 }
             ]
-        groups: list[dict[str, object]] = []
         labels = dict(self.INFLUENZA_GROUPS)
+        values: list[dict[str, object]] = []
         for key, (lower, upper) in self.birth_inputs.items():
-            payload = {
+            value = {
                 "key": key,
                 "label": labels[key],
                 "vaccine": "influenza",
                 "birth_date_from": lower.value(),
                 "birth_date_to": upper.value(),
             }
-            groups.append(payload)
+            values.append(value)
             if key == "child_two_dose":
-                groups.append(
-                    payload
-                    | {
-                        "key": "child_one_dose",
-                        "label": "Eligible child",
-                    }
-                )
-        groups.append(
-            {
-                "key": "exception_influenza",
-                "label": "Exception influenza",
-                "vaccine": "influenza",
-                "birth_date_from": "",
-                "birth_date_to": "",
-            }
-        )
-        return groups
+                values.append(value | {"key": "child_one_dose"})
+        return values
 
-    def _validate_active_values(
-        self,
-        schedule: dict[str, object],
-        age_groups: list[dict[str, object]],
-    ) -> str | None:
-        if not self.active_check.isChecked():
+    def validation_error(self) -> str | None:
+        if not self.program_enabled_check.isChecked():
             return None
-        missing_dates = [key for key, value in schedule.items() if key != "allow_elderly_exception" and not value]
-        if missing_dates:
-            return "Complete all program dates before activating this season."
-        for group in age_groups:
-            if group.get("key") == "exception_influenza":
-                continue
-            if not group.get("birth_date_from") or not group.get("birth_date_to"):
-                return "Complete all birth-date ranges before activating this season."
-            if str(group["birth_date_from"]) > str(group["birth_date_to"]):
+        if not self.season_name_input.text().strip():
+            return "Enter the program year before enabling this schedule."
+        schedule = self.schedule_values()
+        if any(not schedule.get(key) for key in self.date_inputs):
+            return "Complete all program dates before enabling this schedule."
+        for lower, upper in self.birth_inputs.values():
+            if not lower.value() or not upper.value():
+                return "Complete all birth-date ranges before enabling this schedule."
+            if lower.value() > upper.value():
                 return "A birth-date range starts after it ends."
-        for start_key, end_key in self._schedule_pairs():
+        for start_key, end_key in self._date_pairs():
             if str(schedule[start_key]) > str(schedule[end_key]):
                 return "A program date range starts after it ends."
         return None
 
-    def _schedule_pairs(self) -> tuple[tuple[str, str], ...]:
+    def _date_pairs(self) -> tuple[tuple[str, str], ...]:
         if self.program == "covid":
             return (("program_start", "program_end"),)
         return (
@@ -463,86 +255,132 @@ class VaccineSeasonEditor(QWidget):
             ("child_one_dose_start", "child_one_dose_end"),
         )
 
-    def _empty_schedule(self) -> dict[str, object]:
-        schedule = {key: "" for key in self.date_inputs}
-        if self.program == "influenza":
-            schedule["allow_elderly_exception"] = False
-        return schedule
-
-    def _empty_age_groups(self) -> list[dict[str, object]]:
-        if self.program == "covid":
-            return [
-                {
-                    "key": "national_covid",
-                    "label": "National COVID",
-                    "vaccine": "covid",
-                    "birth_date_from": "",
-                    "birth_date_to": "",
-                }
-            ]
-        groups = [
-            {
-                "key": key,
-                "label": label,
-                "vaccine": "influenza",
-                "birth_date_from": "",
-                "birth_date_to": "",
-            }
-            for key, label in self.INFLUENZA_GROUPS
-        ]
-        groups.append(
-            {
-                "key": "child_one_dose",
-                "label": "Eligible child",
-                "vaccine": "influenza",
-                "birth_date_from": "",
-                "birth_date_to": "",
-            }
-        )
-        groups.append(
-            {
-                "key": "exception_influenza",
-                "label": "Exception influenza",
-                "vaccine": "influenza",
-                "birth_date_from": "",
-                "birth_date_to": "",
-            }
-        )
-        return groups
-
-    @staticmethod
-    def _safe_save_error(error: Exception) -> str:
-        text = str(error).lower()
-        if "unique" in text:
-            return "A season with that name already exists."
-        if isinstance(error, ValueError):
-            return str(error)
-        return "Vaccine season could not be saved."
-
-    @staticmethod
-    def _as_bool(value: object) -> bool:
-        if isinstance(value, bool):
-            return value
-        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
 
 class VaccineSettingsPage(QWidget):
     settings_changed = Signal()
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
+        self._db_path = db_path
+        self._schedule_data: dict[str, object] = {}
+        self._age_groups: list[object] = []
         self.tabs = QTabWidget()
-        self.influenza_editor = VaccineSeasonEditor("influenza", db_path)
-        self.covid_editor = VaccineSeasonEditor("covid", db_path)
-        self.tabs.addTab(self.influenza_editor, "Influenza schedules")
-        self.tabs.addTab(self.covid_editor, "COVID schedules")
-        self.influenza_editor.settings_changed.connect(self.settings_changed.emit)
-        self.covid_editor.settings_changed.connect(self.settings_changed.emit)
+        self.influenza_editor = VaccineProgramEditor("influenza")
+        self.covid_editor = VaccineProgramEditor("covid")
+        self.tabs.addTab(self.influenza_editor, "Influenza schedule")
+        self.tabs.addTab(self.covid_editor, "COVID schedule")
 
+        self.save_button = QPushButton("Save vaccine settings")
+        self.save_button.clicked.connect(self.save_settings)
+        self.reload_button = QPushButton("Reload")
+        self.reload_button.clicked.connect(self.load_settings)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.save_button)
+        buttons.addWidget(self.reload_button)
+        buttons.addStretch()
+
+        self.status_label = QLabel("Ready.")
+        self.status_label.setWordWrap(True)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.tabs)
+        layout.addWidget(self.tabs, 1)
+        layout.addLayout(buttons)
+        layout.addWidget(self.status_label)
+        self.load_settings()
+
+    def load_settings(self) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+        self._schedule_data = _json_object(settings.get("vaccine_schedule_rules_json"))
+        self._age_groups = _json_list(settings.get("vaccine_age_groups_json"))
+        groups = {
+            str(group.get("key", "")): group
+            for group in self._age_groups
+            if isinstance(group, dict)
+        }
+        influenza = self._schedule_data.get("influenza", {})
+        covid = self._schedule_data.get("covid", {})
+        self.influenza_editor.load_values(
+            influenza if isinstance(influenza, dict) else {}, groups
+        )
+        self.covid_editor.load_values(covid if isinstance(covid, dict) else {}, groups)
+        self.status_label.setText("Vaccine settings loaded.")
 
     def reload(self) -> None:
-        self.influenza_editor.reload()
-        self.covid_editor.reload()
+        self.load_settings()
+
+    def save_settings(self) -> bool:
+        for editor in (self.influenza_editor, self.covid_editor):
+            error = editor.validation_error()
+            if error:
+                self.tabs.setCurrentWidget(editor)
+                self.status_label.setText(error)
+                return False
+
+        schedule_data = dict(self._schedule_data)
+        for editor in (self.influenza_editor, self.covid_editor):
+            previous = schedule_data.get(editor.program, {})
+            section = dict(previous) if isinstance(previous, dict) else {}
+            section.update(editor.schedule_values())
+            schedule_data[editor.program] = section
+
+        replacement_groups = (
+            self.influenza_editor.age_group_values()
+            + self.covid_editor.age_group_values()
+        )
+        replaced_keys = {str(group["key"]) for group in replacement_groups}
+        age_groups = [
+            group
+            for group in self._age_groups
+            if not isinstance(group, dict)
+            or str(group.get("key", "")) not in replaced_keys
+        ]
+        age_groups.extend(replacement_groups)
+
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            set_settings(
+                connection,
+                {
+                    "vaccine_schedule_rules_json": json.dumps(
+                        schedule_data, ensure_ascii=False, indent=2
+                    ),
+                    "vaccine_age_groups_json": json.dumps(
+                        age_groups, ensure_ascii=False, indent=2
+                    ),
+                    "vaccine_influenza_daily_cap": str(
+                        self.influenza_editor.daily_cap_input.value()
+                    ),
+                    "vaccine_covid_daily_cap": str(
+                        self.covid_editor.daily_cap_input.value()
+                    ),
+                },
+            )
+        self._schedule_data = schedule_data
+        self._age_groups = age_groups
+        self.status_label.setText("Vaccine settings saved.")
+        self.settings_changed.emit()
+        return True
+
+
+def _json_object(value: object) -> dict[str, object]:
+    try:
+        parsed = json.loads(str(value or "{}"))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _json_list(value: object) -> list[object]:
+    try:
+        parsed = json.loads(str(value or "[]"))
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}

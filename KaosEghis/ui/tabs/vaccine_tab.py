@@ -245,8 +245,6 @@ class VaccineTab(QWidget):
         self.stacked_widget.setCurrentIndex(index)
         for button_index, name in enumerate(self.TOP_PAGES):
             self.nav_buttons[name].setChecked(button_index == index)
-        if self.stacked_widget.currentWidget() is self.settings_page:
-            self.settings_page.reload()
 
     def refresh_view(self) -> None:
         initialize_database(self._db_path)
@@ -476,21 +474,12 @@ class VaccineTab(QWidget):
         self.status_label.setText("Form cleared.")
 
     def save_vaccine_settings(self) -> None:
-        editor = self.settings_page.tabs.currentWidget()
-        if hasattr(editor, "save_season") and editor.save_season():
-            self._handle_vaccine_settings_changed()
+        if self.settings_page.save_settings():
+            self.status_label.setText("Vaccine settings saved.")
 
     def load_vaccine_settings(self) -> None:
-        self.settings_page.reload()
-        initialize_database(self._db_path)
-        with connect(self._db_path) as connection:
-            settings = get_settings(connection)
-            counts = get_today_vaccine_counts(
-                connection,
-                datetime.now().date().isoformat(),
-            )
-        self._update_today_counts(settings, counts)
-        self.status_label.setText("Vaccine settings loaded.")
+        self.settings_page.load_settings()
+        self._handle_vaccine_settings_changed()
 
     def _handle_vaccine_settings_changed(self) -> None:
         initialize_database(self._db_path)
@@ -502,7 +491,7 @@ class VaccineTab(QWidget):
             )
         self._update_today_counts(settings, counts)
         self._reset_influenza_check()
-        self.status_label.setText("Vaccine season settings updated.")
+        self.status_label.setText("Vaccine settings loaded.")
 
     def add_vaccine_type(self) -> None:
         dialog = VaccineTypeDialog(self)
