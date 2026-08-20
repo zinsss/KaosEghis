@@ -121,7 +121,9 @@ class VaccineProgramEditor(QWidget):
                 end = OptionalDateInput()
                 self.date_inputs[end_key] = end
                 grid.addWidget(end, row, 2)
-        self.allow_exception_check = QCheckBox("Allow elderly exception review path")
+        self.allow_exception_check = QCheckBox(
+            "Enable medically underserved rural-area exception"
+        )
         grid.addWidget(self.allow_exception_check, len(rows) + 1, 0, 1, 3)
         return group
 

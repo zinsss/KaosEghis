@@ -74,6 +74,32 @@ and review the official season dates and birth ranges before changing it to `tru
 This preview performs no printing, counter increment, vaccination-system input, or
 eGHIS write.
 
+### Medically Underserved Rural-Area Influenza Rule
+
+The clinic uses the configured rural-area exception for the three elderly opening
+groups. It changes both eligibility and cap handling:
+
+- when the 75+ window opens, 75+ vaccinations consume the shared 100-dose cap;
+  70-74 and 65-69 may proceed only through the explicit exception-review path and do
+  not consume that cap yet
+- when the 70-74 window opens, 75+ and 70-74 consume the shared cap; 65-69 remains the
+  non-counted exception path
+- when the 65-69 window opens, all three elderly groups consume the shared cap
+
+Before the first elderly opening date, none of the elderly groups is open. The
+exception behavior is enabled explicitly in Vaccine Settings and is never inferred
+from the workstation location. These are clinic-configured operating rules and must be
+reviewed against the official program notice each year.
+
+### Pediatric Influenza Opening Rule
+
+The configured two-dose pediatric window opens before the one-dose window. During that
+early interval, KaosEghis must stop before label printing and alert the operator to
+check the vaccination system manually for whether the child is a first-time influenza
+recipient who requires two doses. A confirmed vaccination consumes the shared daily
+cap. Once the one-dose window opens, an age-eligible child can proceed without that
+specific first-window alert, subject to the configured end date and cap.
+
 ## Vaccine Schedule Settings
 
 `Vaccine -> Settings` contains two structured pages: `Influenza schedule` and

@@ -677,6 +677,16 @@ class VaccineTab(QWidget):
             lines.append(f"Group: {result.group_label}")
         if result.schedule_start and result.schedule_end:
             lines.append(f"Window: {result.schedule_start} to {result.schedule_end}")
+        if result.group_key and result.status in {
+            "eligible",
+            "review_required",
+            "cap_reached",
+        }:
+            lines.append(
+                "Cap handling: Counts toward the shared daily cap."
+                if result.counted
+                else "Cap handling: Does not consume the shared daily cap."
+            )
         lines.append(
             f"Counted today: {result.today_count} / {result.daily_cap} "
             f"(remaining {result.remaining})"

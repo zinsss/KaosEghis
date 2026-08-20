@@ -175,15 +175,16 @@ def evaluate_influenza_program_for_birth_date(
         )
 
     matched_keys = {key for key, _label in matches}
+    if matched_keys and matched_keys <= INFLUENZA_CHILD_GROUPS:
+        return _evaluate_child_program(
+            influenza_schedule,
+            matches,
+            on_date=on_date,
+            counted_today=counted_today,
+            daily_cap=cap,
+        )
+
     if len(matches) > 1:
-        if matched_keys <= INFLUENZA_CHILD_GROUPS:
-            return _result(
-                "review_required",
-                "Select the child's one-dose or two-dose schedule before proceeding.",
-                counted_today=counted_today,
-                daily_cap=cap,
-                requires_operator_confirmation=True,
-            )
         return _result(
             "configuration_error",
             "Multiple influenza birth-date groups overlap for this patient.",
@@ -222,7 +223,8 @@ def evaluate_influenza_program_for_birth_date(
             if earliest is not None and earliest <= on_date <= end:
                 return _result(
                     "review_required",
-                    "Standard schedule has not opened; verify the configured exception condition.",
+                    "This age group's standard opening date has not arrived. "
+                    "Confirm the medically underserved rural-area exception before proceeding.",
                     group_key=group_key,
                     group_label=group_label,
                     schedule_start=start.isoformat(),
@@ -276,6 +278,122 @@ def evaluate_influenza_program_for_birth_date(
         counted=True,
         counted_today=counted_today,
         daily_cap=cap,
+    )
+
+
+def _evaluate_child_program(
+    influenza_schedule: dict[str, Any],
+    matches: list[tuple[str, str]],
+    *,
+    on_date: date,
+    counted_today: int,
+    daily_cap: int,
+) -> InfluenzaEligibilityResult:
+    two_dose_start = _parse_date(influenza_schedule.get("child_two_dose_start"))
+    two_dose_end = _parse_date(influenza_schedule.get("child_two_dose_end"))
+    one_dose_start = _parse_date(influenza_schedule.get("child_one_dose_start"))
+    one_dose_end = _parse_date(influenza_schedule.get("child_one_dose_end"))
+    child_dates = (two_dose_start, two_dose_end, one_dose_start, one_dose_end)
+    group_label = matches[0][1] or "Eligible child"
+    if (
+        any(value is None for value in child_dates)
+        or two_dose_start > two_dose_end
+        or one_dose_start > one_dose_end
+        or two_dose_start > one_dose_start
+    ):
+        return _result(
+            "configuration_error",
+            "Child influenza schedule dates are incomplete or invalid.",
+            group_key="child_two_dose",
+            group_label=group_label,
+            counted_today=counted_today,
+            daily_cap=daily_cap,
+        )
+
+    if on_date < two_dose_start:
+        return _result(
+            "blocked",
+            "The configured child influenza window has not started.",
+            group_key="child_two_dose",
+            group_label=group_label,
+            schedule_start=two_dose_start.isoformat(),
+            schedule_end=one_dose_end.isoformat(),
+            counted_today=counted_today,
+            daily_cap=daily_cap,
+        )
+
+    if on_date < one_dose_start:
+        if on_date > two_dose_end:
+            return _result(
+                "blocked",
+                "The early two-dose child window is not open.",
+                group_key="child_two_dose",
+                group_label=group_label,
+                schedule_start=two_dose_start.isoformat(),
+                schedule_end=two_dose_end.isoformat(),
+                counted_today=counted_today,
+                daily_cap=daily_cap,
+            )
+        if counted_today >= daily_cap:
+            return _result(
+                "cap_reached",
+                "The configured influenza daily cap has been reached.",
+                group_key="child_two_dose",
+                group_label=group_label,
+                schedule_start=two_dose_start.isoformat(),
+                schedule_end=two_dose_end.isoformat(),
+                counted=True,
+                counted_today=counted_today,
+                daily_cap=daily_cap,
+            )
+        return _result(
+            "review_required",
+            "Before label printing, check the vaccination system manually to confirm "
+            "that this child is a first-time influenza recipient requiring two doses.",
+            group_key="child_two_dose",
+            group_label=group_label,
+            schedule_start=two_dose_start.isoformat(),
+            schedule_end=two_dose_end.isoformat(),
+            counted=True,
+            counted_today=counted_today,
+            daily_cap=daily_cap,
+            requires_operator_confirmation=True,
+        )
+
+    if on_date > one_dose_end:
+        return _result(
+            "blocked",
+            "The configured child influenza window has ended.",
+            group_key="child_one_dose",
+            group_label=group_label,
+            schedule_start=one_dose_start.isoformat(),
+            schedule_end=one_dose_end.isoformat(),
+            counted_today=counted_today,
+            daily_cap=daily_cap,
+        )
+    if counted_today >= daily_cap:
+        return _result(
+            "cap_reached",
+            "The configured influenza daily cap has been reached.",
+            group_key="child_one_dose",
+            group_label=group_label,
+            schedule_start=one_dose_start.isoformat(),
+            schedule_end=one_dose_end.isoformat(),
+            counted=True,
+            counted_today=counted_today,
+            daily_cap=daily_cap,
+        )
+    return _result(
+        "eligible",
+        "The configured child influenza window and daily cap checks passed.",
+        allowed=True,
+        group_key="child_one_dose",
+        group_label=group_label,
+        schedule_start=one_dose_start.isoformat(),
+        schedule_end=one_dose_end.isoformat(),
+        counted=True,
+        counted_today=counted_today,
+        daily_cap=daily_cap,
     )
 
 

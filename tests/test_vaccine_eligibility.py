@@ -185,33 +185,104 @@ def test_invalid_influenza_cap_blocks_as_configuration_error() -> None:
     assert result.allowed is False
 
 
-def test_overlapping_child_schedules_require_dose_selection() -> None:
-    from KaosEghis.core.vaccine_eligibility import (
-        evaluate_influenza_program_for_birth_date,
-    )
-
-    child_groups = [
+def _child_groups():
+    return [
         {
             "key": key,
-            "label": label,
+            "label": "Eligible child",
             "vaccine": "influenza",
             "birth_date_from": "20200101",
             "birth_date_to": "20260831",
         }
-        for key, label in (
-            ("child_two_dose", "Child two-dose"),
-            ("child_one_dose", "Child one-dose"),
-        )
+        for key in ("child_two_dose", "child_one_dose")
     ]
+
+
+def test_early_child_window_requires_manual_two_dose_check() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
     result = evaluate_influenza_program_for_birth_date(
         _schedule(),
-        child_groups,
+        _child_groups(),
         date(2022, 1, 1),
-        on_date=date(2026, 10, 20),
+        on_date=date(2026, 9, 25),
     )
 
     assert result.status == "review_required"
-    assert "one-dose or two-dose" in result.message
+    assert result.counted is True
+    assert result.requires_operator_confirmation is True
+    assert "check the vaccination system manually" in result.message
+    assert "Before label printing" in result.message
+
+
+def test_child_window_is_open_without_dose_alert_after_one_dose_start() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    result = evaluate_influenza_program_for_birth_date(
+        _schedule(),
+        _child_groups(),
+        date(2022, 1, 1),
+        on_date=date(2026, 10, 5),
+        counted_today=99,
+    )
+
+    assert result.status == "eligible"
+    assert result.allowed is True
+    assert result.counted is True
+    assert result.requires_operator_confirmation is False
+
+
+def test_rural_exception_stages_cap_by_elderly_opening_group() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    schedule = _schedule(allow_exception=True)
+
+    at_first_open = {
+        "75_plus": evaluate_influenza_program_for_birth_date(
+            schedule, _age_groups(), date(1950, 1, 1),
+            on_date=date(2026, 10, 11), counted_today=100,
+        ),
+        "70_74": evaluate_influenza_program_for_birth_date(
+            schedule, _age_groups(), date(1953, 1, 1),
+            on_date=date(2026, 10, 11), counted_today=100,
+        ),
+        "65_69": evaluate_influenza_program_for_birth_date(
+            schedule, _age_groups(), date(1958, 1, 1),
+            on_date=date(2026, 10, 11), counted_today=100,
+        ),
+    }
+    assert at_first_open["75_plus"].status == "cap_reached"
+    assert at_first_open["75_plus"].counted is True
+    assert at_first_open["70_74"].status == "review_required"
+    assert at_first_open["70_74"].counted is False
+    assert at_first_open["65_69"].status == "review_required"
+    assert at_first_open["65_69"].counted is False
+
+    at_second_open_70 = evaluate_influenza_program_for_birth_date(
+        schedule, _age_groups(), date(1953, 1, 1),
+        on_date=date(2026, 10, 15), counted_today=100,
+    )
+    at_second_open_65 = evaluate_influenza_program_for_birth_date(
+        schedule, _age_groups(), date(1958, 1, 1),
+        on_date=date(2026, 10, 15), counted_today=100,
+    )
+    assert at_second_open_70.status == "cap_reached"
+    assert at_second_open_70.counted is True
+    assert at_second_open_65.status == "review_required"
+    assert at_second_open_65.counted is False
+
+    at_last_open = evaluate_influenza_program_for_birth_date(
+        schedule, _age_groups(), date(1958, 1, 1),
+        on_date=date(2026, 10, 18), counted_today=100,
+    )
+    assert at_last_open.status == "cap_reached"
+    assert at_last_open.counted is True
 
 
 def test_vaccine_page_can_preview_configured_influenza_gate(tmp_path) -> None:
