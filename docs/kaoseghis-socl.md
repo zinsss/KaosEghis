@@ -1,6 +1,6 @@
 # KaosEghis-SOCL
 
-Last updated: 2026-08-13
+Last updated: 2026-08-21
 
 ## Status
 
@@ -28,6 +28,7 @@ The compose page contains:
 - a Subjective collection tree
 - a Physical Examination collection tree
 - an optional encounter-detail field beside every finding
+- vertically centered compact rows when an encounter-detail field is visible
 - Generate preview
 - New / Clear
 - independently editable Subjective and Objective previews

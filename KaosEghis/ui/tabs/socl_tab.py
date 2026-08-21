@@ -328,6 +328,9 @@ class SoclLauncherPanel(QWidget):
         checkbox.setToolTip(finding.label)
         finding_label = _CheckboxLabel(finding.label)
         finding_label.setWordWrap(True)
+        finding_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         finding_label.setCursor(Qt.CursorShape.PointingHandCursor)
         finding_label.clicked.connect(checkbox.toggle)
         detail_input = QLineEdit()
@@ -343,9 +346,9 @@ class SoclLauncherPanel(QWidget):
             lambda text, option=checkbox: option.setChecked(bool(text.strip()))
         )
 
-        row.addWidget(checkbox, 0, Qt.AlignmentFlag.AlignTop)
-        row.addWidget(finding_label, 1)
-        row.addWidget(detail_input)
+        row.addWidget(checkbox, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(finding_label, 1, Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(detail_input, 0, Qt.AlignmentFlag.AlignVCenter)
         self._finding_checkboxes[finding.id] = checkbox
         self._detail_inputs[finding.id] = detail_input
         self._finding_metadata[finding.id] = (

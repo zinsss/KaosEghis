@@ -281,6 +281,28 @@ def test_launcher_socl_panel_uses_two_column_compact_checkboxes(tmp_path) -> Non
         assert detail.isHidden() is False
 
 
+def test_launcher_socl_detail_rows_remain_vertically_centered(tmp_path) -> None:
+    _app()
+
+    from PySide6.QtCore import Qt
+
+    from KaosEghis.ui.tabs.socl_tab import SoclLauncherPanel
+
+    panel = SoclLauncherPanel(tmp_path / "KaosEghis.sqlite")
+    finding_id = next(iter(panel._finding_checkboxes))
+    checkbox = panel._finding_checkboxes[finding_id]
+    detail = panel._detail_inputs[finding_id]
+    row = checkbox.parentWidget().layout()
+
+    checkbox_alignment = row.itemAt(row.indexOf(checkbox)).alignment()
+    detail_alignment = row.itemAt(row.indexOf(detail)).alignment()
+    assert checkbox_alignment & Qt.AlignmentFlag.AlignVCenter
+    assert detail_alignment & Qt.AlignmentFlag.AlignVCenter
+
+    checkbox.setChecked(True)
+    assert row.itemAt(row.indexOf(checkbox)).alignment() & Qt.AlignmentFlag.AlignVCenter
+
+
 def test_launcher_socl_free_text_is_visible_and_checks_when_typed(tmp_path) -> None:
     _app()
 
