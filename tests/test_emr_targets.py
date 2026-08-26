@@ -115,6 +115,86 @@ def test_default_profile_is_seeded_from_existing_settings(tmp_path) -> None:
     assert "super-secret-ref" not in row
 
 
+def test_vaccine_patient_targets_are_seeded_for_emr_profiles(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_emr_target_profile,
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        default_profile = get_default_emr_target_profile(connection)
+        assert default_profile is not None
+        second_profile = create_emr_target_profile(
+            connection,
+            name="Second EMR",
+            is_enabled=True,
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        expected_keys = {
+            "vaccine.patient_chart_no",
+            "vaccine.patient_resident_id",
+            "vaccine.patient_phone",
+            "vaccine.patient_address",
+        }
+        for profile_id in (default_profile.id, second_profile.id):
+            targets = {
+                key: get_emr_ui_target_by_key(connection, profile_id, key)
+                for key in expected_keys
+            }
+            assert all(target is not None for target in targets.values())
+            assert targets["vaccine.patient_chart_no"].automation_id == "792028"
+            assert targets["vaccine.patient_resident_id"].automation_id is None
+            assert targets["vaccine.patient_phone"].automation_id is None
+            assert targets["vaccine.patient_address"].automation_id is None
+
+
+def test_vaccine_target_seed_preserves_configured_selectors(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+        update_emr_ui_target,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = get_default_emr_target_profile(connection)
+        assert profile is not None
+        target = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "vaccine.patient_phone",
+        )
+        assert target is not None
+        update_emr_ui_target(
+            connection,
+            target.id,
+            target_key=target.target_key,
+            label=target.label,
+            automation_id="verified-phone-id",
+            control_type="Edit",
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        preserved = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "vaccine.patient_phone",
+        )
+
+    assert preserved is not None
+    assert preserved.automation_id == "verified-phone-id"
+    assert preserved.control_type == "Edit"
+
+
 def test_emr_target_profile_migration_adds_grid_automation_columns(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
 
@@ -319,7 +399,12 @@ def test_emr_ui_target_crud(tmp_path) -> None:
     assert listed[0].ancestor_path is not None
     assert "Tools" in listed[0].ancestor_path
     assert deleted is True
-    assert after_delete == []
+    assert {target.target_key for target in after_delete} == {
+        "vaccine.patient_chart_no",
+        "vaccine.patient_resident_id",
+        "vaccine.patient_phone",
+        "vaccine.patient_address",
+    }
 
 
 def test_emr_targets_page_instantiates_and_shows_default_profile(tmp_path, monkeypatch) -> None:

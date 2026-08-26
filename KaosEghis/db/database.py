@@ -10,6 +10,29 @@ from KaosEghis.db.repositories import get_settings
 APP_DIR_NAME = "KaosEghis"
 DATA_DIR_ENV_VAR = "KAOSEGHIS_DATA_DIR"
 
+VACCINE_EMR_TARGET_DEFAULTS = (
+    (
+        "vaccine.patient_chart_no",
+        "Vaccine patient chart No",
+        "792028",
+    ),
+    (
+        "vaccine.patient_resident_id",
+        "Vaccine patient resident No",
+        None,
+    ),
+    (
+        "vaccine.patient_phone",
+        "Vaccine patient telephone",
+        None,
+    ),
+    (
+        "vaccine.patient_address",
+        "Vaccine patient address",
+        None,
+    ),
+)
+
 
 def get_data_dir() -> Path:
     override = os.environ.get(DATA_DIR_ENV_VAR, "").strip()
@@ -54,6 +77,7 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_emr_ui_targets(connection)
         _migrate_vaccine_tables(connection)
         _seed_default_emr_target_profile(connection)
+        _seed_vaccine_emr_targets(connection)
         _seed_default_socl_vocabulary(connection)
         _seed_default_vaccine_types(connection)
         connection.commit()
@@ -560,6 +584,28 @@ def _seed_default_emr_target_profile(connection: sqlite3.Connection) -> None:
             "grdOpdList",
         ),
     )
+
+
+def _seed_vaccine_emr_targets(connection: sqlite3.Connection) -> None:
+    profile_ids = connection.execute(
+        "SELECT id FROM emr_target_profiles ORDER BY id"
+    ).fetchall()
+    for (profile_id,) in profile_ids:
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO emr_ui_targets (
+                profile_id,
+                target_key,
+                label,
+                automation_id
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                (profile_id, target_key, label, automation_id)
+                for target_key, label, automation_id in VACCINE_EMR_TARGET_DEFAULTS
+            ),
+        )
 
 
 def _seed_default_socl_vocabulary(connection: sqlite3.Connection) -> None:

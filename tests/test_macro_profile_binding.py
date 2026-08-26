@@ -181,8 +181,6 @@ def test_macros_page_shows_selected_emr_profile(monkeypatch, tmp_path) -> None:
 
 
 def test_macro_execution_behavior_unchanged_with_bound_profile(monkeypatch, tmp_path) -> None:
-    import sys
-
     from KaosEghis.core.macro_runner import MacroRunner
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import create_emr_target_profile, create_item, create_macro_step
@@ -208,14 +206,10 @@ def test_macro_execution_behavior_unchanged_with_bound_profile(monkeypatch, tmp_
         "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
         lambda _settings: FakeState(),
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "pywinauto.keyboard",
-        type(
-            "Keyboard",
-            (),
-            {"send_keys": staticmethod(lambda keys: calls.append(keys))},
-        )(),
+    monkeypatch.setattr(
+        MacroRunner,
+        "_send_hotkey_sequence",
+        staticmethod(lambda keys: calls.append(keys)),
     )
 
     result = MacroRunner(db_path).execute_macro(macro.id, dry_run=False)
