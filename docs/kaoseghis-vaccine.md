@@ -1,6 +1,6 @@
 # KaosEghis-vaccine
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 ## Status
 
@@ -36,15 +36,31 @@ Database initialization adds these configurable UIA targets to every EMR profile
 
 | Target key | Purpose | Seeded selector |
 | --- | --- | --- |
-| `vaccine.patient_chart_no` | Patient chart number | Configure from the current eGHIS UI |
-| `vaccine.patient_resident_id` | Resident number | Configure from the current eGHIS UI |
-| `vaccine.patient_phone` | Telephone | Configure from the current eGHIS UI |
-| `vaccine.patient_address` | Address | Configure from the current eGHIS UI |
+| `vaccine.patient_chart_no` | Patient chart number | `txt환자번호` |
+| `vaccine.patient_resident_id` | Resident number | `txt주민번호` |
+| `vaccine.patient_name` | Patient name | `txt환자명` |
+| `vaccine.patient_sex_age` | Sex and age | `lblSexAge` |
+| `vaccine.patient_birth_date` | Date of birth | `dateEdit1` |
+| `vaccine.patient_phone` | Preferred mobile telephone | `txt휴대폰` |
+| `vaccine.patient_telephone` | Telephone fallback | `txt전화` |
+| `vaccine.patient_address` | Address | `txt주소` |
 
-The target definitions are available under `Macros -> EMR`. Initialization never
-overwrites stable selectors already configured by the operator. Numeric values that
-match the displayed patient number are removed because eGHIS regenerates them between
-sessions; selectors from the legacy eGHIS build are not copied automatically.
+The target definitions are available under `Macros -> EMR`. Initialization fills an
+untouched placeholder with these verified Automation IDs but never overwrites a target
+that already has an operator-configured selector. Numeric values that match a displayed
+patient number are removed and replaced by `txt환자번호` because patient data is not a
+stable selector.
+
+`Fetch from EMR` is an explicit operator action. It requires the manually cached eGHIS
+connection, focuses the connected process through the connector gate, and clicks the
+current Patient Information opener at screen coordinate `(209, 155)`. It then waits for
+`txt환자번호` and reads all configured fields from that same eGHIS process/window. This
+coordinate is a temporary opener fallback; the patient fields themselves use stable UIA
+Automation IDs. The fetch never runs on startup or in the background.
+
+The preferred telephone value is `txt휴대폰`; `txt전화` is used only when the mobile
+field is blank. Date of birth is shown transiently on the Vaccine page and is not added
+to the local Vaccine record schema by this change. No fetched values are written to logs.
 
 This specification preserves the proven workflow and rule structure from the former
 `eGhis_Assistant` Labeler module. The vaccine catalog and seasonal rule values must be

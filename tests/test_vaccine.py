@@ -120,7 +120,10 @@ def test_vaccine_tab_fetches_patient_context_from_emr_targets(tmp_path, monkeypa
 
     from types import SimpleNamespace
 
-    from KaosEghis.core.uia_inspector import UiaInspectionResult
+    from KaosEghis.core.vaccine_patient_context import (
+        VaccinePatientContext,
+        VaccinePatientFetchResult,
+    )
     from KaosEghis.db.database import initialize_database
     import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
 
@@ -139,16 +142,6 @@ def test_vaccine_tab_fetches_patient_context_from_emr_targets(tmp_path, monkeypa
         diagnosis_grid_automation_id = "tree상병"
         patient_list_grid_automation_id = "grdOpdList"
 
-    target_values = {
-        "vaccine.patient_chart_no": "2735",
-        "vaccine.patient_resident_id": "700101-1234567",
-        "vaccine.patient_name": "홍길동",
-        "vaccine.patient_sex": "M",
-        "vaccine.patient_age": "56",
-        "vaccine.patient_phone": "010-1111-2222",
-        "vaccine.patient_address": "Seoul",
-    }
-
     monkeypatch.setattr(
         vaccine_tab_module,
         "get_active_emr_target_profile",
@@ -159,36 +152,25 @@ def test_vaccine_tab_fetches_patient_context_from_emr_targets(tmp_path, monkeypa
         vaccine_tab_module,
         "get_emr_ui_target_by_key",
         lambda connection, profile_id, target_key: SimpleNamespace(
-            target_id=target_key,
-            parent_target_id=None,
-            parent_automation_id=None,
-            automation_id="auto",
-            name=None,
-            control_type="Edit",
-            class_name=None,
+            automation_id=f"id-{target_key}",
         ),
     )
     monkeypatch.setattr(
         vaccine_tab_module,
-        "inspect_target_readonly",
-        lambda settings, target: UiaInspectionResult(
-            found=True,
-            message="ok",
-            target_id=target.target_id,
-            parent_target_id=None,
-            parent_automation_id=None,
-            parent_found=None,
-            automation_id="auto",
-            name=None,
-            control_type="Edit",
-            class_name=None,
-            found_name=None,
-            found_control_type="Edit",
-            found_class_name=None,
-            is_enabled=True,
-            is_visible=True,
-            text_value=target_values[target.target_id],
-            has_keyboard_focus=True,
+        "fetch_vaccine_patient_context",
+        lambda settings, targets: VaccinePatientFetchResult(
+            success=True,
+            message="Loaded patient context from EMR.",
+            context=VaccinePatientContext(
+                chart_no="2735",
+                resident_id="700101-1234567",
+                patient_name="홍길동",
+                patient_sex="M",
+                patient_age="56",
+                patient_birth_date="1970-01-01",
+                patient_phone="010-1111-2222",
+                patient_address="Seoul",
+            ),
         ),
     )
 
@@ -197,6 +179,7 @@ def test_vaccine_tab_fetches_patient_context_from_emr_targets(tmp_path, monkeypa
     assert page.fetch_current_patient_from_emr() is True
     assert page.patient_name_input.text() == "홍길동"
     assert page.patient_resident_id_input.text() == "700101-1234567"
+    assert page.patient_birth_date_input.text() == "1970-01-01"
     assert page.patient_phone_input.text() == "010-1111-2222"
 
 

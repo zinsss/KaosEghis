@@ -235,6 +235,13 @@ The chart UIA Name is optional and must be a stable Inspect.exe property. A pati
 current chart number must never be entered as the Name criterion because that value
 changes when the selected patient changes.
 
+The Vaccine patient-information fetch uses the separate eGHIS Patient Information view.
+Its verified chart selector is `txt환자번호`; the changing chart number is read from the
+control value. Other verified selectors are `txt환자명`, `txt주민번호`, `txt주소`,
+`lblSexAge`, `dateEdit1`, `txt휴대폰`, and `txt전화`. The explicit fetch opens that view
+only after the operator presses the Vaccine fetch button, then reads the fields from the
+connected eGHIS process. It does not treat any displayed patient value as a UIA selector.
+
 When the marker is present, a large red always-on-top warning asks the operator to
 review the patient memo in EMR. The popup does not display the memo contents, does not
 retain them, and hides automatically when the marker is absent or EMR disconnects.

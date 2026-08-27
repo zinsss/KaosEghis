@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from KaosEghis.core.eghis_connector import build_connector_settings
-from KaosEghis.core.uia_inspector import inspect_target_readonly
+from KaosEghis.core.vaccine_patient_context import fetch_vaccine_patient_context
 from KaosEghis.core.vaccine_eligibility import (
     InfluenzaEligibilityResult,
     evaluate_influenza_program,
@@ -56,10 +56,11 @@ VACCINE_TARGET_KEYS = {
     "chart_no": "vaccine.patient_chart_no",
     "resident_id": "vaccine.patient_resident_id",
     "patient_name": "vaccine.patient_name",
-    "patient_sex": "vaccine.patient_sex",
-    "patient_age": "vaccine.patient_age",
-    "patient_phone": "vaccine.patient_phone",
-    "patient_address": "vaccine.patient_address",
+    "sex_age": "vaccine.patient_sex_age",
+    "birth_date": "vaccine.patient_birth_date",
+    "mobile_phone": "vaccine.patient_phone",
+    "telephone": "vaccine.patient_telephone",
+    "address": "vaccine.patient_address",
 }
 
 
@@ -122,6 +123,7 @@ class VaccineTab(QWidget):
         self.patient_name_input = QLineEdit()
         self.patient_sex_input = QLineEdit()
         self.patient_age_input = QLineEdit()
+        self.patient_birth_date_input = QLineEdit()
         self.patient_phone_input = QLineEdit()
         self.patient_address_input = QLineEdit()
 
@@ -139,6 +141,7 @@ class VaccineTab(QWidget):
         patient_form.addRow("Name", self.patient_name_input)
         patient_form.addRow("Sex", self.patient_sex_input)
         patient_form.addRow("Age", self.patient_age_input)
+        patient_form.addRow("DOB", self.patient_birth_date_input)
         patient_form.addRow("Phone", self.patient_phone_input)
         patient_form.addRow("Address", self.patient_address_input)
 
@@ -182,6 +185,7 @@ class VaccineTab(QWidget):
             self.patient_name_input,
             self.patient_sex_input,
             self.patient_age_input,
+            self.patient_birth_date_input,
             self.patient_phone_input,
             self.patient_address_input,
         ):
@@ -310,42 +314,32 @@ class VaccineTab(QWidget):
             or "grdOpdList",
         )
 
-        fetched: dict[str, str] = {}
-        missing: list[str] = []
+        target_automation_ids: dict[str, str] = {}
         with connect(self._db_path) as connection:
             for field_name, target_key in VACCINE_TARGET_KEYS.items():
                 target = get_emr_ui_target_by_key(connection, profile.id, target_key)
-                if target is None:
-                    missing.append(target_key)
-                    continue
-                result = inspect_target_readonly(connector_settings, target)
-                if not result.found:
-                    missing.append(target_key)
-                    continue
-                fetched[field_name] = (
-                    result.text_value or result.found_name or ""
-                ).strip()
+                if target is not None and target.automation_id:
+                    target_automation_ids[field_name] = target.automation_id
 
-        self.patient_chart_no_input.setText(fetched.get("chart_no", ""))
-        self.patient_resident_id_input.setText(fetched.get("resident_id", ""))
-        self.patient_name_input.setText(fetched.get("patient_name", ""))
-        self.patient_sex_input.setText(fetched.get("patient_sex", ""))
-        self.patient_age_input.setText(fetched.get("patient_age", ""))
-        self.patient_phone_input.setText(fetched.get("patient_phone", ""))
-        self.patient_address_input.setText(fetched.get("patient_address", ""))
-
-        if fetched:
-            self.status_label.setText(
-                "Loaded patient context from EMR."
-                if not missing
-                else "Loaded partial patient context from EMR."
-            )
-            return True
-
-        self.status_label.setText(
-            "No vaccine patient targets could be read from the active EMR profile."
+        result = fetch_vaccine_patient_context(
+            connector_settings,
+            target_automation_ids,
         )
-        return False
+        if not result.success or result.context is None:
+            self.status_label.setText(result.message)
+            return False
+
+        context = result.context
+        self.patient_chart_no_input.setText(context.chart_no)
+        self.patient_resident_id_input.setText(context.resident_id)
+        self.patient_name_input.setText(context.patient_name)
+        self.patient_sex_input.setText(context.patient_sex)
+        self.patient_age_input.setText(context.patient_age)
+        self.patient_birth_date_input.setText(context.patient_birth_date)
+        self.patient_phone_input.setText(context.patient_phone)
+        self.patient_address_input.setText(context.patient_address)
+        self.status_label.setText(result.message)
+        return True
 
     def check_influenza_program(self) -> InfluenzaEligibilityResult:
         initialize_database(self._db_path)
@@ -427,6 +421,7 @@ class VaccineTab(QWidget):
         self.patient_name_input.setText(record.patient_name or "")
         self.patient_sex_input.setText(record.patient_sex or "")
         self.patient_age_input.setText(record.patient_age or "")
+        self.patient_birth_date_input.clear()
         self.patient_phone_input.setText(record.patient_phone or "")
         self.patient_address_input.setText(record.patient_address or "")
         self._select_vaccine_type(record.vaccine_type_id, record.vaccine_type_name)
@@ -467,6 +462,7 @@ class VaccineTab(QWidget):
             self.patient_name_input,
             self.patient_sex_input,
             self.patient_age_input,
+            self.patient_birth_date_input,
             self.patient_phone_input,
             self.patient_address_input,
         ):

@@ -136,22 +136,27 @@ def test_vaccine_patient_targets_are_seeded_for_emr_profiles(tmp_path) -> None:
 
     initialize_database(db_path)
     with connect(db_path) as connection:
-        expected_keys = {
-            "vaccine.patient_chart_no",
-            "vaccine.patient_resident_id",
-            "vaccine.patient_phone",
-            "vaccine.patient_address",
+        expected_targets = {
+            "vaccine.patient_chart_no": "txt환자번호",
+            "vaccine.patient_resident_id": "txt주민번호",
+            "vaccine.patient_name": "txt환자명",
+            "vaccine.patient_sex_age": "lblSexAge",
+            "vaccine.patient_birth_date": "dateEdit1",
+            "vaccine.patient_phone": "txt휴대폰",
+            "vaccine.patient_telephone": "txt전화",
+            "vaccine.patient_address": "txt주소",
         }
         for profile_id in (default_profile.id, second_profile.id):
             targets = {
                 key: get_emr_ui_target_by_key(connection, profile_id, key)
-                for key in expected_keys
+                for key in expected_targets
             }
             assert all(target is not None for target in targets.values())
-            assert targets["vaccine.patient_chart_no"].automation_id is None
-            assert targets["vaccine.patient_resident_id"].automation_id is None
-            assert targets["vaccine.patient_phone"].automation_id is None
-            assert targets["vaccine.patient_address"].automation_id is None
+            assert {
+                key: target.automation_id
+                for key, target in targets.items()
+                if target is not None
+            } == expected_targets
 
 
 def test_vaccine_target_seed_preserves_configured_selectors(tmp_path) -> None:
@@ -195,7 +200,7 @@ def test_vaccine_target_seed_preserves_configured_selectors(tmp_path) -> None:
     assert preserved.control_type == "Edit"
 
 
-def test_numeric_vaccine_chart_selector_is_removed_on_startup(tmp_path) -> None:
+def test_numeric_vaccine_chart_selector_is_replaced_on_startup(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import (
         get_default_emr_target_profile,
@@ -232,7 +237,7 @@ def test_numeric_vaccine_chart_selector_is_removed_on_startup(tmp_path) -> None:
         )
 
     assert migrated is not None
-    assert migrated.automation_id is None
+    assert migrated.automation_id == "txt환자번호"
     assert migrated.name_match is None
 
 
@@ -443,7 +448,11 @@ def test_emr_ui_target_crud(tmp_path) -> None:
     assert {target.target_key for target in after_delete} == {
         "vaccine.patient_chart_no",
         "vaccine.patient_resident_id",
+        "vaccine.patient_name",
+        "vaccine.patient_sex_age",
+        "vaccine.patient_birth_date",
         "vaccine.patient_phone",
+        "vaccine.patient_telephone",
         "vaccine.patient_address",
     }
 

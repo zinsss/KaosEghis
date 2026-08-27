@@ -14,22 +14,42 @@ VACCINE_EMR_TARGET_DEFAULTS = (
     (
         "vaccine.patient_chart_no",
         "Vaccine patient chart No",
-        None,
+        "txt환자번호",
     ),
     (
         "vaccine.patient_resident_id",
         "Vaccine patient resident No",
-        None,
+        "txt주민번호",
+    ),
+    (
+        "vaccine.patient_name",
+        "Vaccine patient name",
+        "txt환자명",
+    ),
+    (
+        "vaccine.patient_sex_age",
+        "Vaccine patient sex and age",
+        "lblSexAge",
+    ),
+    (
+        "vaccine.patient_birth_date",
+        "Vaccine patient date of birth",
+        "dateEdit1",
     ),
     (
         "vaccine.patient_phone",
         "Vaccine patient telephone",
-        None,
+        "txt휴대폰",
+    ),
+    (
+        "vaccine.patient_telephone",
+        "Vaccine patient secondary telephone",
+        "txt전화",
     ),
     (
         "vaccine.patient_address",
         "Vaccine patient address",
-        None,
+        "txt주소",
     ),
 )
 
@@ -631,13 +651,21 @@ def _seed_vaccine_emr_targets(connection: sqlite3.Connection) -> None:
     for (profile_id,) in profile_ids:
         connection.executemany(
             """
-            INSERT OR IGNORE INTO emr_ui_targets (
+            INSERT INTO emr_ui_targets (
                 profile_id,
                 target_key,
                 label,
                 automation_id
             )
             VALUES (?, ?, ?, ?)
+            ON CONFLICT(profile_id, target_key) DO UPDATE SET
+                automation_id = excluded.automation_id,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE emr_ui_targets.automation_id IS NULL
+              AND emr_ui_targets.name_match IS NULL
+              AND emr_ui_targets.scope_automation_id IS NULL
+              AND emr_ui_targets.parent_target_key IS NULL
+              AND emr_ui_targets.ancestor_path IS NULL
             """,
             (
                 (profile_id, target_key, label, automation_id)
