@@ -1,6 +1,6 @@
 # KaosEghis-scheduler
 
-Last updated: 2026-08-03
+Last updated: 2026-08-27
 
 ## Status
 
@@ -211,17 +211,78 @@ rename it into place. Source deletion is out of scope for the first backup miles
 
 ## End-of-Day eGHIS Backup Direction
 
-The later end-of-day workflow will also be a macro connected to a schedule. Potential
-steps are:
+The end-of-day workflow will be a guarded macro connected to a schedule. The requested
+operator sequence is:
 
-- request graceful eGHIS close
-- wait for the exact known backup dialog
-- optionally set the known `shutdown after backup` checkbox
-- optionally confirm the known backup control
+1. Focus the manually connected eGHIS process/window.
+2. If the verified eGHIS lock screen is present, type its password from an unlocked
+   KaosEghis-pw credential entry and submit it.
+3. Send `Alt+F4` to the verified eGHIS window.
+4. Wait for the exact close-confirmation dialog and activate its Yes button.
+5. Wait for the exact backup confirmation and activate its confirmation control.
+6. Wait for the eGHIS Backup window and check the verified power-off-after-backup
+   checkbox.
+
+The password must not be stored in a macro step, scheduler row, setting, result, or log.
+The workflow must block when the KaosEghis-pw vault is locked or the configured
+credential entry is unavailable.
+
+### Captured eGHIS Controls
+
+The following controls were captured from the current production eGHIS build on
+2026-08-27.
+
+#### Close confirmation
+
+Parent dialog:
+
+- UIA Name: `확인`
+- Control type: `Window`
+- Ancestor: `이지스 전자차트 2.0` (`Window`)
+
+Yes button:
+
+- UIA Name: `예(Y)`
+- Control type: `Button`
+- Class observed: `WindowsForms10.Window.b.app.0.2bf8098_r6_ad1`
+- Parent target: the `확인` dialog above
+- Observed coordinate: `(1240, 1015)`, diagnostic reference only
+
+The observed handle and Automation ID were both `45881156`. That number is a transient
+window handle and must not be saved or used as an Automation ID selector. Resolve this
+button by its parent dialog, UIA Name, and control type.
+
+#### Power off after backup
+
+Parent dialog:
+
+- UIA Name: `이지스 백업`
+- Control type: `Window`
+
+Checkbox:
+
+- UIA Name: `백업 완료 후 PC를 자동 종료 합니다.`
+- Automation ID: `chkShutDown`
+- Control type: `CheckBox`
+- Class observed: `WindowsForms10.BUTTON.app.0.141b42a_r7_ad1`
+- Parent target: the `이지스 백업` dialog above
+- Observed coordinate: `(854, 1616)`, diagnostic reference only
+
+`chkShutDown` is the preferred stable selector. The implementation should resolve and
+toggle this checkbox directly rather than send a blind Space key.
+
+### Captures Still Required
+
+- eGHIS lock-screen password field and its parent dialog/window
+- backup confirmation button and its parent dialog/window
+- final/default backup action control, if it is separate from the confirmation above
+- schedule time and selected weekdays
+- KaosEghis-pw service-entry name that supplies the eGHIS password
 
 Every write step remains independently configurable in the macro. Exact dialog targets
 must be captured and manually tested first. The macro must not force-kill eGHIS, click
-unknown dialogs, issue a blind Enter, or call an operating-system shutdown fallback.
+unknown dialogs, type a password without first resolving the lock field, issue blind
+confirmation keys, or call an operating-system shutdown fallback.
 
 ## Claim-Day Direction
 
