@@ -41,6 +41,7 @@ def fetch_vaccine_patient_context(
     connection_checker: Callable[[dict[str, str]], Any] = ensure_cached_connection_ready,
     desktop_factory: Callable[..., Any] | None = None,
     clicker: Callable[[tuple[int, int]], None] | None = None,
+    closer: Callable[[], None] | None = None,
     clock: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
 ) -> VaccinePatientFetchResult:
@@ -75,6 +76,8 @@ def fetch_vaccine_patient_context(
 
     if clicker is None:
         clicker = _click_patient_info_opener
+    if closer is None:
+        closer = _close_patient_information
 
     try:
         clicker(opener_coordinates)
@@ -118,6 +121,12 @@ def fetch_vaccine_patient_context(
         for field_name, automation_id in target_automation_ids.items()
         if automation_id.strip()
     }
+    close_succeeded = True
+    try:
+        closer()
+    except Exception:
+        close_succeeded = False
+
     chart_no = values.get("chart_no", "").strip()
     if not chart_no:
         return VaccinePatientFetchResult(
@@ -153,22 +162,26 @@ def fetch_vaccine_patient_context(
         )
         if not value
     )
-    return VaccinePatientFetchResult(
-        True,
-        (
-            "Loaded patient context from EMR."
-            if not missing_fields
-            else "Loaded partial patient context from EMR."
-        ),
-        context,
-        missing_fields,
+    message = (
+        "Loaded patient context from EMR."
+        if not missing_fields
+        else "Loaded partial patient context from EMR."
     )
+    if not close_succeeded:
+        message += " Close the Patient Information window manually."
+    return VaccinePatientFetchResult(True, message, context, missing_fields)
 
 
 def _click_patient_info_opener(coords: tuple[int, int]) -> None:
     from pywinauto import mouse
 
     mouse.click(button="left", coords=coords)
+
+
+def _close_patient_information() -> None:
+    from pywinauto.keyboard import send_keys
+
+    send_keys("{ESC}")
 
 
 def _find_patient_information_scope(

@@ -57,6 +57,8 @@ current Patient Information opener at screen coordinate `(209, 155)`. It then wa
 `txt환자번호` and reads all configured fields from that same eGHIS process/window. This
 coordinate is a temporary opener fallback; the patient fields themselves use stable UIA
 Automation IDs. The fetch never runs on startup or in the background.
+After the configured fields are read, KaosEghis sends one `{ESC}` to close the Patient
+Information view. Escape is never sent when that view could not be resolved.
 
 The preferred telephone value is `txt휴대폰`; `txt전화` is used only when the mobile
 field is blank. Date of birth is shown transiently on the Vaccine page and is not added

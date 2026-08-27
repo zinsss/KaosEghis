@@ -71,6 +71,7 @@ def test_fetch_opens_patient_info_and_reads_all_fields() -> None:
     )
 
     clicks: list[tuple[int, int]] = []
+    closes: list[bool] = []
     desktop = _Desktop(
         _Root(1, {}),
         _Root(
@@ -94,6 +95,7 @@ def test_fetch_opens_patient_info_and_reads_all_fields() -> None:
         connection_checker=lambda _settings: _ready_state(),
         desktop_factory=lambda **_kwargs: desktop,
         clicker=clicks.append,
+        closer=lambda: closes.append(True),
     )
 
     assert result.success is True
@@ -105,6 +107,7 @@ def test_fetch_opens_patient_info_and_reads_all_fields() -> None:
     assert result.context.patient_birth_date == "1970-01-01"
     assert result.context.patient_phone == "010-1111-2222"
     assert clicks == [(209, 155)]
+    assert closes == [True]
 
 
 def test_fetch_uses_telephone_when_mobile_is_blank() -> None:
@@ -135,6 +138,7 @@ def test_fetch_uses_telephone_when_mobile_is_blank() -> None:
         connection_checker=lambda _settings: _ready_state(),
         desktop_factory=lambda **_kwargs: desktop,
         clicker=lambda _coords: None,
+        closer=lambda: None,
     )
 
     assert result.success is True
@@ -176,3 +180,31 @@ def test_fetch_rejects_missing_chart_target_without_clicking() -> None:
     assert result.success is False
     assert result.message == "Vaccine patient chart target is not configured."
     assert clicks == []
+
+
+def test_fetch_keeps_context_when_escape_close_fails() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    desktop = _Desktop(
+        _Root(1, {}),
+        _Root(2, {"txtPatientNo": "1170"}),
+    )
+
+    def fail_close() -> None:
+        raise RuntimeError("keyboard unavailable")
+
+    result = fetch_vaccine_patient_context(
+        {},
+        {"chart_no": "txtPatientNo"},
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: desktop,
+        clicker=lambda _coords: None,
+        closer=fail_close,
+    )
+
+    assert result.success is True
+    assert result.context is not None
+    assert result.context.chart_no == "1170"
+    assert "Close the Patient Information window manually." in result.message
