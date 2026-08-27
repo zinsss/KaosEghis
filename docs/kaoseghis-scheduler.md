@@ -227,6 +227,12 @@ The password must not be stored in a macro step, scheduler row, setting, result,
 The workflow must block when the KaosEghis-pw vault is locked or the configured
 credential entry is unavailable.
 
+The verified KaosEghis-pw service-entry reference is `eGhis EMR`. The entry contains an
+ID/username as well as a password, but the normal eGHIS inactivity lock requires only
+the password. This workflow must retrieve and type only the password field. It must not
+type the saved ID/username unless a separately captured and verified future login screen
+explicitly requires it.
+
 ### Captured eGHIS Controls
 
 The following controls were captured from the current production eGHIS build on
@@ -277,7 +283,6 @@ toggle this checkbox directly rather than send a blind Space key.
 - backup confirmation button and its parent dialog/window
 - final/default backup action control, if it is separate from the confirmation above
 - schedule time and selected weekdays
-- KaosEghis-pw service-entry name that supplies the eGHIS password
 
 Every write step remains independently configurable in the macro. Exact dialog targets
 must be captured and manually tested first. The macro must not force-kill eGHIS, click
