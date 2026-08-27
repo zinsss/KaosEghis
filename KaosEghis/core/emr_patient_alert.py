@@ -13,7 +13,7 @@ from KaosEghis.core.eghis_connector import get_cached_eghis_state
 
 
 DEFAULT_ALERT_MARKER = "***"
-DEFAULT_CHART_AUTOMATION_ID = "792028"
+DEFAULT_CHART_AUTOMATION_ID = ""
 DEFAULT_MEMO_SCOPE_AUTOMATION_ID = ""
 DEFAULT_MEMO_TEXT_AUTOMATION_ID = "TreatmentPtntMemo"
 

@@ -57,7 +57,7 @@ class SettingsTab(QWidget):
         self.patient_alert_chart_scope_automation_id = QLineEdit()
         self.patient_alert_chart_automation_id = QLineEdit()
         self.patient_alert_chart_automation_id.setPlaceholderText(
-            "Inspect.exe AutomationId, for example 792028"
+            "Stable Inspect.exe AutomationId; do not enter the displayed chart number"
         )
         self.patient_alert_chart_name = QLineEdit()
         self.patient_alert_chart_name.setPlaceholderText(

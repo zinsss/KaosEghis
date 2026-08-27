@@ -24,7 +24,7 @@ def test_settings_panel_instantiates(tmp_path) -> None:
     assert tab.kaospacs_gateway_api_token.echoMode() == tab.kaospacs_gateway_api_token.EchoMode.Password
     assert tab.kaospacs_integration_token.echoMode() == tab.kaospacs_integration_token.EchoMode.Password
     assert tab.patient_alert_enabled.isChecked() is True
-    assert tab.patient_alert_chart_automation_id.text() == "792028"
+    assert tab.patient_alert_chart_automation_id.text() == ""
     assert tab.patient_alert_memo_scope_automation_id.text() == ""
     assert tab.patient_alert_memo_automation_id.text() == "TreatmentPtntMemo"
     assert tab.patient_alert_memo_name.text() == ""
@@ -87,7 +87,7 @@ def test_previous_patient_alert_defaults_upgrade_to_verified_targets(tmp_path) -
         )
         settings = get_settings(connection)
 
-    assert settings["eghis_patient_alert_chart_automation_id"] == "792028"
+    assert settings["eghis_patient_alert_chart_automation_id"] == "lblChartNo"
     assert settings["eghis_patient_alert_memo_scope_automation_id"] == ""
     assert settings["eghis_patient_alert_memo_automation_id"] == "TreatmentPtntMemo"
     assert settings["eghis_patient_alert_memo_name"] == ""
@@ -112,7 +112,7 @@ def test_reversed_chart_target_settings_are_normalized(tmp_path) -> None:
         )
         settings = get_settings(connection)
 
-    assert settings["eghis_patient_alert_chart_automation_id"] == "792028"
+    assert settings["eghis_patient_alert_chart_automation_id"] == "lblChartNo"
     assert settings["eghis_patient_alert_chart_name"] == ""
 
 
@@ -124,7 +124,28 @@ def test_chart_target_placeholders_distinguish_id_from_patient_value(tmp_path) -
     tab = SettingsTab(db_path=tmp_path / "KaosEghis.sqlite")
 
     assert "AutomationId" in tab.patient_alert_chart_automation_id.placeholderText()
+    assert "displayed chart number" in tab.patient_alert_chart_automation_id.placeholderText()
     assert "do not enter" in tab.patient_alert_chart_name.placeholderText()
+
+
+def test_numeric_patient_values_are_not_used_as_chart_selectors(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "eghis_patient_alert_chart_automation_id": "724506",
+                "eghis_patient_alert_chart_name": "724506",
+            },
+        )
+        settings = get_settings(connection)
+
+    assert settings["eghis_patient_alert_chart_automation_id"] == ""
+    assert settings["eghis_patient_alert_chart_name"] == ""
 
 
 def test_settings_internal_pages_are_reachable(tmp_path) -> None:

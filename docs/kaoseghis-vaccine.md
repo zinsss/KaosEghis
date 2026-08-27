@@ -36,15 +36,15 @@ Database initialization adds these configurable UIA targets to every EMR profile
 
 | Target key | Purpose | Seeded selector |
 | --- | --- | --- |
-| `vaccine.patient_chart_no` | Patient chart number | Automation ID `792028` |
+| `vaccine.patient_chart_no` | Patient chart number | Configure from the current eGHIS UI |
 | `vaccine.patient_resident_id` | Resident number | Configure from the current eGHIS UI |
 | `vaccine.patient_phone` | Telephone | Configure from the current eGHIS UI |
 | `vaccine.patient_address` | Address | Configure from the current eGHIS UI |
 
 The target definitions are available under `Macros -> EMR`. Initialization never
-overwrites selectors already configured by the operator. Only the chart-number selector
-is prefilled because it has been verified against the current eGHIS build; selectors
-from the legacy eGHIS build are not copied automatically.
+overwrites stable selectors already configured by the operator. Numeric values that
+match the displayed patient number are removed because eGHIS regenerates them between
+sessions; selectors from the legacy eGHIS build are not copied automatically.
 
 This specification preserves the proven workflow and rule structure from the former
 `eGhis_Assistant` Labeler module. The vaccine catalog and seasonal rule values must be

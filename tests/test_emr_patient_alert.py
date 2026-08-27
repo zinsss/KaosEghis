@@ -188,6 +188,9 @@ def test_patient_alert_probe_backs_off_after_failed_chart_resolution() -> None:
     now = [100.0]
     root = _Node()
     probe = EmrPatientAlertProbe(
+        configuration=EmrPatientAlertConfiguration(
+            chart_automation_id="ChartId",
+        ),
         state_provider=_connected_state,
         desktop_factory=lambda **_kwargs: _Desktop(root),
         clock=lambda: now[0],
@@ -229,10 +232,10 @@ def test_patient_alert_configuration_uses_editable_uia_fields() -> None:
     )
 
 
-def test_patient_alert_configuration_uses_verified_direct_target_defaults() -> None:
+def test_patient_alert_configuration_does_not_guess_chart_target_defaults() -> None:
     configuration = patient_alert_configuration_from_settings({})
 
-    assert configuration.chart_automation_id == "792028"
+    assert configuration.chart_automation_id == ""
     assert configuration.memo_scope_automation_id == ""
     assert configuration.memo_automation_id == "TreatmentPtntMemo"
     assert configuration.memo_name == ""

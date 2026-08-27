@@ -220,7 +220,8 @@ That means:
 ## Patient Note Alert Monitor
 
 KaosEghis polls only the configured current-patient chart-number UIA target while an
-EMR connection is cached. The verified chart Automation ID is `792028`. When that
+EMR connection is cached. The chart-number target must use a stable UIA selector rather
+than the displayed numeric patient number, which changes between eGHIS sessions. When that
 value changes, the monitor waits briefly for the patient view to settle, resolves the
 configured memo target, and reads that memo once for the new patient. The default memo
 path is the directly readable `TreatmentPtntMemo` target. Scope, Name, and an

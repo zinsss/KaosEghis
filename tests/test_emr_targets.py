@@ -148,7 +148,7 @@ def test_vaccine_patient_targets_are_seeded_for_emr_profiles(tmp_path) -> None:
                 for key in expected_keys
             }
             assert all(target is not None for target in targets.values())
-            assert targets["vaccine.patient_chart_no"].automation_id == "792028"
+            assert targets["vaccine.patient_chart_no"].automation_id is None
             assert targets["vaccine.patient_resident_id"].automation_id is None
             assert targets["vaccine.patient_phone"].automation_id is None
             assert targets["vaccine.patient_address"].automation_id is None
@@ -193,6 +193,47 @@ def test_vaccine_target_seed_preserves_configured_selectors(tmp_path) -> None:
     assert preserved is not None
     assert preserved.automation_id == "verified-phone-id"
     assert preserved.control_type == "Edit"
+
+
+def test_numeric_vaccine_chart_selector_is_removed_on_startup(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = get_default_emr_target_profile(connection)
+        assert profile is not None
+        target = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "vaccine.patient_chart_no",
+        )
+        assert target is not None
+        connection.execute(
+            """
+            UPDATE emr_ui_targets
+            SET automation_id = ?, name_match = ?
+            WHERE id = ?
+            """,
+            ("724506", "724506", target.id),
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        migrated = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "vaccine.patient_chart_no",
+        )
+
+    assert migrated is not None
+    assert migrated.automation_id is None
+    assert migrated.name_match is None
 
 
 def test_emr_target_profile_migration_adds_grid_automation_columns(tmp_path) -> None:

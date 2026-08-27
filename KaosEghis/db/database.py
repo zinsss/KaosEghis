@@ -14,7 +14,7 @@ VACCINE_EMR_TARGET_DEFAULTS = (
     (
         "vaccine.patient_chart_no",
         "Vaccine patient chart No",
-        "792028",
+        None,
     ),
     (
         "vaccine.patient_resident_id",
@@ -75,6 +75,7 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_pacs_audit_events(connection)
         _migrate_emr_target_profiles(connection)
         _migrate_emr_ui_targets(connection)
+        _migrate_unstable_patient_number_selectors(connection)
         _migrate_vaccine_tables(connection)
         _seed_default_emr_target_profile(connection)
         _seed_vaccine_emr_targets(connection)
@@ -541,6 +542,43 @@ def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_emr_ui_targets_profile_target_key ON emr_ui_targets(profile_id, target_key)"
     )
+
+
+def _migrate_unstable_patient_number_selectors(
+    connection: sqlite3.Connection,
+) -> None:
+    for key in (
+        "eghis_patient_alert_chart_automation_id",
+        "eghis_patient_alert_chart_name",
+    ):
+        row = connection.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (key,),
+        ).fetchone()
+        if row is not None and str(row[0] or "").strip().isdigit():
+            connection.execute(
+                "UPDATE app_settings SET value = '', updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+                (key,),
+            )
+
+    rows = connection.execute(
+        """
+        SELECT id, automation_id, name_match
+        FROM emr_ui_targets
+        WHERE target_key = 'vaccine.patient_chart_no'
+        """
+    ).fetchall()
+    for target_id, automation_id, name_match in rows:
+        updates: list[str] = []
+        if str(automation_id or "").strip().isdigit():
+            updates.append("automation_id = NULL")
+        if str(name_match or "").strip().isdigit():
+            updates.append("name_match = NULL")
+        if updates:
+            connection.execute(
+                f"UPDATE emr_ui_targets SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (target_id,),
+            )
 
 
 def _seed_default_emr_target_profile(connection: sqlite3.Connection) -> None:

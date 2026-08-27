@@ -13,7 +13,7 @@ LEGACY_PATIENT_ALERT_DEFAULTS = {
     "eghis_patient_alert_memo_name": "eghisRichTexbox",
 }
 PATIENT_ALERT_DEFAULTS = {
-    "eghis_patient_alert_chart_automation_id": "792028",
+    "eghis_patient_alert_chart_automation_id": "lblChartNo",
     "eghis_patient_alert_memo_scope_automation_id": "",
     "eghis_patient_alert_memo_automation_id": "TreatmentPtntMemo",
     "eghis_patient_alert_memo_name": "",
@@ -30,7 +30,7 @@ DEFAULT_SETTINGS = {
     "eghis_patient_status_tab_automation_id": "tabProc",
     "eghis_patient_alert_enabled": "true",
     "eghis_patient_alert_chart_scope_automation_id": "",
-    "eghis_patient_alert_chart_automation_id": "792028",
+    "eghis_patient_alert_chart_automation_id": "",
     "eghis_patient_alert_chart_name": "",
     "eghis_patient_alert_memo_scope_automation_id": "",
     "eghis_patient_alert_memo_automation_id": "TreatmentPtntMemo",
@@ -451,7 +451,11 @@ def get_settings(connection: sqlite3.Connection) -> dict[str, str]:
         settings.get(key) == value
         for key, value in REVERSED_PATIENT_ALERT_CHART_TARGET.items()
     ):
-        settings["eghis_patient_alert_chart_automation_id"] = "792028"
+        settings["eghis_patient_alert_chart_automation_id"] = "lblChartNo"
+        settings["eghis_patient_alert_chart_name"] = ""
+    if settings.get("eghis_patient_alert_chart_automation_id", "").strip().isdigit():
+        settings["eghis_patient_alert_chart_automation_id"] = ""
+    if settings.get("eghis_patient_alert_chart_name", "").strip().isdigit():
         settings["eghis_patient_alert_chart_name"] = ""
     web_admin_url = (settings.get("kaospacs_web_admin_url") or "").strip()
     if not web_admin_url or web_admin_url == LEGACY_KAOSPACS_WEB_ADMIN_URL:
