@@ -204,13 +204,14 @@ implemented but is created only by an explicit Scheduler control, disabled by de
 hidden from Launcher, and never assigned a schedule automatically. Backup-file copying
 is still not implemented, and claim-day work remains planning-only.
 
-The end-of-day macro uses three editable EMR target keys:
-`shutdown.lock_password`, `shutdown.close_yes`, and
+The end-of-day macro uses four editable EMR target keys:
+`shutdown.lock_password`, `shutdown.close_yes`, `shutdown.backup_yes`, and
 `shutdown.power_off_after_backup`. The first action may inspect the known eGHIS lock
 dialog without treating that expected dialog as an unknown-modal failure. It types only
 the password retrieved from the unlocked KaosEghis-pw entry `eGhis EMR`; the saved
-username is ignored. Later actions activate the exact close/backup Yes button and the
-exact backup power-off checkbox. Missing or ambiguous targets stop execution. No
+username is ignored. Later actions independently activate the close Yes button, wait,
+activate the database-backup Yes button, wait again, and select the exact backup
+power-off checkbox. Missing or ambiguous targets stop execution. No
 credential value is stored in SQLite, macro steps, Scheduler history, or UI logs.
 - hidden background macro service
 - generic recorder

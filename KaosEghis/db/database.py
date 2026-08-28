@@ -68,8 +68,8 @@ EGHIS_SHUTDOWN_TARGET_DEFAULTS = (
     },
     {
         "target_key": "shutdown.close_yes",
-        "label": "eGHIS close and backup confirmation",
-        "description": "Yes button that closes eGHIS and starts its database backup.",
+        "label": "eGHIS close confirmation",
+        "description": "First Yes button that confirms closing eGHIS.",
         "automation_id": None,
         "control_type": "Button",
         "name_match": "예(Y)",
@@ -77,6 +77,15 @@ EGHIS_SHUTDOWN_TARGET_DEFAULTS = (
             '[{"name":"확인","control_type":"Window"},'
             '{"name":"이지스 전자차트 2.0","control_type":"Window"}]'
         ),
+    },
+    {
+        "target_key": "shutdown.backup_yes",
+        "label": "eGHIS database backup confirmation",
+        "description": "Second Yes button that confirms the eGHIS database backup.",
+        "automation_id": None,
+        "control_type": "Button",
+        "name_match": "예(Y)",
+        "ancestor_path": '[{"name":"확인","control_type":"Window"}]',
     },
     {
         "target_key": "shutdown.power_off_after_backup",

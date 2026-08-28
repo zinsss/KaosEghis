@@ -71,10 +71,11 @@ No source deletion and no live PostgreSQL-directory copy should be included init
 ## End-of-Day Implementation
 
 The eGHIS end-of-day backup workflow is implemented as a disabled saved macro that is
-created only when the operator presses `Create end-of-day macro`. It uses verified,
-editable EMR targets for the inactivity-lock password, graceful-close confirmation, and
-shutdown-after-backup checkbox. No schedule is seeded; the operator supplies the time
-and weekdays after manual review.
+created only when the operator presses `Create end-of-day macro`. It uses editable EMR
+targets for the inactivity-lock password, graceful-close Yes, database-backup Yes, and
+shutdown-after-backup checkbox. The two confirmations are separate ordered actions with
+waits between them. No schedule is seeded; the operator supplies the time and weekdays
+after manual review.
 
 Implementation must retain:
 

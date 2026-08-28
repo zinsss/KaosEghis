@@ -29,10 +29,13 @@ def test_end_of_day_macro_is_disabled_hidden_and_idempotent(tmp_path) -> None:
     assert len(matching) == 1
     assert [step.action for step in steps] == [
         "unlock_eghis",
-        "focus_window",
         "delay_ms",
         "hotkey",
+        "delay_ms",
         "confirm_eghis_backup",
+        "delay_ms",
+        "confirm_eghis_backup",
+        "delay_ms",
         "check_eghis_shutdown_after_backup",
     ]
     assert [step.target_id for step in steps] == [
@@ -41,10 +44,84 @@ def test_end_of_day_macro_is_disabled_hidden_and_idempotent(tmp_path) -> None:
         None,
         None,
         "shutdown.close_yes",
+        None,
+        "shutdown.backup_yes",
+        None,
         "shutdown.power_off_after_backup",
     ]
     assert steps[0].value == "eGhis EMR"
-    assert steps[3].value == "{ALT}{F4}"
+    assert steps[2].value == "{ALT}{F4}"
+    assert [steps[index].value for index in (1, 3, 5, 7)] == [
+        "1000",
+        "1000",
+        "1000",
+        "2000",
+    ]
+
+
+def test_legacy_single_confirmation_macro_is_corrected_and_disabled(tmp_path) -> None:
+    from KaosEghis.core.eghis_shutdown import (
+        END_OF_DAY_CREDENTIAL_REFERENCE,
+        END_OF_DAY_MACRO_NAME,
+        LOCK_PASSWORD_TARGET_KEY,
+        POWER_OFF_CHECKBOX_TARGET_KEY,
+        create_eghis_end_of_day_macro,
+    )
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_item,
+        create_macro_step,
+        get_default_emr_target_profile,
+        list_macro_steps,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = get_default_emr_target_profile(connection)
+        assert profile is not None
+        macro = create_item(
+            connection,
+            END_OF_DAY_MACRO_NAME,
+            "macro",
+            is_enabled=True,
+            emr_target_profile_id=profile.id,
+            is_launcher_exposed=False,
+        )
+        legacy_steps = (
+            (1, "unlock_eghis", LOCK_PASSWORD_TARGET_KEY, END_OF_DAY_CREDENTIAL_REFERENCE, 10.0),
+            (2, "focus_window", None, None, 5.0),
+            (3, "delay_ms", None, "1000", 5.0),
+            (4, "hotkey", None, "{ALT}{F4}", 5.0),
+            (5, "confirm_eghis_backup", "shutdown.close_yes", None, 10.0),
+            (
+                6,
+                "check_eghis_shutdown_after_backup",
+                POWER_OFF_CHECKBOX_TARGET_KEY,
+                None,
+                30.0,
+            ),
+        )
+        for order, action, target_id, value, timeout in legacy_steps:
+            create_macro_step(
+                connection,
+                macro.id,
+                order,
+                action,
+                target_id,
+                value,
+                timeout,
+                0,
+            )
+
+        corrected, changed = create_eghis_end_of_day_macro(connection)
+        steps = list_macro_steps(connection, corrected.id)
+
+    assert changed is True
+    assert corrected.is_enabled is False
+    assert len(steps) == 9
+    assert steps[4].target_id == "shutdown.close_yes"
+    assert steps[6].target_id == "shutdown.backup_yes"
 
 
 def test_process_scoped_resolver_searches_connected_process_windows(monkeypatch) -> None:
@@ -137,7 +214,7 @@ def test_end_of_day_macro_dry_run_never_reads_password_or_sends_input(
     ).execute_macro(macro.id, dry_run=True)
 
     assert result.success is True
-    assert result.executed_steps == 6
+    assert result.executed_steps == 9
     assert "credential_reference=eGhis EMR" in result.message
     assert "password never displayed" in result.message
     assert "test-lock-password" not in result.message

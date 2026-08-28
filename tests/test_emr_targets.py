@@ -228,6 +228,9 @@ def test_eghis_shutdown_targets_are_seeded_for_emr_profiles(tmp_path) -> None:
             confirm_target = get_emr_ui_target_by_key(
                 connection, profile_id, "shutdown.close_yes"
             )
+            backup_target = get_emr_ui_target_by_key(
+                connection, profile_id, "shutdown.backup_yes"
+            )
             power_target = get_emr_ui_target_by_key(
                 connection, profile_id, "shutdown.power_off_after_backup"
             )
@@ -242,6 +245,12 @@ def test_eghis_shutdown_targets_are_seeded_for_emr_profiles(tmp_path) -> None:
             assert confirm_target.name_match == "예(Y)"
             assert confirm_target.control_type == "Button"
             assert "확인" in (confirm_target.ancestor_path or "")
+
+            assert backup_target is not None
+            assert backup_target.automation_id is None
+            assert backup_target.name_match == "예(Y)"
+            assert backup_target.control_type == "Button"
+            assert "확인" in (backup_target.ancestor_path or "")
 
             assert power_target is not None
             assert power_target.automation_id == "chkShutDown"
@@ -541,6 +550,7 @@ def test_emr_ui_target_crud(tmp_path) -> None:
     assert {target.target_key for target in after_delete} == {
         "shutdown.lock_password",
         "shutdown.close_yes",
+        "shutdown.backup_yes",
         "shutdown.power_off_after_backup",
         "vaccine.patient_chart_no",
         "vaccine.patient_resident_id",

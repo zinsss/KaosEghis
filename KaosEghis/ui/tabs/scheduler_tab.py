@@ -239,7 +239,7 @@ class SchedulerTab(QWidget):
         self.refresh_view()
         if created:
             self.log.setPlainText(
-                f"Created disabled macro '{macro.name}'. Review and enable it before "
+                f"Created or corrected disabled macro '{macro.name}'. Review and enable it before "
                 "creating a schedule. No macro was run."
             )
             return

@@ -353,7 +353,12 @@ class MacroRunner:
             return MacroRunResult(False, message, 0, None)
         if not self._activate_target_element(target):
             return MacroRunResult(False, "input failed", 0, None)
-        return MacroRunResult(True, "Confirmed eGHIS close and database backup.", 1, None)
+        return MacroRunResult(
+            True,
+            f"Activated configured eGHIS confirmation '{step.target_id}'.",
+            1,
+            None,
+        )
 
     def _run_check_eghis_shutdown_after_backup(
         self,

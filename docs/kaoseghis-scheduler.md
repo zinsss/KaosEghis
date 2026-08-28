@@ -213,25 +213,25 @@ rename it into place. Source deletion is out of scope for the first backup miles
 
 The guarded end-of-day sequence is implemented as the saved macro
 `eGHIS End-of-Day Backup and Power Off`. Scheduler exposes `Create end-of-day macro`,
-which creates this definition once. It does not create a schedule, enable the macro, or
-run it. The operator must review its targets and dry run, explicitly enable it, and then
-choose the schedule time and weekdays.
+which creates this definition once or corrects the exact earlier one-confirmation
+definition. A corrected definition is disabled again. It does not create a schedule or
+run the macro. The operator must review its targets and dry run, explicitly enable it,
+and then choose the schedule time and weekdays.
 
 The generated sequence is:
 
-1. Focus the manually connected eGHIS process/window.
-2. If the verified eGHIS lock screen is present, type its password from an unlocked
-   KaosEghis-pw credential entry and submit it.
+1. Focus the manually connected eGHIS process/window and, if its verified inactivity
+   lock is present, type the vault password and submit it.
+2. Wait for the patient-facing window to settle.
 3. Send `Alt+F4` to the verified eGHIS window.
-4. Wait for the exact close/backup confirmation dialog and activate its Yes button.
-   eGHIS starts its database backup automatically after this confirmation.
-5. Wait for the eGHIS Backup window and check the verified power-off-after-backup
+4. Wait, then activate the configured close-confirmation Yes button.
+5. Wait, then activate the independently configured database-backup Yes button.
+6. Wait for the eGHIS Backup window and check the verified power-off-after-backup
    checkbox.
 
-The stored actions are `unlock_eghis`, `focus_window`, `delay_ms`, `hotkey`,
-`confirm_eghis_backup`, and `check_eghis_shutdown_after_backup`. They run in that order
-and stop on the first failure. The macro is hidden from Launcher and disabled by
-default.
+The stored actions are `unlock_eghis`, `delay_ms`, `hotkey`, two ordered
+`confirm_eghis_backup` steps, and `check_eghis_shutdown_after_backup`. They stop on the
+first failure. The macro is hidden from Launcher and disabled by default.
 
 The password must not be stored in a macro step, scheduler row, setting, result, or log.
 The workflow must block when the KaosEghis-pw vault is locked or the configured
@@ -270,7 +270,7 @@ field, retrieve only the password from the `eGhis EMR` KaosEghis-pw entry, type 
 submit it. If the dialog or field is absent, ambiguous, or not focusable, the workflow
 must block without typing any credential.
 
-#### Close and backup confirmation
+#### Close confirmation
 
 Parent dialog:
 
@@ -288,9 +288,16 @@ Yes button:
 
 The observed handle and Automation ID were both `45881156`. That number is a transient
 window handle and must not be saved or used as an Automation ID selector. Resolve this
-button by its parent dialog, UIA Name, and control type. The operator confirmed that
-activating this Yes button starts the eGHIS database backup automatically. No second
-blind Enter or separate backup-confirmation action is required.
+button by its parent dialog, UIA Name, and control type. This first Yes confirms closing
+eGHIS only.
+
+#### Database-backup confirmation
+
+The database backup requires a second Yes after the close confirmation. It has its own
+editable target, `shutdown.backup_yes`, so its ancestor, Automation ID, Name, control
+type, and class can be updated independently after an eGHIS release. The seeded fallback
+uses UIA Name `예(Y)`, control type `Button`, and a parent window named `확인`; the operator
+must verify this target against the installed eGHIS build before enabling the macro.
 
 #### Power off after backup
 
@@ -315,6 +322,7 @@ These controls are saved as editable EMR-profile targets under Macros > EMR:
 
 - `shutdown.lock_password`
 - `shutdown.close_yes`
+- `shutdown.backup_yes`
 - `shutdown.power_off_after_backup`
 
 Initialization seeds verified defaults for each profile but preserves an operator's
@@ -325,7 +333,7 @@ the sequence.
 
 ### Operator Configuration Still Required
 
-- review and manually test the three targets against the installed eGHIS build
+- review and manually test the four targets against the installed eGHIS build
 - enable the macro only after the test succeeds
 - create a Scheduler job with the intended time and selected weekdays
 
