@@ -1,6 +1,6 @@
 # KaosEghis Design
 
-Last updated: 2026-08-20
+Last updated: 2026-08-28
 
 ## Purpose
 
@@ -172,6 +172,21 @@ Dedicated KaosEghis-scan surface.
 - native file drag-out for manual browser upload
 - `View folder` fallback
 - configurable periodic cleanup and explicit `Clean now`
+
+### `Workspace`
+
+Workspace groups embedded document services and compact local tools behind its own top
+navigation. Its `Formatter` page provides a reusable Korean compact-date formatter:
+
+- accepts comma-separated `YYYY-MM-DD` values
+- sorts and deduplicates dates
+- groups days by month and months by year
+- removes leading zeroes in the rendered Korean text
+- rejects malformed or impossible dates with a controlled UI validation message
+- copies only the formatted result when the operator presses `Copy`
+
+The date transformation lives in `KaosEghis/core/date_formatting.py` and has no database,
+network, EMR, or macro side effects.
 
 ### `Scheduler`
 

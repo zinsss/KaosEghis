@@ -79,6 +79,7 @@ from KaosEghis.db.repositories import (
     update_item,
 )
 from KaosEghis.ui.tabs.eghis_assist_tab import MacroEditorDialog
+from KaosEghis.ui.tabs.date_formatter_page import DateFormatterPage
 from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
 from KaosEghis.ui.tabs.flu_report_tab import FluReportTab
 from KaosEghis.ui.tabs.service_web_tab import ServiceWebTab
@@ -227,7 +228,7 @@ class MacrosTab(QWidget):
 
 
 class WorkspaceTab(QWidget):
-    TOP_PAGES = ["Mail", "Paperless", "PDF", "rHWP", "Flu-Report", "Scan"]
+    TOP_PAGES = ["Mail", "Paperless", "PDF", "rHWP", "Flu-Report", "Scan", "Formatter"]
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -261,6 +262,7 @@ class WorkspaceTab(QWidget):
         )
         self.flu_report_page = FluReportTab()
         self.scan_page = ScanTab(db_path)
+        self.formatter_page = DateFormatterPage()
 
         for page in (
             self.mail_page,
@@ -269,6 +271,7 @@ class WorkspaceTab(QWidget):
             self.rhwp_page,
             self.flu_report_page,
             self.scan_page,
+            self.formatter_page,
         ):
             self.stacked_widget.addWidget(page)
 

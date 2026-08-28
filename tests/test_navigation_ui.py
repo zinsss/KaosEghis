@@ -191,7 +191,15 @@ def test_workspace_tab_pages_are_reachable(tmp_path, monkeypatch) -> None:
 
     tab = WorkspaceTab(tmp_path / "KaosEghis.sqlite")
 
-    assert list(tab.nav_buttons.keys()) == ["Mail", "Paperless", "PDF", "rHWP", "Flu-Report", "Scan"]
+    assert list(tab.nav_buttons.keys()) == [
+        "Mail",
+        "Paperless",
+        "PDF",
+        "rHWP",
+        "Flu-Report",
+        "Scan",
+        "Formatter",
+    ]
     assert tab.stacked_widget.currentWidget() is tab.mail_page
 
     tab.nav_buttons["Flu-Report"].click()
@@ -199,6 +207,9 @@ def test_workspace_tab_pages_are_reachable(tmp_path, monkeypatch) -> None:
 
     tab.nav_buttons["Scan"].click()
     assert tab.stacked_widget.currentWidget() is tab.scan_page
+
+    tab.nav_buttons["Formatter"].click()
+    assert tab.stacked_widget.currentWidget() is tab.formatter_page
 
 
 def test_drag_hover_switch_helpers_only_accept_local_file_urls() -> None:

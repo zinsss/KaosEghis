@@ -1,6 +1,6 @@
 # KaosEghis Plans
 
-Last updated: 2026-08-08
+Last updated: 2026-08-28
 
 ## Current Working State
 
@@ -24,6 +24,14 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - preserve strict automation safety boundaries
 - improve top-level navigation and coherence
 - add launcher collections without losing direct-run speed for simple macros
+
+### Workspace Formatter
+
+- reusable Korean compact-date formatter implemented in the core layer
+- `Workspace > Formatter` provides explicit Format, Copy, and Clear controls
+- input is sorted and deduplicated before grouping by year and month
+- malformed or impossible dates produce controlled validation instead of partial output
+- no persistence, network request, EMR action, or automatic clipboard write
 
 ### KaosEghis-SOCL
 
