@@ -1,6 +1,6 @@
 # KaosEghis-scheduler
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 ## Status
 
@@ -236,7 +236,29 @@ explicitly requires it.
 ### Captured eGHIS Controls
 
 The following controls were captured from the current production eGHIS build on
-2026-08-27.
+2026-08-27 and 2026-08-28.
+
+#### Inactivity-lock password
+
+Parent dialog:
+
+- UIA Name: `로그인 안내`
+- Control type: `Window`
+- Ancestor: `이지스 전자차트 2.0` (`Window`)
+
+Password field:
+
+- Automation ID: `TxtPW`
+- Control type: `Edit`
+- Class observed: `WindowsForms10.Window.b.app.0.2bf8098_r6_ad1`
+- Parent target: the `로그인 안내` dialog above
+- Observed coordinate: `(1184, 992)`, diagnostic reference only
+
+The observed handle `1449044` is transient and must not be saved as a selector. The
+workflow must uniquely resolve `TxtPW` inside the `로그인 안내` window, focus that exact
+field, retrieve only the password from the `eGhis EMR` KaosEghis-pw entry, type it, and
+submit it. If the dialog or field is absent, ambiguous, or not focusable, the workflow
+must block without typing any credential.
 
 #### Close confirmation
 
@@ -279,7 +301,6 @@ toggle this checkbox directly rather than send a blind Space key.
 
 ### Captures Still Required
 
-- eGHIS lock-screen password field and its parent dialog/window
 - backup confirmation button and its parent dialog/window
 - final/default backup action control, if it is separate from the confirmation above
 - schedule time and selected weekdays
