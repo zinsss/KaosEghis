@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from KaosEghis.core.macro_runner import MacroRunner
+from KaosEghis.core.eghis_shutdown import create_eghis_end_of_day_macro
 from KaosEghis.core.scheduler import (
     SchedulerRuntime,
     calculate_next_run,
@@ -89,6 +90,10 @@ class SchedulerTab(QWidget):
 
         self.new_button = QPushButton("New schedule")
         self.new_button.clicked.connect(self.add_job)
+        self.create_shutdown_macro_button = QPushButton("Create end-of-day macro")
+        self.create_shutdown_macro_button.clicked.connect(
+            self.create_end_of_day_macro
+        )
         self.edit_button = QPushButton("Edit")
         self.edit_button.clicked.connect(self.edit_job)
         self.delete_button = QPushButton("Delete")
@@ -107,6 +112,7 @@ class SchedulerTab(QWidget):
         controls = QHBoxLayout()
         for button in (
             self.new_button,
+            self.create_shutdown_macro_button,
             self.edit_button,
             self.delete_button,
             self.toggle_button,
@@ -220,6 +226,26 @@ class SchedulerTab(QWidget):
             create_scheduler_job(connection, next_run_at=next_run_at, **data)
         self.refresh_view()
         self.log.setPlainText("Schedule created. No macro was run.")
+
+    def create_end_of_day_macro(self) -> None:
+        effective_path = self._db_path or get_database_path()
+        initialize_database(effective_path)
+        try:
+            with connect(effective_path) as connection:
+                macro, created = create_eghis_end_of_day_macro(connection)
+        except (RuntimeError, ValueError):
+            self.log.setPlainText("End-of-day macro could not be created.")
+            return
+        self.refresh_view()
+        if created:
+            self.log.setPlainText(
+                f"Created disabled macro '{macro.name}'. Review and enable it before "
+                "creating a schedule. No macro was run."
+            )
+            return
+        self.log.setPlainText(
+            f"Macro '{macro.name}' already exists. No macro was changed or run."
+        )
 
     def edit_job(self) -> None:
         job = self._selected_job()

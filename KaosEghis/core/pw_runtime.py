@@ -14,6 +14,19 @@ from KaosEghis.core.credential_vault import (
 )
 
 
+_ACTIVE_VAULT_SESSION: CredentialVaultSession | None = None
+
+
+def get_unlocked_credential_password(service_name: str) -> str | None:
+    session = _ACTIVE_VAULT_SESSION
+    if session is None:
+        return None
+    entry = session.get_entry(service_name.strip())
+    if entry is None or not entry.password:
+        return None
+    return entry.password
+
+
 @dataclass(frozen=True)
 class ForegroundWindowContext:
     hwnd: int | None
@@ -51,25 +64,34 @@ class PwRuntime(QObject):
         return self.session is not None
 
     def initialize_or_unlock(self, master_password: str) -> tuple[bool, str]:
+        global _ACTIVE_VAULT_SESSION
         try:
             if self.vault.exists():
                 self.session = self.vault.unlock(master_password)
+                _ACTIVE_VAULT_SESSION = self.session
                 self.state_changed.emit(True)
                 return True, "Credential vault unlocked."
             self.session = self.vault.create(master_password)
+            _ACTIVE_VAULT_SESSION = self.session
             self.state_changed.emit(True)
             return True, "Credential vault created and unlocked."
         except InvalidMasterPasswordError:
             self.session = None
+            _ACTIVE_VAULT_SESSION = None
             self.state_changed.emit(False)
             return False, "Master password is invalid."
         except Exception as error:
             self.session = None
+            _ACTIVE_VAULT_SESSION = None
             self.state_changed.emit(False)
             return False, f"Credential vault error: {error}"
 
     def lock(self) -> None:
+        global _ACTIVE_VAULT_SESSION
+        active_session = self.session
         self.session = None
+        if _ACTIVE_VAULT_SESSION is active_session:
+            _ACTIVE_VAULT_SESSION = None
         self.state_changed.emit(False)
 
     def current_context(self) -> ForegroundWindowContext:

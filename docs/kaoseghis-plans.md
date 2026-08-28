@@ -149,8 +149,9 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - the backup-copy macro itself is still under preparation and is not implemented
 - initial background workflow: copy completed backup artifacts to one or more approved
   destinations, including an optionally Dropbox-synchronized folder
-- initial interactive workflow: guarded eGHIS close, backup confirmation, and optional
-  `shutdown after backup` checkbox, with every action step independently toggleable
+- guarded interactive eGHIS close/backup/power-off macro implemented as an explicit,
+  disabled, hidden saved definition; target selectors remain editable under Macros > EMR
+- Scheduler never creates its time/weekdays or enables/runs it automatically
 - claim-day statistical preparation remains early planning and dry-run/manual-review
   only
 - scheduled jobs are disabled by default and use explicit missed-run policies

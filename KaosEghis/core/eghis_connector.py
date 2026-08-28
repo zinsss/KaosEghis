@@ -241,7 +241,11 @@ def refresh_cached_eghis_state(
     return _CACHED_STATE
 
 
-def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorState:
+def validate_cached_connection_identity(
+    settings: dict[str, str],
+) -> EghisConnectorState:
+    """Validate the manually cached process/window without rejecting expected modals."""
+
     global _CACHED_STATE
     state = get_cached_eghis_state()
     if state is None:
@@ -278,6 +282,23 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
         )
         _CACHED_STATE = blocked
         return blocked
+    identity_valid = replace(
+        state,
+        status="yellow",
+        window_owner_pid=owner_pid,
+        last_seen_at=_timestamp_now(),
+        message="Application identity confirmed; readiness pending.",
+    )
+    _CACHED_STATE = identity_valid
+    return identity_valid
+
+
+def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorState:
+    global _CACHED_STATE
+    state = validate_cached_connection_identity(settings)
+    if state.status == "red":
+        return state
+    owner_pid = state.window_owner_pid
     if _has_blocking_modal_dialog(state, settings):
         blocked = _manual_reconnect_required(
             state,

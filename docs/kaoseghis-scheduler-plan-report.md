@@ -68,11 +68,13 @@ Proposed first backup macro behavior:
 
 No source deletion and no live PostgreSQL-directory copy should be included initially.
 
-## End-of-Day Plan
+## End-of-Day Implementation
 
-The later eGHIS end-of-day backup workflow will also be a macro. It needs verified UI
-targets for graceful close, the exact backup prompt, the shutdown-after-backup checkbox,
-and the confirmation control.
+The eGHIS end-of-day backup workflow is implemented as a disabled saved macro that is
+created only when the operator presses `Create end-of-day macro`. It uses verified,
+editable EMR targets for the inactivity-lock password, graceful-close confirmation, and
+shutdown-after-backup checkbox. No schedule is seeded; the operator supplies the time
+and weekdays after manual review.
 
 Implementation must retain:
 
@@ -83,6 +85,10 @@ Implementation must retain:
 - no forced process kill
 - no blind keyboard confirmation
 - no operating-system shutdown fallback
+
+The implementation retrieves only the password from the unlocked KaosEghis-pw entry
+`eGhis EMR`, does not persist or log that value, stops on the first failure, and delegates
+power-off only to the verified eGHIS backup checkbox.
 
 ## Claim-Day Plan
 

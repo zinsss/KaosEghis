@@ -209,10 +209,15 @@ The backup macro must never copy live PostgreSQL data directories or partially w
 files. Initial implementation should copy to a temporary destination, verify it, then
 rename it into place. Source deletion is out of scope for the first backup milestone.
 
-## End-of-Day eGHIS Backup Direction
+## End-of-Day eGHIS Backup Macro
 
-The end-of-day workflow will be a guarded macro connected to a schedule. The requested
-operator sequence is:
+The guarded end-of-day sequence is implemented as the saved macro
+`eGHIS End-of-Day Backup and Power Off`. Scheduler exposes `Create end-of-day macro`,
+which creates this definition once. It does not create a schedule, enable the macro, or
+run it. The operator must review its targets and dry run, explicitly enable it, and then
+choose the schedule time and weekdays.
+
+The generated sequence is:
 
 1. Focus the manually connected eGHIS process/window.
 2. If the verified eGHIS lock screen is present, type its password from an unlocked
@@ -222,6 +227,11 @@ operator sequence is:
    eGHIS starts its database backup automatically after this confirmation.
 5. Wait for the eGHIS Backup window and check the verified power-off-after-backup
    checkbox.
+
+The stored actions are `unlock_eghis`, `focus_window`, `delay_ms`, `hotkey`,
+`confirm_eghis_backup`, and `check_eghis_shutdown_after_backup`. They run in that order
+and stop on the first failure. The macro is hidden from Launcher and disabled by
+default.
 
 The password must not be stored in a macro step, scheduler row, setting, result, or log.
 The workflow must block when the KaosEghis-pw vault is locked or the configured
@@ -301,14 +311,28 @@ Checkbox:
 `chkShutDown` is the preferred stable selector. The implementation should resolve and
 toggle this checkbox directly rather than send a blind Space key.
 
-### Captures Still Required
+These controls are saved as editable EMR-profile targets under Macros > EMR:
 
-- schedule time and selected weekdays
+- `shutdown.lock_password`
+- `shutdown.close_yes`
+- `shutdown.power_off_after_backup`
 
-Every write step remains independently configurable in the macro. Exact dialog targets
-must be captured and manually tested first. The macro must not force-kill eGHIS, click
-unknown dialogs, type a password without first resolving the lock field, issue blind
-confirmation keys, or call an operating-system shutdown fallback.
+Initialization seeds verified defaults for each profile but preserves an operator's
+edited selectors. This allows a future eGHIS update to be handled by updating targets
+without changing the macro sequence. Runtime resolution is limited to windows owned by
+the manually connected eGHIS process; an absent, ambiguous, or unfocusable target stops
+the sequence.
+
+### Operator Configuration Still Required
+
+- review and manually test the three targets against the installed eGHIS build
+- enable the macro only after the test succeeds
+- create a Scheduler job with the intended time and selected weekdays
+
+The macro must not force-kill eGHIS, click unknown dialogs, type a password without
+first resolving the lock field, issue blind confirmation keys, or call an
+operating-system shutdown fallback. Workstation power-off is delegated only to the
+verified eGHIS backup checkbox.
 
 ## Claim-Day Direction
 

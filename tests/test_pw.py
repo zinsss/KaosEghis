@@ -83,6 +83,33 @@ def test_pw_runtime_unlock_and_lock_transitions(tmp_path) -> None:
     assert runtime.is_unlocked is False
 
 
+def test_unlocked_credential_password_is_available_only_during_session(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.core.pw_runtime import (
+        PwRuntime,
+        get_unlocked_credential_password,
+    )
+
+    runtime = PwRuntime()
+    runtime.vault.path = tmp_path / "vault.json"
+    success, _message = runtime.initialize_or_unlock("clinic-master")
+    assert success is True
+    assert runtime.session is not None
+    runtime.session.set_entry(
+        service_name="eGhis EMR",
+        username="saved-id-is-not-used",
+        password="test-lock-password",
+    )
+
+    assert get_unlocked_credential_password("eGhis EMR") == "test-lock-password"
+    assert get_unlocked_credential_password("missing") is None
+
+    runtime.lock()
+
+    assert get_unlocked_credential_password("eGhis EMR") is None
+
+
 def test_main_window_has_hidden_pw_runtime() -> None:
     _app()
 

@@ -398,9 +398,39 @@ def test_scheduler_tab_instantiates_without_running_macro(tmp_path) -> None:
 
     assert tab.jobs_table.columnCount() == 7
     assert tab.new_button.text() == "New schedule"
+    assert tab.create_shutdown_macro_button.text() == "Create end-of-day macro"
     assert tab.dry_run_button.text() == "Dry run"
     assert tab.run_now_button.text() == "Run now"
     assert runtime.is_busy is False
+
+
+def test_scheduler_creates_disabled_end_of_day_macro_without_schedule(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.core.scheduler import SchedulerRuntime
+    from KaosEghis.db.database import connect
+    from KaosEghis.db.repositories import list_items, list_scheduler_jobs
+    from KaosEghis.ui.tabs.scheduler_tab import SchedulerTab
+
+    db_path = tmp_path / "scheduler.sqlite"
+    runtime = SchedulerRuntime(db_path)
+    tab = SchedulerTab(db_path, runtime=runtime)
+
+    tab.create_end_of_day_macro()
+
+    with connect(db_path) as connection:
+        macros = [
+            item
+            for item in list_items(connection, "macro")
+            if item.name == "eGHIS End-of-Day Backup and Power Off"
+        ]
+        jobs = list_scheduler_jobs(connection)
+
+    assert len(macros) == 1
+    assert macros[0].is_enabled is False
+    assert macros[0].is_launcher_exposed is False
+    assert jobs == []
+    assert "No macro was run" in tab.log.toPlainText()
 
 
 def test_real_macro_execution_blocks_when_another_macro_holds_lock(

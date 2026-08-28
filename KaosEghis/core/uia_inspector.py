@@ -128,6 +128,58 @@ def resolve_target_scope_element(
     return None, " | ".join(messages) if messages else "Target scope could not be resolved."
 
 
+def resolve_target_element_in_cached_process(
+    target: UiTargetRecord,
+    *,
+    desktop_type: Any | None = None,
+) -> tuple[Any | None, str]:
+    """Resolve a target across top-level windows owned by the cached eGHIS PID."""
+
+    cached_state = get_cached_eghis_state()
+    cached_pid = getattr(cached_state, "pid", None)
+    if cached_pid is None:
+        return None, "Application is not connected."
+    if desktop_type is None:
+        try:
+            from pywinauto import Desktop
+        except ImportError:
+            return None, "pywinauto is not installed; UIA inspection unavailable."
+        desktop_type = Desktop
+
+    messages: list[str] = []
+    for backend in _preferred_backend_order(target):
+        try:
+            desktop = desktop_type(backend=backend)
+            windows = desktop.windows(process=int(cached_pid))
+        except Exception:
+            messages.append(f"{backend}: unable to inspect connected application windows")
+            continue
+
+        matches: list[Any] = []
+        seen_handles: set[int] = set()
+        for window in windows:
+            match, _parent_found, message = _resolve_target_element(window, target, set())
+            if match is None:
+                if message:
+                    messages.append(f"{backend}: {message}")
+                continue
+            handle = _window_handle(match)
+            if handle is not None and handle in seen_handles:
+                continue
+            if handle is not None:
+                seen_handles.add(handle)
+            matches.append(match)
+
+        if len(matches) == 1:
+            return matches[0], "Target found in connected application process."
+        if len(matches) > 1:
+            return None, f"Target matched {len(matches)} elements in connected application process."
+
+    if messages:
+        return None, messages[-1]
+    return None, "Target could not be resolved in connected application process."
+
+
 def _preferred_backend_order(target: UiTargetRecord) -> tuple[str, ...]:
     has_parent_scope = bool(
         _clean(target.parent_automation_id) or _clean(getattr(target, "ancestor_path", None))

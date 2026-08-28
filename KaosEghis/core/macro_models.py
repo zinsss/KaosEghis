@@ -19,6 +19,9 @@ class MacroAction(str, Enum):
     SET_EDIT_TEXT = "set_edit_text"
     PRESET_TEXT = "preset_text"
     LEGACY_SYMPTOM_PASTE = "legacy_symptom_paste"
+    UNLOCK_EGHIS = "unlock_eghis"
+    CONFIRM_EGHIS_BACKUP = "confirm_eghis_backup"
+    CHECK_EGHIS_SHUTDOWN_AFTER_BACKUP = "check_eghis_shutdown_after_backup"
     DELAY_MS = "delay_ms"
 
 

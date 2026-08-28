@@ -401,6 +401,9 @@ ALLOWED_MACRO_ACTIONS = {
     "paste_text",
     "preset_text",
     "legacy_symptom_paste",
+    "unlock_eghis",
+    "confirm_eghis_backup",
+    "check_eghis_shutdown_after_backup",
     "set_edit_text",
     "delay_ms",
     # Legacy actions kept for existing saved definitions and older dry-run tests.

@@ -7,6 +7,7 @@ from pathlib import Path
 import random
 import threading
 import time
+from typing import Callable
 
 from KaosEghis.core.clipboard_service import copy_text, restore_clipboard
 from KaosEghis.core.eghis_connector import (
@@ -15,11 +16,14 @@ from KaosEghis.core.eghis_connector import (
     focus_cached_eghis_window,
     get_cached_eghis_state,
     refresh_cached_eghis_state,
+    validate_cached_connection_identity,
 )
+from KaosEghis.core.pw_runtime import get_unlocked_credential_password
 from KaosEghis.core.macro_models import MacroRunResult, MacroStep
 from KaosEghis.core.uia_inspector import (
     inspect_target_readonly,
     resolve_target_element,
+    resolve_target_element_in_cached_process,
     resolve_target_scope_element,
 )
 from KaosEghis.core.wait_engine import WaitCondition, wait_for_target_condition
@@ -48,7 +52,12 @@ _MACRO_EXECUTION_LOCK = threading.Lock()
 
 
 class MacroRunner:
-    def __init__(self, db_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        *,
+        password_provider: Callable[[str], str | None] | None = None,
+    ) -> None:
         self._cancel_requested = False
         self._db_path = db_path
         self._current_settings: dict[str, str] | None = None
@@ -60,6 +69,7 @@ class MacroRunner:
         self._resolved_target_cache: dict[tuple[int | None, str, str | None], object] = {}
         self._resolved_target_aliases: dict[str, tuple[int | None, str, str | None]] = {}
         self._run_metrics = _RunMetrics()
+        self._password_provider = password_provider or get_unlocked_credential_password
 
     def cancel(self) -> None:
         self._cancel_requested = True
@@ -138,8 +148,15 @@ class MacroRunner:
                 None,
             )
 
-        state = ensure_cached_connection_ready(settings)
-        if state.status != "green":
+        starts_with_unlock = bool(
+            steps and self._action_name(steps[0]) == "unlock_eghis"
+        )
+        state = (
+            validate_cached_connection_identity(settings)
+            if starts_with_unlock
+            else ensure_cached_connection_ready(settings)
+        )
+        if state.status == "red" or (not starts_with_unlock and state.status != "green"):
             self._clear_resolved_target_cache()
             return MacroRunResult(
                 False,
@@ -150,7 +167,7 @@ class MacroRunner:
 
         executed_steps = 0
         self._current_settings = settings
-        self._connection_ready_confirmed = True
+        self._connection_ready_confirmed = state.status == "green"
         cached_state = get_cached_eghis_state()
         self._use_cached_focus = bool(
             cached_state is not None and getattr(state, "window_handle", None) is not None
@@ -275,11 +292,85 @@ class MacroRunner:
             return self._run_preset_text(step, self._require_settings())
         if action == "legacy_symptom_paste":
             return self._run_legacy_symptom_paste(step, self._require_settings())
+        if action == "unlock_eghis":
+            return self._run_unlock_eghis(step, self._require_settings())
+        if action == "confirm_eghis_backup":
+            return self._run_confirm_eghis_backup(step)
+        if action == "check_eghis_shutdown_after_backup":
+            return self._run_check_eghis_shutdown_after_backup(step)
         return MacroRunResult(False, "unsupported action", 0, None)
 
     def _run_delay(self, step: MacroStep) -> MacroRunResult:
         milliseconds = step.options.get("ms", step.value)
         return self._wait_milliseconds(milliseconds)
+
+    def _run_unlock_eghis(
+        self,
+        step: MacroStep,
+        settings: dict[str, str],
+    ) -> MacroRunResult:
+        if not step.target_id:
+            return MacroRunResult(False, "target not found", 0, None)
+        credential_reference = str(step.value or "").strip()
+        if not credential_reference:
+            return MacroRunResult(False, "credential unavailable", 0, None)
+
+        target, resolve_message = self._resolve_process_target(step.target_id)
+        if target is None:
+            ready = ensure_cached_connection_ready(settings)
+            if ready.status != "green":
+                return MacroRunResult(False, ready.message or resolve_message, 0, None)
+            self._connection_ready_confirmed = True
+            self._window_focus_applied = True
+            return MacroRunResult(True, "eGHIS was already unlocked.", 1, None)
+
+        password = self._password_provider(credential_reference)
+        if not password:
+            return MacroRunResult(False, "credential unavailable", 0, None)
+        focused, _focus_message = self._focus_target_element(target)
+        if not focused:
+            return MacroRunResult(False, "window not ready", 0, None)
+        if not self._type_secret_and_submit(password):
+            return MacroRunResult(False, "input failed", 0, None)
+
+        deadline = time.monotonic() + max(float(step.timeout_seconds or 0.0), 0.5)
+        while time.monotonic() < deadline:
+            if self._cancel_requested:
+                return MacroRunResult(False, "Macro execution canceled.", 0, None)
+            remaining_target, _message = self._resolve_process_target(step.target_id)
+            if remaining_target is None:
+                ready = ensure_cached_connection_ready(settings)
+                if ready.status == "green":
+                    self._connection_ready_confirmed = True
+                    self._window_focus_applied = True
+                    return MacroRunResult(True, "eGHIS inactivity lock cleared.", 1, None)
+            time.sleep(0.1)
+        return MacroRunResult(False, "timeout", 0, None)
+
+    def _run_confirm_eghis_backup(self, step: MacroStep) -> MacroRunResult:
+        target, message = self._wait_for_process_target(step)
+        if target is None:
+            return MacroRunResult(False, message, 0, None)
+        if not self._activate_target_element(target):
+            return MacroRunResult(False, "input failed", 0, None)
+        return MacroRunResult(True, "Confirmed eGHIS close and database backup.", 1, None)
+
+    def _run_check_eghis_shutdown_after_backup(
+        self,
+        step: MacroStep,
+    ) -> MacroRunResult:
+        target, message = self._wait_for_process_target(step)
+        if target is None:
+            return MacroRunResult(False, message, 0, None)
+        checked = self._checkbox_checked_state(target)
+        if checked is True:
+            return MacroRunResult(True, "Power off after backup was already selected.", 1, None)
+        if not self._activate_target_element(target):
+            return MacroRunResult(False, "input failed", 0, None)
+        time.sleep(0.1)
+        if self._checkbox_checked_state(target) is False:
+            return MacroRunResult(False, "input failed", 0, None)
+        return MacroRunResult(True, "Selected power off after eGHIS backup.", 1, None)
 
     def _wait_milliseconds(
         self,
@@ -1029,6 +1120,73 @@ class MacroRunner:
         self._run_metrics.resolved_targets = len(self._resolved_target_cache)
         return element, "Target resolved."
 
+    def _resolve_process_target(self, target_id: str) -> tuple[object | None, str]:
+        with connect(self._db_path or get_database_path()) as connection:
+            target_record, _cache_key = self._load_runtime_target_record(
+                connection,
+                target_id,
+            )
+        if target_record is None:
+            return None, "target not found"
+        element, message = resolve_target_element_in_cached_process(target_record)
+        if element is None:
+            if "timeout" in message.casefold():
+                return None, "timeout"
+            if _message_indicates_window_not_ready(message):
+                return None, "window not ready"
+            return None, "target not found"
+        return element, "Target resolved in connected eGHIS process."
+
+    def _wait_for_process_target(
+        self,
+        step: MacroStep,
+    ) -> tuple[object | None, str]:
+        if not step.target_id:
+            return None, "target not found"
+        deadline = time.monotonic() + max(float(step.timeout_seconds or 0.0), 0.0)
+        while True:
+            if self._cancel_requested:
+                return None, "Macro execution canceled."
+            target, message = self._resolve_process_target(step.target_id)
+            if target is not None:
+                return target, message
+            if time.monotonic() >= deadline:
+                return None, "timeout" if message == "target not found" else message
+            time.sleep(0.1)
+
+    @staticmethod
+    def _type_secret_and_submit(password: str) -> bool:
+        try:
+            import pyautogui
+
+            pyautogui.write(password, interval=0.01)
+            MacroRunner._send_keys("{ENTER}")
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _checkbox_checked_state(element: object) -> bool | None:
+        for method_name in ("get_toggle_state", "get_check_state", "is_checked"):
+            method = getattr(element, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                state = method()
+            except Exception:
+                continue
+            if isinstance(state, bool):
+                return state
+            try:
+                return int(state) != 0
+            except (TypeError, ValueError):
+                continue
+        try:
+            state = element.iface_toggle.CurrentToggleState
+            return int(state) != 0
+        except Exception:
+            return None
+
     def _focus_runtime_target(
         self,
         step: MacroStep,
@@ -1442,6 +1600,23 @@ class MacroRunner:
                 f"timeout={step.timeout_seconds} retries={step.retries} "
                 "(read-only text check)"
             )
+        if action == "unlock_eghis":
+            credential_reference = str(step.value or "(not configured)")
+            return (
+                f"{display_order}. unlock_eghis{target} "
+                f"credential_reference={credential_reference}{timing_text} "
+                f"timeout={step.timeout_seconds} (password never displayed)"
+            )
+        if action == "confirm_eghis_backup":
+            return (
+                f"{display_order}. confirm_eghis_backup{target}{timing_text} "
+                f"timeout={step.timeout_seconds} (dry run only)"
+            )
+        if action == "check_eghis_shutdown_after_backup":
+            return (
+                f"{display_order}. check_eghis_shutdown_after_backup{target}"
+                f"{timing_text} timeout={step.timeout_seconds} (dry run only)"
+            )
 
         value = step.options.get("text") or step.options.get("key") or step.value
         value_text = f" value={value}" if value else ""
@@ -1620,6 +1795,7 @@ class MacroRunner:
             "text not matched",
             "input failed",
             "clipboard failed",
+            "credential unavailable",
             "window not ready",
             "timeout",
             "unsupported action",
@@ -1639,7 +1815,17 @@ class MacroRunner:
             return "clipboard failed"
         if "unsupported" in lowered or action == "wait_text_or_image":
             return "unsupported action"
-        if action in {"click", "double_click", "hotkey", "key", "type_text", "paste_text"}:
+        if action in {
+            "click",
+            "double_click",
+            "hotkey",
+            "key",
+            "type_text",
+            "paste_text",
+            "unlock_eghis",
+            "confirm_eghis_backup",
+            "check_eghis_shutdown_after_backup",
+        }:
             if "clipboard" in lowered and action == "paste_text":
                 return "clipboard failed"
             return "input failed"

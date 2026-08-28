@@ -200,6 +200,99 @@ def test_vaccine_target_seed_preserves_configured_selectors(tmp_path) -> None:
     assert preserved.control_type == "Edit"
 
 
+def test_eghis_shutdown_targets_are_seeded_for_emr_profiles(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_emr_target_profile,
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        default_profile = get_default_emr_target_profile(connection)
+        assert default_profile is not None
+        second_profile = create_emr_target_profile(
+            connection,
+            name="Second EMR",
+            is_enabled=True,
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        for profile_id in (default_profile.id, second_profile.id):
+            lock_target = get_emr_ui_target_by_key(
+                connection, profile_id, "shutdown.lock_password"
+            )
+            confirm_target = get_emr_ui_target_by_key(
+                connection, profile_id, "shutdown.close_yes"
+            )
+            power_target = get_emr_ui_target_by_key(
+                connection, profile_id, "shutdown.power_off_after_backup"
+            )
+
+            assert lock_target is not None
+            assert lock_target.automation_id == "TxtPW"
+            assert lock_target.control_type == "Edit"
+            assert "로그인 안내" in (lock_target.ancestor_path or "")
+
+            assert confirm_target is not None
+            assert confirm_target.automation_id is None
+            assert confirm_target.name_match == "예(Y)"
+            assert confirm_target.control_type == "Button"
+            assert "확인" in (confirm_target.ancestor_path or "")
+
+            assert power_target is not None
+            assert power_target.automation_id == "chkShutDown"
+            assert power_target.control_type == "CheckBox"
+            assert "이지스 백업" in (power_target.ancestor_path or "")
+
+
+def test_shutdown_target_seed_preserves_configured_selectors(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+        update_emr_ui_target,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = get_default_emr_target_profile(connection)
+        assert profile is not None
+        target = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "shutdown.close_yes",
+        )
+        assert target is not None
+        update_emr_ui_target(
+            connection,
+            target.id,
+            target_key=target.target_key,
+            label=target.label,
+            automation_id="verified-close-button",
+            control_type="Button",
+            name_match="Updated Yes",
+            ancestor_path='[{"name":"Updated confirmation","control_type":"Window"}]',
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        preserved = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "shutdown.close_yes",
+        )
+
+    assert preserved is not None
+    assert preserved.automation_id == "verified-close-button"
+    assert preserved.name_match == "Updated Yes"
+    assert "Updated confirmation" in (preserved.ancestor_path or "")
+
+
 def test_numeric_vaccine_chart_selector_is_replaced_on_startup(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import (
@@ -446,6 +539,9 @@ def test_emr_ui_target_crud(tmp_path) -> None:
     assert "Tools" in listed[0].ancestor_path
     assert deleted is True
     assert {target.target_key for target in after_delete} == {
+        "shutdown.lock_password",
+        "shutdown.close_yes",
+        "shutdown.power_off_after_backup",
         "vaccine.patient_chart_no",
         "vaccine.patient_resident_id",
         "vaccine.patient_name",

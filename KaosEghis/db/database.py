@@ -53,6 +53,42 @@ VACCINE_EMR_TARGET_DEFAULTS = (
     ),
 )
 
+EGHIS_SHUTDOWN_TARGET_DEFAULTS = (
+    {
+        "target_key": "shutdown.lock_password",
+        "label": "eGHIS inactivity-lock password",
+        "description": "Password-only field for the verified eGHIS inactivity lock.",
+        "automation_id": "TxtPW",
+        "control_type": "Edit",
+        "name_match": None,
+        "ancestor_path": (
+            '[{"name":"로그인 안내","control_type":"Window"},'
+            '{"name":"이지스 전자차트 2.0","control_type":"Window"}]'
+        ),
+    },
+    {
+        "target_key": "shutdown.close_yes",
+        "label": "eGHIS close and backup confirmation",
+        "description": "Yes button that closes eGHIS and starts its database backup.",
+        "automation_id": None,
+        "control_type": "Button",
+        "name_match": "예(Y)",
+        "ancestor_path": (
+            '[{"name":"확인","control_type":"Window"},'
+            '{"name":"이지스 전자차트 2.0","control_type":"Window"}]'
+        ),
+    },
+    {
+        "target_key": "shutdown.power_off_after_backup",
+        "label": "Power off after eGHIS backup",
+        "description": "Checkbox that powers off the workstation after backup completes.",
+        "automation_id": "chkShutDown",
+        "control_type": "CheckBox",
+        "name_match": "백업 완료 후 PC를 자동 종료 합니다.",
+        "ancestor_path": '[{"name":"이지스 백업","control_type":"Window"}]',
+    },
+)
+
 
 def get_data_dir() -> Path:
     override = os.environ.get(DATA_DIR_ENV_VAR, "").strip()
@@ -99,6 +135,7 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_vaccine_tables(connection)
         _seed_default_emr_target_profile(connection)
         _seed_vaccine_emr_targets(connection)
+        _seed_eghis_shutdown_targets(connection)
         _seed_default_socl_vocabulary(connection)
         _seed_default_vaccine_types(connection)
         connection.commit()
@@ -670,6 +707,54 @@ def _seed_vaccine_emr_targets(connection: sqlite3.Connection) -> None:
             (
                 (profile_id, target_key, label, automation_id)
                 for target_key, label, automation_id in VACCINE_EMR_TARGET_DEFAULTS
+            ),
+        )
+
+
+def _seed_eghis_shutdown_targets(connection: sqlite3.Connection) -> None:
+    profile_ids = connection.execute(
+        "SELECT id FROM emr_target_profiles ORDER BY id"
+    ).fetchall()
+    for (profile_id,) in profile_ids:
+        connection.executemany(
+            """
+            INSERT INTO emr_ui_targets (
+                profile_id,
+                target_key,
+                label,
+                description,
+                automation_id,
+                control_type,
+                name_match,
+                ancestor_path
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(profile_id, target_key) DO UPDATE SET
+                automation_id = excluded.automation_id,
+                control_type = excluded.control_type,
+                name_match = excluded.name_match,
+                ancestor_path = excluded.ancestor_path,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE emr_ui_targets.automation_id IS NULL
+              AND emr_ui_targets.name_match IS NULL
+              AND emr_ui_targets.scope_automation_id IS NULL
+              AND emr_ui_targets.parent_target_key IS NULL
+              AND emr_ui_targets.ancestor_path IS NULL
+              AND emr_ui_targets.control_type IS NULL
+              AND emr_ui_targets.class_name IS NULL
+            """,
+            (
+                (
+                    profile_id,
+                    target["target_key"],
+                    target["label"],
+                    target["description"],
+                    target["automation_id"],
+                    target["control_type"],
+                    target["name_match"],
+                    target["ancestor_path"],
+                )
+                for target in EGHIS_SHUTDOWN_TARGET_DEFAULTS
             ),
         )
 

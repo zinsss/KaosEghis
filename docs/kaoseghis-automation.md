@@ -198,9 +198,20 @@ uses a countdown, and records sanitized history. Startup calculates future times
 does not replay missed work.
 
 Scheduled real execution uses the same `MacroRunner` path as manual execution. It
-therefore cannot bypass connector, target-resolution, modal-dialog, supported-action,
-or single-execution safety. The backup-copy and eGHIS close/backup macros are not yet
-implemented, and claim-day work remains planning-only.
+therefore cannot bypass connector, target-resolution, supported-action, or
+single-execution safety. The guarded `eGHIS End-of-Day Backup and Power Off` macro is
+implemented but is created only by an explicit Scheduler control, disabled by default,
+hidden from Launcher, and never assigned a schedule automatically. Backup-file copying
+is still not implemented, and claim-day work remains planning-only.
+
+The end-of-day macro uses three editable EMR target keys:
+`shutdown.lock_password`, `shutdown.close_yes`, and
+`shutdown.power_off_after_backup`. The first action may inspect the known eGHIS lock
+dialog without treating that expected dialog as an unknown-modal failure. It types only
+the password retrieved from the unlocked KaosEghis-pw entry `eGhis EMR`; the saved
+username is ignored. Later actions activate the exact close/backup Yes button and the
+exact backup power-off checkbox. Missing or ambiguous targets stop execution. No
+credential value is stored in SQLite, macro steps, Scheduler history, or UI logs.
 - hidden background macro service
 - generic recorder
 - unconstrained mouse automation
