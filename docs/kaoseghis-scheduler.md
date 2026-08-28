@@ -218,9 +218,9 @@ operator sequence is:
 2. If the verified eGHIS lock screen is present, type its password from an unlocked
    KaosEghis-pw credential entry and submit it.
 3. Send `Alt+F4` to the verified eGHIS window.
-4. Wait for the exact close-confirmation dialog and activate its Yes button.
-5. Wait for the exact backup confirmation and activate its confirmation control.
-6. Wait for the eGHIS Backup window and check the verified power-off-after-backup
+4. Wait for the exact close/backup confirmation dialog and activate its Yes button.
+   eGHIS starts its database backup automatically after this confirmation.
+5. Wait for the eGHIS Backup window and check the verified power-off-after-backup
    checkbox.
 
 The password must not be stored in a macro step, scheduler row, setting, result, or log.
@@ -260,7 +260,7 @@ field, retrieve only the password from the `eGhis EMR` KaosEghis-pw entry, type 
 submit it. If the dialog or field is absent, ambiguous, or not focusable, the workflow
 must block without typing any credential.
 
-#### Close confirmation
+#### Close and backup confirmation
 
 Parent dialog:
 
@@ -278,7 +278,9 @@ Yes button:
 
 The observed handle and Automation ID were both `45881156`. That number is a transient
 window handle and must not be saved or used as an Automation ID selector. Resolve this
-button by its parent dialog, UIA Name, and control type.
+button by its parent dialog, UIA Name, and control type. The operator confirmed that
+activating this Yes button starts the eGHIS database backup automatically. No second
+blind Enter or separate backup-confirmation action is required.
 
 #### Power off after backup
 
@@ -301,8 +303,6 @@ toggle this checkbox directly rather than send a blind Space key.
 
 ### Captures Still Required
 
-- backup confirmation button and its parent dialog/window
-- final/default backup action control, if it is separate from the confirmation above
 - schedule time and selected weekdays
 
 Every write step remains independently configurable in the macro. Exact dialog targets
