@@ -192,6 +192,34 @@ def test_global_launcher_action_switches_to_kaoseghis_launcher(
     assert "Ctrl+Alt+Shift+F11" in window.notification_area.text.text()
 
 
+def test_global_socl_action_opens_only_the_separate_socl_window(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+
+    import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
+
+    monkeypatch.setattr(pacs_panel_module, "check_kaospacs_health", lambda settings: True)
+    monkeypatch.setattr(
+        pacs_panel_module,
+        "run_readonly_query",
+        lambda *_args, **_kwargs: (["?column?"], [(1,)]),
+    )
+
+    from KaosEghis.ui.main_window import MainWindow
+
+    window = MainWindow()
+    window.tabs.setCurrentWidget(window.settings_tab)
+
+    window._handle_socl_hotkey()
+
+    assert window.kaoseghis_tab.socl_window.isVisible() is True
+    assert window.tabs.currentWidget() is window.settings_tab
+    assert "Ctrl+Alt+Shift+F10" in window.notification_area.text.text()
+    window.kaoseghis_tab.socl_window.close()
+
+
 def test_macros_tab_pages_are_reachable(tmp_path, monkeypatch) -> None:
     _app()
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))

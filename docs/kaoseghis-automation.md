@@ -97,6 +97,14 @@ Launcher access:
   dispatcher
 - performs navigation only; it never starts a macro automatically
 
+SOCL access:
+
+- global hotkey: `Ctrl+Alt+Shift+F10`
+- opens the independently movable SOCL window without switching the main app page
+- performs no note generation, clipboard copy, or EMR automation
+- works while another application is foreground through the Windows native hotkey
+  dispatcher
+
 ### Manual Explicit Write Tests
 
 Modules:

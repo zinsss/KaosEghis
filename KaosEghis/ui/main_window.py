@@ -23,7 +23,7 @@ from KaosEghis.core.emr_patient_alert import (
     EmrPatientAlertResult,
     patient_alert_configuration_from_settings,
 )
-from KaosEghis.core.launcher_hotkey import LauncherHotkeyRuntime
+from KaosEghis.core.launcher_hotkey import LauncherHotkeyRuntime, SoclHotkeyRuntime
 from KaosEghis.core.pw_runtime import ForegroundWindowContext, PwRuntime
 from KaosEghis.core.scheduler import SchedulerRuntime
 from KaosEghis.db.database import connect, initialize_database
@@ -90,6 +90,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("KaosEghis")
         self.setFixedSize(1438, 1194)
         self.launcher_hotkey_runtime = LauncherHotkeyRuntime(self)
+        self.socl_hotkey_runtime = SoclHotkeyRuntime(self)
         self.pw_runtime = PwRuntime(self)
         self.patient_alert_popup = EmrPatientAlertPopup()
         self.patient_alert_monitor = EmrPatientAlertMonitor(
@@ -137,6 +138,7 @@ class MainWindow(QMainWindow):
         self.pw_runtime.state_changed.connect(self._handle_pw_state_changed)
         self.pw_runtime.action_requested.connect(self._handle_pw_hotkey)
         self.launcher_hotkey_runtime.activated.connect(self._handle_launcher_hotkey)
+        self.socl_hotkey_runtime.activated.connect(self._handle_socl_hotkey)
         self._update_pacs_tab_health(self.pacs_panel.is_healthy, self.pacs_panel.health_reason)
 
         self.setCentralWidget(tabs)
@@ -155,6 +157,7 @@ class MainWindow(QMainWindow):
         self.patient_alert_popup.close()
         self.kaoseghis_tab.close_socl_window()
         self.launcher_hotkey_runtime.stop()
+        self.socl_hotkey_runtime.stop()
         self.pw_runtime.stop()
         self.scheduler_runtime.stop()
         super().closeEvent(event)
@@ -163,6 +166,11 @@ class MainWindow(QMainWindow):
         if not self.launcher_hotkey_runtime.start():
             self.show_notification(
                 "Launcher shortcut unavailable. Ctrl+Alt+Shift+F11 could not be registered.",
+                "warning",
+            )
+        if not self.socl_hotkey_runtime.start():
+            self.show_notification(
+                "SOCL shortcut unavailable. Ctrl+Alt+Shift+F10 could not be registered.",
                 "warning",
             )
         self.pw_runtime.start()
@@ -181,6 +189,15 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self.show_notification("Launcher opened (Ctrl+Alt+Shift+F11).", "info")
+
+    def _handle_socl_hotkey(self) -> None:
+        self.kaoseghis_tab.open_socl_window()
+        if os.environ.get("QT_QPA_PLATFORM", "").strip().lower() != "offscreen":
+            try:
+                _activate_hwnd(int(self.kaoseghis_tab.socl_window.winId()))
+            except Exception:
+                pass
+        self.show_notification("SOCL opened (Ctrl+Alt+Shift+F10).", "info")
 
     def _handle_patient_alert_result(self, result: EmrPatientAlertResult) -> None:
         if result.marker_found:

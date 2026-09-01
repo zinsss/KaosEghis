@@ -122,7 +122,7 @@ class KaosEghisTab(QWidget):
         self.stacked_widget = QStackedWidget()
 
         self.launcher_page = LauncherPage(db_path)
-        self.socl_window = SoclPopupWindow(db_path, self)
+        self.socl_window = SoclPopupWindow(db_path)
         self.launcher_page.socl_window_requested.connect(self.open_socl_window)
         self.procedures_page = PlaceholderPage(
             "Procedures",

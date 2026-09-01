@@ -78,6 +78,8 @@ Primary daily-use tab.
   collections
 - `Ctrl+Alt+Shift+F11` restores KaosEghis and opens the Launcher from any foreground
   application; the shortcut navigates only and never executes a launcher item
+- `Ctrl+Alt+Shift+F10` opens the independent SOCL window from any foreground
+  application without changing the main KaosEghis tab or generating/copying a note
 - direct macros run immediately
 - launcher collections open a chooser dialog on double-click and expose member
   macros from a right-click context menu

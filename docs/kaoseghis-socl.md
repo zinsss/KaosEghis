@@ -26,6 +26,12 @@ remain on the patient-facing monitor while the main fixed-size KaosEghis window 
 on the operator monitor. Closing and reopening the application restores the last valid
 SOCL screen position and size; an off-screen saved position is ignored safely.
 
+`Ctrl+Alt+Shift+F10` is the dedicated Windows global shortcut. It opens and focuses the
+SOCL window even when another application is foreground, but it does not generate,
+copy, clear, or otherwise change the current note. The neighboring application
+shortcuts remain `Ctrl+Alt+Shift+F11` for Launcher and `Ctrl+Alt+Shift+F12` for the
+hidden KaosEghis-pw surface.
+
 ### Compose
 
 The compose page contains:
