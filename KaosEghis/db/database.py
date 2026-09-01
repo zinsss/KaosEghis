@@ -119,9 +119,13 @@ def describe_database_path(path: Path | None = None) -> str:
 
 
 @contextmanager
-def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
+def connect(
+    path: Path | None = None,
+    *,
+    timeout: float = 5.0,
+) -> Iterator[sqlite3.Connection]:
     db_path = path or get_database_path()
-    connection = sqlite3.connect(db_path)
+    connection = sqlite3.connect(db_path, timeout=timeout)
     try:
         yield connection
     finally:

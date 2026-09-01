@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import sqlite3
 import threading
+import time
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -27,7 +29,7 @@ from KaosEghis.core.eghis_db import (
     EghisDbQueryRejectedError,
     EghisDbUnavailableError,
 )
-from KaosEghis.db.database import connect, initialize_database
+from KaosEghis.db.database import connect
 from KaosEghis.db.repositories import get_settings
 
 
@@ -37,6 +39,10 @@ class FluPanel(QWidget):
     REPORT_COLUMNS = ("Age Group", "Visits", "Patients")
     report_loaded = Signal(int, dict, int)
     report_failed = Signal(int, str)
+    report_unconfigured = Signal(int)
+    SETTINGS_READ_ATTEMPTS = 2
+    SETTINGS_READ_TIMEOUT_SECONDS = 0.25
+    SETTINGS_RETRY_DELAY_SECONDS = 0.1
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -105,8 +111,13 @@ class FluPanel(QWidget):
         self._populate_table({label: (0, 0) for label in AGE_GROUP_ORDER})
         self.report_loaded.connect(self._handle_report_loaded)
         self.report_failed.connect(self._handle_report_failed)
+        self.report_unconfigured.connect(self._handle_report_unconfigured)
 
     def load_report(self) -> None:
+        if self._loading:
+            self.status_label.setText("Report is already loading.")
+            return
+
         week_text = self.week_input.text().strip()
         try:
             week_number = int(week_text)
@@ -133,44 +144,35 @@ class FluPanel(QWidget):
             f"Week {week_number}, {_format_summary_range(self._current_year, start_ymd, end_ymd)}"
         )
 
-        initialize_database(self._db_path)
-        with connect(self._db_path) as connection:
-            settings = get_settings(connection)
-
-        if not (settings.get("eghis_db_connection_string") or "").strip():
-            counts = {label: (0, 0) for label in AGE_GROUP_ORDER}
-            self.total_visits_label.setText("Total Visits(Practice) Count: 0")
-            self._populate_table(counts)
-            self.status_label.setText("No eGHIS DB connection configured.")
-            return
-
         self._loading = True
         self._load_generation += 1
         generation = self._load_generation
         self.search_button.setEnabled(False)
         self.status_label.setText("Loading report...")
-        self._start_report_worker(settings, week_number, generation)
+        self._start_report_worker(week_number, generation)
 
     def _start_report_worker(
         self,
-        settings: dict[str, str],
         week_number: int,
         generation: int,
     ) -> None:
         worker = threading.Thread(
             target=self._load_report_worker,
-            args=(dict(settings), week_number, generation),
+            args=(week_number, generation),
             daemon=True,
         )
         worker.start()
 
     def _load_report_worker(
         self,
-        settings: dict[str, str],
         week_number: int,
         generation: int,
     ) -> None:
         try:
+            settings = self._load_report_settings()
+            if not (settings.get("eghis_db_connection_string") or "").strip():
+                self.report_unconfigured.emit(generation)
+                return
             rows = fetch_weekly_age_report(
                 settings,
                 year=self._current_year,
@@ -197,6 +199,24 @@ class FluPanel(QWidget):
 
         self.report_loaded.emit(generation, counts_by_age, total_visits)
 
+    def _load_report_settings(self) -> dict[str, str]:
+        for attempt in range(self.SETTINGS_READ_ATTEMPTS):
+            try:
+                with connect(
+                    self._db_path,
+                    timeout=self.SETTINGS_READ_TIMEOUT_SECONDS,
+                ) as connection:
+                    return get_settings(connection)
+            except sqlite3.OperationalError as exc:
+                message = str(exc).casefold()
+                if "no such table" in message:
+                    return {}
+                is_transient = "locked" in message or "busy" in message
+                if not is_transient or attempt + 1 >= self.SETTINGS_READ_ATTEMPTS:
+                    raise
+                time.sleep(self.SETTINGS_RETRY_DELAY_SECONDS)
+        return {}
+
     def _handle_report_loaded(
         self,
         generation: int,
@@ -221,6 +241,15 @@ class FluPanel(QWidget):
         self.search_button.setEnabled(True)
         self.total_visits_label.setText("Total Visits(Practice) Count: -")
         self.status_label.setText(message)
+        self._populate_table({label: (0, 0) for label in AGE_GROUP_ORDER})
+
+    def _handle_report_unconfigured(self, generation: int) -> None:
+        if generation != self._load_generation:
+            return
+        self._loading = False
+        self.search_button.setEnabled(True)
+        self.total_visits_label.setText("Total Visits(Practice) Count: 0")
+        self.status_label.setText("No eGHIS DB connection configured.")
         self._populate_table({label: (0, 0) for label in AGE_GROUP_ORDER})
 
     def _populate_table(self, counts_by_age: dict[str, tuple[int, int]]) -> None:

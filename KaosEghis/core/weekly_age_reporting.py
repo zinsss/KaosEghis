@@ -20,6 +20,7 @@ AGE_GROUP_ORDER = [
     "50-64",
     "65 over",
 ]
+FLU_DB_CONNECT_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -125,7 +126,11 @@ def fetch_weekly_age_report(
     )
 
     try:
-        column_names, rows = run_readonly_query(connection_string, query)
+        column_names, rows = run_readonly_query(
+            connection_string,
+            query,
+            connect_timeout_seconds=FLU_DB_CONNECT_TIMEOUT_SECONDS,
+        )
     except (EghisDbQueryRejectedError, EghisDbUnavailableError) as exc:
         raise WeeklyAgeReportingUnavailableError(str(exc)) from exc
 

@@ -78,11 +78,13 @@ def test_fetch_weekly_age_report_returns_rows(monkeypatch) -> None:
             return None
 
     class FakePsycopg2Module:
-        def connect(self, connection_string: str):
+        def connect(self, connection_string: str, **options):
             self.connection_string = connection_string
+            self.options = options
             return FakeConnection()
 
-    monkeypatch.setitem(sys.modules, "psycopg2", FakePsycopg2Module())
+    fake_psycopg2 = FakePsycopg2Module()
+    monkeypatch.setitem(sys.modules, "psycopg2", fake_psycopg2)
 
     rows = weekly_age_reporting.fetch_weekly_age_report(
         {"eghis_db_connection_string": "postgresql://example"},
@@ -96,6 +98,7 @@ def test_fetch_weekly_age_report_returns_rows(monkeypatch) -> None:
         ("65 over", 4, 3),
     ]
     assert "public.h1opdin" in executed_queries[0]
+    assert fake_psycopg2.options == {"connect_timeout": 5}
 
 
 def test_fetch_weekly_age_report_uses_configured_query_template(monkeypatch) -> None:
@@ -126,8 +129,9 @@ def test_fetch_weekly_age_report_uses_configured_query_template(monkeypatch) -> 
             return None
 
     class FakePsycopg2Module:
-        def connect(self, connection_string: str):
+        def connect(self, connection_string: str, **options):
             self.connection_string = connection_string
+            self.options = options
             return FakeConnection()
 
     monkeypatch.setitem(sys.modules, "psycopg2", FakePsycopg2Module())

@@ -1,6 +1,6 @@
 # KaosEghis Flu
 
-Last updated: 2026-06-28
+Last updated: 2026-09-01
 
 Project name: `KaosEghis-flu`
 
@@ -59,6 +59,9 @@ Current backend behavior:
 - queries Eghis PostgreSQL in read-only mode
 - buckets visits into predefined age groups
 - returns visit count and distinct patient count per group
+- loads SQLite settings and runs PostgreSQL work outside the Qt GUI thread
+- retries a brief SQLite lock once and bounds PostgreSQL connection setup to five seconds
+- initializes/migrates local SQLite only during application startup, not on every report load
 
 Source tables currently used:
 

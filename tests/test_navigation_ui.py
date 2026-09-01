@@ -733,14 +733,10 @@ def test_flu_panel_load_failure_updates_status_without_raising(tmp_path, monkeyp
 
     panel = FluPanel(tmp_path / "KaosEghis.sqlite")
 
-    def fake_start_report_worker(settings, week_number, generation) -> None:
+    def fake_start_report_worker(week_number, generation) -> None:
         panel.report_failed.emit(generation, "Flu report DB query failed.")
 
     monkeypatch.setattr(panel, "_start_report_worker", fake_start_report_worker)
-
-    panel.load_report()
-
-    assert panel.status_label.text() == "No eGHIS DB connection configured."
 
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import set_settings
@@ -757,6 +753,42 @@ def test_flu_panel_load_failure_updates_status_without_raising(tmp_path, monkeyp
     panel.load_report()
 
     assert panel.status_label.text() == "Flu report DB query failed."
+    assert panel.search_button.isEnabled() is True
+
+
+def test_flu_panel_settings_lookup_runs_behind_worker_boundary(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.flu_panel import FluPanel
+
+    panel = FluPanel(tmp_path / "KaosEghis.sqlite")
+    calls: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        panel,
+        "_start_report_worker",
+        lambda week_number, generation: calls.append((week_number, generation)),
+    )
+
+    panel.load_report()
+
+    assert calls == [(int(panel.week_input.text()), 1)]
+    assert panel.status_label.text() == "Loading report..."
+
+
+def test_flu_panel_unconfigured_worker_result_is_non_modal(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.plugins.flu_panel import FluPanel
+
+    panel = FluPanel(tmp_path / "KaosEghis.sqlite")
+    panel._loading = True
+    panel._load_generation = 1
+    panel.search_button.setEnabled(False)
+
+    panel.report_unconfigured.emit(1)
+
+    assert panel.status_label.text() == "No eGHIS DB connection configured."
+    assert panel.total_visits_label.text() == "Total Visits(Practice) Count: 0"
     assert panel.search_button.isEnabled() is True
 
 def test_kaosgdd_profile_persists_cookies_and_cache(tmp_path, monkeypatch) -> None:
