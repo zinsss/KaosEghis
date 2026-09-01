@@ -101,6 +101,7 @@ def test_fetch_opens_patient_info_and_reads_all_fields() -> None:
     assert result.success is True
     assert result.context is not None
     assert result.context.chart_no == "1170"
+    assert result.context.resident_id == "700101-1234567"
     assert result.context.patient_name == "Test Patient"
     assert result.context.patient_sex == "M"
     assert result.context.patient_age == "56"
@@ -108,6 +109,19 @@ def test_fetch_opens_patient_info_and_reads_all_fields() -> None:
     assert result.context.patient_phone == "010-1111-2222"
     assert clicks == [(209, 155)]
     assert closes == [True]
+
+
+def test_resident_id_formatting_preserves_label_and_normalizes_system_input() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        resident_id_for_label,
+        resident_id_for_vaccine_system,
+    )
+
+    captured = " 700101-1234567 "
+
+    assert resident_id_for_label(captured) == "700101-1234567"
+    assert resident_id_for_vaccine_system(captured) == "7001011234567"
+    assert captured == " 700101-1234567 "
 
 
 def test_fetch_uses_telephone_when_mobile_is_blank() -> None:

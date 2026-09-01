@@ -1,6 +1,6 @@
 # KaosEghis-vaccine
 
-Last updated: 2026-08-27
+Last updated: 2026-09-01
 
 ## Status
 
@@ -63,6 +63,13 @@ Information view. Escape is never sent when that view could not be resolved.
 The preferred telephone value is `txt휴대폰`; `txt전화` is used only when the mobile
 field is blank. Date of birth is shown transiently on the Vaccine page and is not added
 to the local Vaccine record schema by this change. No fetched values are written to logs.
+
+Resident-number formatting has an explicit output boundary. The captured hyphenated
+value, such as `700101-1234567`, is preserved for operator display and thermal-label
+output. Only the value handed to a verified external vaccination-system resident-number
+field is normalized to `7001011234567`. Capture, preview, and saved form values are not
+silently rewritten. The external vaccination-system typing workflow is not implemented
+yet; its future adapter must apply this normalization immediately before input.
 
 This specification preserves the proven workflow and rule structure from the former
 `eGhis_Assistant` Labeler module. The vaccine catalog and seasonal rule values must be

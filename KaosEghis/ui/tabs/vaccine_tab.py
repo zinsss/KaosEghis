@@ -26,7 +26,10 @@ from PySide6.QtWidgets import (
 )
 
 from KaosEghis.core.eghis_connector import build_connector_settings
-from KaosEghis.core.vaccine_patient_context import fetch_vaccine_patient_context
+from KaosEghis.core.vaccine_patient_context import (
+    fetch_vaccine_patient_context,
+    resident_id_for_label,
+)
 from KaosEghis.core.vaccine_eligibility import (
     InfluenzaEligibilityResult,
     evaluate_influenza_program,
@@ -797,6 +800,9 @@ class VaccineTab(QWidget):
         vaccine_name = selected_item.text() if selected_item is not None else "(no vaccine selected)"
         patient_name = self.patient_name_input.text().strip() or "(no patient name)"
         patient_chart_no = self.patient_chart_no_input.text().strip() or "-"
+        patient_resident_id = (
+            resident_id_for_label(self.patient_resident_id_input.text()) or "-"
+        )
         patient_sex = self.patient_sex_input.text().strip()
         patient_age = self.patient_age_input.text().strip()
         patient_phone = self.patient_phone_input.text().strip() or "-"
@@ -808,6 +814,7 @@ class VaccineTab(QWidget):
                     f"Vaccine: {vaccine_name}",
                     f"Patient: {patient_name}",
                     f"Chart No: {patient_chart_no}",
+                    f"Resident No: {patient_resident_id}",
                     f"Sex/Age: {sex_age}",
                     f"Phone: {patient_phone}",
                 ]

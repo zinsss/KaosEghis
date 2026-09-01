@@ -179,6 +179,7 @@ def test_vaccine_tab_fetches_patient_context_from_emr_targets(tmp_path, monkeypa
     assert page.fetch_current_patient_from_emr() is True
     assert page.patient_name_input.text() == "홍길동"
     assert page.patient_resident_id_input.text() == "700101-1234567"
+    assert "Resident No: 700101-1234567" in page.label_preview.toPlainText()
     assert page.patient_birth_date_input.text() == "1970-01-01"
     assert page.patient_phone_input.text() == "010-1111-2222"
 

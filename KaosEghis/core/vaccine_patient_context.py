@@ -32,6 +32,18 @@ class VaccinePatientFetchResult:
     missing_fields: tuple[str, ...] = ()
 
 
+def resident_id_for_label(resident_id: str) -> str:
+    """Preserve the captured resident-number spelling for label output."""
+
+    return str(resident_id or "").strip()
+
+
+def resident_id_for_vaccine_system(resident_id: str) -> str:
+    """Remove hyphens only at the external vaccine-system input boundary."""
+
+    return resident_id_for_label(resident_id).replace("-", "")
+
+
 def fetch_vaccine_patient_context(
     settings: dict[str, str],
     target_automation_ids: dict[str, str],
