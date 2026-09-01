@@ -1,10 +1,34 @@
-from PySide6.QtWidgets import QApplication, QProxyStyle, QStyle
+from PySide6.QtCore import QMargins
+from PySide6.QtGui import QFont, QFontMetrics
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QApplication,
+    QProxyStyle,
+    QPushButton,
+    QStyle,
+    QStyleOptionButton,
+    QStyleOptionToolButton,
+    QToolButton,
+)
+
+
+def bracket_button_text(label: str) -> str:
+    """Return the compact visual label used by application buttons."""
+
+    stripped = label.strip()
+    return f"[ {stripped} ]" if stripped else ""
 
 
 class KaosEghisProxyStyle(QProxyStyle):
-    """Provide consistent layout spacing that Qt style sheets cannot express."""
+    """Provide layout spacing and compact bracketed button labels."""
 
     LAYOUT_SPACING = 8
+
+    def polish(self, target):
+        polished = super().polish(target)
+        if isinstance(target, (QPushButton, QToolButton)):
+            self._reserve_bracketed_label_width(target)
+        return polished
 
     def pixelMetric(self, metric, option=None, widget=None):
         if metric in {
@@ -13,6 +37,62 @@ class KaosEghisProxyStyle(QProxyStyle):
         }:
             return self.LAYOUT_SPACING
         return super().pixelMetric(metric, option, widget)
+
+    def drawControl(self, element, option, painter, widget=None):
+        if element == QStyle.ControlElement.CE_PushButtonLabel:
+            if isinstance(widget, QPushButton):
+                self._reserve_bracketed_label_width(widget)
+            display_option = QStyleOptionButton(option)
+            display_option.text = bracket_button_text(display_option.text)
+            return super().drawControl(element, display_option, painter, widget)
+        if element == QStyle.ControlElement.CE_ToolButtonLabel:
+            if isinstance(widget, QToolButton):
+                self._reserve_bracketed_label_width(widget)
+            display_option = QStyleOptionToolButton(option)
+            display_option.text = bracket_button_text(display_option.text)
+            return super().drawControl(element, display_option, painter, widget)
+        return super().drawControl(element, option, painter, widget)
+
+    def sizeFromContents(self, contents_type, option, size, widget=None):
+        display_option = option
+        display_size = size
+        if contents_type == QStyle.ContentsType.CT_PushButton:
+            display_option = QStyleOptionButton(option)
+            raw_text = display_option.text
+            display_option.text = bracket_button_text(raw_text)
+            display_size = size.grownBy(
+                self._button_text_extra_margins(display_option, raw_text)
+            )
+        elif contents_type == QStyle.ContentsType.CT_ToolButton:
+            display_option = QStyleOptionToolButton(option)
+            raw_text = display_option.text
+            display_option.text = bracket_button_text(raw_text)
+            display_size = size.grownBy(
+                self._button_text_extra_margins(display_option, raw_text)
+            )
+        return super().sizeFromContents(
+            contents_type, display_option, display_size, widget
+        )
+
+    @staticmethod
+    def _button_text_extra_margins(option, raw_text):
+        extra_width = max(
+            0,
+            option.fontMetrics.horizontalAdvance(bracket_button_text(raw_text))
+            - option.fontMetrics.horizontalAdvance(raw_text),
+        )
+        return QMargins(0, 0, extra_width, 0)
+
+    @staticmethod
+    def _reserve_bracketed_label_width(button: QAbstractButton) -> None:
+        display_text = bracket_button_text(button.text())
+        bold_font = QFont(button.font())
+        bold_font.setBold(True)
+        label_width = max(
+            button.fontMetrics().horizontalAdvance(display_text),
+            QFontMetrics(bold_font).horizontalAdvance(display_text),
+        )
+        button.setMinimumWidth(max(button.minimumWidth(), label_width + 6))
 
 
 NORD_QSS = """
@@ -194,62 +274,62 @@ QComboBox QAbstractItemView {
 
 QPushButton,
 QToolButton {
-    background-color: #434c5e;
-    color: #eceff4;
-    border: 1px solid #4c566a;
-    border-radius: 4px;
-    min-height: 24px;
-    padding: 8px 12px;
+    background-color: transparent;
+    color: #a3b1c2;
+    border: none;
+    outline: none;
+    min-height: 18px;
+    padding: 1px 3px;
+    font-weight: 400;
 }
 
 QPushButton:hover,
 QToolButton:hover {
-    background-color: #4c566a;
-    border-color: #88c0d0;
+    background-color: transparent;
+    color: #eceff4;
 }
 
 QPushButton:pressed,
 QToolButton:pressed {
-    background-color: #5e81ac;
-    border-color: #81a1c1;
+    background-color: transparent;
+    color: #81a1c1;
 }
 
 QPushButton:checked,
 QPushButton[pageActive="true"],
 QPushButton[filterActive="true"],
 QToolButton:checked {
-    background-color: #88c0d0;
-    color: #2e3440;
-    border-color: #8fbcbb;
+    background-color: transparent;
+    color: #88c0d0;
+    font-weight: 700;
 }
 
 QPushButton[emrConnectionState="connected"] {
-    background-color: #a3be8c;
-    color: #2e3440;
-    border-color: #8fbcbb;
+    background-color: transparent;
+    color: #a3be8c;
+    font-weight: 700;
 }
 
 QPushButton[emrConnectionState="connected"]:hover {
-    background-color: #b4cfa0;
-    border-color: #a3be8c;
+    background-color: transparent;
+    color: #b4cfa0;
 }
 
 QPushButton[emrConnectionState="stale"] {
-    background-color: #d08770;
-    color: #2e3440;
-    border-color: #bf616a;
+    background-color: transparent;
+    color: #d08770;
+    font-weight: 700;
 }
 
 QPushButton[emrConnectionState="stale"]:hover {
-    background-color: #dca08e;
-    border-color: #d08770;
+    background-color: transparent;
+    color: #dca08e;
 }
 
 QPushButton:disabled,
 QToolButton:disabled {
-    background-color: #2e3440;
+    background-color: transparent;
     color: #4c566a;
-    border-color: #3b4252;
 }
 
 QTableWidget,

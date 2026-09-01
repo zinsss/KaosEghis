@@ -1,6 +1,6 @@
 # KaosEghis Design
 
-Last updated: 2026-08-28
+Last updated: 2026-09-01
 
 ## Purpose
 
@@ -29,8 +29,9 @@ Main window:
 - global Nord stylesheet, including themed vertical and horizontal scrollbars
 - shared Qt layout metrics provide an 8 px gap between adjacent controls throughout
   the application; intentional tab bars remain visually grouped
-- shared buttons keep stable font metrics across normal and selected states; selection
-  uses accent color without a late bold-weight change that can clip Korean or Latin text
+- shared buttons render as compact, borderless `[ Button ]` text controls; selected,
+  connected, and warning states use their semantic accent color and bold weight while
+  the proxy style includes the visual brackets in size calculation to prevent clipping
 - the right side of the top tab bar contains a persistent app notification area with
   a colored state dot and short operator-facing text
 - app notifications contain action status only and must not expose captured values,

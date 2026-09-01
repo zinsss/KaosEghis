@@ -60,7 +60,7 @@ class FluPanel(QWidget):
         self.date_range_label.setStyleSheet("font-size: 18px;")
 
         self.search_button = QPushButton("Search")
-        self.search_button.setStyleSheet("font-size: 18px; padding: 8px 16px;")
+        self.search_button.setStyleSheet("font-size: 18px;")
         self.search_button.clicked.connect(self.load_report)
 
         controls = QHBoxLayout()

@@ -87,12 +87,6 @@ class PacsPanel(QWidget):
         "Summary",
         "Error",
     ]
-    FILTER_BUTTON_SELECTED_STYLE = (
-        "background-color: #88c0d0; color: #2e3440; "
-        "border: 1px solid #8fbcbb;"
-    )
-    FILTER_BUTTON_UNSELECTED_STYLE = ""
-
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
 
@@ -389,9 +383,9 @@ class PacsPanel(QWidget):
             selected = key == page_name
             button.setChecked(selected)
             button.setProperty("pageActive", selected)
-            button.setStyleSheet(
-                self.FILTER_BUTTON_SELECTED_STYLE if selected else self.FILTER_BUTTON_UNSELECTED_STYLE
-            )
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
 
         if page_name == "admin":
             return
@@ -953,11 +947,9 @@ class PacsPanel(QWidget):
             is_selected = key == self._active_filter
             button.setChecked(is_selected)
             button.setProperty("filterActive", is_selected)
-            button.setStyleSheet(
-                self.FILTER_BUTTON_SELECTED_STYLE
-                if is_selected
-                else self.FILTER_BUTTON_UNSELECTED_STYLE
-            )
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
 
     def clear_audit(self) -> None:
         confirmed = QMessageBox.question(

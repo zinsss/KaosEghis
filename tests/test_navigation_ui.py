@@ -10,12 +10,33 @@ def _app():
     return app if app is not None else QApplication([])
 
 
-def test_theme_keeps_selected_button_text_from_changing_size() -> None:
-    from KaosEghis.ui.theme import NORD_QSS
+def test_theme_uses_compact_flat_bracketed_buttons() -> None:
+    from KaosEghis.ui.theme import NORD_QSS, bracket_button_text
 
-    assert "min-height: 24px;" in NORD_QSS
-    assert "padding: 8px 12px;" in NORD_QSS
-    assert "font-weight: 700;" not in NORD_QSS
+    assert bracket_button_text("Save") == "[ Save ]"
+    assert bracket_button_text("  ") == ""
+    assert "min-height: 18px;" in NORD_QSS
+    assert "padding: 1px 3px;" in NORD_QSS
+    assert "border: none;" in NORD_QSS
+    assert "outline: none;" in NORD_QSS
+    assert "font-weight: 700;" in NORD_QSS
+
+
+def test_button_proxy_preserves_logical_text_and_reserves_bracket_width() -> None:
+    _app()
+
+    from PySide6.QtWidgets import QPushButton
+
+    from KaosEghis.ui.theme import KaosEghisProxyStyle, bracket_button_text
+
+    button = QPushButton("Save")
+    style = KaosEghisProxyStyle()
+    style.polish(button)
+
+    assert button.text() == "Save"
+    assert button.minimumWidth() >= button.fontMetrics().horizontalAdvance(
+        bracket_button_text("Save")
+    )
 
 
 def test_theme_flattens_spinbox_stepper_buttons() -> None:
@@ -634,9 +655,9 @@ def test_launcher_emr_connection_has_distinct_theme_states() -> None:
     from KaosEghis.ui.theme import NORD_QSS
 
     assert 'QPushButton[emrConnectionState="connected"]' in NORD_QSS
-    assert "background-color: #a3be8c;" in NORD_QSS
+    assert "color: #a3be8c;" in NORD_QSS
     assert 'QPushButton[emrConnectionState="stale"]' in NORD_QSS
-    assert "background-color: #d08770;" in NORD_QSS
+    assert "color: #d08770;" in NORD_QSS
 
 
 def test_workspace_and_pacs_surfaces_instantiate(tmp_path, monkeypatch) -> None:
