@@ -225,6 +225,24 @@ def test_launcher_socl_panel_uses_s_and_o_tabs_and_shared_vocabulary(
     assert panel.finding_count("objective") > 0
 
 
+def test_socl_popup_combines_compact_composer_and_vocabulary_editor(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.socl_tab import SoclPopupWindow
+
+    window = SoclPopupWindow(tmp_path / "KaosEghis.sqlite")
+
+    assert window.isWindow() is True
+    assert [
+        window.pages.tabText(index) for index in range(window.pages.count())
+    ] == ["Compose", "Edit vocabulary"]
+    assert [
+        window.composer.pages.tabText(index)
+        for index in range(window.composer.pages.count())
+    ] == ["S", "O"]
+    window.close()
+
+
 def test_launcher_socl_panel_generates_only_current_domain(tmp_path) -> None:
     _app()
 

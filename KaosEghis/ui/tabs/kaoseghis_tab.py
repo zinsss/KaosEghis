@@ -85,7 +85,7 @@ from KaosEghis.ui.tabs.flu_report_tab import FluReportTab
 from KaosEghis.ui.tabs.service_web_tab import ServiceWebTab
 from KaosEghis.ui.tabs.scan_tab import ScanTab
 from KaosEghis.ui.tabs.scheduler_tab import SchedulerTab
-from KaosEghis.ui.tabs.socl_tab import SoclLauncherPanel, SoclTab
+from KaosEghis.ui.tabs.socl_tab import SoclPopupWindow
 from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
 from KaosEghis.config import DEFAULT_CONFIG
 
@@ -111,6 +111,7 @@ class PlaceholderPage(QWidget):
 
 class KaosEghisTab(QWidget):
     TOP_PAGES = ["Launcher", "SOCL", "Procedures", "Vaccine"]
+    STACKED_PAGE_NAMES = ["Launcher", "Procedures", "Vaccine"]
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -121,10 +122,8 @@ class KaosEghisTab(QWidget):
         self.stacked_widget = QStackedWidget()
 
         self.launcher_page = LauncherPage(db_path)
-        self.socl_page = SoclTab(db_path)
-        self.socl_page.vocabulary_page.vocabulary_changed.connect(
-            self.launcher_page.socl_panel.reload_vocabulary
-        )
+        self.socl_window = SoclPopupWindow(db_path, self)
+        self.launcher_page.socl_window_requested.connect(self.open_socl_window)
         self.procedures_page = PlaceholderPage(
             "Procedures",
             "Procedures page is not implemented yet.",
@@ -133,7 +132,6 @@ class KaosEghisTab(QWidget):
 
         for page in (
             self.launcher_page,
-            self.socl_page,
             self.procedures_page,
             self.vaccine_page,
         ):
@@ -141,11 +139,15 @@ class KaosEghisTab(QWidget):
 
         for index, name in enumerate(self.TOP_PAGES):
             button = QPushButton(name)
-            button.setCheckable(True)
+            button.setCheckable(name != "SOCL")
             button.setAcceptDrops(True)
-            button.clicked.connect(
-                lambda _checked=False, page_index=index: self.show_page(page_index)
-            )
+            if name == "SOCL":
+                button.clicked.connect(self.open_socl_window)
+            else:
+                page_index = self.STACKED_PAGE_NAMES.index(name)
+                button.clicked.connect(
+                    lambda _checked=False, index=page_index: self.show_page(index)
+                )
             self.nav_buttons[name] = button
             self.top_nav_row.addWidget(button)
         self.top_nav_row.addStretch()
@@ -158,14 +160,28 @@ class KaosEghisTab(QWidget):
 
     def show_page(self, index: int) -> None:
         self.stacked_widget.setCurrentIndex(index)
-        for button_index, name in enumerate(self.TOP_PAGES):
-            self.nav_buttons[name].setChecked(button_index == index)
+        current_name = self.STACKED_PAGE_NAMES[index]
+        for name, button in self.nav_buttons.items():
+            if button.isCheckable():
+                button.setChecked(name == current_name)
 
         current_widget = self.stacked_widget.currentWidget()
         if hasattr(current_widget, "activate_page"):
             current_widget.activate_page()
         if hasattr(current_widget, "refresh_view"):
             current_widget.refresh_view()
+
+    def show_named_page(self, name: str) -> None:
+        if name == "SOCL":
+            self.open_socl_window()
+            return
+        self.show_page(self.STACKED_PAGE_NAMES.index(name))
+
+    def open_socl_window(self) -> None:
+        self.socl_window.open_window()
+
+    def close_socl_window(self) -> None:
+        self.socl_window.close()
 
 
 class MacrosTab(QWidget):
@@ -308,11 +324,11 @@ class WorkspaceTab(QWidget):
 
 
 class LauncherPage(QWidget):
+    socl_window_requested = Signal()
     ENTRY_ID_ROLE = LauncherListWidget.ITEM_ID_ROLE if "LauncherListWidget" in globals() else 256
     ENTRY_KIND_ROLE = 258
     ITEM_TYPE_ROLE = LauncherListWidget.ITEM_TYPE_ROLE if "LauncherListWidget" in globals() else 257
     LAUNCHER_COLUMN_STRETCH = 1
-    SOCL_COLUMN_STRETCH = 3
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -326,10 +342,13 @@ class LauncherPage(QWidget):
         self.connection_toggle.setCheckable(True)
         self.connection_toggle.toggled.connect(self.toggle_connection)
         self.connection_status_label = QLabel("EMR: disconnected.")
+        self.open_socl_button = QPushButton("Open SOCL")
+        self.open_socl_button.clicked.connect(self.socl_window_requested.emit)
 
         connection_row = QHBoxLayout()
         connection_row.addWidget(self.connection_toggle)
         connection_row.addWidget(self.connection_status_label, 1)
+        connection_row.addWidget(self.open_socl_button)
         connection_row.addStretch()
 
         self.launcher_lists: dict[str, LauncherListWidget] = {}
@@ -349,14 +368,6 @@ class LauncherPage(QWidget):
             columns.addWidget(section_label, 0, index)
             columns.addWidget(section_list, 1, index)
             columns.setColumnStretch(index, self.LAUNCHER_COLUMN_STRETCH)
-
-        socl_index = len(LAUNCHER_SECTIONS)
-        self.socl_label = QLabel("SOCL")
-        self.socl_label.setObjectName("launcherSectionTitle")
-        self.socl_panel = SoclLauncherPanel(db_path)
-        columns.addWidget(self.socl_label, 0, socl_index)
-        columns.addWidget(self.socl_panel, 1, socl_index)
-        columns.setColumnStretch(socl_index, self.SOCL_COLUMN_STRETCH)
 
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_view)
@@ -600,9 +611,9 @@ class LauncherPage(QWidget):
             parent_tab = self.parentWidget()
             if parent_tab is not None and not hasattr(parent_tab, "show_page"):
                 parent_tab = parent_tab.parentWidget()
-            if hasattr(parent_tab, "show_page"):
+            if hasattr(parent_tab, "show_named_page"):
                 try:
-                    parent_tab.show_page(3)
+                    parent_tab.show_named_page("Vaccine")
                 except Exception:
                     pass
             vaccine_page = getattr(parent_tab, "vaccine_page", None)

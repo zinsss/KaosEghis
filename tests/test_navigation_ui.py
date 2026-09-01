@@ -122,11 +122,12 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
         "Comments",
         "Actions",
     ]
-    assert tab.launcher_page.socl_label.text() == "SOCL"
+    assert tab.launcher_page.open_socl_button.text() == "Open SOCL"
+    assert not hasattr(tab.launcher_page, "socl_panel")
     assert not hasattr(tab.launcher_page, "summary_label")
 
 
-def test_launcher_page_gives_compact_socl_most_of_the_width() -> None:
+def test_launcher_page_gives_three_lists_equal_width_without_embedded_socl() -> None:
     _app()
 
     from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
@@ -134,7 +135,8 @@ def test_launcher_page_gives_compact_socl_most_of_the_width() -> None:
     page = LauncherPage()
 
     assert page.LAUNCHER_COLUMN_STRETCH == 1
-    assert page.SOCL_COLUMN_STRETCH == 3
+    assert not hasattr(page, "SOCL_COLUMN_STRETCH")
+    assert not hasattr(page, "socl_panel")
 
 
 def test_kaoseghis_top_nav_pages_are_reachable() -> None:
@@ -145,7 +147,9 @@ def test_kaoseghis_top_nav_pages_are_reachable() -> None:
     tab = KaosEghisTab()
 
     tab.nav_buttons["SOCL"].click()
-    assert tab.stacked_widget.currentWidget() is tab.socl_page
+    assert tab.socl_window.isVisible() is True
+    assert tab.stacked_widget.currentWidget() is tab.launcher_page
+    tab.socl_window.close()
 
     tab.nav_buttons["Procedures"].click()
     assert tab.stacked_widget.currentWidget() is tab.procedures_page
@@ -298,25 +302,28 @@ def test_launcher_page_places_macros_into_three_columns(tmp_path, monkeypatch) -
         page.launcher_lists["Actions"].item(1).text()
         == "Fetch Pt. Info for Vaccination"
     )
-    assert [
-        page.socl_panel.pages.tabText(index)
-        for index in range(page.socl_panel.pages.count())
-    ] == ["S", "O"]
+    assert page.open_socl_button.text() == "Open SOCL"
 
-def test_launcher_compact_socl_panel_is_visible(tmp_path, monkeypatch) -> None:
+def test_launcher_opens_independent_socl_window(tmp_path, monkeypatch) -> None:
     _app()
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
     from KaosEghis.db.database import initialize_database
-    from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
+    from KaosEghis.ui.tabs.kaoseghis_tab import KaosEghisTab
 
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
 
-    page = LauncherPage(db_path)
-    assert page.socl_label.text() == "SOCL"
-    assert page.socl_panel.finding_count("subjective") > 0
-    assert page.socl_panel.finding_count("objective") > 0
+    tab = KaosEghisTab(db_path)
+    assert tab.socl_window.isWindow() is True
+    assert tab.socl_window.isVisible() is False
+
+    tab.launcher_page.open_socl_button.click()
+
+    assert tab.socl_window.isVisible() is True
+    assert tab.socl_window.composer.finding_count("subjective") > 0
+    assert tab.socl_window.composer.finding_count("objective") > 0
+    tab.socl_window.close()
 
 
 def test_launcher_cross_column_move_keeps_macro_out_of_actions_after_reload(tmp_path, monkeypatch) -> None:

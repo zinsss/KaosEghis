@@ -6,9 +6,9 @@ The Launcher previously embedded KaosGDD's compact Agenda and Supplies web surfa
 That embedded surface was removed from Launcher after KaosGDD changed and the daily
 KaosEghis workflow no longer required it there.
 
-The released Launcher layout now uses that space for a compact SOCL composer with
-separate `S` and `O` tabs. KaosEghis still does not reproduce or store KaosGDD
-calendar, task, or supplies data.
+The released Launcher now keeps three equal-width launcher lists and opens SOCL in an
+independently movable window with separate `S` and `O` tabs. KaosEghis still does not
+reproduce or store KaosGDD calendar, task, or supplies data.
 
 The removed embedded page contained three KaosGDD-owned pages:
 
@@ -20,7 +20,7 @@ The removed embedded page contained three KaosGDD-owned pages:
 ## Current Architecture
 
 ```text
-KaosEghis Launcher -> local compact SOCL S/O composer
+KaosEghis Launcher -> independently movable local SOCL S/O window
 
 KaosGDD -> its own calendar, task, and supplies surfaces
 ```

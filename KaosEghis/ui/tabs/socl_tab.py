@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -50,6 +52,8 @@ from KaosEghis.db.repositories import (
     move_socl_collection,
     move_socl_finding,
     restore_default_socl_vocabulary,
+    get_settings,
+    set_settings,
     update_socl_collection,
     update_socl_finding,
 )
@@ -971,3 +975,97 @@ class FindingEditorDialog(QDialog):
             QMessageBox.warning(self, "Invalid finding", "Rendered phrase is required.")
             return
         self.accept()
+
+
+class SoclPopupWindow(QMainWindow):
+    """Independently movable SOCL surface for dual-monitor patient encounters."""
+
+    notification_requested = Signal(str, str)
+    DEFAULT_WIDTH = 860
+    DEFAULT_HEIGHT = 900
+    GEOMETRY_KEYS = {
+        "x": "socl_popup_x",
+        "y": "socl_popup_y",
+        "width": "socl_popup_width",
+        "height": "socl_popup_height",
+    }
+
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent, Qt.WindowType.Window)
+        self._db_path = db_path
+        self.setWindowTitle("SOCL - KaosEghis")
+        self.setMinimumSize(680, 640)
+
+        self.composer = SoclLauncherPanel(db_path)
+        self.vocabulary_page = SoclVocabularyEditor(db_path)
+        self.pages = QTabWidget()
+        self.pages.addTab(self.composer, "Compose")
+        self.pages.addTab(self.vocabulary_page, "Edit vocabulary")
+        self.setCentralWidget(self.pages)
+
+        self.composer.notification_requested.connect(
+            self.notification_requested.emit
+        )
+        self.vocabulary_page.vocabulary_changed.connect(
+            self.composer.reload_vocabulary
+        )
+        self._restore_geometry()
+
+    def open_window(self) -> None:
+        if self.isMinimized():
+            self.showNormal()
+        else:
+            self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def closeEvent(self, event) -> None:
+        self._save_geometry()
+        super().closeEvent(event)
+
+    def _effective_path(self) -> Path:
+        return self._db_path or get_database_path()
+
+    def _restore_geometry(self) -> None:
+        path = self._effective_path()
+        initialize_database(path)
+        with connect(path) as connection:
+            settings = get_settings(connection)
+        try:
+            geometry = QRect(
+                int(settings[self.GEOMETRY_KEYS["x"]]),
+                int(settings[self.GEOMETRY_KEYS["y"]]),
+                int(settings[self.GEOMETRY_KEYS["width"]]),
+                int(settings[self.GEOMETRY_KEYS["height"]]),
+            )
+        except (KeyError, TypeError, ValueError):
+            self.resize(self.DEFAULT_WIDTH, self.DEFAULT_HEIGHT)
+            return
+
+        if geometry.width() < self.minimumWidth() or geometry.height() < self.minimumHeight():
+            self.resize(self.DEFAULT_WIDTH, self.DEFAULT_HEIGHT)
+            return
+        screens = QGuiApplication.screens()
+        if screens and not any(
+            screen.availableGeometry().intersects(geometry) for screen in screens
+        ):
+            self.resize(self.DEFAULT_WIDTH, self.DEFAULT_HEIGHT)
+            return
+        self.setGeometry(geometry)
+
+    def _save_geometry(self) -> None:
+        geometry = self.normalGeometry()
+        with connect(self._effective_path()) as connection:
+            set_settings(
+                connection,
+                {
+                    self.GEOMETRY_KEYS["x"]: str(geometry.x()),
+                    self.GEOMETRY_KEYS["y"]: str(geometry.y()),
+                    self.GEOMETRY_KEYS["width"]: str(geometry.width()),
+                    self.GEOMETRY_KEYS["height"]: str(geometry.height()),
+                },
+            )

@@ -1,6 +1,6 @@
 # KaosEghis-SOCL
 
-Last updated: 2026-08-21
+Last updated: 2026-09-01
 
 ## Status
 
@@ -16,10 +16,15 @@ not mean normal, negative, absent, or not examined.
 
 ## Current UI
 
-SOCL is a top-level KaosEghis tab with two pages:
+SOCL is an independently movable KaosEghis-owned window with two pages:
 
 - `Compose`
 - `Edit vocabulary`
+
+It opens from `Launcher -> Open SOCL` or the `SOCL` navigation action. The window can
+remain on the patient-facing monitor while the main fixed-size KaosEghis window stays
+on the operator monitor. Closing and reopening the application restores the last valid
+SOCL screen position and size; an off-screen saved position is ignored safely.
 
 ### Compose
 
@@ -44,10 +49,9 @@ the physician's current preview. `Generate preview` deterministically rebuilds t
 preview from the current explicit selections; the physician may then edit the result
 before copying it.
 
-### Launcher Composer
+### Compact Composer
 
-The Launcher contains a compact composer using the same vocabulary and deterministic
-renderer:
+The popup Compose page uses the compact composer and deterministic renderer:
 
 - separate `S` and `O` tabs
 - two checkbox columns inside each clinical collection

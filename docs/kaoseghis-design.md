@@ -67,9 +67,11 @@ Primary daily-use tab.
 - `Launcher` is the daily-use macro launcher surface; double-click or its run button
   executes immediately with an in-page `Running '<macro name>'...` status instead of
   a confirmation dialog
-- the right side of Launcher contains a compact SOCL composer with `S` and `O` tabs;
-  it shares the same local vocabulary as the full SOCL editor
-- each Launcher SOCL group uses a dense two-column checkbox layout; optional detail
+- Launcher provides `Open SOCL`, which opens an independently movable SOCL window for
+  dual-monitor encounters instead of embedding the composer in the main app window
+- the SOCL window remembers its last valid screen position and size, so it can remain
+  on the patient-facing monitor while KaosEghis stays on the operator monitor
+- each SOCL group uses a dense two-column checkbox layout; optional detail
   fields expand for checked findings, while free-text/other fields remain visible
 - Launcher no longer embeds or loads KaosGDD Calendar, Tasks, or Supplies
 - the Launcher now supports both direct executable macros and launcher
@@ -111,7 +113,10 @@ Physician-controlled Subjective and Objective note composer.
 - supports local add/edit/delete/reorder for collections, labels, and rendered phrases
 - generates deterministic editable S and O previews from checked findings only
 - copies S, O, or combined S/O to the clipboard
-- provides the same vocabulary through a compact `S`/`O` tabbed composer on Launcher
+- opens as a separate top-level window from either `Launcher -> Open SOCL` or the
+  in-tab `SOCL` navigation action
+- combines the compact `S`/`O` composer and local vocabulary editor in that window
+- remains open and usable while the main KaosEghis window changes tabs
 - persists vocabulary only; encounter selections and generated notes stay in memory
 - performs no diagnosis inference, EMR automation, or eGHIS database write
 - detailed design: `docs/kaoseghis-socl.md`

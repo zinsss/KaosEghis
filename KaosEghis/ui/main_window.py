@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         self.scheduler_runtime.notification_requested.connect(
             self.show_notification
         )
-        self.kaoseghis_tab.socl_page.notification_requested.connect(
+        self.kaoseghis_tab.socl_window.notification_requested.connect(
             self.show_notification
         )
         self.pw_runtime.state_changed.connect(self._handle_pw_state_changed)
@@ -153,6 +153,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self.patient_alert_monitor.stop()
         self.patient_alert_popup.close()
+        self.kaoseghis_tab.close_socl_window()
         self.launcher_hotkey_runtime.stop()
         self.pw_runtime.stop()
         self.scheduler_runtime.stop()
