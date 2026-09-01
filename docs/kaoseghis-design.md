@@ -29,9 +29,9 @@ Main window:
 - global Nord stylesheet, including themed vertical and horizontal scrollbars
 - shared Qt layout metrics provide an 8 px gap between adjacent controls throughout
   the application; intentional tab bars remain visually grouped
-- shared buttons render as compact, borderless `[ Button ]` text controls; selected,
-  connected, and warning states use their semantic accent color and bold weight while
-  the proxy style includes the visual brackets in size calculation to prevent clipping
+- shared buttons use explicit compact, borderless `[ Button ]` labels; the theme keeps
+  dynamic labels bracketed without duplication, while selected, connected, and warning
+  states use their semantic accent color and bold weight
 - the right side of the top tab bar contains a persistent app notification area with
   a colored state dot and short operator-facing text
 - app notifications contain action status only and must not expose captured values,

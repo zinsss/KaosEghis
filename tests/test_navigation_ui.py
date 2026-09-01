@@ -14,6 +14,7 @@ def test_theme_uses_compact_flat_bracketed_buttons() -> None:
     from KaosEghis.ui.theme import NORD_QSS, bracket_button_text
 
     assert bracket_button_text("Save") == "[ Save ]"
+    assert bracket_button_text("[ Save ]") == "[ Save ]"
     assert bracket_button_text("  ") == ""
     assert "min-height: 18px;" in NORD_QSS
     assert "padding: 1px 3px;" in NORD_QSS
@@ -22,7 +23,7 @@ def test_theme_uses_compact_flat_bracketed_buttons() -> None:
     assert "font-weight: 700;" in NORD_QSS
 
 
-def test_button_proxy_preserves_logical_text_and_reserves_bracket_width() -> None:
+def test_button_proxy_applies_explicit_brackets_and_reserves_width() -> None:
     _app()
 
     from PySide6.QtWidgets import QPushButton
@@ -33,10 +34,16 @@ def test_button_proxy_preserves_logical_text_and_reserves_bracket_width() -> Non
     style = KaosEghisProxyStyle()
     style.polish(button)
 
-    assert button.text() == "Save"
+    assert button.text() == "[ Save ]"
     assert button.minimumWidth() >= button.fontMetrics().horizontalAdvance(
-        bracket_button_text("Save")
+        button.text()
     )
+
+    button.setText("Reconnect EMR")
+    button.show()
+    _app().processEvents()
+
+    assert button.text() == "[ Reconnect EMR ]"
 
 
 def test_theme_flattens_spinbox_stepper_buttons() -> None:

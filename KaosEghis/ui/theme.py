@@ -1,4 +1,4 @@
-from PySide6.QtCore import QMargins
+from PySide6.QtCore import QEvent, QMargins
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -16,6 +16,8 @@ def bracket_button_text(label: str) -> str:
     """Return the compact visual label used by application buttons."""
 
     stripped = label.strip()
+    if stripped.startswith("[ ") and stripped.endswith(" ]"):
+        return stripped
     return f"[ {stripped} ]" if stripped else ""
 
 
@@ -27,8 +29,19 @@ class KaosEghisProxyStyle(QProxyStyle):
     def polish(self, target):
         polished = super().polish(target)
         if isinstance(target, (QPushButton, QToolButton)):
+            self._apply_bracketed_label(target)
+            target.installEventFilter(self)
             self._reserve_bracketed_label_width(target)
         return polished
+
+    def eventFilter(self, watched, event):
+        if (
+            isinstance(watched, (QPushButton, QToolButton))
+            and event.type() in {QEvent.Type.Show, QEvent.Type.Paint}
+        ):
+            self._apply_bracketed_label(watched)
+            self._reserve_bracketed_label_width(watched)
+        return super().eventFilter(watched, event)
 
     def pixelMetric(self, metric, option=None, widget=None):
         if metric in {
@@ -93,6 +106,12 @@ class KaosEghisProxyStyle(QProxyStyle):
             QFontMetrics(bold_font).horizontalAdvance(display_text),
         )
         button.setMinimumWidth(max(button.minimumWidth(), label_width + 6))
+
+    @staticmethod
+    def _apply_bracketed_label(button: QAbstractButton) -> None:
+        display_text = bracket_button_text(button.text())
+        if display_text != button.text():
+            button.setText(display_text)
 
 
 NORD_QSS = """
