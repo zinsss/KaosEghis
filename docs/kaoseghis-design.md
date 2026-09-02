@@ -1,5 +1,12 @@
 # KaosEghis Design
 
+## Startup Surface
+
+KaosEghis displays a lightweight splash as soon as `QApplication` is ready. It remains
+visible while local data, integration services, the main workspace, and runtime services
+initialize, then closes when the main window is ready. Startup messages remain generic
+and never display database paths, service URLs, credentials, or patient information.
+
 Last updated: 2026-09-01
 
 ## Purpose
