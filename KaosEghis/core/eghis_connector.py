@@ -241,6 +241,35 @@ def refresh_cached_eghis_state(
     return _CACHED_STATE
 
 
+def ensure_cached_grid_handle(
+    settings: dict[str, str],
+    automation_id: str | None,
+) -> int | None:
+    """Repair one configured grid anchor without scanning every EMR descendant."""
+
+    global _CACHED_STATE
+    normalized_id = (automation_id or "").strip()
+    if not normalized_id or normalized_id not in _grid_automation_ids_from_settings(settings):
+        return None
+
+    state = get_cached_eghis_state()
+    if state is None:
+        return None
+    cached_handles = dict(state.cached_grid_handles or {})
+    cached_handle = cached_handles.get(normalized_id)
+    if cached_handle is not None and _window_handle_is_valid(cached_handle):
+        return cached_handle
+
+    scope_handle = state.main_window_handle or state.window_handle
+    resolved_handle = _resolve_cached_grid_handle(scope_handle, normalized_id)
+    if resolved_handle is None:
+        return None
+
+    cached_handles[normalized_id] = resolved_handle
+    _CACHED_STATE = replace(state, cached_grid_handles=cached_handles)
+    return resolved_handle
+
+
 def validate_cached_connection_identity(
     settings: dict[str, str],
 ) -> EghisConnectorState:
@@ -845,6 +874,57 @@ def _resolve_cached_grid_handles(
         if all(automation_id in handles for automation_id in grid_automation_ids):
             break
     return handles or None
+
+
+def _resolve_cached_grid_handle(
+    scope_handle: int | None,
+    automation_id: str,
+) -> int | None:
+    if scope_handle is None:
+        return None
+    for backend in ("win32", "uia"):
+        handle = _resolve_cached_grid_handle_for_backend(
+            scope_handle,
+            backend,
+            automation_id,
+        )
+        if handle is not None:
+            return handle
+    return None
+
+
+def _resolve_cached_grid_handle_for_backend(
+    scope_handle: int,
+    backend: str,
+    automation_id: str,
+) -> int | None:
+    try:
+        from pywinauto import Desktop
+
+        specification = Desktop(backend=backend).window(handle=scope_handle).child_window(
+            auto_id=automation_id
+        )
+        try:
+            if not specification.exists(timeout=0.75, retry_interval=0.05):
+                return None
+        except (AttributeError, TypeError):
+            pass
+        element = specification.wrapper_object()
+    except Exception:
+        return None
+
+    handle = getattr(element, "handle", None)
+    if handle is None:
+        handle = getattr(getattr(element, "element_info", None), "handle", None)
+    if handle is None:
+        return None
+    try:
+        normalized_handle = int(handle)
+    except (TypeError, ValueError):
+        return None
+    if normalized_handle <= 0 or not _window_handle_is_valid(normalized_handle):
+        return None
+    return normalized_handle
 
 
 def _grid_handles_for_state(

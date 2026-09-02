@@ -563,6 +563,14 @@ def _find_parent_element_from_cached_handle(
     cached_state = get_cached_eghis_state()
     cached_handles = getattr(cached_state, "cached_grid_handles", None) or {}
     cached_handle = cached_handles.get(parent_automation_id)
+    configured_main_id = str(
+        getattr(cached_state, "main_window_automation_id", "") or ""
+    ).strip()
+    if (
+        cached_handle is None
+        and configured_main_id.casefold() == parent_automation_id.casefold()
+    ):
+        cached_handle = getattr(cached_state, "main_window_handle", None)
     if cached_handle is None:
         return None
 

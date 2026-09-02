@@ -13,6 +13,7 @@ from KaosEghis.core.clipboard_service import copy_text, restore_clipboard
 from KaosEghis.core.eghis_connector import (
     build_connector_settings,
     ensure_cached_connection_ready,
+    ensure_cached_grid_handle,
     focus_cached_eghis_window,
     get_cached_eghis_state,
     refresh_cached_eghis_state,
@@ -1110,6 +1111,7 @@ class MacroRunner:
             self._resolved_target_aliases[target_id] = cache_key
             self._run_metrics.cache_hits += 1
             return self._resolved_target_cache[cache_key], "Target resolved."
+        ensure_cached_grid_handle(settings, target_record.parent_automation_id)
         element, _parent_found, message = resolve_target_element(
             settings, target_record
         )

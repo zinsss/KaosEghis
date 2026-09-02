@@ -65,6 +65,12 @@ Ancestor-path support:
 - Explicit EMR connect/reconnect eagerly caches the configured patient-status tab and
   prescription, symptom, diagnosis, and patient-list grid handles. Partial Win32 and
   UIA results are merged so a grid exposed through only one backend is still cached.
+  If startup captures only part of that cache, the first macro that needs a missing
+  configured grid performs one bounded direct automation-ID lookup and stores the
+  recovered handle in the current connection cache. Macros that do not target a
+  configured grid do not trigger grid discovery.
+  Targets scoped directly to the configured main EMR automation ID reuse the cached
+  main-window handle instead of searching the full UI tree again.
   Macro readiness validates and reuses these handles without repeating the descendant
   scan; reconnect is required after the underlying handles become stale.
 - Cached grid-row targets resolve directly to the configured row proxy without

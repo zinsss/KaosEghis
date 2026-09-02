@@ -1129,6 +1129,65 @@ def test_emr_scope_automation_id_overrides_parent_key_and_profile_scope(
     assert runtime_target.parent_automation_id == "grdOpdList"
 
 
+def test_macro_target_resolution_repairs_configured_grid_cache(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_emr_target_profile,
+        create_emr_ui_target,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = create_emr_target_profile(
+            connection,
+            name="Grid Profile",
+            is_enabled=True,
+            is_default=True,
+            main_window_automation_id="H2OpdTreatment",
+            patient_list_grid_automation_id="grdOpdList",
+        )
+        create_emr_ui_target(
+            connection,
+            profile_id=profile.id,
+            target_key="patient.row1",
+            label="Patient row 1",
+            scope_automation_id="grdOpdList",
+            control_type="DataItem",
+            name_match="Patient row 1",
+        )
+
+    cache_requests: list[str | None] = []
+    resolved_element = object()
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_grid_handle",
+        lambda _settings, automation_id: cache_requests.append(automation_id) or 88,
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.resolve_target_element",
+        lambda _settings, target: (
+            resolved_element,
+            True,
+            f"resolved {target.target_id}",
+        ),
+    )
+
+    runner = MacroRunner(db_path)
+    runner._current_profile_id = profile.id
+    element, message = runner._resolve_runtime_target(
+        {"eghis_patient_list_grid_automation_id": "grdOpdList"},
+        "patient.row1",
+    )
+
+    assert element is resolved_element
+    assert message == "Target resolved."
+    assert cache_requests == ["grdOpdList"]
+
+
 def test_emr_runtime_target_infers_scope_from_ancestor_path_when_missing(
     tmp_path,
 ) -> None:

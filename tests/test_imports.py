@@ -1725,6 +1725,64 @@ def test_grid_cache_combines_partial_win32_and_uia_results(monkeypatch) -> None:
     }
 
 
+def test_missing_grid_handle_is_repaired_once_and_merged(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    cached = connector.EghisConnectorState(
+        "green",
+        True,
+        "Eghis.exe",
+        12,
+        "C:/Eghis.exe",
+        True,
+        "Eghis EMR",
+        55,
+        12,
+        "H2OpdTreatment",
+        77,
+        True,
+        "2026-09-02T09:00:00",
+        "Connected and active",
+        {"tree처방": 101},
+    )
+    calls: list[tuple[int | None, str]] = []
+    monkeypatch.setattr(connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(connector, "_window_handle_is_valid", lambda _handle: True)
+    monkeypatch.setattr(
+        connector,
+        "_resolve_cached_grid_handle",
+        lambda scope, automation_id: calls.append((scope, automation_id)) or 103,
+    )
+    settings = {
+        "eghis_symptom_grid_automation_id": "grdSymp",
+    }
+
+    first = connector.ensure_cached_grid_handle(settings, "grdSymp")
+    second = connector.ensure_cached_grid_handle(settings, "grdSymp")
+
+    assert first == 103
+    assert second == 103
+    assert calls == [(77, "grdSymp")]
+    assert connector.get_cached_eghis_state().cached_grid_handles == {
+        "tree처방": 101,
+        "grdSymp": 103,
+    }
+
+
+def test_non_grid_target_does_not_trigger_grid_cache_repair(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    monkeypatch.setattr(
+        connector,
+        "_resolve_cached_grid_handle",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("non-grid targets must not trigger grid discovery")
+        ),
+    )
+
+    assert connector.ensure_cached_grid_handle({}, "TreatmentSymp") is None
+
+
 
 
 def test_resolve_main_window_handle_falls_back_to_named_mdi_child(monkeypatch) -> None:
@@ -3090,6 +3148,35 @@ def test_parent_scoped_cached_handle_respects_uia_backend_preference(monkeypatch
 
     assert parent is not None
     assert backend_calls == ["uia"]
+
+
+def test_parent_scope_reuses_cached_main_window_handle(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from KaosEghis.core.uia_inspector import _find_parent_element_from_cached_handle
+
+    backend_calls: list[tuple[int, str]] = []
+    cached_parent = object()
+
+    monkeypatch.setattr(
+        "KaosEghis.core.uia_inspector.get_cached_eghis_state",
+        lambda: SimpleNamespace(
+            cached_grid_handles=None,
+            main_window_automation_id="H2OpdTreatment",
+            main_window_handle=77,
+        ),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.uia_inspector._wrapper_from_handle",
+        lambda handle, backend: (
+            backend_calls.append((handle, backend)) or cached_parent
+        ),
+    )
+
+    parent = _find_parent_element_from_cached_handle("H2OpdTreatment")
+
+    assert parent is cached_parent
+    assert backend_calls == [(77, "win32")]
 
 
 def test_inspect_target_readonly_prefers_parent_automation_scope_over_stale_ancestor_path(
