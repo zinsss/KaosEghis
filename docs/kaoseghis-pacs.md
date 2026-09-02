@@ -395,6 +395,10 @@ Rules:
 - auto poll is off by default
 - dry run is off by default
 - testing KaosPACS connection uses `GET /health` only
+- When enabled, the in-process auto-poll timer runs health checks, the read-only eGHIS
+  query, and KaosPACS synchronization on a background worker. Qt applies only the
+  completed status, table, and audit updates, preventing the polling cycle from
+  pausing the rest of the app.
 
 ## Startup Validation
 

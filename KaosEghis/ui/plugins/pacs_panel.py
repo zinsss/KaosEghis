@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import re
+import threading
 import webbrowser
 
 from PySide6.QtCore import QDate, QTimer, QUrl, Qt, Signal
@@ -38,11 +40,15 @@ from KaosEghis.core.eghis_db import (
     run_readonly_query,
 )
 from KaosEghis.core.kaospacs_client import (
+    KaosPacsSyncResult,
     check_kaospacs_health,
     reconcile_kaospacs_worklist_to_local,
     sync_local_worklist_to_kaospacs,
 )
-from KaosEghis.core.pacs_polling import poll_eghis_image_orders_into_local_worklist
+from KaosEghis.core.pacs_polling import (
+    PollResult,
+    poll_eghis_image_orders_into_local_worklist,
+)
 from KaosEghis.db.database import connect, describe_database_path, initialize_database
 from KaosEghis.db.repositories import (
     DEFAULT_KAOSPACS_WEB_ADMIN_URL,
@@ -61,8 +67,19 @@ from KaosEghis.db.repositories import (
 from KaosEghis.ui.plugins.pacs_worklist_dialog import PacsWorklistDialog
 
 
+@dataclass(frozen=True)
+class _PollOperationResult:
+    kaospacs_available: bool
+    eghis_db_available: bool
+    eghis_db_configured: bool
+    poll_result: PollResult | None = None
+    sync_result: KaosPacsSyncResult | None = None
+    error_message: str | None = None
+
+
 class PacsPanel(QWidget):
     health_state_changed = Signal(bool, str)
+    auto_poll_finished = Signal(object)
     DEFAULT_POLL_INTERVAL_SECONDS = 60
     MIN_POLL_INTERVAL_SECONDS = 15
     ADMIN_REFRESH_DELAY_MS = 350
@@ -98,9 +115,11 @@ class PacsPanel(QWidget):
         self._health_reason = "PACS health unknown"
         self._active_filter = "all"
         self._poll_in_progress = False
+        self._poll_worker_thread: threading.Thread | None = None
         self._selected_date = date.today()
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._handle_poll_timer_tick)
+        self.auto_poll_finished.connect(self._finish_auto_poll)
 
         self.page_stack = QStackedWidget()
         self._page_names = ["admin", "operator_mode", "settings"]
@@ -766,14 +785,35 @@ class PacsPanel(QWidget):
             self._poll_timer.stop()
 
     def _handle_poll_timer_tick(self) -> None:
-        self._run_poll(refresh_admin=True, is_auto_poll=True)
+        if self._poll_in_progress:
+            self._show_poll_overlap()
+            return
+
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+
+        self._poll_in_progress = True
+        selected_date = self._selected_date
+
+        def worker() -> None:
+            result = self._perform_poll_operation(
+                settings,
+                selected_date=selected_date,
+                is_auto_poll=True,
+            )
+            self.auto_poll_finished.emit(result)
+
+        self._poll_worker_thread = threading.Thread(
+            target=worker,
+            name="KaosEghis PACS auto poll",
+            daemon=True,
+        )
+        self._poll_worker_thread.start()
 
     def _run_poll(self, *, refresh_admin: bool = False, is_auto_poll: bool = False) -> None:
         if self._poll_in_progress:
-            self.last_poll_result_label.setText("Last poll result: skipped overlap")
-            self.polling_status.setText("Polling status: skipped overlap")
-            self._log_audit_aggregate(event_type="poll", summary="skipped overlap")
-            self.refresh_audit()
+            self._show_poll_overlap()
             return
 
         self._poll_in_progress = True
@@ -781,39 +821,147 @@ class PacsPanel(QWidget):
             initialize_database(self._db_path)
             with connect(self._db_path) as connection:
                 settings = get_settings(connection)
+            result = self._perform_poll_operation(
+                settings,
+                selected_date=self._selected_date,
+                is_auto_poll=is_auto_poll,
+            )
+            self._apply_poll_operation_result(
+                result,
+                refresh_admin=refresh_admin,
+                is_auto_poll=is_auto_poll,
+            )
+        finally:
+            self._poll_in_progress = False
 
-            self._refresh_kaospacs_status(settings)
-            self._refresh_eghis_db_status(settings)
-            if is_auto_poll and (not self._kaospacs_available or not self._eghis_db_available):
-                self._poll_timer.stop()
-                self.polling_status.setText(f"Auto poll stopped: {self._health_reason}")
-                self.last_poll_result_label.setText(
-                    f"Last poll result: auto poll stopped - {self._health_reason}"
-                )
-                return
+    def _finish_auto_poll(self, result: _PollOperationResult) -> None:
+        try:
+            self._apply_poll_operation_result(
+                result,
+                refresh_admin=True,
+                is_auto_poll=True,
+            )
+        finally:
+            self._poll_in_progress = False
+            self._poll_worker_thread = None
 
-            result = poll_eghis_image_orders_into_local_worklist(
+    def _perform_poll_operation(
+        self,
+        settings: dict[str, str],
+        *,
+        selected_date: date,
+        is_auto_poll: bool,
+    ) -> _PollOperationResult:
+        try:
+            kaospacs_available = bool(check_kaospacs_health(settings))
+        except RuntimeError:
+            kaospacs_available = False
+
+        connection_string = (settings.get("eghis_db_connection_string") or "").strip()
+        eghis_db_configured = bool(connection_string)
+        eghis_db_available = False
+        if eghis_db_configured:
+            try:
+                run_readonly_query(connection_string, "SELECT 1")
+                eghis_db_available = True
+            except (EghisDbUnavailableError, EghisDbQueryRejectedError, RuntimeError):
+                pass
+
+        if is_auto_poll and (not kaospacs_available or not eghis_db_available):
+            return _PollOperationResult(
+                kaospacs_available,
+                eghis_db_available,
+                eghis_db_configured,
+            )
+
+        try:
+            poll_result = poll_eghis_image_orders_into_local_worklist(
                 settings,
                 self._db_path,
-                selected_date=self._selected_date,
+                selected_date=selected_date,
             )
-            self.refresh_rows()
-            self.last_poll_time_label.setText(
-                f"Last poll time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            sync_result = None
+            if poll_result.message is None:
+                sync_result = sync_local_worklist_to_kaospacs(settings, self._db_path)
+            return _PollOperationResult(
+                kaospacs_available,
+                eghis_db_available,
+                eghis_db_configured,
+                poll_result=poll_result,
+                sync_result=sync_result,
             )
-            if result.message is not None:
-                self.last_poll_result_label.setText(f"Last poll result: {result.message}")
-                self.polling_status.setText(f"Polling status: {result.message}")
-                self._log_audit_aggregate(event_type="poll", summary=result.message)
-                self.refresh_audit()
-                return
-            poll_summary = (
-                f"inserted={result.inserted}, updated={result.updated}, skipped={result.skipped}"
+        except Exception:
+            return _PollOperationResult(
+                kaospacs_available,
+                eghis_db_available,
+                eghis_db_configured,
+                error_message="unknown error",
             )
-            self.last_poll_result_label.setText(f"Last poll result: {poll_summary}")
-            self._log_audit_aggregate(event_type="poll", summary=poll_summary)
 
-            sync_result = sync_local_worklist_to_kaospacs(settings, self._db_path)
+    def _apply_poll_operation_result(
+        self,
+        operation: _PollOperationResult,
+        *,
+        refresh_admin: bool,
+        is_auto_poll: bool,
+    ) -> None:
+        self._kaospacs_available = operation.kaospacs_available
+        self._eghis_db_available = operation.eghis_db_available
+        self.pacs_server_status.setText(
+            "KaosPACS server: healthy"
+            if operation.kaospacs_available
+            else "KaosPACS server: unavailable"
+        )
+        if not operation.eghis_db_configured:
+            self.eghis_db_status.setText("Eghis DB: not configured")
+        else:
+            self.eghis_db_status.setText(
+                "Eghis DB: healthy"
+                if operation.eghis_db_available
+                else "Eghis DB: unavailable"
+            )
+        self._emit_health_state()
+
+        if is_auto_poll and not self.is_healthy:
+            self._poll_timer.stop()
+            self.polling_status.setText(f"Auto poll stopped: {self._health_reason}")
+            self.last_poll_result_label.setText(
+                f"Last poll result: auto poll stopped - {self._health_reason}"
+            )
+            return
+
+        self.last_poll_time_label.setText(
+            f"Last poll time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        if operation.error_message is not None:
+            self.polling_status.setText("Polling status: unknown error")
+            self.last_poll_result_label.setText("Last poll result: unknown error")
+            self._log_audit_error(
+                summary="poll failed",
+                error_message=operation.error_message,
+            )
+            self.refresh_audit()
+            return
+
+        result = operation.poll_result
+        if result is None:
+            return
+        self.refresh_rows()
+        if result.message is not None:
+            self.last_poll_result_label.setText(f"Last poll result: {result.message}")
+            self.polling_status.setText(f"Polling status: {result.message}")
+            self._log_audit_aggregate(event_type="poll", summary=result.message)
+            self.refresh_audit()
+            return
+
+        poll_summary = (
+            f"inserted={result.inserted}, updated={result.updated}, skipped={result.skipped}"
+        )
+        self.last_poll_result_label.setText(f"Last poll result: {poll_summary}")
+        self._log_audit_aggregate(event_type="poll", summary=poll_summary)
+
+        sync_result = operation.sync_result
+        if sync_result is not None:
             sync_prefix = "DRY RUN - " if sync_result.dry_run else ""
             sync_summary = (
                 f"{sync_prefix}sent={sync_result.sent}, cancelled={sync_result.cancelled}, "
@@ -836,11 +984,15 @@ class PacsPanel(QWidget):
                     event_type="sync",
                     summary=self._prefix_dry_run_summary(sync_result.dry_run, sync_summary),
                 )
-            self.refresh_audit()
-            if refresh_admin:
-                self._schedule_admin_reload()
-        finally:
-            self._poll_in_progress = False
+        self.refresh_audit()
+        if refresh_admin:
+            self._schedule_admin_reload()
+
+    def _show_poll_overlap(self) -> None:
+        self.last_poll_result_label.setText("Last poll result: skipped overlap")
+        self.polling_status.setText("Polling status: skipped overlap")
+        self._log_audit_aggregate(event_type="poll", summary="skipped overlap")
+        self.refresh_audit()
 
     def _schedule_admin_reload(self) -> None:
         self.admin_status_label.setText(
