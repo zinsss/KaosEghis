@@ -107,7 +107,7 @@ def test_fetch_opens_patient_info_and_reads_all_fields() -> None:
     assert result.context.patient_age == "56"
     assert result.context.patient_birth_date == "1970-01-01"
     assert result.context.patient_phone == "010-1111-2222"
-    assert clicks == [(209, 155)]
+    assert clicks == [(210, 115)]
     assert closes == [True]
 
 

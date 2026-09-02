@@ -8,7 +8,7 @@ from typing import Any, Callable
 from KaosEghis.core.eghis_connector import ensure_cached_connection_ready
 
 
-DEFAULT_PATIENT_INFO_OPEN_COORDINATES = (209, 155)
+DEFAULT_PATIENT_INFO_OPEN_COORDINATES = (210, 115)
 DEFAULT_PATIENT_INFO_TIMEOUT_SECONDS = 4.0
 
 
