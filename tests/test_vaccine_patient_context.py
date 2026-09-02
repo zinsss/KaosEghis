@@ -2,8 +2,9 @@ from types import SimpleNamespace
 
 
 class _Element:
-    def __init__(self, value: str) -> None:
+    def __init__(self, value: str, automation_id: str = "") -> None:
         self._value = value
+        self.element_info = SimpleNamespace(automation_id=automation_id)
 
     def get_value(self) -> str:
         return self._value
@@ -42,6 +43,23 @@ class _Desktop:
     def windows(self, *, process: int):
         assert process == 100
         return [self._patient_root]
+
+
+class _WrapperRoot:
+    """Model the API exposed by a real pywinauto UIAWrapper."""
+
+    def __init__(self, handle: int, values: dict[str, str]) -> None:
+        self.handle = handle
+        self.element_info = SimpleNamespace(automation_id="")
+        self._elements = [
+            _Element(value, automation_id)
+            for automation_id, value in values.items()
+        ]
+        self.descendant_calls = 0
+
+    def descendants(self):
+        self.descendant_calls += 1
+        return list(self._elements)
 
 
 TARGET_IDS = {
@@ -122,6 +140,44 @@ def test_resident_id_formatting_preserves_label_and_normalizes_system_input() ->
     assert resident_id_for_label(captured) == "700101-1234567"
     assert resident_id_for_vaccine_system(captured) == "7001011234567"
     assert captured == " 700101-1234567 "
+
+
+def test_fetch_uses_real_uia_wrapper_descendants_once_for_all_fields() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    main_root = _WrapperRoot(1, {})
+    patient_root = _WrapperRoot(
+        2,
+        {
+            "txtPatientNo": "1170",
+            "txtResidentNo": "700101-1234567",
+            "txtPatientName": "Test Patient",
+            "lblSexAge": "M / 56",
+            "dateBirth": "1970-01-01",
+            "txtMobile": "010-1111-2222",
+            "txtTelephone": "",
+            "txtAddress": "Test address",
+        },
+    )
+    desktop = _Desktop(main_root, patient_root)
+
+    result = fetch_vaccine_patient_context(
+        {},
+        TARGET_IDS,
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: desktop,
+        clicker=lambda _coords: None,
+        closer=lambda: None,
+    )
+
+    assert result.success is True
+    assert result.context is not None
+    assert result.context.chart_no == "1170"
+    assert result.context.resident_id == "700101-1234567"
+    # One scan verifies readiness and one scan indexes every configured field.
+    assert patient_root.descendant_calls == 2
 
 
 def test_fetch_uses_telephone_when_mobile_is_blank() -> None:

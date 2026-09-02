@@ -124,12 +124,22 @@ def fetch_vaccine_patient_context(
     if patient_scope is None:
         return VaccinePatientFetchResult(
             False,
-            "Patient information window was not ready.",
+            "Patient information opened, but its chart-number target was not found. "
+            "Check the Vaccine EMR target settings.",
             None,
         )
 
+    configured_ids = {
+        automation_id.strip()
+        for automation_id in target_automation_ids.values()
+        if automation_id.strip()
+    }
+    elements_by_id = _find_elements_by_automation_id(
+        patient_scope,
+        configured_ids,
+    )
     values = {
-        field_name: _read_target_value(patient_scope, automation_id)
+        field_name: _read_element_value(elements_by_id.get(automation_id.strip()))
         for field_name, automation_id in target_automation_ids.items()
         if automation_id.strip()
     }
@@ -236,6 +246,10 @@ def _find_patient_information_scope(
 
 def _read_target_value(scope: Any, automation_id: str) -> str:
     element = _find_element(scope, automation_id)
+    return _read_element_value(element)
+
+
+def _read_element_value(element: Any | None) -> str:
     if element is None:
         return ""
     for reader_name in ("get_value", "texts", "window_text"):
@@ -262,10 +276,58 @@ def _read_target_value(scope: Any, automation_id: str) -> str:
 
 
 def _find_element(scope: Any, automation_id: str) -> Any | None:
+    return _find_elements_by_automation_id(
+        scope,
+        {str(automation_id or "").strip()},
+    ).get(str(automation_id or "").strip())
+
+
+def _find_elements_by_automation_id(
+    scope: Any,
+    automation_ids: set[str],
+) -> dict[str, Any]:
+    wanted = {value for value in automation_ids if value}
+    if not wanted:
+        return {}
+
+    # pywinauto WindowSpecification exposes child_window(), while a resolved
+    # UIAWrapper exposes descendants(). Support both without rescanning once per field.
+    descendants_method = getattr(scope, "descendants", None)
+    if callable(descendants_method):
+        try:
+            candidates = [scope, *descendants_method()]
+        except Exception:
+            candidates = []
+        matches: dict[str, list[Any]] = {automation_id: [] for automation_id in wanted}
+        for candidate in candidates:
+            candidate_id = _element_automation_id(candidate)
+            if candidate_id in matches:
+                matches[candidate_id].append(candidate)
+        return {
+            automation_id: candidates[0]
+            for automation_id, candidates in matches.items()
+            if len(candidates) == 1
+        }
+
+    child_window = getattr(scope, "child_window", None)
+    if not callable(child_window):
+        return {}
+    resolved: dict[str, Any] = {}
+    for automation_id in wanted:
+        try:
+            resolved[automation_id] = child_window(
+                auto_id=automation_id
+            ).wrapper_object()
+        except Exception:
+            continue
+    return resolved
+
+
+def _element_automation_id(element: Any) -> str:
     try:
-        return scope.child_window(auto_id=automation_id).wrapper_object()
+        return str(element.element_info.automation_id or "").strip()
     except Exception:
-        return None
+        return ""
 
 
 def _element_handle(element: Any) -> int | None:

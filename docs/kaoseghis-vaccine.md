@@ -60,6 +60,12 @@ Automation IDs. The fetch never runs on startup or in the background.
 After the configured fields are read, KaosEghis sends one `{ESC}` to close the Patient
 Information view. Escape is never sent when that view could not be resolved.
 
+The opened window is a resolved pywinauto UIA wrapper, so target lookup indexes its
+descendants by exact Automation ID. All configured patient fields are read from one
+shared descendant index rather than rescanning the window for every field. Failure to
+find the chart-number target is reported as a target-configuration problem instead of
+being mislabeled as a generic window-readiness failure.
+
 The preferred telephone value is `txt휴대폰`; `txt전화` is used only when the mobile
 field is blank. Date of birth is shown transiently on the Vaccine page and is not added
 to the local Vaccine record schema by this change. No fetched values are written to logs.
