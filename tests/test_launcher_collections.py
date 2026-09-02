@@ -461,6 +461,15 @@ def test_macro_and_macrotext_dialogs_expose_launcher_checkbox(
     assert macro_dialog.values()["is_launcher_exposed"] is True
     assert macrotext_dialog.launcher_exposed.isChecked() is True
 
+    macro_label = macro_dialog.layout().itemAt(0).layout().labelForField(
+        macro_dialog.launcher_exposed
+    )
+    macrotext_label = macrotext_dialog.layout().itemAt(0).layout().labelForField(
+        macrotext_dialog.launcher_exposed
+    )
+    assert macro_label.text() == "Show in Launcher"
+    assert macrotext_label.text() == "Show in Launcher"
+
 
 def test_launcher_drop_on_item_routes_to_collection_creation() -> None:
     app = _app()

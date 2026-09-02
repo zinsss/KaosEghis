@@ -1978,7 +1978,7 @@ def test_macros_page_has_dry_run_and_run_selected_macro_buttons() -> None:
     assert page.run_macro_button.text() == "Run selected macro"
 
 
-def test_macros_page_splits_executable_and_non_executable_lists(monkeypatch, tmp_path) -> None:
+def test_macros_page_splits_shown_and_hidden_launcher_lists(monkeypatch, tmp_path) -> None:
     _app()
 
     from KaosEghis.db.database import connect, initialize_database
@@ -1989,15 +1989,39 @@ def test_macros_page_splits_executable_and_non_executable_lists(monkeypatch, tmp
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
     with connect(db_path) as connection:
-        create_item(connection, "Real Macro", "macro", True)
-        create_item(connection, "Template Macro", "macro", False)
+        create_item(
+            connection,
+            "Shown Macro",
+            "macro",
+            True,
+            is_launcher_exposed=True,
+        )
+        create_item(
+            connection,
+            "Hidden Macro",
+            "macro",
+            True,
+            is_launcher_exposed=False,
+        )
+        create_item(
+            connection,
+            "Disabled Macro",
+            "macro",
+            False,
+            is_launcher_exposed=True,
+        )
 
     page = MacrosPage(db_path)
 
-    assert page.executable_macros_table.rowCount() == 1
-    assert page.non_executable_macros_table.rowCount() == 1
-    assert page.executable_macros_table.item(0, 1).text() == "Real Macro"
-    assert page.non_executable_macros_table.item(0, 1).text() == "Template Macro"
+    assert page.shown_macros_table.rowCount() == 1
+    assert page.hidden_macros_table.rowCount() == 2
+    assert page.shown_macros_table.item(0, 1).text() == "Shown Macro"
+    hidden_names = {
+        page.hidden_macros_table.item(row, 1).text()
+        for row in range(page.hidden_macros_table.rowCount())
+    }
+    assert hidden_names == {"Hidden Macro", "Disabled Macro"}
+    assert page.shown_macros_table.horizontalHeaderItem(4).text() == "show in launcher"
 
 
 def test_macros_page_lists_collections_too(monkeypatch, tmp_path) -> None:

@@ -1,5 +1,10 @@
 # KaosEghis Macro
 
+The Builder groups saved macros by their operator-facing launcher state: `Shown in
+Launcher` and `Not shown in Launcher`. The editor's `Show in Launcher` checkbox controls
+that visibility. `Executable` remains a separate safety gate; a non-executable macro is
+never offered as a runnable launcher item even when its launcher visibility flag is set.
+
 Last updated: 2026-08-03
 
 ## Purpose

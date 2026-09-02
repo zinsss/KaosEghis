@@ -1017,8 +1017,11 @@ class MacrosPage(QWidget):
         self.automation_summary = QLabel("Create and edit saved macros.")
         self.automation_summary.setObjectName("macroSummary")
 
-        self.executable_macros_table = _create_macro_table()
-        self.non_executable_macros_table = _create_macro_table()
+        self.shown_macros_table = _create_macro_table()
+        self.hidden_macros_table = _create_macro_table()
+        # Compatibility aliases for callers that still use the original names.
+        self.executable_macros_table = self.shown_macros_table
+        self.non_executable_macros_table = self.hidden_macros_table
         self.collections_table = _create_collection_table()
         self.macros_table = self.executable_macros_table
         self.executable_macros_table.rows_reordered.connect(
@@ -1066,19 +1069,19 @@ class MacrosPage(QWidget):
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("Macro status will appear here.")
 
-        executable_column = QVBoxLayout()
-        executable_column.addWidget(QLabel("Executable macros"))
-        executable_column.addWidget(self.executable_macros_table)
+        shown_column = QVBoxLayout()
+        shown_column.addWidget(QLabel("Shown in Launcher"))
+        shown_column.addWidget(self.shown_macros_table)
 
-        non_executable_column = QVBoxLayout()
-        non_executable_column.addWidget(QLabel("Non-executable macros"))
-        non_executable_column.addWidget(self.non_executable_macros_table)
+        hidden_column = QVBoxLayout()
+        hidden_column.addWidget(QLabel("Not shown in Launcher"))
+        hidden_column.addWidget(self.hidden_macros_table)
 
         tables_row = QGridLayout()
         tables_row.setContentsMargins(0, 0, 0, 0)
         tables_row.setHorizontalSpacing(12)
-        tables_row.addLayout(executable_column, 0, 0)
-        tables_row.addLayout(non_executable_column, 0, 1)
+        tables_row.addLayout(shown_column, 0, 0)
+        tables_row.addLayout(hidden_column, 0, 1)
         tables_row.setColumnStretch(0, 1)
         tables_row.setColumnStretch(1, 1)
 
@@ -1106,13 +1109,17 @@ class MacrosPage(QWidget):
 
     def refresh_view(self) -> None:
         macros = _load_macros(self._db_path)
-        executable_macros = [macro for macro in macros if macro.is_enabled]
-        non_executable_macros = [macro for macro in macros if not macro.is_enabled]
+        shown_macros = [
+            macro
+            for macro in macros
+            if macro.is_enabled and macro.is_launcher_exposed
+        ]
+        hidden_macros = [macro for macro in macros if macro not in shown_macros]
         _populate_macro_table(
-            self.executable_macros_table, executable_macros, self._db_path
+            self.shown_macros_table, shown_macros, self._db_path
         )
         _populate_macro_table(
-            self.non_executable_macros_table, non_executable_macros, self._db_path
+            self.hidden_macros_table, hidden_macros, self._db_path
         )
         _populate_collection_table(self.collections_table, self._db_path)
         macro_ids = ", ".join(str(macro.id) for macro in macros) or "None"
@@ -1806,7 +1813,7 @@ class MacroTextDialog(QDialog):
         form = QFormLayout()
         form.addRow("Name", self.name)
         form.addRow("Mode", self.randomized)
-        form.addRow("Exposed in Launcher", self.launcher_exposed)
+        form.addRow("Show in Launcher", self.launcher_exposed)
         form.addRow("Text", self.content)
 
         buttons = QDialogButtonBox(
@@ -2283,7 +2290,7 @@ class ReorderableMacroTable(QTableWidget):
 def _create_macro_table() -> QTableWidget:
     table = ReorderableMacroTable(0, 5)
     table.setHorizontalHeaderLabels(
-        ["id", "name", "EMR profile", "executable", "exposed"]
+        ["id", "name", "EMR profile", "executable", "show in launcher"]
     )
     table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)

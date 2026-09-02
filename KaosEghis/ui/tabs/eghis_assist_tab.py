@@ -966,7 +966,7 @@ class MacroEditorDialog(QDialog):
         form = QFormLayout()
         form.addRow("Macro name", self.name)
         form.addRow("Executable", self.enabled)
-        form.addRow("Exposed in Launcher", self.launcher_exposed)
+        form.addRow("Show in Launcher", self.launcher_exposed)
         form.addRow("Application preset", self.emr_profile)
 
         buttons = QDialogButtonBox(
