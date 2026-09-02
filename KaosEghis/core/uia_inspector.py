@@ -180,6 +180,56 @@ def resolve_target_element_in_cached_process(
     return None, "Target could not be resolved in connected application process."
 
 
+def resolve_target_element_in_named_top_level_window(
+    target: UiTargetRecord,
+    window_title: str,
+    *,
+    process_id: int | None = None,
+    desktop_type: Any | None = None,
+) -> tuple[Any | None, str]:
+    """Resolve read-only within one exact, explicitly trusted top-level title."""
+
+    expected_title = (window_title or "").strip()
+    if not expected_title:
+        return None, "Trusted window title is not configured."
+    if desktop_type is None:
+        try:
+            from pywinauto import Desktop
+        except ImportError:
+            return None, "pywinauto is not installed; UIA inspection unavailable."
+        desktop_type = Desktop
+
+    for backend in _preferred_backend_order(target):
+        try:
+            desktop = desktop_type(backend=backend)
+            windows = (
+                desktop.windows(process=int(process_id))
+                if process_id is not None
+                else desktop.windows()
+            )
+        except Exception:
+            continue
+
+        title_matches = [
+            window for window in windows if _window_title(window).strip() == expected_title
+        ]
+        resolved_matches: list[Any] = []
+        for window in title_matches:
+            match, _parent_found, _message = _resolve_target_element(
+                window,
+                target,
+                set(),
+            )
+            if match is not None:
+                resolved_matches.append(match)
+        if len(resolved_matches) == 1:
+            return resolved_matches[0], f"Target found in trusted window '{expected_title}'."
+        if len(resolved_matches) > 1:
+            return None, f"Target matched multiple elements in trusted window '{expected_title}'."
+
+    return None, f"Target was not found in trusted window '{expected_title}'."
+
+
 def _preferred_backend_order(target: UiTargetRecord) -> tuple[str, ...]:
     has_parent_scope = bool(
         _clean(target.parent_automation_id) or _clean(getattr(target, "ancestor_path", None))

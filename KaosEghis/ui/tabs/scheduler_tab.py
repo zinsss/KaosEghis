@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import threading
 
-from PySide6.QtCore import QTime, Qt
+from PySide6.QtCore import QTime, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -26,7 +27,11 @@ from PySide6.QtWidgets import (
 )
 
 from KaosEghis.core.macro_runner import MacroRunner
-from KaosEghis.core.eghis_shutdown import create_eghis_end_of_day_macro
+from KaosEghis.core.eghis_shutdown import (
+    create_eghis_end_of_day_macro,
+    format_eghis_shutdown_preflight,
+    inspect_eghis_shutdown_preflight,
+)
 from KaosEghis.core.scheduler import (
     SchedulerRuntime,
     calculate_next_run,
@@ -47,6 +52,8 @@ from KaosEghis.db.repositories import (
 
 
 class SchedulerTab(QWidget):
+    shutdown_preflight_finished = Signal(object)
+
     def __init__(
         self,
         db_path: Path | None = None,
@@ -94,6 +101,8 @@ class SchedulerTab(QWidget):
         self.create_shutdown_macro_button.clicked.connect(
             self.create_end_of_day_macro
         )
+        self.check_shutdown_button = QPushButton("Check shutdown setup")
+        self.check_shutdown_button.clicked.connect(self.check_shutdown_setup)
         self.edit_button = QPushButton("Edit")
         self.edit_button.clicked.connect(self.edit_job)
         self.delete_button = QPushButton("Delete")
@@ -113,6 +122,7 @@ class SchedulerTab(QWidget):
         for button in (
             self.new_button,
             self.create_shutdown_macro_button,
+            self.check_shutdown_button,
             self.edit_button,
             self.delete_button,
             self.toggle_button,
@@ -155,6 +165,8 @@ class SchedulerTab(QWidget):
         layout.addWidget(self.log)
 
         self.runtime.state_changed.connect(self.refresh_view)
+        self.shutdown_preflight_finished.connect(self._finish_shutdown_preflight)
+        self._shutdown_preflight_thread: threading.Thread | None = None
         self.refresh_view()
 
     def activate_page(self) -> None:
@@ -246,6 +258,38 @@ class SchedulerTab(QWidget):
         self.log.setPlainText(
             f"Macro '{macro.name}' already exists. No macro was changed or run."
         )
+
+    def check_shutdown_setup(self) -> None:
+        if (
+            self._shutdown_preflight_thread is not None
+            and self._shutdown_preflight_thread.is_alive()
+        ):
+            self.log.setPlainText("Shutdown preflight is already running.")
+            return
+        self.log.setPlainText("Checking shutdown setup without sending input...")
+        self.check_shutdown_button.setEnabled(False)
+
+        def worker() -> None:
+            try:
+                result = inspect_eghis_shutdown_preflight(self._db_path)
+            except Exception:
+                result = None
+            self.shutdown_preflight_finished.emit(result)
+
+        self._shutdown_preflight_thread = threading.Thread(
+            target=worker,
+            name="KaosEghis shutdown preflight",
+            daemon=True,
+        )
+        self._shutdown_preflight_thread.start()
+
+    def _finish_shutdown_preflight(self, result) -> None:
+        self._shutdown_preflight_thread = None
+        self.check_shutdown_button.setEnabled(True)
+        if result is None:
+            self.log.setPlainText("Shutdown preflight failed without sending input.")
+            return
+        self.log.setPlainText(format_eghis_shutdown_preflight(result))
 
     def edit_job(self) -> None:
         job = self._selected_job()

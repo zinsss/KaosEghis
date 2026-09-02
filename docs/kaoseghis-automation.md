@@ -1,6 +1,18 @@
 # KaosEghis Automation
 
-Last updated: 2026-08-20
+## End-Of-Day Shutdown Preflight
+
+The Scheduler page provides `Check shutdown setup`. This is a read-only diagnostic:
+it checks the macro/job state, cached EMR connection, unlocked credential availability,
+saved target definitions, and any shutdown-stage windows currently visible. It never
+opens a window, sends input, enables the macro, or changes a schedule.
+
+Lock and confirmation targets remain restricted to windows owned by the cached eGHIS
+PID. The final `shutdown.power_off_after_backup` checkbox may resolve outside that PID
+only inside an exact top-level window titled `이지스 백업`; this accommodates the eGHIS
+backup helper while preventing a general cross-application target search.
+
+Last updated: 2026-09-02
 
 ## Purpose
 

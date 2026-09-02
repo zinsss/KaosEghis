@@ -399,6 +399,7 @@ def test_scheduler_tab_instantiates_without_running_macro(tmp_path) -> None:
     assert tab.jobs_table.columnCount() == 7
     assert tab.new_button.text() == "New schedule"
     assert tab.create_shutdown_macro_button.text() == "Create end-of-day macro"
+    assert tab.check_shutdown_button.text() == "Check shutdown setup"
     assert tab.dry_run_button.text() == "Dry run"
     assert tab.run_now_button.text() == "Run now"
     assert runtime.is_busy is False

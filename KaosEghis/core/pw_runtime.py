@@ -27,6 +27,16 @@ def get_unlocked_credential_password(service_name: str) -> str | None:
     return entry.password
 
 
+def has_unlocked_credential(service_name: str) -> bool:
+    """Report credential availability without returning the secret."""
+
+    session = _ACTIVE_VAULT_SESSION
+    if session is None:
+        return False
+    entry = session.get_entry(service_name.strip())
+    return bool(entry is not None and entry.password)
+
+
 @dataclass(frozen=True)
 class ForegroundWindowContext:
     hwnd: int | None

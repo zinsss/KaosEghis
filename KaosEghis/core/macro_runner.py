@@ -19,12 +19,17 @@ from KaosEghis.core.eghis_connector import (
     refresh_cached_eghis_state,
     validate_cached_connection_identity,
 )
+from KaosEghis.core.eghis_shutdown import (
+    POWER_OFF_CHECKBOX_TARGET_KEY,
+    POWER_OFF_WINDOW_TITLE,
+)
 from KaosEghis.core.pw_runtime import get_unlocked_credential_password
 from KaosEghis.core.macro_models import MacroRunResult, MacroStep
 from KaosEghis.core.uia_inspector import (
     inspect_target_readonly,
     resolve_target_element,
     resolve_target_element_in_cached_process,
+    resolve_target_element_in_named_top_level_window,
     resolve_target_scope_element,
 )
 from KaosEghis.core.wait_engine import WaitCondition, wait_for_target_condition
@@ -1136,6 +1141,11 @@ class MacroRunner:
         if target_record is None:
             return None, "target not found"
         element, message = resolve_target_element_in_cached_process(target_record)
+        if element is None and target_id == POWER_OFF_CHECKBOX_TARGET_KEY:
+            element, message = resolve_target_element_in_named_top_level_window(
+                target_record,
+                POWER_OFF_WINDOW_TITLE,
+            )
         if element is None:
             if "timeout" in message.casefold():
                 return None, "timeout"

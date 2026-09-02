@@ -3,6 +3,22 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 
+def _runtime_target(target_id: str, automation_id: str):
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    return UiTargetRecord(
+        id=1,
+        target_id=target_id,
+        parent_target_id=None,
+        parent_automation_id=None,
+        automation_id=automation_id,
+        name=None,
+        control_type="Edit",
+        class_name=None,
+        created_at="2026-09-02T00:00:00",
+    )
+
+
 def test_end_of_day_macro_is_disabled_hidden_and_idempotent(tmp_path) -> None:
     from KaosEghis.core.eghis_shutdown import create_eghis_end_of_day_macro
     from KaosEghis.db.database import connect, initialize_database
@@ -182,6 +198,252 @@ def test_process_scoped_resolver_searches_connected_process_windows(monkeypatch)
     assert resolved is target_element
     assert calls == [("uia", 917)]
     assert "connected application process" in message
+
+
+def test_named_window_resolver_uses_exact_title_and_process_scope() -> None:
+    from KaosEghis.core import uia_inspector
+
+    class FakeElement:
+        def __init__(self, automation_id: str) -> None:
+            self.element_info = SimpleNamespace(
+                automation_id=automation_id,
+                name="",
+                control_type="Edit",
+                class_name="WindowsForms10.Edit",
+                handle=600,
+            )
+
+    class FakeWindow:
+        def __init__(self, title: str, elements: list[FakeElement]) -> None:
+            self._title = title
+            self._elements = elements
+
+        def window_text(self) -> str:
+            return self._title
+
+        def descendants(self) -> list[FakeElement]:
+            return self._elements
+
+    calls: list[tuple[str, int]] = []
+    target_element = FakeElement("chkShutDown")
+
+    class FakeDesktop:
+        def __init__(self, *, backend: str) -> None:
+            self.backend = backend
+
+        def windows(self, *, process: int) -> list[FakeWindow]:
+            calls.append((self.backend, process))
+            return [
+                FakeWindow("Other window", [target_element]),
+                FakeWindow("이지스 백업", [target_element]),
+            ]
+
+    resolved, message = (
+        uia_inspector.resolve_target_element_in_named_top_level_window(
+            _runtime_target("shutdown.power_off_after_backup", "chkShutDown"),
+            "이지스 백업",
+            process_id=721,
+            desktop_type=FakeDesktop,
+        )
+    )
+
+    assert resolved is target_element
+    assert calls == [("uia", 721)]
+    assert "trusted window" in message
+
+
+def test_power_off_target_may_fall_back_to_exact_backup_window(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import contextlib
+
+    from KaosEghis.core import macro_runner
+    from KaosEghis.core.eghis_shutdown import POWER_OFF_CHECKBOX_TARGET_KEY
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    target_record = _runtime_target(POWER_OFF_CHECKBOX_TARGET_KEY, "chkShutDown")
+    backup_checkbox = object()
+    named_calls: list[tuple[str, int | None]] = []
+    runner = MacroRunner(tmp_path / "runner.sqlite")
+    monkeypatch.setattr(macro_runner, "connect", lambda _path: contextlib.nullcontext(object()))
+    monkeypatch.setattr(
+        runner,
+        "_load_runtime_target_record",
+        lambda _connection, _target_id: (target_record, (1, "target", None)),
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "resolve_target_element_in_cached_process",
+        lambda _target: (None, "not found"),
+    )
+
+    def resolve_named(target, title, *, process_id=None, desktop_type=None):
+        assert target is target_record
+        named_calls.append((title, process_id))
+        return backup_checkbox, "found"
+
+    monkeypatch.setattr(
+        macro_runner,
+        "resolve_target_element_in_named_top_level_window",
+        resolve_named,
+    )
+
+    resolved, message = runner._resolve_process_target(POWER_OFF_CHECKBOX_TARGET_KEY)
+
+    assert resolved is backup_checkbox
+    assert named_calls == [("이지스 백업", None)]
+    assert "connected eGHIS process" in message
+
+
+def test_non_backup_target_never_uses_cross_process_window_fallback(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import contextlib
+
+    from KaosEghis.core import macro_runner
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    target_record = _runtime_target("shutdown.close_yes", "CloseYes")
+    runner = MacroRunner(tmp_path / "runner.sqlite")
+    monkeypatch.setattr(macro_runner, "connect", lambda _path: contextlib.nullcontext(object()))
+    monkeypatch.setattr(
+        runner,
+        "_load_runtime_target_record",
+        lambda _connection, _target_id: (target_record, (1, "target", None)),
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "resolve_target_element_in_cached_process",
+        lambda _target: (None, "not found"),
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "resolve_target_element_in_named_top_level_window",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Only the backup checkbox may use cross-process lookup.")
+        ),
+    )
+
+    resolved, message = runner._resolve_process_target("shutdown.close_yes")
+
+    assert resolved is None
+    assert message == "target not found"
+
+
+def test_shutdown_preflight_reports_disabled_macro_without_exposing_secret(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from KaosEghis.core import eghis_shutdown
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_scheduler_job
+
+    db_path = tmp_path / "preflight.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        macro, _created = eghis_shutdown.create_eghis_end_of_day_macro(connection)
+        create_scheduler_job(
+            connection,
+            "End of day",
+            macro.id,
+            "20:30",
+            (0, 1, 2, 3, 4),
+            is_enabled=True,
+            next_run_at="2026-09-02T20:30:00",
+        )
+
+    monkeypatch.setattr(
+        eghis_shutdown,
+        "get_cached_eghis_state",
+        lambda: SimpleNamespace(
+            status="green",
+            pid=721,
+            window_handle=12345,
+        ),
+    )
+    monkeypatch.setattr(eghis_shutdown, "has_unlocked_credential", lambda _name: True)
+    monkeypatch.setattr(
+        eghis_shutdown,
+        "_inspect_shutdown_target_readonly",
+        lambda target_key, target, cached_pid: eghis_shutdown.ShutdownTargetDiagnostic(
+            target_key=target_key,
+            configured=target is not None,
+            visible=False,
+            owner_pid=None,
+            ownership="unknown",
+            message=f"pid={cached_pid}",
+        ),
+    )
+
+    result = eghis_shutdown.inspect_eghis_shutdown_preflight(db_path)
+    output = eghis_shutdown.format_eghis_shutdown_preflight(result)
+
+    assert result.macro_found is True
+    assert result.macro_enabled is False
+    assert result.enabled_schedule_count == 1
+    assert result.next_run_at == "2026-09-02T20:30:00"
+    assert result.emr_connected is True
+    assert result.credential_available is True
+    assert "Macro: disabled" in output
+    assert "BLOCKED" in output
+    assert "test-lock-password" not in output
+    assert "No windows were opened and no input was sent." in output
+
+
+def test_shutdown_preflight_scopes_only_backup_checkbox_outside_cached_pid(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core import eghis_shutdown
+    from KaosEghis.db.repositories import EmrUiTargetRecord
+
+    calls: list[tuple[str, int | None]] = []
+
+    def target(target_key: str, window_name: str) -> EmrUiTargetRecord:
+        return EmrUiTargetRecord(
+            id=1,
+            profile_id=1,
+            target_key=target_key,
+            label=target_key,
+            description=None,
+            scope_automation_id=None,
+            automation_id="Target",
+            control_type="Button",
+            class_name=None,
+            name_match=None,
+            parent_target_key=None,
+            created_at="2026-09-02T00:00:00",
+            updated_at="2026-09-02T00:00:00",
+            ancestor_path=(
+                '[{"name": "'
+                + window_name
+                + '", "control_type": "Window"}]'
+            ),
+        )
+
+    def resolve(_target, title, *, process_id=None, desktop_type=None):
+        calls.append((title, process_id))
+        return None, "not open"
+
+    monkeypatch.setattr(
+        eghis_shutdown,
+        "resolve_target_element_in_named_top_level_window",
+        resolve,
+    )
+
+    eghis_shutdown._inspect_shutdown_target_readonly(
+        eghis_shutdown.CLOSE_CONFIRM_TARGET_KEY,
+        target(eghis_shutdown.CLOSE_CONFIRM_TARGET_KEY, "확인"),
+        721,
+    )
+    eghis_shutdown._inspect_shutdown_target_readonly(
+        eghis_shutdown.POWER_OFF_CHECKBOX_TARGET_KEY,
+        target(eghis_shutdown.POWER_OFF_CHECKBOX_TARGET_KEY, "이지스 백업"),
+        721,
+    )
+
+    assert calls == [("확인", 721), ("이지스 백업", None)]
 
 
 def test_end_of_day_macro_dry_run_never_reads_password_or_sends_input(
