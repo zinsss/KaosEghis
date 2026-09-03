@@ -53,6 +53,7 @@ def fetch_vaccine_patient_context(
     connection_checker: Callable[[dict[str, str]], Any] = ensure_cached_connection_ready,
     desktop_factory: Callable[..., Any] | None = None,
     process_family_provider: Callable[[int], tuple[int, ...]] | None = None,
+    process_target_finder: Callable[[str, tuple[int, ...]], Any | None] | None = None,
     clicker: Callable[[tuple[int, int]], None] | None = None,
     closer: Callable[[], None] | None = None,
     clock: Callable[[], float] = time.monotonic,
@@ -93,6 +94,8 @@ def fetch_vaccine_patient_context(
         closer = _close_patient_information
     if process_family_provider is None:
         process_family_provider = _trusted_eghis_process_ids
+    if process_target_finder is None:
+        process_target_finder = _find_exact_uia_edit_in_processes
 
     try:
         clicker(opener_coordinates)
@@ -114,13 +117,16 @@ def fetch_vaccine_patient_context(
 
     deadline = clock() + max(float(timeout_seconds), 0.1)
     patient_scope = None
-    process_ids = process_family_provider(int(state.pid))
     while clock() <= deadline:
+        # The patient-information window may start in an eGHIS helper process
+        # after the opener is clicked, so refresh the trusted family each pass.
+        process_ids = process_family_provider(int(state.pid))
         patient_scope = _find_patient_information_scope(
             desktop,
             state,
             chart_automation_id,
             process_ids,
+            process_target_finder=process_target_finder,
         )
         if patient_scope is not None:
             break
@@ -216,8 +222,11 @@ def _find_patient_information_scope(
     state: Any,
     chart_automation_id: str,
     process_ids: tuple[int, ...] | None = None,
+    *,
+    process_target_finder: Callable[[str, tuple[int, ...]], Any | None] | None = None,
 ) -> Any | None:
-    roots: list[Any] = []
+    cached_roots: list[Any] = []
+    process_roots: list[Any] = []
     seen_handles: set[int] = set()
     for handle in (
         getattr(state, "main_window_handle", None),
@@ -229,46 +238,139 @@ def _find_patient_information_scope(
             root = desktop.window(handle=handle).wrapper_object()
         except Exception:
             continue
-        roots.append(root)
+        cached_roots.append(root)
         seen_handles.add(int(handle))
 
-    for process_id in process_ids or (int(state.pid),):
+    trusted_process_ids = process_ids or (int(state.pid),)
+    for process_id in trusted_process_ids:
         try:
-            process_windows = desktop.windows(process=int(process_id))
+            process_windows = desktop.windows(
+                process=int(process_id),
+                visible_only=False,
+            )
+        except TypeError:
+            # Keep compatibility with small test doubles and older backends.
+            try:
+                process_windows = desktop.windows(process=int(process_id))
+            except Exception:
+                process_windows = []
         except Exception:
             process_windows = []
         for root in process_windows:
             handle = _element_handle(root)
             if handle is not None and handle in seen_handles:
                 continue
-            roots.append(root)
+            process_roots.append(root)
             if handle is not None:
                 seen_handles.add(handle)
 
-    for root in roots:
+    # New helper windows are usually much smaller than the cached main window.
+    # Search them first to avoid traversing the entire eGHIS UI tree.
+    for root in process_roots:
+        if _find_element(root, chart_automation_id) is not None:
+            return root
+
+    if process_target_finder is not None:
+        try:
+            chart_element = process_target_finder(
+                chart_automation_id,
+                tuple(int(process_id) for process_id in trusted_process_ids),
+            )
+        except Exception:
+            chart_element = None
+        if chart_element is not None:
+            return _top_level_scope(chart_element)
+
+    for root in cached_roots:
         if _find_element(root, chart_automation_id) is not None:
             return root
     return None
 
 
+def _find_exact_uia_edit_in_processes(
+    automation_id: str,
+    process_ids: tuple[int, ...],
+) -> Any | None:
+    """Find one exact visible Edit inside the trusted eGHIS process family."""
+
+    try:
+        from pywinauto.controls.uiawrapper import UIAWrapper
+        from pywinauto.uia_element_info import UIAElementInfo
+    except ImportError:
+        return None
+
+    candidates: list[Any] = []
+    try:
+        desktop_info = UIAElementInfo()
+    except Exception:
+        return None
+    for process_id in process_ids:
+        try:
+            elements = desktop_info.descendants(
+                process=int(process_id),
+                control_type="Edit",
+                cache_enable=True,
+            )
+        except Exception:
+            continue
+        for element_info in elements:
+            try:
+                candidate_id = str(element_info.automation_id or "").strip()
+            except Exception:
+                continue
+            if candidate_id != automation_id:
+                continue
+            try:
+                candidates.append(UIAWrapper(element_info))
+            except Exception:
+                continue
+    return _select_unique_visible_element(candidates)
+
+
+def _top_level_scope(element: Any) -> Any:
+    try:
+        return element.top_level_parent()
+    except Exception:
+        return element
+
+
 def _trusted_eghis_process_ids(root_pid: int) -> tuple[int, ...]:
-    """Return the connected eGHIS PID plus eGHIS-named descendant helpers."""
+    """Return the connected eGHIS process family without unrelated processes."""
 
     process_ids = [int(root_pid)]
     try:
         import psutil
 
-        children = psutil.Process(int(root_pid)).children(recursive=True)
+        connected_process = psutil.Process(int(root_pid))
     except Exception:
         return tuple(process_ids)
-    for child in children:
+
+    family_root = connected_process
+    current = connected_process
+    while True:
         try:
-            name = str(child.name() or "").strip().casefold()
-            child_pid = int(child.pid)
+            parent = current.parent()
+            parent_name = str(parent.name() or "").strip().casefold()
+        except Exception:
+            break
+        if not parent_name.startswith("eghis"):
+            break
+        family_root = parent
+        current = parent
+
+    family: list[Any] = [family_root]
+    try:
+        family.extend(family_root.children(recursive=True))
+    except Exception:
+        pass
+    for process in family:
+        try:
+            name = str(process.name() or "").strip().casefold()
+            process_id = int(process.pid)
         except Exception:
             continue
-        if name.startswith("eghis") and child_pid not in process_ids:
-            process_ids.append(child_pid)
+        if name.startswith("eghis") and process_id not in process_ids:
+            process_ids.append(process_id)
     return tuple(process_ids)
 
 

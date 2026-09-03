@@ -54,9 +54,12 @@ stable selector.
 `Fetch from EMR` is an explicit operator action. It requires the manually cached eGHIS
 connection, focuses the connected process through the connector gate, and clicks the
 current Patient Information opener at screen coordinate `(210, 115)`. It then waits for
-`txt환자번호` and reads all configured fields from that same eGHIS process/window. This
-coordinate is a temporary opener fallback; the patient fields themselves use stable UIA
-Automation IDs. The fetch never runs on startup or in the background.
+`txt환자번호` and reads all configured fields from that same eGHIS process/window. The
+reader refreshes the trusted eGHIS helper-process family while the patient-information
+window opens, includes hidden UIA host windows, and can perform an exact process-scoped
+`Edit` lookup when ordinary top-level enumeration misses the deeply nested chart field.
+This coordinate is a temporary opener fallback; the patient fields themselves use stable
+UIA Automation IDs. The fetch never runs on startup or in the background.
 After the configured fields are read, KaosEghis sends one `{ESC}` to close the Patient
 Information view. Escape is never sent when that view could not be resolved.
 

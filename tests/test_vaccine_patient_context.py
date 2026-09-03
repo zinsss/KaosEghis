@@ -74,6 +74,14 @@ class _ProcessFamilyDesktop:
         return []
 
 
+class _DeepChartElement:
+    def __init__(self, patient_root) -> None:
+        self._patient_root = patient_root
+
+    def top_level_parent(self):
+        return self._patient_root
+
+
 class _WrapperRoot:
     """Model the API exposed by a real pywinauto UIAWrapper."""
 
@@ -279,6 +287,79 @@ def test_fetch_searches_verified_eghis_child_process_for_patient_window() -> Non
     assert result.context is not None
     assert result.context.chart_no == "1170"
     assert desktop.process_calls == [100, 200]
+
+
+def test_fetch_refreshes_process_family_until_new_helper_appears() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    desktop = _ProcessFamilyDesktop(
+        _Root(1, {}),
+        _Root(2, {"txtPatientNo": "1170"}),
+    )
+    process_family_calls: list[int] = []
+
+    def process_family_provider(root_pid: int) -> tuple[int, ...]:
+        process_family_calls.append(root_pid)
+        return (100,) if len(process_family_calls) == 1 else (100, 200)
+
+    ticks = iter((0.0, 0.0, 0.1))
+    result = fetch_vaccine_patient_context(
+        {},
+        {"chart_no": "txtPatientNo"},
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: desktop,
+        process_family_provider=process_family_provider,
+        process_target_finder=lambda _automation_id, _process_ids: None,
+        clicker=lambda _coords: None,
+        closer=lambda: None,
+        clock=lambda: next(ticks),
+        sleeper=lambda _seconds: None,
+    )
+
+    assert result.success is True
+    assert result.context is not None
+    assert result.context.chart_no == "1170"
+    assert process_family_calls == [100, 100]
+    assert desktop.process_calls == [100, 100, 200]
+
+
+def test_fetch_uses_exact_process_scoped_edit_when_window_enumeration_misses_it() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    patient_root = _WrapperRoot(
+        2,
+        {
+            "txtPatientNo": "2516",
+            "txtPatientName": "Test Patient",
+        },
+    )
+    desktop = _ProcessFamilyDesktop(_WrapperRoot(1, {}), _WrapperRoot(2, {}))
+    finder_calls: list[tuple[str, tuple[int, ...]]] = []
+
+    def find_exact_edit(automation_id: str, process_ids: tuple[int, ...]):
+        finder_calls.append((automation_id, process_ids))
+        return _DeepChartElement(patient_root)
+
+    result = fetch_vaccine_patient_context(
+        {},
+        {"chart_no": "txtPatientNo", "patient_name": "txtPatientName"},
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: desktop,
+        process_family_provider=lambda _root_pid: (100, 200),
+        process_target_finder=find_exact_edit,
+        clicker=lambda _coords: None,
+        closer=lambda: None,
+    )
+
+    assert result.success is True
+    assert result.context is not None
+    assert result.context.chart_no == "2516"
+    assert result.context.patient_name == "Test Patient"
+    assert finder_calls == [("txtPatientNo", (100, 200))]
 
 
 def test_process_family_accepts_only_eghis_named_descendants(monkeypatch) -> None:
