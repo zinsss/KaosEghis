@@ -59,7 +59,8 @@ reader refreshes the trusted eGHIS helper-process family while the patient-infor
 window opens, includes hidden UIA host windows, and can perform an exact process-scoped
 `Edit` lookup when ordinary top-level enumeration misses the deeply nested chart field.
 The exact chart control that establishes readiness is retained for value reading instead
-of being rediscovered in a second WinForms tree scan.
+of being rediscovered in a second WinForms tree scan. Value extraction follows the same
+UIA ValuePattern and WinForms legacy-value paths used by the in-app capture tool.
 This coordinate is a temporary opener fallback; the patient fields themselves use stable
 UIA Automation IDs. The fetch never runs on startup or in the background.
 After the configured fields are read, KaosEghis sends one `{ESC}` to close the Patient

@@ -278,7 +278,7 @@ def _find_patient_information_scope(
     # Search them first to avoid traversing the entire eGHIS UI tree.
     for root in process_roots:
         chart_element = _find_element(root, chart_automation_id)
-        if chart_element is not None:
+        if _has_readable_chart_value(chart_element):
             return _PatientInformationResolution(root, chart_element)
 
     if process_target_finder is not None:
@@ -289,7 +289,7 @@ def _find_patient_information_scope(
             )
         except Exception:
             chart_element = None
-        if chart_element is not None:
+        if _has_readable_chart_value(chart_element):
             return _PatientInformationResolution(
                 _top_level_scope(chart_element),
                 chart_element,
@@ -297,7 +297,7 @@ def _find_patient_information_scope(
 
     for root in cached_roots:
         chart_element = _find_element(root, chart_automation_id)
-        if chart_element is not None:
+        if _has_readable_chart_value(chart_element):
             return _PatientInformationResolution(root, chart_element)
     return None
 
@@ -339,7 +339,12 @@ def _find_exact_uia_edit_in_processes(
                 candidates.append(UIAWrapper(element_info))
             except Exception:
                 continue
-    return _select_unique_visible_element(candidates)
+    visible_with_values = [
+        candidate
+        for candidate in candidates
+        if _element_is_visible(candidate) and _has_readable_chart_value(candidate)
+    ]
+    return visible_with_values[0] if len(visible_with_values) == 1 else None
 
 
 def _top_level_scope(element: Any) -> Any:
@@ -397,6 +402,30 @@ def _read_target_value(scope: Any, automation_id: str) -> str:
 def _read_element_value(element: Any | None) -> str:
     if element is None:
         return ""
+    try:
+        iface_value = getattr(element, "iface_value", None)
+    except Exception:
+        iface_value = None
+    if iface_value is not None:
+        for attribute in ("CurrentValue", "Value"):
+            try:
+                value = getattr(iface_value, attribute, None)
+            except Exception:
+                value = None
+            text = str(value or "").strip()
+            if text:
+                return text
+
+    try:
+        legacy = element.legacy_properties()
+    except Exception:
+        legacy = None
+    if isinstance(legacy, dict):
+        for key in ("Value", "Name"):
+            text = str(legacy.get(key) or "").strip()
+            if text:
+                return text
+
     for reader_name in ("get_value", "texts", "window_text"):
         try:
             value = getattr(element, reader_name)()
@@ -409,15 +438,13 @@ def _read_element_value(element: Any | None) -> str:
         if text:
             return text
     try:
-        value = element.iface_value.CurrentValue
-    except Exception:
-        value = ""
-    if value:
-        return str(value).strip()
-    try:
         return str(element.element_info.name or "").strip()
     except Exception:
         return ""
+
+
+def _has_readable_chart_value(element: Any | None) -> bool:
+    return bool(_read_element_value(element).strip())
 
 
 def _find_element(scope: Any, automation_id: str) -> Any | None:

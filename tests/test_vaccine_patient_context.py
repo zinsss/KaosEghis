@@ -74,16 +74,16 @@ class _ProcessFamilyDesktop:
         return []
 
 
-class _DeepChartElement:
-    def __init__(self, patient_root, value: str = "2516") -> None:
+class _LegacyValueChartElement:
+    def __init__(self, patient_root, value: str) -> None:
         self._patient_root = patient_root
         self._value = value
 
     def top_level_parent(self):
         return self._patient_root
 
-    def get_value(self) -> str:
-        return self._value
+    def legacy_properties(self) -> dict[str, str]:
+        return {"Value": self._value}
 
 
 class _WrapperRoot:
@@ -345,7 +345,7 @@ def test_fetch_uses_exact_process_scoped_edit_when_window_enumeration_misses_it(
 
     def find_exact_edit(automation_id: str, process_ids: tuple[int, ...]):
         finder_calls.append((automation_id, process_ids))
-        return _DeepChartElement(patient_root)
+        return _LegacyValueChartElement(patient_root, "829")
 
     result = fetch_vaccine_patient_context(
         {},
@@ -360,7 +360,7 @@ def test_fetch_uses_exact_process_scoped_edit_when_window_enumeration_misses_it(
 
     assert result.success is True
     assert result.context is not None
-    assert result.context.chart_no == "2516"
+    assert result.context.chart_no == "829"
     assert result.context.patient_name == "Test Patient"
     assert finder_calls == [("txtPatientNo", (100, 200))]
 
