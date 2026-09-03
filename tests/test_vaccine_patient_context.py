@@ -75,15 +75,21 @@ class _ProcessFamilyDesktop:
 
 
 class _LegacyValueChartElement:
-    def __init__(self, patient_root, value: str) -> None:
+    def __init__(self, patient_root, value: str, parent_scope=None) -> None:
         self._patient_root = patient_root
         self._value = value
+        self._parent_scope = parent_scope
+        self.value_reads = 0
 
     def top_level_parent(self):
         return self._patient_root
 
+    def parent(self):
+        return self._parent_scope
+
     def legacy_properties(self) -> dict[str, str]:
-        return {"Value": self._value}
+        self.value_reads += 1
+        return {"Value": self._value if self.value_reads == 1 else ""}
 
 
 class _WrapperRoot:
@@ -340,12 +346,17 @@ def test_fetch_uses_exact_process_scoped_edit_when_window_enumeration_misses_it(
             "txtPatientName": "Test Patient",
         },
     )
+    patient_root.element_info.name = "환자 기초 정보"
     desktop = _ProcessFamilyDesktop(_WrapperRoot(1, {}), _WrapperRoot(2, {}))
     finder_calls: list[tuple[str, tuple[int, ...]]] = []
 
     def find_exact_edit(automation_id: str, process_ids: tuple[int, ...]):
         finder_calls.append((automation_id, process_ids))
-        return _LegacyValueChartElement(patient_root, "829")
+        return _LegacyValueChartElement(
+            _WrapperRoot(3, {}),
+            "829",
+            parent_scope=patient_root,
+        )
 
     result = fetch_vaccine_patient_context(
         {},

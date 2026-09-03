@@ -66,6 +66,10 @@ Current lookup preference:
 1. direct scoped `child_window(...)` lookup when exact criteria are available
 2. parent-scoped direct lookup when `parent_target_id` or `parent_automation_id` is configured
 3. EMR scope-anchor lookup when an EMR UI target stores a narrowed container such as `grdOpdList`
+
+Cached grid-row activation uses the cached grid rectangle directly. It does not enumerate
+the WinForms grid child tree to calculate a row click, because that UIA call can block the
+operator interface for several seconds.
 4. ancestor-path scoped lookup when an EMR UI target stores a parsed Inspector parent chain
 5. descendant scan fallback only when direct lookup does not resolve uniquely
 

@@ -61,6 +61,8 @@ window opens, includes hidden UIA host windows, and can perform an exact process
 The exact chart control that establishes readiness is retained for value reading instead
 of being rediscovered in a second WinForms tree scan. Value extraction follows the same
 UIA ValuePattern and WinForms legacy-value paths used by the in-app capture tool.
+Its readable value is captured immediately, and the nearest `환자 기초 정보` ancestor is
+used as the scope for the remaining fields instead of rescanning the full eGHIS window.
 This coordinate is a temporary opener fallback; the patient fields themselves use stable
 UIA Automation IDs. The fetch never runs on startup or in the background.
 After the configured fields are read, KaosEghis sends one `{ESC}` to close the Patient

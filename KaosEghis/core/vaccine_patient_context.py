@@ -35,7 +35,13 @@ class VaccinePatientFetchResult:
 @dataclass(frozen=True)
 class _PatientInformationResolution:
     scope: Any
-    chart_element: Any
+    chart_value: str
+
+
+@dataclass(frozen=True)
+class _ResolvedChartCandidate:
+    element: Any
+    value: str
 
 
 def resident_id_for_label(resident_id: str) -> str:
@@ -83,6 +89,7 @@ def fetch_vaccine_patient_context(
             None,
         )
 
+    uses_native_desktop = desktop_factory is None
     if desktop_factory is None:
         try:
             from pywinauto import Desktop
@@ -100,7 +107,7 @@ def fetch_vaccine_patient_context(
         closer = _close_patient_information
     if process_family_provider is None:
         process_family_provider = _trusted_eghis_process_ids
-    if process_target_finder is None:
+    if process_target_finder is None and uses_native_desktop:
         process_target_finder = _find_exact_uia_edit_in_processes
 
     try:
@@ -149,7 +156,7 @@ def fetch_vaccine_patient_context(
     configured_ids = {
         automation_id.strip()
         for automation_id in target_automation_ids.values()
-        if automation_id.strip()
+        if automation_id.strip() and automation_id.strip() != chart_automation_id
     }
     elements_by_id = _find_elements_by_automation_id(
         patient_resolution.scope,
@@ -158,12 +165,12 @@ def fetch_vaccine_patient_context(
     # Keep the exact control that established popup readiness. A second tree
     # pass can omit or ambiguously expose this WinForms edit even though its
     # ValuePattern was available during the process-scoped lookup.
-    elements_by_id[chart_automation_id] = patient_resolution.chart_element
     values = {
         field_name: _read_element_value(elements_by_id.get(automation_id.strip()))
         for field_name, automation_id in target_automation_ids.items()
-        if automation_id.strip()
+        if automation_id.strip() and field_name != "chart_no"
     }
+    values["chart_no"] = patient_resolution.chart_value
     close_succeeded = True
     try:
         closer()
@@ -274,13 +281,7 @@ def _find_patient_information_scope(
             if handle is not None:
                 seen_handles.add(handle)
 
-    # New helper windows are usually much smaller than the cached main window.
-    # Search them first to avoid traversing the entire eGHIS UI tree.
-    for root in process_roots:
-        chart_element = _find_element(root, chart_automation_id)
-        if _has_readable_chart_value(chart_element):
-            return _PatientInformationResolution(root, chart_element)
-
+    # Exact process-scoped UIA lookup avoids traversing every eGHIS window.
     if process_target_finder is not None:
         try:
             chart_element = process_target_finder(
@@ -289,16 +290,29 @@ def _find_patient_information_scope(
             )
         except Exception:
             chart_element = None
-        if _has_readable_chart_value(chart_element):
-            return _PatientInformationResolution(
-                _top_level_scope(chart_element),
-                chart_element,
-            )
+        resolution = _patient_information_resolution(chart_element)
+        if resolution is not None:
+            return resolution
+
+    # New helper windows are usually much smaller than the cached main window.
+    # Search them before falling back to the cached eGHIS roots.
+    for root in process_roots:
+        chart_element = _find_element(root, chart_automation_id)
+        resolution = _patient_information_resolution(
+            chart_element,
+            fallback_scope=root,
+        )
+        if resolution is not None:
+            return resolution
 
     for root in cached_roots:
         chart_element = _find_element(root, chart_automation_id)
-        if _has_readable_chart_value(chart_element):
-            return _PatientInformationResolution(root, chart_element)
+        resolution = _patient_information_resolution(
+            chart_element,
+            fallback_scope=root,
+        )
+        if resolution is not None:
+            return resolution
     return None
 
 
@@ -339,11 +353,13 @@ def _find_exact_uia_edit_in_processes(
                 candidates.append(UIAWrapper(element_info))
             except Exception:
                 continue
-    visible_with_values = [
-        candidate
-        for candidate in candidates
-        if _element_is_visible(candidate) and _has_readable_chart_value(candidate)
-    ]
+    visible_with_values: list[_ResolvedChartCandidate] = []
+    for candidate in candidates:
+        if not _element_is_visible(candidate):
+            continue
+        value = _read_element_value(candidate)
+        if value:
+            visible_with_values.append(_ResolvedChartCandidate(candidate, value))
     return visible_with_values[0] if len(visible_with_values) == 1 else None
 
 
@@ -352,6 +368,38 @@ def _top_level_scope(element: Any) -> Any:
         return element.top_level_parent()
     except Exception:
         return element
+
+
+def _patient_information_resolution(
+    chart_element: Any | None,
+    *,
+    fallback_scope: Any | None = None,
+) -> _PatientInformationResolution | None:
+    if isinstance(chart_element, _ResolvedChartCandidate):
+        chart_value = chart_element.value
+        chart_element = chart_element.element
+    else:
+        chart_value = _read_element_value(chart_element)
+    if not chart_value:
+        return None
+    scope = _nearest_patient_information_scope(chart_element)
+    if scope is None:
+        scope = fallback_scope or _top_level_scope(chart_element)
+    return _PatientInformationResolution(scope, chart_value)
+
+
+def _nearest_patient_information_scope(element: Any) -> Any | None:
+    current = element
+    for _ in range(12):
+        try:
+            current = current.parent()
+        except Exception:
+            return None
+        if current is None:
+            return None
+        if _element_name(current).casefold() == "환자 기초 정보".casefold():
+            return current
+    return None
 
 
 def _trusted_eghis_process_ids(root_pid: int) -> tuple[int, ...]:
@@ -443,10 +491,6 @@ def _read_element_value(element: Any | None) -> str:
         return ""
 
 
-def _has_readable_chart_value(element: Any | None) -> bool:
-    return bool(_read_element_value(element).strip())
-
-
 def _find_element(scope: Any, automation_id: str) -> Any | None:
     return _find_elements_by_automation_id(
         scope,
@@ -498,6 +542,13 @@ def _find_elements_by_automation_id(
 def _element_automation_id(element: Any) -> str:
     try:
         return str(element.element_info.automation_id or "").strip()
+    except Exception:
+        return ""
+
+
+def _element_name(element: Any) -> str:
+    try:
+        return str(element.element_info.name or "").strip()
     except Exception:
         return ""
 

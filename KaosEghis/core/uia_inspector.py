@@ -54,8 +54,10 @@ class _GridRowProxy:
 
         left, top, right, bottom = _rect_edges(self.scope_element.rectangle())
         width = max(right - left, 1)
-        body_top, body_bottom = _grid_body_vertical_bounds(self.scope_element)
-        row_height = _estimate_grid_row_height(self.scope_element)
+        body_top = top + 28
+        body_bottom = max(bottom - 4, body_top + 20)
+        visible_height = max(body_bottom - body_top, 1)
+        row_height = max(18, min(26, int(round(visible_height / 24))))
         x = left + min(max(int(width * 0.08), 24), 120)
         y = int(body_top + ((self.row_index - 0.5) * row_height))
         y = max(body_top + 1, min(y, body_bottom - 1))
@@ -1177,39 +1179,6 @@ def _rect_edges(rect: Any) -> tuple[int, int, int, int]:
     right = int(getattr(rect, "right", getattr(rect, "R", left)))
     bottom = int(getattr(rect, "bottom", getattr(rect, "B", top)))
     return left, top, right, bottom
-
-
-def _grid_body_vertical_bounds(scope_element: Any) -> tuple[int, int]:
-    left, top, right, bottom = _rect_edges(scope_element.rectangle())
-    width = max(right - left, 1)
-    body_top = top + 28
-    body_bottom = bottom - 4
-    try:
-        children = scope_element.children()
-    except Exception:
-        children = []
-    body_candidates: list[tuple[int, int]] = []
-    for child in children:
-        try:
-            child_left, child_top, child_right, child_bottom = _rect_edges(child.rectangle())
-        except Exception:
-            continue
-        child_width = child_right - child_left
-        child_height = child_bottom - child_top
-        if child_width >= width * 0.75 and child_height >= 80:
-            body_candidates.append((child_top, child_bottom))
-    if body_candidates:
-        body_top = min(candidate[0] for candidate in body_candidates)
-        body_bottom = max(candidate[1] for candidate in body_candidates)
-    if body_bottom <= body_top:
-        body_bottom = max(bottom - 4, body_top + 20)
-    return body_top, body_bottom
-
-
-def _estimate_grid_row_height(scope_element: Any) -> int:
-    body_top, body_bottom = _grid_body_vertical_bounds(scope_element)
-    visible_height = max(body_bottom - body_top, 1)
-    return max(18, min(26, int(round(visible_height / 24))))
 
 
 def _parse_ancestor_path(ancestor_path: str) -> list[dict[str, str]]:

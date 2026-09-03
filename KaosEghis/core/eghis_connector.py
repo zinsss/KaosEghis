@@ -882,7 +882,9 @@ def _resolve_cached_grid_handle(
 ) -> int | None:
     if scope_handle is None:
         return None
-    for backend in ("win32", "uia"):
+    # These anchors originate from UIA Automation IDs. Try UIA first so a
+    # missing cache does not spend a full Win32 lookup timeout before repair.
+    for backend in ("uia", "win32"):
         handle = _resolve_cached_grid_handle_for_backend(
             scope_handle,
             backend,

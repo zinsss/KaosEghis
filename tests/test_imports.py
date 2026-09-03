@@ -3742,6 +3742,34 @@ def test_inspect_target_readonly_can_resolve_grid_row_target_from_ancestor_scope
     assert outpatient_list.descendants_calls == 0
 
 
+def test_cached_grid_row_click_does_not_enumerate_grid_children(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    from KaosEghis.core.uia_inspector import _GridRowProxy
+
+    clicks: list[tuple[str, tuple[int, int]]] = []
+
+    class GridScope:
+        @staticmethod
+        def rectangle():
+            return SimpleNamespace(left=100, top=100, right=500, bottom=700)
+
+        @staticmethod
+        def children():
+            raise AssertionError("cached grid click must not enumerate children")
+
+    fake_mouse = SimpleNamespace(
+        click=lambda **kwargs: clicks.append(("click", kwargs["coords"])),
+        double_click=lambda **kwargs: clicks.append(("double", kwargs["coords"])),
+    )
+    monkeypatch.setitem(sys.modules, "pywinauto", SimpleNamespace(mouse=fake_mouse))
+
+    _GridRowProxy(GridScope(), 1).double_click_input()
+
+    assert clicks == [("double", (132, 140))]
+
+
 def test_parent_scoped_name_pattern_prefers_immediate_children(monkeypatch) -> None:
     from KaosEghis.core.uia_inspector import inspect_target_readonly
     from KaosEghis.db.repositories import UiTargetRecord
