@@ -53,8 +53,6 @@ def fetch_vaccine_patient_context(
     connection_checker: Callable[[dict[str, str]], Any] = ensure_cached_connection_ready,
     desktop_factory: Callable[..., Any] | None = None,
     process_family_provider: Callable[[int], tuple[int, ...]] | None = None,
-    opener_chart_reader: Callable[[Any, tuple[int, int], tuple[int, ...]], str]
-    | None = None,
     clicker: Callable[[tuple[int, int]], None] | None = None,
     closer: Callable[[], None] | None = None,
     clock: Callable[[], float] = time.monotonic,
@@ -95,8 +93,15 @@ def fetch_vaccine_patient_context(
         closer = _close_patient_information
     if process_family_provider is None:
         process_family_provider = _trusted_eghis_process_ids
-    if opener_chart_reader is None:
-        opener_chart_reader = _read_chart_number_at_opener
+
+    try:
+        clicker(opener_coordinates)
+    except Exception:
+        return VaccinePatientFetchResult(
+            False,
+            "Patient information window could not be opened.",
+            None,
+        )
 
     try:
         desktop = desktop_factory(backend="uia")
@@ -107,35 +112,15 @@ def fetch_vaccine_patient_context(
             None,
         )
 
-    process_ids = process_family_provider(int(state.pid))
-    opener_chart_no = opener_chart_reader(
-        desktop,
-        opener_coordinates,
-        process_ids,
-    )
-    try:
-        clicker(opener_coordinates)
-    except Exception:
-        return VaccinePatientFetchResult(
-            False,
-            "Patient information window could not be opened.",
-            None,
-        )
-
     deadline = clock() + max(float(timeout_seconds), 0.1)
     patient_scope = None
-    configured_ids = {
-        automation_id.strip()
-        for automation_id in target_automation_ids.values()
-        if automation_id.strip()
-    }
+    process_ids = process_family_provider(int(state.pid))
     while clock() <= deadline:
         patient_scope = _find_patient_information_scope(
             desktop,
             state,
             chart_automation_id,
             process_ids,
-            configured_ids,
         )
         if patient_scope is not None:
             break
@@ -149,6 +134,11 @@ def fetch_vaccine_patient_context(
             None,
         )
 
+    configured_ids = {
+        automation_id.strip()
+        for automation_id in target_automation_ids.values()
+        if automation_id.strip()
+    }
     elements_by_id = _find_elements_by_automation_id(
         patient_scope,
         configured_ids,
@@ -158,8 +148,6 @@ def fetch_vaccine_patient_context(
         for field_name, automation_id in target_automation_ids.items()
         if automation_id.strip()
     }
-    if not values.get("chart_no", "").strip() and opener_chart_no:
-        values["chart_no"] = opener_chart_no
     close_succeeded = True
     try:
         closer()
@@ -228,7 +216,6 @@ def _find_patient_information_scope(
     state: Any,
     chart_automation_id: str,
     process_ids: tuple[int, ...] | None = None,
-    configured_automation_ids: set[str] | None = None,
 ) -> Any | None:
     roots: list[Any] = []
     seen_handles: set[int] = set()
@@ -258,21 +245,10 @@ def _find_patient_information_scope(
             if handle is not None:
                 seen_handles.add(handle)
 
-    best_fallback: Any | None = None
-    best_fallback_count = 0
-    wanted = set(configured_automation_ids or ())
-    wanted.add(chart_automation_id)
     for root in roots:
-        matches = _find_elements_by_automation_id(root, wanted)
-        if chart_automation_id in matches:
+        if _find_element(root, chart_automation_id) is not None:
             return root
-        fallback_count = len(matches)
-        if fallback_count >= 2 and fallback_count > best_fallback_count:
-            best_fallback = root
-            best_fallback_count = fallback_count
-        elif fallback_count >= 2 and fallback_count == best_fallback_count:
-            best_fallback = None
-    return best_fallback
+    return None
 
 
 def _trusted_eghis_process_ids(root_pid: int) -> tuple[int, ...]:
@@ -294,24 +270,6 @@ def _trusted_eghis_process_ids(root_pid: int) -> tuple[int, ...]:
         if name.startswith("eghis") and child_pid not in process_ids:
             process_ids.append(child_pid)
     return tuple(process_ids)
-
-
-def _read_chart_number_at_opener(
-    desktop: Any,
-    coords: tuple[int, int],
-    trusted_process_ids: tuple[int, ...],
-) -> str:
-    """Read the transient numeric chart label under the explicit opener point."""
-
-    try:
-        element = desktop.from_point(int(coords[0]), int(coords[1]))
-    except Exception:
-        return ""
-    owner_pid = _element_process_id(element)
-    if owner_pid not in set(trusted_process_ids):
-        return ""
-    value = _read_element_value(element).strip()
-    return value if re.fullmatch(r"\d{1,20}", value) else ""
 
 
 def _read_target_value(scope: Any, automation_id: str) -> str:
@@ -431,14 +389,6 @@ def _element_handle(element: Any) -> int | None:
     value = getattr(element, "handle", None)
     if value is None:
         value = getattr(getattr(element, "element_info", None), "handle", None)
-    try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _element_process_id(element: Any) -> int | None:
-    value = getattr(getattr(element, "element_info", None), "process_id", None)
     try:
         return int(value) if value is not None else None
     except (TypeError, ValueError):

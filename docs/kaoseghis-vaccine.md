@@ -77,14 +77,6 @@ the cached process and only descendants whose executable name begins with `eGhis
 Unrelated child applications are excluded, and the operation remains read-only after
 the explicit operator click that opens Patient Information.
 
-In current eGHIS builds, the main-screen chart number at the Patient Information opener
-may be exposed as a plain `Text` whose numeric Automation ID changes every run. That ID
-is never saved. Immediately before the explicit opener click, KaosEghis may read a
-digits-only chart value at the configured opener coordinate, provided the element is
-owned by the trusted eGHIS process family. If the opened detail view no longer exposes
-`txt환자번호`, this transient value is used only after at least two other configured
-Patient Information fields uniquely identify the detail scope.
-
 The preferred telephone value is `txt휴대폰`; `txt전화` is used only when the mobile
 field is blank. Date of birth is shown transiently on the Vaccine page and is not added
 to the local Vaccine record schema by this change. No fetched values are written to logs.
