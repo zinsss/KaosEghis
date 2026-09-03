@@ -52,6 +52,7 @@ def fetch_vaccine_patient_context(
     timeout_seconds: float = DEFAULT_PATIENT_INFO_TIMEOUT_SECONDS,
     connection_checker: Callable[[dict[str, str]], Any] = ensure_cached_connection_ready,
     desktop_factory: Callable[..., Any] | None = None,
+    process_family_provider: Callable[[int], tuple[int, ...]] | None = None,
     clicker: Callable[[tuple[int, int]], None] | None = None,
     closer: Callable[[], None] | None = None,
     clock: Callable[[], float] = time.monotonic,
@@ -90,6 +91,8 @@ def fetch_vaccine_patient_context(
         clicker = _click_patient_info_opener
     if closer is None:
         closer = _close_patient_information
+    if process_family_provider is None:
+        process_family_provider = _trusted_eghis_process_ids
 
     try:
         clicker(opener_coordinates)
@@ -111,11 +114,13 @@ def fetch_vaccine_patient_context(
 
     deadline = clock() + max(float(timeout_seconds), 0.1)
     patient_scope = None
+    process_ids = process_family_provider(int(state.pid))
     while clock() <= deadline:
         patient_scope = _find_patient_information_scope(
             desktop,
             state,
             chart_automation_id,
+            process_ids,
         )
         if patient_scope is not None:
             break
@@ -210,6 +215,7 @@ def _find_patient_information_scope(
     desktop: Any,
     state: Any,
     chart_automation_id: str,
+    process_ids: tuple[int, ...] | None = None,
 ) -> Any | None:
     roots: list[Any] = []
     seen_handles: set[int] = set()
@@ -226,22 +232,44 @@ def _find_patient_information_scope(
         roots.append(root)
         seen_handles.add(int(handle))
 
-    try:
-        process_windows = desktop.windows(process=int(state.pid))
-    except Exception:
-        process_windows = []
-    for root in process_windows:
-        handle = _element_handle(root)
-        if handle is not None and handle in seen_handles:
-            continue
-        roots.append(root)
-        if handle is not None:
-            seen_handles.add(handle)
+    for process_id in process_ids or (int(state.pid),):
+        try:
+            process_windows = desktop.windows(process=int(process_id))
+        except Exception:
+            process_windows = []
+        for root in process_windows:
+            handle = _element_handle(root)
+            if handle is not None and handle in seen_handles:
+                continue
+            roots.append(root)
+            if handle is not None:
+                seen_handles.add(handle)
 
     for root in roots:
         if _find_element(root, chart_automation_id) is not None:
             return root
     return None
+
+
+def _trusted_eghis_process_ids(root_pid: int) -> tuple[int, ...]:
+    """Return the connected eGHIS PID plus eGHIS-named descendant helpers."""
+
+    process_ids = [int(root_pid)]
+    try:
+        import psutil
+
+        children = psutil.Process(int(root_pid)).children(recursive=True)
+    except Exception:
+        return tuple(process_ids)
+    for child in children:
+        try:
+            name = str(child.name() or "").strip().casefold()
+            child_pid = int(child.pid)
+        except Exception:
+            continue
+        if name.startswith("eghis") and child_pid not in process_ids:
+            process_ids.append(child_pid)
+    return tuple(process_ids)
 
 
 def _read_target_value(scope: Any, automation_id: str) -> str:

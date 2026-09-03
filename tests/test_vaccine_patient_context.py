@@ -55,6 +55,25 @@ class _Desktop:
         return [self._patient_root]
 
 
+class _ProcessFamilyDesktop:
+    def __init__(self, main_root: _Root, helper_root: _Root) -> None:
+        self._main_root = main_root
+        self._helper_root = helper_root
+        self.process_calls: list[int] = []
+
+    def window(self, *, handle: int):
+        assert handle == self._main_root.handle
+        return _Specification(self._main_root)
+
+    def windows(self, *, process: int):
+        self.process_calls.append(process)
+        if process == 100:
+            return [self._main_root]
+        if process == 200:
+            return [self._helper_root]
+        return []
+
+
 class _WrapperRoot:
     """Model the API exposed by a real pywinauto UIAWrapper."""
 
@@ -228,6 +247,70 @@ def test_fetch_prefers_unique_visible_chart_target_over_hidden_duplicate() -> No
     assert result.context is not None
     assert result.context.chart_no == "1170"
     assert result.context.patient_name == "Test Patient"
+
+
+def test_fetch_searches_verified_eghis_child_process_for_patient_window() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    desktop = _ProcessFamilyDesktop(
+        _Root(1, {}),
+        _Root(
+            2,
+            {
+                "txtPatientNo": "1170",
+                "txtPatientName": "Test Patient",
+            },
+        ),
+    )
+
+    result = fetch_vaccine_patient_context(
+        {},
+        {"chart_no": "txtPatientNo", "patient_name": "txtPatientName"},
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: desktop,
+        process_family_provider=lambda _root_pid: (100, 200),
+        clicker=lambda _coords: None,
+        closer=lambda: None,
+    )
+
+    assert result.success is True
+    assert result.context is not None
+    assert result.context.chart_no == "1170"
+    assert desktop.process_calls == [100, 200]
+
+
+def test_process_family_accepts_only_eghis_named_descendants(monkeypatch) -> None:
+    from KaosEghis.core import vaccine_patient_context
+
+    class Child:
+        def __init__(self, pid: int, name: str) -> None:
+            self.pid = pid
+            self._name = name
+
+        def name(self) -> str:
+            return self._name
+
+    class RootProcess:
+        def children(self, *, recursive: bool):
+            assert recursive is True
+            return [
+                Child(200, "eGhis.Forms.exe"),
+                Child(201, "eGhis.Chart.Interaction.exe"),
+                Child(202, "chrome.exe"),
+            ]
+
+    monkeypatch.setattr(
+        "psutil.Process",
+        lambda pid: RootProcess() if pid == 100 else None,
+    )
+
+    assert vaccine_patient_context._trusted_eghis_process_ids(100) == (
+        100,
+        200,
+        201,
+    )
 
 
 def test_fetch_rejects_multiple_visible_chart_targets() -> None:

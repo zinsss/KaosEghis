@@ -71,6 +71,12 @@ opened Patient Information field. Exact-ID lookup therefore accepts a match only
 there is one candidate overall or exactly one visible candidate. Multiple visible
 matches remain blocked rather than risking capture from the wrong patient surface.
 
+The Patient Information form may be hosted by an eGHIS helper such as
+`eGhis.Forms.exe` rather than the connected `eGhis.exe` PID. Fetch therefore searches
+the cached process and only descendants whose executable name begins with `eGhis`.
+Unrelated child applications are excluded, and the operation remains read-only after
+the explicit operator click that opens Patient Information.
+
 The preferred telephone value is `txt휴대폰`; `txt전화` is used only when the mobile
 field is blank. Date of birth is shown transiently on the Vaccine page and is not added
 to the local Vaccine record schema by this change. No fetched values are written to logs.
