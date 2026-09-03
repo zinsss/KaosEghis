@@ -75,11 +75,15 @@ class _ProcessFamilyDesktop:
 
 
 class _DeepChartElement:
-    def __init__(self, patient_root) -> None:
+    def __init__(self, patient_root, value: str = "2516") -> None:
         self._patient_root = patient_root
+        self._value = value
 
     def top_level_parent(self):
         return self._patient_root
+
+    def get_value(self) -> str:
+        return self._value
 
 
 class _WrapperRoot:
@@ -333,7 +337,6 @@ def test_fetch_uses_exact_process_scoped_edit_when_window_enumeration_misses_it(
     patient_root = _WrapperRoot(
         2,
         {
-            "txtPatientNo": "2516",
             "txtPatientName": "Test Patient",
         },
     )

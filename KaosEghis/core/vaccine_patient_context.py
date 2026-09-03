@@ -32,6 +32,12 @@ class VaccinePatientFetchResult:
     missing_fields: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class _PatientInformationResolution:
+    scope: Any
+    chart_element: Any
+
+
 def resident_id_for_label(resident_id: str) -> str:
     """Preserve the captured resident-number spelling for label output."""
 
@@ -116,23 +122,23 @@ def fetch_vaccine_patient_context(
         )
 
     deadline = clock() + max(float(timeout_seconds), 0.1)
-    patient_scope = None
+    patient_resolution = None
     while clock() <= deadline:
         # The patient-information window may start in an eGHIS helper process
         # after the opener is clicked, so refresh the trusted family each pass.
         process_ids = process_family_provider(int(state.pid))
-        patient_scope = _find_patient_information_scope(
+        patient_resolution = _find_patient_information_scope(
             desktop,
             state,
             chart_automation_id,
             process_ids,
             process_target_finder=process_target_finder,
         )
-        if patient_scope is not None:
+        if patient_resolution is not None:
             break
         sleeper(0.1)
 
-    if patient_scope is None:
+    if patient_resolution is None:
         return VaccinePatientFetchResult(
             False,
             "Patient information opened, but its chart-number target was not found. "
@@ -146,9 +152,13 @@ def fetch_vaccine_patient_context(
         if automation_id.strip()
     }
     elements_by_id = _find_elements_by_automation_id(
-        patient_scope,
+        patient_resolution.scope,
         configured_ids,
     )
+    # Keep the exact control that established popup readiness. A second tree
+    # pass can omit or ambiguously expose this WinForms edit even though its
+    # ValuePattern was available during the process-scoped lookup.
+    elements_by_id[chart_automation_id] = patient_resolution.chart_element
     values = {
         field_name: _read_element_value(elements_by_id.get(automation_id.strip()))
         for field_name, automation_id in target_automation_ids.items()
@@ -224,7 +234,7 @@ def _find_patient_information_scope(
     process_ids: tuple[int, ...] | None = None,
     *,
     process_target_finder: Callable[[str, tuple[int, ...]], Any | None] | None = None,
-) -> Any | None:
+) -> _PatientInformationResolution | None:
     cached_roots: list[Any] = []
     process_roots: list[Any] = []
     seen_handles: set[int] = set()
@@ -267,8 +277,9 @@ def _find_patient_information_scope(
     # New helper windows are usually much smaller than the cached main window.
     # Search them first to avoid traversing the entire eGHIS UI tree.
     for root in process_roots:
-        if _find_element(root, chart_automation_id) is not None:
-            return root
+        chart_element = _find_element(root, chart_automation_id)
+        if chart_element is not None:
+            return _PatientInformationResolution(root, chart_element)
 
     if process_target_finder is not None:
         try:
@@ -279,11 +290,15 @@ def _find_patient_information_scope(
         except Exception:
             chart_element = None
         if chart_element is not None:
-            return _top_level_scope(chart_element)
+            return _PatientInformationResolution(
+                _top_level_scope(chart_element),
+                chart_element,
+            )
 
     for root in cached_roots:
-        if _find_element(root, chart_automation_id) is not None:
-            return root
+        chart_element = _find_element(root, chart_automation_id)
+        if chart_element is not None:
+            return _PatientInformationResolution(root, chart_element)
     return None
 
 

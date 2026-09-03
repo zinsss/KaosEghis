@@ -58,6 +58,8 @@ current Patient Information opener at screen coordinate `(210, 115)`. It then wa
 reader refreshes the trusted eGHIS helper-process family while the patient-information
 window opens, includes hidden UIA host windows, and can perform an exact process-scoped
 `Edit` lookup when ordinary top-level enumeration misses the deeply nested chart field.
+The exact chart control that establishes readiness is retained for value reading instead
+of being rediscovered in a second WinForms tree scan.
 This coordinate is a temporary opener fallback; the patient fields themselves use stable
 UIA Automation IDs. The fetch never runs on startup or in the background.
 After the configured fields are read, KaosEghis sends one `{ESC}` to close the Patient
