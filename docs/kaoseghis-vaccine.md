@@ -66,6 +66,11 @@ shared descendant index rather than rescanning the window for every field. Failu
 find the chart-number target is reported as a target-configuration problem instead of
 being mislabeled as a generic window-readiness failure.
 
+Some eGHIS views retain hidden controls with the same Automation ID as the currently
+opened Patient Information field. Exact-ID lookup therefore accepts a match only when
+there is one candidate overall or exactly one visible candidate. Multiple visible
+matches remain blocked rather than risking capture from the wrong patient surface.
+
 The preferred telephone value is `txt휴대폰`; `txt전화` is used only when the mobile
 field is blank. Date of birth is shown transiently on the Vaccine page and is not added
 to the local Vaccine record schema by this change. No fetched values are written to logs.

@@ -304,9 +304,9 @@ def _find_elements_by_automation_id(
             if candidate_id in matches:
                 matches[candidate_id].append(candidate)
         return {
-            automation_id: candidates[0]
+            automation_id: selected
             for automation_id, candidates in matches.items()
-            if len(candidates) == 1
+            if (selected := _select_unique_visible_element(candidates)) is not None
         }
 
     child_window = getattr(scope, "child_window", None)
@@ -328,6 +328,33 @@ def _element_automation_id(element: Any) -> str:
         return str(element.element_info.automation_id or "").strip()
     except Exception:
         return ""
+
+
+def _select_unique_visible_element(candidates: list[Any]) -> Any | None:
+    """Choose an exact selector match without guessing between visible controls."""
+
+    if len(candidates) == 1:
+        return candidates[0]
+    visible = [candidate for candidate in candidates if _element_is_visible(candidate)]
+    return visible[0] if len(visible) == 1 else None
+
+
+def _element_is_visible(element: Any) -> bool:
+    try:
+        return bool(element.is_visible())
+    except Exception:
+        pass
+    info = getattr(element, "element_info", None)
+    try:
+        visible = getattr(info, "visible", None)
+    except Exception:
+        visible = None
+    if visible is not None:
+        return bool(visible)
+    try:
+        return not bool(getattr(info, "offscreen"))
+    except Exception:
+        return False
 
 
 def _element_handle(element: Any) -> int | None:

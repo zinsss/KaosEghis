@@ -2,12 +2,22 @@ from types import SimpleNamespace
 
 
 class _Element:
-    def __init__(self, value: str, automation_id: str = "") -> None:
+    def __init__(
+        self,
+        value: str,
+        automation_id: str = "",
+        *,
+        visible: bool = True,
+    ) -> None:
         self._value = value
         self.element_info = SimpleNamespace(automation_id=automation_id)
+        self._visible = visible
 
     def get_value(self) -> str:
         return self._value
+
+    def is_visible(self) -> bool:
+        return self._visible
 
 
 class _Specification:
@@ -178,6 +188,76 @@ def test_fetch_uses_real_uia_wrapper_descendants_once_for_all_fields() -> None:
     assert result.context.resident_id == "700101-1234567"
     # One scan verifies readiness and one scan indexes every configured field.
     assert patient_root.descendant_calls == 2
+
+
+def test_fetch_prefers_unique_visible_chart_target_over_hidden_duplicate() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    class DuplicateChartRoot(_WrapperRoot):
+        def __init__(self) -> None:
+            super().__init__(
+                2,
+                {
+                    "txtPatientNo": "1170",
+                    "txtPatientName": "Test Patient",
+                },
+            )
+            self._elements.insert(
+                0,
+                _Element(
+                    "stale-hidden-value",
+                    "txtPatientNo",
+                    visible=False,
+                ),
+            )
+
+    desktop = _Desktop(_WrapperRoot(1, {}), DuplicateChartRoot())
+
+    result = fetch_vaccine_patient_context(
+        {},
+        {"chart_no": "txtPatientNo", "patient_name": "txtPatientName"},
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: desktop,
+        clicker=lambda _coords: None,
+        closer=lambda: None,
+    )
+
+    assert result.success is True
+    assert result.context is not None
+    assert result.context.chart_no == "1170"
+    assert result.context.patient_name == "Test Patient"
+
+
+def test_fetch_rejects_multiple_visible_chart_targets() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    class AmbiguousChartRoot(_WrapperRoot):
+        def __init__(self) -> None:
+            super().__init__(2, {"txtPatientNo": "1170"})
+            self._elements.append(_Element("2200", "txtPatientNo", visible=True))
+
+    ticks = iter((0.0, 0.0, 1.0))
+    result = fetch_vaccine_patient_context(
+        {},
+        {"chart_no": "txtPatientNo"},
+        timeout_seconds=0.1,
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: _Desktop(
+            _WrapperRoot(1, {}),
+            AmbiguousChartRoot(),
+        ),
+        clicker=lambda _coords: None,
+        closer=lambda: None,
+        clock=lambda: next(ticks),
+        sleeper=lambda _seconds: None,
+    )
+
+    assert result.success is False
+    assert "chart-number target was not found" in result.message
 
 
 def test_fetch_uses_telephone_when_mobile_is_blank() -> None:
