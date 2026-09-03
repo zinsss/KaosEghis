@@ -54,6 +54,9 @@ class _Desktop:
         assert process == 100
         return [self._patient_root]
 
+    def from_point(self, _x: int, _y: int):
+        raise LookupError("No opener point in this test.")
+
 
 class _ProcessFamilyDesktop:
     def __init__(self, main_root: _Root, helper_root: _Root) -> None:
@@ -72,6 +75,9 @@ class _ProcessFamilyDesktop:
         if process == 200:
             return [self._helper_root]
         return []
+
+    def from_point(self, _x: int, _y: int):
+        raise LookupError("No opener point in this test.")
 
 
 class _WrapperRoot:
@@ -279,6 +285,76 @@ def test_fetch_searches_verified_eghis_child_process_for_patient_window() -> Non
     assert result.context is not None
     assert result.context.chart_no == "1170"
     assert desktop.process_calls == [100, 200]
+
+
+def test_fetch_uses_guarded_opener_chart_when_detail_chart_id_is_absent() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    desktop = _Desktop(
+        _Root(1, {}),
+        _WrapperRoot(
+            2,
+            {
+                "txtResidentNo": "700101-1234567",
+                "txtPatientName": "Test Patient",
+                "txtAddress": "Test address",
+            },
+        ),
+    )
+
+    result = fetch_vaccine_patient_context(
+        {},
+        {
+            "chart_no": "txtPatientNo",
+            "resident_id": "txtResidentNo",
+            "patient_name": "txtPatientName",
+            "address": "txtAddress",
+        },
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: desktop,
+        opener_chart_reader=lambda _desktop, coords, pids: (
+            "1124" if coords == (210, 115) and pids == (100,) else ""
+        ),
+        clicker=lambda _coords: None,
+        closer=lambda: None,
+    )
+
+    assert result.success is True
+    assert result.context is not None
+    assert result.context.chart_no == "1124"
+    assert result.context.resident_id == "700101-1234567"
+
+
+def test_opener_chart_reader_rejects_value_from_untrusted_process() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        _read_chart_number_at_opener,
+    )
+
+    class PointDesktop:
+        def from_point(self, x: int, y: int):
+            assert (x, y) == (210, 115)
+            element = _Element("1124", "dynamic-handle")
+            element.element_info.process_id = 999
+            return element
+
+    assert _read_chart_number_at_opener(PointDesktop(), (210, 115), (100, 200)) == ""
+
+
+def test_opener_chart_reader_accepts_numeric_value_from_eghis_process() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        _read_chart_number_at_opener,
+    )
+
+    class PointDesktop:
+        def from_point(self, x: int, y: int):
+            assert (x, y) == (210, 115)
+            element = _Element("1124", "332914")
+            element.element_info.process_id = 100
+            return element
+
+    assert _read_chart_number_at_opener(PointDesktop(), (210, 115), (100, 200)) == "1124"
 
 
 def test_process_family_accepts_only_eghis_named_descendants(monkeypatch) -> None:
