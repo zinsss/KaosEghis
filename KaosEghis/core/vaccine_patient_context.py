@@ -11,6 +11,11 @@ from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
 DEFAULT_PATIENT_INFO_OPEN_COORDINATES = (210, 115)
 DEFAULT_PATIENT_INFO_TIMEOUT_SECONDS = 4.0
+PATIENT_FIELD_AUTOMATION_ID_FALLBACKS = {
+    # Older/current patient-information views expose this value as txtSexAge,
+    # while the main treatment view commonly exposes lblSexAge.
+    "sex_age": ("txtSexAge",),
+}
 
 
 @dataclass(frozen=True)
@@ -154,10 +159,16 @@ def fetch_vaccine_patient_context(
             None,
         )
 
+    field_automation_ids = {
+        field_name: _field_automation_id_candidates(field_name, automation_id)
+        for field_name, automation_id in target_automation_ids.items()
+        if field_name != "chart_no"
+    }
     configured_ids = {
-        automation_id.strip()
-        for automation_id in target_automation_ids.values()
-        if automation_id.strip() and automation_id.strip() != chart_automation_id
+        automation_id
+        for candidates in field_automation_ids.values()
+        for automation_id in candidates
+        if automation_id != chart_automation_id
     }
     elements_by_id = _find_elements_by_automation_id(
         patient_resolution.scope,
@@ -167,9 +178,8 @@ def fetch_vaccine_patient_context(
     # pass can omit or ambiguously expose this WinForms edit even though its
     # ValuePattern was available during the process-scoped lookup.
     values = {
-        field_name: _read_element_value(elements_by_id.get(automation_id.strip()))
-        for field_name, automation_id in target_automation_ids.items()
-        if automation_id.strip() and field_name != "chart_no"
+        field_name: _read_first_target_value(elements_by_id, automation_ids)
+        for field_name, automation_ids in field_automation_ids.items()
     }
     values["chart_no"] = patient_resolution.chart_value
     close_succeeded = True
@@ -434,6 +444,28 @@ def _trusted_eghis_process_ids(root_pid: int) -> tuple[int, ...]:
 def _read_target_value(scope: Any, automation_id: str) -> str:
     element = _find_element(scope, automation_id)
     return _read_element_value(element)
+
+
+def _field_automation_id_candidates(
+    field_name: str,
+    configured_automation_id: str,
+) -> tuple[str, ...]:
+    candidates = (
+        str(configured_automation_id or "").strip(),
+        *PATIENT_FIELD_AUTOMATION_ID_FALLBACKS.get(field_name, ()),
+    )
+    return tuple(dict.fromkeys(value for value in candidates if value))
+
+
+def _read_first_target_value(
+    elements_by_id: dict[str, Any],
+    automation_ids: tuple[str, ...],
+) -> str:
+    for automation_id in automation_ids:
+        value = _read_element_value(elements_by_id.get(automation_id))
+        if value:
+            return value
+    return ""
 
 
 def _read_element_value(element: Any | None) -> str:

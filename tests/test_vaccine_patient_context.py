@@ -517,6 +517,38 @@ def test_fetch_uses_telephone_when_mobile_is_blank() -> None:
     assert result.context.patient_phone == "054-000-0000"
 
 
+def test_fetch_uses_patient_window_sex_age_fallback_and_compact_format() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    desktop = _Desktop(
+        _Root(1, {}),
+        _Root(
+            2,
+            {
+                "txtPatientNo": "1170",
+                # The configured main-view label is absent from this popup.
+                "txtSexAge": "F/84",
+            },
+        ),
+    )
+
+    result = fetch_vaccine_patient_context(
+        {},
+        {"chart_no": "txtPatientNo", "sex_age": "lblSexAge"},
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: desktop,
+        clicker=lambda _coords: None,
+        closer=lambda: None,
+    )
+
+    assert result.success is True
+    assert result.context is not None
+    assert result.context.patient_sex == "F"
+    assert result.context.patient_age == "84"
+
+
 def test_fetch_does_not_click_when_emr_is_not_connected() -> None:
     from KaosEghis.core.vaccine_patient_context import (
         fetch_vaccine_patient_context,

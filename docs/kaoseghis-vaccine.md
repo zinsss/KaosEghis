@@ -39,7 +39,7 @@ Database initialization adds these configurable UIA targets to every EMR profile
 | `vaccine.patient_chart_no` | Patient chart number | `txt환자번호` |
 | `vaccine.patient_resident_id` | Resident number | `txt주민번호` |
 | `vaccine.patient_name` | Patient name | `txt환자명` |
-| `vaccine.patient_sex_age` | Sex and age | `lblSexAge` |
+| `vaccine.patient_sex_age` | Sex and age | `lblSexAge` (patient-information fallback: `txtSexAge`) |
 | `vaccine.patient_birth_date` | Date of birth | `dateEdit1` |
 | `vaccine.patient_phone` | Preferred mobile telephone | `txt휴대폰` |
 | `vaccine.patient_telephone` | Telephone fallback | `txt전화` |
