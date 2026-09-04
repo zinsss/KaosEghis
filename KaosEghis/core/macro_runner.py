@@ -13,9 +13,10 @@ from KaosEghis.core.clipboard_service import copy_text, restore_clipboard
 from KaosEghis.core.eghis_connector import (
     build_connector_settings,
     ensure_cached_connection_ready,
-    ensure_cached_grid_handle,
+    ensure_cached_grid_element,
     focus_cached_eghis_window,
     get_cached_eghis_state,
+    invalidate_cached_grid_element,
     refresh_cached_eghis_state,
     validate_cached_connection_identity,
 )
@@ -467,12 +468,20 @@ class MacroRunner:
         if target_record is None:
             return MacroRunResult(False, "target not found", 0, None)
 
+        target, resolve_message = self._resolve_runtime_target(
+            settings,
+            step.target_id,
+        )
+        if target is None:
+            return MacroRunResult(False, resolve_message, 0, None)
+
         result = wait_for_target_condition(
             settings,
             target_record,
             WaitCondition.KEYBOARD_FOCUS,
             timeout_ms=max(0, int(float(step.timeout_seconds or 0.0) * 1000)),
             poll_ms=100,
+            resolved_element=target,
         )
         if not result.success:
             if "timed out" in result.message.casefold():
@@ -1116,7 +1125,9 @@ class MacroRunner:
             self._resolved_target_aliases[target_id] = cache_key
             self._run_metrics.cache_hits += 1
             return self._resolved_target_cache[cache_key], "Target resolved."
-        ensure_cached_grid_handle(settings, target_record.parent_automation_id)
+        if force_refresh:
+            invalidate_cached_grid_element(target_record.parent_automation_id)
+        ensure_cached_grid_element(settings, target_record.parent_automation_id)
         element, _parent_found, message = resolve_target_element(
             settings, target_record
         )

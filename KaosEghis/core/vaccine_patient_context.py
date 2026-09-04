@@ -6,6 +6,7 @@ import time
 from typing import Any, Callable
 
 from KaosEghis.core.eghis_connector import ensure_cached_connection_ready
+from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
 
 DEFAULT_PATIENT_INFO_OPEN_COORDINATES = (210, 115)
@@ -243,7 +244,6 @@ def _find_patient_information_scope(
     process_target_finder: Callable[[str, tuple[int, ...]], Any | None] | None = None,
 ) -> _PatientInformationResolution | None:
     cached_roots: list[Any] = []
-    process_roots: list[Any] = []
     seen_handles: set[int] = set()
     for handle in (
         getattr(state, "main_window_handle", None),
@@ -259,6 +259,23 @@ def _find_patient_information_scope(
         seen_handles.add(int(handle))
 
     trusted_process_ids = process_ids or (int(state.pid),)
+
+    # Use the exact native UIA property query before enumerating any process
+    # windows. The patient-information control has a stable Automation ID even
+    # though it can live under a transient eGHIS child window.
+    if process_target_finder is not None:
+        try:
+            chart_element = process_target_finder(
+                chart_automation_id,
+                tuple(int(process_id) for process_id in trusted_process_ids),
+            )
+        except Exception:
+            chart_element = None
+        resolution = _patient_information_resolution(chart_element)
+        if resolution is not None:
+            return resolution
+
+    process_roots: list[Any] = []
     for process_id in trusted_process_ids:
         try:
             process_windows = desktop.windows(
@@ -280,19 +297,6 @@ def _find_patient_information_scope(
             process_roots.append(root)
             if handle is not None:
                 seen_handles.add(handle)
-
-    # Exact process-scoped UIA lookup avoids traversing every eGHIS window.
-    if process_target_finder is not None:
-        try:
-            chart_element = process_target_finder(
-                chart_automation_id,
-                tuple(int(process_id) for process_id in trusted_process_ids),
-            )
-        except Exception:
-            chart_element = None
-        resolution = _patient_information_resolution(chart_element)
-        if resolution is not None:
-            return resolution
 
     # New helper windows are usually much smaller than the cached main window.
     # Search them before falling back to the cached eGHIS roots.
@@ -320,39 +324,14 @@ def _find_exact_uia_edit_in_processes(
     automation_id: str,
     process_ids: tuple[int, ...],
 ) -> Any | None:
-    """Find one exact visible Edit inside the trusted eGHIS process family."""
+    """Find the patient-info Edit through a native exact Automation-ID query."""
 
-    try:
-        from pywinauto.controls.uiawrapper import UIAWrapper
-        from pywinauto.uia_element_info import UIAElementInfo
-    except ImportError:
-        return None
-
-    candidates: list[Any] = []
-    try:
-        desktop_info = UIAElementInfo()
-    except Exception:
-        return None
-    for process_id in process_ids:
-        try:
-            elements = desktop_info.descendants(
-                process=int(process_id),
-                control_type="Edit",
-                cache_enable=True,
-            )
-        except Exception:
-            continue
-        for element_info in elements:
-            try:
-                candidate_id = str(element_info.automation_id or "").strip()
-            except Exception:
-                continue
-            if candidate_id != automation_id:
-                continue
-            try:
-                candidates.append(UIAWrapper(element_info))
-            except Exception:
-                continue
+    matches = find_uia_elements_by_automation_ids(
+        (automation_id,),
+        process_ids=process_ids,
+        control_type="Edit",
+    )
+    candidates = _deduplicate_elements(matches.get(automation_id, []))
     visible_with_values: list[_ResolvedChartCandidate] = []
     for candidate in candidates:
         if not _element_is_visible(candidate):
@@ -360,7 +339,17 @@ def _find_exact_uia_edit_in_processes(
         value = _read_element_value(candidate)
         if value:
             visible_with_values.append(_ResolvedChartCandidate(candidate, value))
-    return visible_with_values[0] if len(visible_with_values) == 1 else None
+
+    patient_info_candidates = [
+        candidate
+        for candidate in visible_with_values
+        if _nearest_patient_information_scope(candidate.element) is not None
+    ]
+    if len(patient_info_candidates) == 1:
+        return patient_info_candidates[0]
+    if len(visible_with_values) == 1:
+        return visible_with_values[0]
+    return None
 
 
 def _top_level_scope(element: Any) -> Any:
@@ -506,6 +495,18 @@ def _find_elements_by_automation_id(
     if not wanted:
         return {}
 
+    element_info = getattr(scope, "element_info", None)
+    if callable(getattr(element_info, "_get_elements", None)):
+        matches = find_uia_elements_by_automation_ids(
+            wanted,
+            root_element=scope,
+        )
+        return {
+            automation_id: selected
+            for automation_id, candidates in matches.items()
+            if (selected := _select_unique_visible_element(candidates)) is not None
+        }
+
     # pywinauto WindowSpecification exposes child_window(), while a resolved
     # UIAWrapper exposes descendants(). Support both without rescanning once per field.
     descendants_method = getattr(scope, "descendants", None)
@@ -588,6 +589,19 @@ def _element_handle(element: Any) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _deduplicate_elements(elements: list[Any]) -> list[Any]:
+    unique: list[Any] = []
+    seen_handles: set[int] = set()
+    for element in elements:
+        handle = _element_handle(element)
+        if handle is not None and handle > 0:
+            if handle in seen_handles:
+                continue
+            seen_handles.add(handle)
+        unique.append(element)
+    return unique
 
 
 def _split_sex_age(value: str) -> tuple[str, str]:

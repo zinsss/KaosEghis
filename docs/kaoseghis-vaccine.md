@@ -554,7 +554,11 @@ Before operational use, tests must cover:
 ## Implementation Sequence
 
 1. Editable vaccine catalog and local preparation records. Done.
-2. Transient current-patient reader from the connected eGHIS profile. Done as a first EMR-target-based fetch.
+2. Transient current-patient reader from the connected eGHIS profile. Done as an
+   EMR-target-based fetch. The reader queries exact Automation IDs through native UIA,
+   prefers the visible `txt환자번호` beneath the `환자 기초 정보` ancestor when eGHIS
+   exposes duplicate IDs elsewhere, and indexes the remaining fields in one scoped
+   query. It does not scan or log raw patient rows.
 3. Pure eligibility/counter decision engine with boundary tests. Done as a guarded
    preview; child-dose confirmation and the print/completion counter checkpoint remain.
 4. Thermal label preview and printing service.

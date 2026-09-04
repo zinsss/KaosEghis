@@ -284,6 +284,15 @@ control value. Other verified selectors are `txt환자명`, `txt주민번호`, `
 only after the operator presses the Vaccine fetch button, then reads the fields from the
 connected eGHIS process. It does not treat any displayed patient value as a UIA selector.
 
+Grid/tab anchors are cached only in process memory for the connected EMR session. The
+cache retains resolved UIA objects as well as native window handles because some eGHIS
+controls expose a valid Automation ID but no reusable HWND. Exact Automation-ID lookup
+uses a native UIA property condition, avoiding a full Python-side descendant walk.
+Routine connector refreshes for the same PID/window preserve this cache; disconnect,
+process replacement, or explicit invalidation clears it. Macro `when_ready` checks the
+already-resolved per-run target rather than resolving the same UI tree on every poll.
+No UIA object or handle is saved to SQLite.
+
 When the marker is present, a large red always-on-top warning asks the operator to
 review the patient memo in EMR. The popup does not display the memo contents, does not
 retain them, and hides automatically when the marker is absent or EMR disconnects.

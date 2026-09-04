@@ -1,7 +1,11 @@
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import PurePath
+import threading
 import time
+from typing import Any
+
+from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
 
 CACHE_TTL_SECONDS = 10
@@ -43,6 +47,7 @@ class EghisConnectorState:
 
 
 _CACHED_STATE: EghisConnectorState | None = None
+_CACHED_GRID_ELEMENTS: dict[tuple[int, str], tuple[int, Any] | Any] = {}
 
 
 def build_connector_settings(
@@ -229,6 +234,7 @@ def get_cached_eghis_state() -> EghisConnectorState | None:
 def clear_cached_eghis_state() -> None:
     global _CACHED_STATE
     _CACHED_STATE = None
+    _CACHED_GRID_ELEMENTS.clear()
 
 
 def refresh_cached_eghis_state(
@@ -237,8 +243,56 @@ def refresh_cached_eghis_state(
     eager_grid_cache: bool = False,
 ) -> EghisConnectorState:
     global _CACHED_STATE
-    _CACHED_STATE = discover_eghis(settings, eager_grid_cache=eager_grid_cache)
+    previous_state = _CACHED_STATE
+    if eager_grid_cache:
+        _CACHED_GRID_ELEMENTS.clear()
+    discovered = discover_eghis(settings, eager_grid_cache=eager_grid_cache)
+    if not eager_grid_cache:
+        if previous_state is not None and _same_cached_connection(
+            previous_state,
+            discovered,
+        ):
+            discovered = replace(
+                discovered,
+                cached_grid_handles=_merge_valid_grid_handles(
+                    previous_state.cached_grid_handles,
+                    discovered.cached_grid_handles,
+                ),
+            )
+        else:
+            _CACHED_GRID_ELEMENTS.clear()
+    _CACHED_STATE = discovered
     return _CACHED_STATE
+
+
+def get_cached_grid_element(automation_id: str | None) -> Any | None:
+    normalized_id = (automation_id or "").strip()
+    state = get_cached_eghis_state()
+    scope_handle = _cached_grid_scope_handle(state)
+    if not normalized_id or scope_handle is None:
+        return None
+    return _cached_grid_element_for_scope(scope_handle, normalized_id)
+
+
+def invalidate_cached_grid_element(automation_id: str | None) -> None:
+    normalized_id = (automation_id or "").strip()
+    if not normalized_id:
+        return
+    for key in tuple(_CACHED_GRID_ELEMENTS):
+        if key[1] == normalized_id:
+            _CACHED_GRID_ELEMENTS.pop(key, None)
+
+
+def ensure_cached_grid_element(
+    settings: dict[str, str],
+    automation_id: str | None,
+) -> Any | None:
+    normalized_id = (automation_id or "").strip()
+    cached = get_cached_grid_element(normalized_id)
+    if cached is not None:
+        return cached
+    ensure_cached_grid_handle(settings, normalized_id)
+    return get_cached_grid_element(normalized_id)
 
 
 def ensure_cached_grid_handle(
@@ -255,6 +309,9 @@ def ensure_cached_grid_handle(
     state = get_cached_eghis_state()
     if state is None:
         return None
+    cached_element = get_cached_grid_element(normalized_id)
+    if cached_element is not None:
+        return _valid_native_handle(cached_element)
     cached_handles = dict(state.cached_grid_handles or {})
     cached_handle = cached_handles.get(normalized_id)
     if cached_handle is not None and _window_handle_is_valid(cached_handle):
@@ -781,12 +838,34 @@ def _resolve_main_window_handle(
 ) -> int | None:
     if window_handle is None or not automation_id:
         return None
-    for backend in ("win32", "uia"):
+
+    # eGHIS exposes the treatment room as a native MDI child named 진료실.
+    # Resolve that HWND first; it avoids two potentially slow pywinauto tree
+    # searches while retaining the Automation-ID lookup as a fallback.
+    fallback_handle = _find_named_mdi_child_window_handle(window_handle, "진료실")
+    if fallback_handle is not None:
+        return fallback_handle
+
+    matches = find_uia_elements_by_automation_ids(
+        (automation_id,),
+        root_handle=window_handle,
+    )
+    target = _select_cached_anchor(matches.get(automation_id, []))
+    if target is not None:
+        handle = _valid_native_handle(target)
+        if handle is not None:
+            return handle
+
+    for backend in ("win32",):
         try:
             from pywinauto import Desktop
 
             window = Desktop(backend=backend).window(handle=window_handle)
-            target = window.child_window(auto_id=automation_id).wrapper_object()
+            specification = window.child_window(auto_id=automation_id)
+            exists = getattr(specification, "exists", None)
+            if callable(exists) and not exists(timeout=0.2, retry_interval=0.04):
+                continue
+            target = specification.wrapper_object()
             handle = getattr(target, "handle", None)
             if handle is None:
                 handle = getattr(getattr(target, "element_info", None), "handle", None)
@@ -794,9 +873,6 @@ def _resolve_main_window_handle(
                 return int(handle)
         except Exception:
             continue
-    fallback_handle = _find_named_mdi_child_window_handle(window_handle, "진료실")
-    if fallback_handle is not None:
-        return fallback_handle
     return None
 
 
@@ -860,7 +936,9 @@ def _resolve_cached_grid_handles(
     if scope_handle is None:
         return None
     handles: dict[str, int] = {}
-    for backend in ("win32", "uia"):
+    # Grid IDs are UIA Automation IDs. A native property-condition query is
+    # both faster and more precise than a Win32 descendant walk.
+    for backend in ("uia", "win32"):
         try:
             backend_handles = _resolve_cached_grid_handles_for_backend(
                 scope_handle,
@@ -871,7 +949,11 @@ def _resolve_cached_grid_handles(
             backend_handles = {}
         for automation_id, handle in backend_handles.items():
             handles.setdefault(automation_id, handle)
-        if all(automation_id in handles for automation_id in grid_automation_ids):
+        if all(
+            automation_id in handles
+            or _cached_grid_element_for_scope(scope_handle, automation_id) is not None
+            for automation_id in grid_automation_ids
+        ):
             break
     return handles or None
 
@@ -900,6 +982,17 @@ def _resolve_cached_grid_handle_for_backend(
     backend: str,
     automation_id: str,
 ) -> int | None:
+    if backend == "uia":
+        matches = find_uia_elements_by_automation_ids(
+            (automation_id,),
+            root_handle=scope_handle,
+        )
+        element = _select_cached_anchor(matches.get(automation_id, []))
+        if element is None:
+            return None
+        _remember_cached_grid_element(scope_handle, automation_id, element)
+        return _valid_native_handle(element)
+
     try:
         from pywinauto import Desktop
 
@@ -915,18 +1008,9 @@ def _resolve_cached_grid_handle_for_backend(
     except Exception:
         return None
 
-    handle = getattr(element, "handle", None)
-    if handle is None:
-        handle = getattr(getattr(element, "element_info", None), "handle", None)
-    if handle is None:
-        return None
-    try:
-        normalized_handle = int(handle)
-    except (TypeError, ValueError):
-        return None
-    if normalized_handle <= 0 or not _window_handle_is_valid(normalized_handle):
-        return None
-    return normalized_handle
+    _remember_cached_grid_element(scope_handle, automation_id, element)
+
+    return _valid_native_handle(element)
 
 
 def _grid_handles_for_state(
@@ -977,6 +1061,22 @@ def _resolve_cached_grid_handles_for_backend(
     backend: str,
     grid_automation_ids: tuple[str, ...],
 ) -> dict[str, int]:
+    if backend == "uia":
+        matches = find_uia_elements_by_automation_ids(
+            grid_automation_ids,
+            root_handle=scope_handle,
+        )
+        handles: dict[str, int] = {}
+        for automation_id in grid_automation_ids:
+            element = _select_cached_anchor(matches.get(automation_id, []))
+            if element is None:
+                continue
+            _remember_cached_grid_element(scope_handle, automation_id, element)
+            handle = _valid_native_handle(element)
+            if handle is not None:
+                handles[automation_id] = handle
+        return handles
+
     try:
         from pywinauto import Desktop
 
@@ -992,6 +1092,7 @@ def _resolve_cached_grid_handles_for_backend(
         ).strip()
         if automation_id not in grid_automation_ids or automation_id in handles:
             continue
+        _remember_cached_grid_element(scope_handle, automation_id, element)
         handle = getattr(element, "handle", None)
         if handle is None:
             handle = getattr(getattr(element, "element_info", None), "handle", None)
@@ -1004,6 +1105,96 @@ def _resolve_cached_grid_handles_for_backend(
         if len(handles) == len(grid_automation_ids):
             break
     return handles
+
+
+def _remember_cached_grid_element(
+    scope_handle: int,
+    automation_id: str,
+    element: Any,
+) -> None:
+    key = (int(scope_handle), automation_id)
+    thread_id = threading.get_ident()
+    existing = _CACHED_GRID_ELEMENTS.get(key)
+    if (
+        isinstance(existing, tuple)
+        and len(existing) == 2
+        and existing[0] == thread_id
+    ):
+        return
+    _CACHED_GRID_ELEMENTS[key] = (thread_id, element)
+
+
+def _cached_grid_element_for_scope(
+    scope_handle: int,
+    automation_id: str,
+) -> Any | None:
+    entry = _CACHED_GRID_ELEMENTS.get((int(scope_handle), automation_id))
+    if isinstance(entry, tuple) and len(entry) == 2 and isinstance(entry[0], int):
+        return entry[1] if entry[0] == threading.get_ident() else None
+    # Compatibility for lightweight test doubles and cache state created by
+    # older in-process code during a hot reload.
+    return entry
+
+
+def _select_cached_anchor(elements: list[Any]) -> Any | None:
+    if len(elements) == 1:
+        return elements[0]
+    visible: list[Any] = []
+    for element in elements:
+        try:
+            if element.is_visible():
+                visible.append(element)
+        except Exception:
+            continue
+    return visible[0] if len(visible) == 1 else None
+
+
+def _valid_native_handle(element: Any) -> int | None:
+    handle = getattr(element, "handle", None)
+    if handle is None:
+        handle = getattr(getattr(element, "element_info", None), "handle", None)
+    try:
+        normalized_handle = int(handle)
+    except (TypeError, ValueError):
+        return None
+    if normalized_handle <= 0 or not _window_handle_is_valid(normalized_handle):
+        return None
+    return normalized_handle
+
+
+def _cached_grid_scope_handle(state: EghisConnectorState | None) -> int | None:
+    if state is None:
+        return None
+    handle = state.main_window_handle or state.window_handle
+    try:
+        return int(handle) if handle is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _same_cached_connection(
+    left: EghisConnectorState | None,
+    right: EghisConnectorState | None,
+) -> bool:
+    if left is None or right is None:
+        return False
+    return bool(
+        left.pid is not None
+        and left.pid == right.pid
+        and left.window_handle == right.window_handle
+        and _cached_grid_scope_handle(left) == _cached_grid_scope_handle(right)
+    )
+
+
+def _merge_valid_grid_handles(
+    previous: dict[str, int] | None,
+    current: dict[str, int] | None,
+) -> dict[str, int] | None:
+    merged = dict(current or {})
+    for automation_id, handle in (previous or {}).items():
+        if automation_id not in merged and _window_handle_is_valid(handle):
+            merged[automation_id] = handle
+    return merged or None
 
 
 def _grid_automation_ids_from_settings(settings: dict[str, str]) -> tuple[str, ...]:

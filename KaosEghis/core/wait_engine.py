@@ -2,7 +2,11 @@ from dataclasses import dataclass
 from enum import Enum
 from time import monotonic, sleep
 
-from KaosEghis.core.uia_inspector import UiaInspectionResult, inspect_target_readonly
+from KaosEghis.core.uia_inspector import (
+    UiaInspectionResult,
+    inspect_resolved_target_readonly,
+    inspect_target_readonly,
+)
 from KaosEghis.db.repositories import UiTargetRecord
 
 
@@ -30,6 +34,7 @@ def wait_for_target_condition(
     condition: WaitCondition | str,
     timeout_ms: int = 5000,
     poll_ms: int = 200,
+    resolved_element: object | None = None,
 ) -> WaitResult:
     condition_value = _condition_value(condition)
     timeout_ms = max(0, int(timeout_ms))
@@ -42,7 +47,11 @@ def wait_for_target_condition(
     while True:
         attempts += 1
         try:
-            inspection = inspect_target_readonly(settings, target)
+            inspection = (
+                inspect_resolved_target_readonly(target, resolved_element)
+                if resolved_element is not None
+                else inspect_target_readonly(settings, target)
+            )
         except Exception as error:
             return _result(
                 False,

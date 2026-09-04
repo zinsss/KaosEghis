@@ -376,6 +376,49 @@ def test_fetch_uses_exact_process_scoped_edit_when_window_enumeration_misses_it(
     assert finder_calls == [("txtPatientNo", (100, 200))]
 
 
+def test_exact_process_lookup_prefers_chart_under_patient_information(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core import vaccine_patient_context
+
+    class Parent:
+        def __init__(self, name: str, parent=None) -> None:
+            self.element_info = SimpleNamespace(name=name)
+            self._parent = parent
+
+        def parent(self):
+            return self._parent
+
+    patient_scope = Parent("환자 기초 정보", Parent("PnlMain"))
+    unrelated_scope = Parent("Other form", Parent("PnlMain"))
+
+    class Candidate(_Element):
+        def __init__(self, value: str, handle: int, parent) -> None:
+            super().__init__(value, "txt환자번호")
+            self.handle = handle
+            self._parent = parent
+
+        def parent(self):
+            return self._parent
+
+    expected = Candidate("829", 20, patient_scope)
+    unrelated = Candidate("999", 10, unrelated_scope)
+    monkeypatch.setattr(
+        vaccine_patient_context,
+        "find_uia_elements_by_automation_ids",
+        lambda *_args, **_kwargs: {"txt환자번호": [unrelated, expected]},
+    )
+
+    result = vaccine_patient_context._find_exact_uia_edit_in_processes(
+        "txt환자번호",
+        (100, 200),
+    )
+
+    assert result is not None
+    assert result.element is expected
+    assert result.value == "829"
+
+
 def test_process_family_accepts_only_eghis_named_descendants(monkeypatch) -> None:
     from KaosEghis.core import vaccine_patient_context
 

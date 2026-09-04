@@ -521,10 +521,28 @@ def test_when_ready_uses_keyboard_focus_wait(monkeypatch, tmp_path) -> None:
         lambda _settings: FakeState(),
     )
 
-    def fake_wait(settings, target, condition, timeout_ms=0, poll_ms=0):
+    resolved_element = object()
+    monkeypatch.setattr(
+        MacroRunner,
+        "_resolve_runtime_target",
+        lambda self, settings, target_id, force_refresh=False: (
+            resolved_element,
+            "Target resolved.",
+        ),
+    )
+
+    def fake_wait(
+        settings,
+        target,
+        condition,
+        timeout_ms=0,
+        poll_ms=0,
+        resolved_element=None,
+    ):
         captured["target_id"] = target.target_id
         captured["condition"] = getattr(condition, "value", condition)
         captured["timeout_ms"] = timeout_ms
+        captured["resolved_element"] = resolved_element
         return WaitResult(
             success=True,
             message="Condition satisfied: keyboard_focus.",
@@ -542,6 +560,7 @@ def test_when_ready_uses_keyboard_focus_wait(monkeypatch, tmp_path) -> None:
     assert captured["target_id"] == "symptom.text"
     assert captured["condition"] == "keyboard_focus"
     assert captured["timeout_ms"] == 2000
+    assert captured["resolved_element"] is resolved_element
 
 
 def test_when_ready_times_out_when_keyboard_focus_never_arrives(monkeypatch, tmp_path) -> None:
@@ -566,8 +585,17 @@ def test_when_ready_times_out_when_keyboard_focus_never_arrives(monkeypatch, tmp
         lambda _settings: FakeState(),
     )
     monkeypatch.setattr(
+        MacroRunner,
+        "_resolve_runtime_target",
+        lambda self, settings, target_id, force_refresh=False: (
+            object(),
+            "Target resolved.",
+        ),
+    )
+    monkeypatch.setattr(
         "KaosEghis.core.macro_runner.wait_for_target_condition",
-        lambda settings, target, condition, timeout_ms=0, poll_ms=0: WaitResult(
+        lambda settings, target, condition, timeout_ms=0, poll_ms=0,
+        resolved_element=None: WaitResult(
             success=False,
             message="Timed out waiting for keyboard_focus.",
             target_id=target.target_id,
@@ -1164,8 +1192,8 @@ def test_macro_target_resolution_repairs_configured_grid_cache(
     cache_requests: list[str | None] = []
     resolved_element = object()
     monkeypatch.setattr(
-        "KaosEghis.core.macro_runner.ensure_cached_grid_handle",
-        lambda _settings, automation_id: cache_requests.append(automation_id) or 88,
+        "KaosEghis.core.macro_runner.ensure_cached_grid_element",
+        lambda _settings, automation_id: cache_requests.append(automation_id) or object(),
     )
     monkeypatch.setattr(
         "KaosEghis.core.macro_runner.resolve_target_element",

@@ -3,7 +3,10 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from KaosEghis.core.eghis_connector import get_cached_eghis_state
+from KaosEghis.core.eghis_connector import (
+    get_cached_eghis_state,
+    get_cached_grid_element,
+)
 from KaosEghis.db.database import connect
 from KaosEghis.db.repositories import UiTargetRecord, get_ui_target
 
@@ -307,6 +310,23 @@ def inspect_target_readonly(
     if match is None:
         return _not_found(target, message, parent_found=parent_found)
 
+    return inspect_resolved_target_readonly(
+        target,
+        match,
+        message=message,
+        parent_found=parent_found,
+    )
+
+
+def inspect_resolved_target_readonly(
+    target: UiTargetRecord,
+    match: Any,
+    *,
+    message: str = "Target found.",
+    parent_found: bool | None = None,
+) -> UiaInspectionResult:
+    """Inspect an already-resolved element without traversing the UI tree again."""
+
     success_message = message or "Target found by read-only UIA inspection."
     if success_message == "Target found.":
         success_message = "Target found by read-only UIA inspection."
@@ -563,8 +583,14 @@ def _find_parent_element(
     if cached_parent is not None:
         return cached_parent, "Parent found."
     try:
-        parent = window.child_window(auto_id=parent_automation_id).wrapper_object()
+        parent = _quick_child_wrapper(window, auto_id=parent_automation_id)
     except Exception as error:
+        if _is_grid_row_target(target):
+            return None, _parent_lookup_error_message(
+                target,
+                parent_automation_id,
+                error,
+            )
         fallback_parent = _find_parent_element_from_descendants(
             window,
             target,
@@ -612,6 +638,10 @@ def _find_parent_element_from_cached_handle(
     *,
     preferred_backend: str | None = None,
 ) -> Any | None:
+    cached_element = get_cached_grid_element(parent_automation_id)
+    if cached_element is not None:
+        return cached_element
+
     cached_state = get_cached_eghis_state()
     cached_handles = getattr(cached_state, "cached_grid_handles", None) or {}
     cached_handle = cached_handles.get(parent_automation_id)
@@ -900,12 +930,25 @@ def _find_direct_child_match(
     if not automation_id:
         return None, ""
     try:
-        match = scope.child_window(auto_id=automation_id).wrapper_object()
+        match = _quick_child_wrapper(scope, auto_id=automation_id)
     except Exception:
         return None, ""
     if match is None:
         return None, ""
     return match, f"automation_id '{automation_id}' {scope_description}"
+
+
+def _quick_child_wrapper(scope: Any, **criteria: str) -> Any:
+    specification = scope.child_window(**criteria)
+    exists = getattr(specification, "exists", None)
+    if callable(exists):
+        try:
+            if not exists(timeout=0.2, retry_interval=0.04):
+                raise LookupError("UIA child was not found")
+        except TypeError:
+            if not exists(timeout=0.2):
+                raise LookupError("UIA child was not found")
+    return specification.wrapper_object()
 
 
 def _find_immediate_child_match(

@@ -1716,10 +1716,10 @@ def test_grid_cache_combines_partial_win32_and_uia_results(monkeypatch) -> None:
         ("tree처방", "grdSymp", "tree상병", "grdOpdList"),
     )
 
-    assert calls == ["win32", "uia"]
+    assert calls == ["uia", "win32"]
     assert handles == {
         "tree처방": 101,
-        "grdSymp": 102,
+        "grdSymp": 202,
         "tree상병": 103,
         "grdOpdList": 104,
     }
@@ -1781,6 +1781,84 @@ def test_non_grid_target_does_not_trigger_grid_cache_repair(monkeypatch) -> None
     )
 
     assert connector.ensure_cached_grid_handle({}, "TreatmentSymp") is None
+
+
+def test_non_eager_refresh_preserves_same_session_grid_cache(monkeypatch) -> None:
+    from dataclasses import replace
+
+    import KaosEghis.core.eghis_connector as connector
+
+    cached = connector.EghisConnectorState(
+        "green",
+        True,
+        "eGhis.exe",
+        12,
+        "C:/eGhis/eGhis.exe",
+        True,
+        "Eghis EMR",
+        55,
+        12,
+        "H2OpdTreatment",
+        77,
+        True,
+        "2026-09-04T09:00:00",
+        "Connected and active",
+        {"grdOpdList": 88},
+    )
+    cached_element = object()
+    monkeypatch.setattr(connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(
+        connector,
+        "_CACHED_GRID_ELEMENTS",
+        {(77, "grdOpdList"): cached_element},
+    )
+    monkeypatch.setattr(
+        connector,
+        "discover_eghis",
+        lambda _settings, eager_grid_cache=False: replace(
+            cached,
+            cached_grid_handles=None,
+            last_seen_at="2026-09-04T09:01:00",
+        ),
+    )
+    monkeypatch.setattr(connector, "_window_handle_is_valid", lambda _handle: True)
+
+    refreshed = connector.refresh_cached_eghis_state({}, eager_grid_cache=False)
+
+    assert refreshed.cached_grid_handles == {"grdOpdList": 88}
+    assert connector.get_cached_grid_element("grdOpdList") is cached_element
+
+
+def test_cached_grid_element_can_be_handleless(monkeypatch) -> None:
+    import KaosEghis.core.eghis_connector as connector
+
+    cached = connector.EghisConnectorState(
+        "green",
+        True,
+        "eGhis.exe",
+        12,
+        "C:/eGhis/eGhis.exe",
+        True,
+        "Eghis EMR",
+        55,
+        12,
+        "H2OpdTreatment",
+        77,
+        True,
+        "2026-09-04T09:00:00",
+        "Connected and active",
+        None,
+    )
+    cached_element = object()
+    monkeypatch.setattr(connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(
+        connector,
+        "_CACHED_GRID_ELEMENTS",
+        {(77, "grdOpdList"): cached_element},
+    )
+
+    assert connector.get_cached_grid_element("grdOpdList") is cached_element
+    assert connector.ensure_cached_grid_element({}, "grdOpdList") is cached_element
 
 
 
@@ -3148,6 +3226,26 @@ def test_parent_scoped_cached_handle_respects_uia_backend_preference(monkeypatch
 
     assert parent is not None
     assert backend_calls == ["uia"]
+
+
+def test_parent_scope_uses_cached_element_without_rebuilding_wrapper(monkeypatch) -> None:
+    from KaosEghis.core.uia_inspector import _find_parent_element_from_cached_handle
+
+    cached_parent = object()
+    monkeypatch.setattr(
+        "KaosEghis.core.uia_inspector.get_cached_grid_element",
+        lambda automation_id: cached_parent if automation_id == "grdOpdList" else None,
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.uia_inspector._wrapper_from_handle",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("cached UIA element must avoid handle reconstruction")
+        ),
+    )
+
+    parent = _find_parent_element_from_cached_handle("grdOpdList")
+
+    assert parent is cached_parent
 
 
 def test_parent_scope_reuses_cached_main_window_handle(monkeypatch) -> None:
