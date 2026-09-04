@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from KaosEghis.core.eghis_connector import ensure_cached_connection_ready
 from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
+from KaosEghis.core.vaccine_eligibility import birth_date_from_resident_id
 
 
 DEFAULT_PATIENT_INFO_OPEN_COORDINATES = (210, 115)
@@ -196,17 +197,22 @@ def fetch_vaccine_patient_context(
             None,
         )
 
+    resident_id = values.get("resident_id", "").strip()
     sex, age = _split_sex_age(values.get("sex_age", ""))
+    birth_date = values.get("birth_date", "").strip()
+    if not birth_date:
+        derived_birth_date = birth_date_from_resident_id(resident_id)
+        birth_date = derived_birth_date.isoformat() if derived_birth_date else ""
     patient_phone = values.get("mobile_phone", "").strip() or values.get(
         "telephone", ""
     ).strip()
     context = VaccinePatientContext(
         chart_no=chart_no,
-        resident_id=values.get("resident_id", "").strip(),
+        resident_id=resident_id,
         patient_name=values.get("patient_name", "").strip(),
         patient_sex=sex,
         patient_age=age,
-        patient_birth_date=values.get("birth_date", "").strip(),
+        patient_birth_date=birth_date,
         patient_phone=patient_phone,
         patient_address=values.get("address", "").strip(),
     )

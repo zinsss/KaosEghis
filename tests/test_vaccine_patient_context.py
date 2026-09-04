@@ -549,6 +549,37 @@ def test_fetch_uses_patient_window_sex_age_fallback_and_compact_format() -> None
     assert result.context.patient_age == "84"
 
 
+def test_fetch_derives_missing_birth_date_from_resident_id() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    desktop = _Desktop(
+        _Root(1, {}),
+        _Root(
+            2,
+            {
+                "txtPatientNo": "1170",
+                "txtResidentNo": "410203-2234567",
+                "dateBirth": "",
+            },
+        ),
+    )
+
+    result = fetch_vaccine_patient_context(
+        {},
+        TARGET_IDS,
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: desktop,
+        clicker=lambda _coords: None,
+        closer=lambda: None,
+    )
+
+    assert result.success is True
+    assert result.context is not None
+    assert result.context.patient_birth_date == "1941-02-03"
+
+
 def test_fetch_does_not_click_when_emr_is_not_connected() -> None:
     from KaosEghis.core.vaccine_patient_context import (
         fetch_vaccine_patient_context,

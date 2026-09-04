@@ -45,6 +45,10 @@ Database initialization adds these configurable UIA targets to every EMR profile
 | `vaccine.patient_telephone` | Telephone fallback | `txt전화` |
 | `vaccine.patient_address` | Address | `txt주소` |
 
+The patient-information DOB control remains the preferred source. If that control is
+empty or unavailable, Vaccine derives DOB from the captured resident number and keeps
+the result only as `YYYY-MM-DD` in the current patient context.
+
 The target definitions are available under `Macros -> EMR`. Initialization fills an
 untouched placeholder with these verified Automation IDs but never overwrites a target
 that already has an operator-configured selector. Numeric values that match a displayed
