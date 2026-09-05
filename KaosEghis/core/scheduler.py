@@ -7,7 +7,7 @@ from typing import Callable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from KaosEghis.core.macro_models import MacroRunResult
+from KaosEghis.core.macro_models import MacroAction, MacroRunResult
 from KaosEghis.core.macro_runner import MacroRunner
 from KaosEghis.db.database import connect, get_database_path, initialize_database
 from KaosEghis.db.repositories import (
@@ -17,6 +17,7 @@ from KaosEghis.db.repositories import (
     get_item,
     get_scheduler_job,
     list_due_scheduler_jobs,
+    list_macro_steps,
     list_scheduler_jobs,
     start_scheduler_run,
     update_scheduler_job_runtime,
@@ -327,7 +328,15 @@ class SchedulerRuntime(QObject):
             return
 
         status = _scheduler_status_from_result(result)
-        summary = _safe_scheduler_summary(result, status)
+        failed_action = self._failed_action(
+            job.macro_item_id,
+            result.failed_step,
+        )
+        summary = _safe_scheduler_summary(
+            result,
+            status,
+            failed_action=failed_action,
+        )
         self._finish_run_record(
             job,
             run_id,
@@ -347,6 +356,27 @@ class SchedulerRuntime(QObject):
         self.notification_requested.emit(message, tone)
         self.state_changed.emit()
         QTimer.singleShot(0, self.check_due_jobs)
+
+    def _failed_action(
+        self,
+        macro_item_id: int,
+        failed_step: int | None,
+    ) -> str | None:
+        if failed_step is None:
+            return None
+        effective_path = self._db_path or get_database_path()
+        try:
+            with connect(effective_path) as connection:
+                return next(
+                    (
+                        step.action
+                        for step in list_macro_steps(connection, macro_item_id)
+                        if step.step_order == failed_step
+                    ),
+                    None,
+                )
+        except Exception:
+            return None
 
     def _finish_run_record(
         self,
@@ -430,6 +460,7 @@ def _scheduler_status_from_result(result: MacroRunResult) -> str:
         for marker in (
             "blocked",
             "disabled",
+            "credential",
             "not ready",
             "reconnect",
             "target not",
@@ -441,11 +472,70 @@ def _scheduler_status_from_result(result: MacroRunResult) -> str:
     return "failed"
 
 
-def _safe_scheduler_summary(result: MacroRunResult, status: str) -> str:
-    categories = {
-        "succeeded": "Macro completed.",
-        "cancelled": "Cancelled by operator.",
-        "blocked": "Macro safety check blocked execution.",
-        "failed": "Macro execution failed.",
-    }
-    return categories.get(status, "Unknown scheduler result.")
+def _safe_scheduler_summary(
+    result: MacroRunResult,
+    status: str,
+    *,
+    failed_action: str | None = None,
+) -> str:
+    if status == "succeeded":
+        return "Macro completed."
+    if status == "cancelled":
+        return "Cancelled by operator."
+
+    safe_action = _safe_scheduler_action(failed_action)
+    if result.failed_step is None:
+        location = "before macro steps"
+    else:
+        location = f"at step {result.failed_step}"
+        if safe_action is not None:
+            location += f" ({safe_action})"
+    prefix = "Blocked" if status == "blocked" else "Failed"
+    reason = _safe_scheduler_failure_reason(result.message)
+    return f"{prefix} {location}: {reason}."
+
+
+def _safe_scheduler_action(action: str | None) -> str | None:
+    normalized = str(action or "").strip()
+    allowed_actions = {member.value for member in MacroAction}
+    return normalized if normalized in allowed_actions else None
+
+
+def _safe_scheduler_failure_reason(message: str | None) -> str:
+    lowered = str(message or "").strip().casefold()
+    if "another macro" in lowered:
+        return "Another macro is running"
+    if "does not match preset" in lowered or "preset mismatch" in lowered:
+        return "EMR preset mismatch"
+    if "not running" in lowered:
+        return "EMR process not running"
+    if "not connected" in lowered:
+        return "EMR not connected"
+    if "connection stale" in lowered or "window handle invalid" in lowered:
+        return "EMR connection stale"
+    if "modal/popup" in lowered or "modal" in lowered:
+        return "EMR modal or popup blocked execution"
+    if (
+        "not focusable" in lowered
+        or "foreground mismatch" in lowered
+        or "window not ready" in lowered
+        or "focus failed" in lowered
+    ):
+        return "EMR focus or window check failed"
+    if "reconnect" in lowered:
+        return "EMR reconnect required"
+    if "credential" in lowered:
+        return "Credential unavailable"
+    if "target not found" in lowered or "text not matched" in lowered:
+        return "Target not found"
+    if "timeout" in lowered or "timed out" in lowered:
+        return "Timeout"
+    if "clipboard" in lowered:
+        return "Clipboard failed"
+    if "input failed" in lowered:
+        return "Input failed"
+    if "unsupported" in lowered:
+        return "Unsupported action"
+    if "disabled" in lowered or "macro not found" in lowered or "unavailable" in lowered:
+        return "Macro unavailable or disabled"
+    return "Unknown error"

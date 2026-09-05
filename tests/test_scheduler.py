@@ -215,6 +215,113 @@ def test_due_scheduler_job_runs_macro_after_countdown(tmp_path) -> None:
     runtime.stop()
 
 
+def test_scheduler_records_safe_failed_step_reason(tmp_path) -> None:
+    app = _app()
+
+    from KaosEghis.core.macro_models import MacroRunResult
+    from KaosEghis.core.scheduler import SchedulerRuntime
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_item,
+        create_macro_step,
+        create_scheduler_job,
+        list_scheduler_runs,
+        update_scheduler_job_runtime,
+    )
+
+    db_path = tmp_path / "scheduler.sqlite"
+    initialize_database(db_path)
+
+    class BlockedRunner:
+        def execute_macro(self, item_id: int, dry_run: bool = False):
+            return MacroRunResult(False, "credential unavailable", 0, 1)
+
+        def cancel(self) -> None:
+            pass
+
+    with connect(db_path) as connection:
+        macro = create_item(connection, "End of day", "macro", True)
+        create_macro_step(
+            connection,
+            macro.id,
+            1,
+            "unlock_eghis",
+            "shutdown.lock_password",
+            "credential-reference",
+            10.0,
+            0,
+        )
+        job = create_scheduler_job(
+            connection,
+            "Shutdown",
+            macro.id,
+            "11:00",
+            (0,),
+            is_enabled=True,
+        )
+
+    runtime = SchedulerRuntime(
+        db_path,
+        runner_factory=lambda _path: BlockedRunner(),
+        now_provider=lambda: datetime(2026, 8, 3, 11, 0, 0),
+        countdown_seconds=0,
+    )
+    runtime.start()
+    with connect(db_path) as connection:
+        update_scheduler_job_runtime(
+            connection,
+            job.id,
+            next_run_at="2026-08-03T10:59:00",
+        )
+
+    runtime.check_due_jobs()
+    deadline = time.monotonic() + 2
+    while runtime.is_busy and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+    with connect(db_path) as connection:
+        run = list_scheduler_runs(connection, job.id)[0]
+    assert run.status == "blocked"
+    assert run.executed_steps == 0
+    assert run.summary == (
+        "Blocked at step 1 (unlock_eghis): Credential unavailable."
+    )
+    assert "credential-reference" not in run.summary
+    runtime.stop()
+
+
+def test_scheduler_summary_categorizes_errors_without_storing_raw_details() -> None:
+    from KaosEghis.core.macro_models import MacroRunResult
+    from KaosEghis.core.scheduler import _safe_scheduler_summary
+
+    not_connected = _safe_scheduler_summary(
+        MacroRunResult(
+            False,
+            "Application not connected. Connect manually and retry.",
+            0,
+            None,
+        ),
+        "blocked",
+    )
+    raw_error = _safe_scheduler_summary(
+        MacroRunResult(
+            False,
+            "DriverError password=do-not-store server=private-host",
+            2,
+            3,
+        ),
+        "failed",
+        failed_action="not-an-allowed-action",
+    )
+
+    assert not_connected == "Blocked before macro steps: EMR not connected."
+    assert raw_error == "Failed at step 3: Unknown error."
+    assert "do-not-store" not in raw_error
+    assert "private-host" not in raw_error
+
+
 def test_late_scheduler_job_is_recorded_as_missed_without_running(tmp_path) -> None:
     _app()
 

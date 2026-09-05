@@ -227,6 +227,12 @@ It runs only inside the visible KaosEghis process, keeps jobs disabled by defaul
 uses a countdown, and records sanitized history. Startup calculates future times and
 does not replay missed work.
 
+Scheduler run history records the failed step number, an allowed macro action name,
+and a safe operator-facing reason category such as EMR not connected, credential
+unavailable, target not found, focus/window failure, timeout, or input failure. Raw
+exceptions, credential values, connection strings, target values, and typed text are
+never copied into Scheduler history.
+
 Scheduled real execution uses the same `MacroRunner` path as manual execution. It
 therefore cannot bypass connector, target-resolution, supported-action, or
 single-execution safety. The guarded `eGHIS End-of-Day Backup and Power Off` macro is
