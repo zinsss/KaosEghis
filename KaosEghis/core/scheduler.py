@@ -464,7 +464,9 @@ def _scheduler_status_from_result(result: MacroRunResult) -> str:
             "not ready",
             "reconnect",
             "target not",
+            "ambiguous",
             "window",
+            "focus",
             "another macro",
         )
     ):
@@ -515,6 +517,12 @@ def _safe_scheduler_failure_reason(message: str | None) -> str:
         return "EMR connection stale"
     if "modal/popup" in lowered or "modal" in lowered:
         return "EMR modal or popup blocked execution"
+    if "lock dialog focus failed" in lowered:
+        return "EMR lock dialog focus failed"
+    if "main emr focus failed" in lowered:
+        return "Main EMR focus failed"
+    if "lock target ambiguous" in lowered:
+        return "EMR lock target is ambiguous"
     if (
         "not focusable" in lowered
         or "foreground mismatch" in lowered

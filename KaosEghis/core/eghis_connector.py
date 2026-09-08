@@ -588,6 +588,51 @@ def focus_cached_eghis_window(settings: dict[str, str]) -> EghisConnectorState:
     return ready
 
 
+def focus_cached_eghis_process_window(
+    settings: dict[str, str],
+    window_handle: int,
+) -> tuple[bool, str]:
+    """Focus one exact window owned by the manually connected eGHIS process."""
+
+    global _CACHED_STATE
+    state = validate_cached_connection_identity(settings)
+    if state.status == "red" or state.pid is None:
+        return False, state.message or "window not ready"
+    try:
+        normalized_handle = int(window_handle)
+    except (TypeError, ValueError):
+        _CACHED_STATE = _manual_reconnect_required(
+            state,
+            "Application connection stale. Reconnect manually and retry.",
+        )
+        return False, "window handle invalid"
+    if normalized_handle <= 0 or not _window_handle_is_valid(normalized_handle):
+        _CACHED_STATE = _manual_reconnect_required(
+            state,
+            "Application connection stale. Reconnect manually and retry.",
+        )
+        return False, "window handle invalid"
+    if _get_window_owner_pid(normalized_handle) != state.pid:
+        _CACHED_STATE = _manual_reconnect_required(
+            state,
+            "Connected window does not match eGHIS. Reconnect manually and retry.",
+        )
+        return False, "window process mismatch"
+
+    focused, message = _focus_and_confirm_window(
+        normalized_handle,
+        state,
+        settings,
+        allowed_window_handles={normalized_handle},
+    )
+    if not focused:
+        _CACHED_STATE = _manual_reconnect_required(
+            state,
+            "Application not focusable. Reconnect manually and retry.",
+        )
+    return focused, message
+
+
 def is_cached_window_still_valid(state: EghisConnectorState) -> bool:
     if not state.window_found:
         return False
@@ -783,27 +828,100 @@ def _focus_window_handle(window_handle: int) -> bool:
         return False
 
 
+def _focus_window_handle_with_attached_input(window_handle: int) -> bool:
+    """Retry foreground activation from worker threads without sending input."""
+
+    attached_threads: list[tuple[int, int]] = []
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        target = wintypes.HWND(int(window_handle))
+        if not user32.IsWindow(target):
+            return False
+
+        current_thread_id = int(kernel32.GetCurrentThreadId())
+        foreground_handle = user32.GetForegroundWindow()
+        foreground_thread_id = (
+            int(user32.GetWindowThreadProcessId(foreground_handle, None))
+            if foreground_handle
+            else 0
+        )
+        target_thread_id = int(user32.GetWindowThreadProcessId(target, None))
+
+        for other_thread_id in dict.fromkeys(
+            (foreground_thread_id, target_thread_id)
+        ):
+            if not other_thread_id or other_thread_id == current_thread_id:
+                continue
+            if user32.AttachThreadInput(current_thread_id, other_thread_id, True):
+                attached_threads.append((current_thread_id, other_thread_id))
+
+        user32.ShowWindowAsync(target, 9)  # SW_RESTORE
+        user32.BringWindowToTop(target)
+        user32.SetForegroundWindow(target)
+        user32.SetActiveWindow(target)
+        user32.SetFocus(target)
+        return int(user32.GetForegroundWindow() or 0) == int(window_handle)
+    except Exception:
+        return False
+    finally:
+        if "user32" in locals():
+            for current_thread_id, other_thread_id in reversed(attached_threads):
+                try:
+                    user32.AttachThreadInput(
+                        current_thread_id,
+                        other_thread_id,
+                        False,
+                    )
+                except Exception:
+                    continue
+
+
 def _focus_and_confirm_window(
     window_handle: int,
     state: EghisConnectorState,
     settings: dict[str, str],
+    *,
+    allowed_window_handles: set[int | None] | None = None,
 ) -> tuple[bool, str]:
     if not _focus_window_handle(window_handle):
-        return False, "focus failed"
+        if not _focus_window_handle_with_attached_input(window_handle):
+            return False, "focus failed"
+
+    allowed_handles = (
+        {handle for handle in allowed_window_handles if handle is not None}
+        if allowed_window_handles is not None
+        else {
+            handle
+            for handle in (
+                window_handle,
+                state.window_handle,
+                state.main_window_handle,
+            )
+            if handle is not None
+        }
+    )
+    attached_focus_attempted = False
 
     for attempt in range(FOCUS_RETRY_ATTEMPTS):
         foreground = _get_foreground_window_info()
-        if foreground is not None and foreground.get("window_handle") in {
-            window_handle,
-            state.window_handle,
-            state.main_window_handle,
-        }:
+        if (
+            foreground is not None
+            and foreground.get("window_handle") in allowed_handles
+        ):
             return True, "Connected and active"
         if _foreground_looks_like_modal(foreground, state, settings):
             return False, "modal/popup detected"
         if attempt < FOCUS_RETRY_ATTEMPTS - 1:
             time.sleep(FOCUS_RETRY_DELAY_SECONDS)
-            _focus_window_handle(window_handle)
+            if not attached_focus_attempted:
+                _focus_window_handle_with_attached_input(window_handle)
+                attached_focus_attempted = True
+            else:
+                _focus_window_handle(window_handle)
 
     return False, "foreground mismatch"
 

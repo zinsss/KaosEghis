@@ -12,7 +12,7 @@ PID. The final `shutdown.power_off_after_backup` checkbox may resolve outside th
 only inside an exact top-level window titled `이지스 백업`; this accommodates the eGHIS
 backup helper while preventing a general cross-application target search.
 
-Last updated: 2026-09-02
+Last updated: 2026-09-08
 
 ## Purpose
 
@@ -249,6 +249,19 @@ username is ignored. Later actions independently activate the close Yes button, 
 activate the database-backup Yes button, wait again, and select the exact backup
 power-off checkbox. Missing or ambiguous targets stop execution. No
 credential value is stored in SQLite, macro steps, Scheduler history, or UI logs.
+
+The lock-password step resolves its configured Automation ID (currently `TxtPW`) with
+one native UIA query limited to the manually connected eGHIS PID. It does not walk the
+full eGHIS descendant tree. Before retrieving the password, KaosEghis verifies that the
+target's actual top-level lock dialog belongs to that PID and is the foreground window.
+When ordinary Windows foreground activation from the Scheduler worker does not take,
+the connector retries by temporarily attaching input threads; it still sends no input
+until the exact foreground HWND is confirmed. Scheduler history distinguishes lock
+dialog focus failure from main-EMR focus failure without recording raw exceptions or
+credentials. A failed exact-window ownership or focus check marks the connector as
+requiring manual reconnection. A locked Windows desktop or secure desktop remains
+intentionally blocked.
+
 - hidden background macro service
 - generic recorder
 - unconstrained mouse automation

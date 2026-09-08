@@ -296,6 +296,272 @@ def test_power_off_target_may_fall_back_to_exact_backup_window(
     assert "connected eGHIS process" in message
 
 
+def test_lock_password_target_uses_fast_exact_process_lookup(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import contextlib
+
+    from KaosEghis.core import macro_runner
+    from KaosEghis.core.eghis_shutdown import LOCK_PASSWORD_TARGET_KEY
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    target_record = _runtime_target(LOCK_PASSWORD_TARGET_KEY, "TxtPW")
+
+    class Candidate:
+        handle = 441
+        element_info = SimpleNamespace(
+            handle=441,
+            name="",
+            class_name="",
+            process_id=721,
+        )
+
+        @staticmethod
+        def is_visible() -> bool:
+            return True
+
+    candidate = Candidate()
+    calls: list[tuple[tuple[str, ...], tuple[int, ...], str | None]] = []
+    runner = MacroRunner(tmp_path / "runner.sqlite")
+    monkeypatch.setattr(
+        macro_runner,
+        "connect",
+        lambda _path: contextlib.nullcontext(object()),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_load_runtime_target_record",
+        lambda _connection, _target_id: (target_record, (1, "target", None)),
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "get_cached_eghis_state",
+        lambda: SimpleNamespace(pid=721),
+    )
+
+    def find_exact(automation_ids, *, process_ids, control_type):
+        calls.append((tuple(automation_ids), tuple(process_ids), control_type))
+        return {"TxtPW": [candidate]}
+
+    monkeypatch.setattr(
+        macro_runner,
+        "find_uia_elements_by_automation_ids",
+        find_exact,
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "resolve_target_element_in_cached_process",
+        lambda _target: (_ for _ in ()).throw(
+            AssertionError("The lock target must not scan the full eGHIS tree.")
+        ),
+    )
+
+    resolved, message = runner._resolve_process_target(LOCK_PASSWORD_TARGET_KEY)
+
+    assert resolved is candidate
+    assert calls == [(('TxtPW',), (721,), 'Edit')]
+    assert "Lock target found" in message
+
+
+def test_missing_lock_password_target_does_not_scan_full_tree(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import contextlib
+
+    from KaosEghis.core import macro_runner
+    from KaosEghis.core.eghis_shutdown import LOCK_PASSWORD_TARGET_KEY
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    target_record = _runtime_target(LOCK_PASSWORD_TARGET_KEY, "TxtPW")
+    runner = MacroRunner(tmp_path / "runner.sqlite")
+    monkeypatch.setattr(
+        macro_runner,
+        "connect",
+        lambda _path: contextlib.nullcontext(object()),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_load_runtime_target_record",
+        lambda _connection, _target_id: (target_record, (1, "target", None)),
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "get_cached_eghis_state",
+        lambda: SimpleNamespace(pid=721),
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "find_uia_elements_by_automation_ids",
+        lambda *_args, **_kwargs: {"TxtPW": []},
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "resolve_target_element_in_cached_process",
+        lambda _target: (_ for _ in ()).throw(
+            AssertionError("An absent lock target must not trigger a full-tree scan.")
+        ),
+    )
+
+    resolved, message = runner._resolve_process_target(LOCK_PASSWORD_TARGET_KEY)
+
+    assert resolved is None
+    assert message == "target not found"
+
+
+def test_ambiguous_lock_password_target_is_blocked(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import contextlib
+
+    from KaosEghis.core import macro_runner
+    from KaosEghis.core.eghis_shutdown import LOCK_PASSWORD_TARGET_KEY
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    target_record = _runtime_target(LOCK_PASSWORD_TARGET_KEY, "TxtPW")
+
+    class Candidate:
+        def __init__(self, handle: int) -> None:
+            self.handle = handle
+            self.element_info = SimpleNamespace(
+                handle=handle,
+                name="",
+                class_name="",
+            )
+
+        @staticmethod
+        def is_visible() -> bool:
+            return True
+
+    runner = MacroRunner(tmp_path / "runner.sqlite")
+    monkeypatch.setattr(
+        macro_runner,
+        "connect",
+        lambda _path: contextlib.nullcontext(object()),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_load_runtime_target_record",
+        lambda _connection, _target_id: (target_record, (1, "target", None)),
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "get_cached_eghis_state",
+        lambda: SimpleNamespace(pid=721),
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "find_uia_elements_by_automation_ids",
+        lambda *_args, **_kwargs: {
+            "TxtPW": [Candidate(441), Candidate(442)]
+        },
+    )
+
+    resolved, message = runner._resolve_process_target(LOCK_PASSWORD_TARGET_KEY)
+
+    assert resolved is None
+    assert message == "lock target ambiguous"
+
+
+def test_exact_process_window_focus_rejects_owner_pid_mismatch(monkeypatch) -> None:
+    from KaosEghis.core import eghis_connector
+
+    cached = eghis_connector.EghisConnectorState(
+        status="yellow",
+        process_running=True,
+        process_name="eGhis.exe",
+        pid=721,
+        exe_path="C:/eGhis.exe",
+        window_found=True,
+        window_title="이지스 전자차트 2.0",
+        window_handle=55,
+        window_owner_pid=721,
+        main_window_automation_id="H2OpdTreatment",
+        main_window_handle=56,
+        is_active=False,
+        last_seen_at="2026-09-08T10:00:00",
+        message="valid",
+    )
+    monkeypatch.setattr(eghis_connector, "_CACHED_STATE", cached)
+    monkeypatch.setattr(
+        eghis_connector,
+        "validate_cached_connection_identity",
+        lambda _settings: cached,
+    )
+    monkeypatch.setattr(
+        eghis_connector,
+        "_window_handle_is_valid",
+        lambda _handle: True,
+    )
+    monkeypatch.setattr(
+        eghis_connector,
+        "_get_window_owner_pid",
+        lambda _handle: 999,
+    )
+    monkeypatch.setattr(
+        eghis_connector,
+        "_focus_and_confirm_window",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("A foreign process window must never be focused.")
+        ),
+    )
+
+    focused, message = eghis_connector.focus_cached_eghis_process_window({}, 441)
+
+    assert focused is False
+    assert message == "window process mismatch"
+    assert eghis_connector.get_cached_eghis_state().status == "red"
+
+
+def test_window_focus_uses_attached_input_after_normal_focus_misses(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core import eghis_connector
+
+    state = SimpleNamespace(window_handle=55, main_window_handle=56)
+    calls: list[str] = []
+    foreground = iter(
+        [
+            {"window_handle": 999, "window_title": "Other app"},
+            {"window_handle": 441, "window_title": "로그인 안내"},
+        ]
+    )
+    monkeypatch.setattr(
+        eghis_connector,
+        "_focus_window_handle",
+        lambda _handle: calls.append("normal") or True,
+    )
+    monkeypatch.setattr(
+        eghis_connector,
+        "_focus_window_handle_with_attached_input",
+        lambda _handle: calls.append("attached") or True,
+    )
+    monkeypatch.setattr(
+        eghis_connector,
+        "_get_foreground_window_info",
+        lambda: next(foreground),
+    )
+    monkeypatch.setattr(
+        eghis_connector,
+        "_foreground_looks_like_modal",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(eghis_connector.time, "sleep", lambda _seconds: None)
+
+    focused, message = eghis_connector._focus_and_confirm_window(
+        441,
+        state,
+        {},
+        allowed_window_handles={441},
+    )
+
+    assert focused is True
+    assert message == "Connected and active"
+    assert calls == ["normal", "attached"]
+
+
 def test_non_backup_target_never_uses_cross_process_window_fallback(
     tmp_path,
     monkeypatch,
@@ -493,13 +759,28 @@ def test_unlock_eghis_uses_vault_password_only_after_target_resolves(
     resolutions = iter([(target, "found"), (None, "not found")])
     password_requests: list[str] = []
     typed_values: list[str] = []
+    events: list[str] = []
     runner = MacroRunner(
         password_provider=lambda name: (
             password_requests.append(name) or "test-lock-password"
         )
     )
     monkeypatch.setattr(runner, "_resolve_process_target", lambda _key: next(resolutions))
-    monkeypatch.setattr(runner, "_focus_target_element", lambda _target: (True, "focused"))
+    monkeypatch.setattr(runner, "_top_level_window_handle", lambda _target: 441)
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.focus_cached_eghis_process_window",
+        lambda _settings, _handle: events.append("window") or (True, "focused"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_focus_target_element",
+        lambda _target: events.append("target") or (True, "focused"),
+    )
+    runner._password_provider = lambda name: (
+        events.append("password")
+        or password_requests.append(name)
+        or "test-lock-password"
+    )
     monkeypatch.setattr(
         runner,
         "_type_secret_and_submit",
@@ -523,6 +804,7 @@ def test_unlock_eghis_uses_vault_password_only_after_target_resolves(
     assert result.success is True
     assert password_requests == ["eGhis EMR"]
     assert typed_values == ["test-lock-password"]
+    assert events == ["window", "target", "password"]
     assert "test-lock-password" not in result.message
 
 
@@ -535,6 +817,16 @@ def test_unlock_eghis_blocks_without_unlocked_credential(monkeypatch) -> None:
         runner,
         "_resolve_process_target",
         lambda _key: (object(), "found"),
+    )
+    monkeypatch.setattr(runner, "_top_level_window_handle", lambda _target: 441)
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.focus_cached_eghis_process_window",
+        lambda _settings, _handle: (True, "focused"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_focus_target_element",
+        lambda _target: (True, "focused"),
     )
     monkeypatch.setattr(
         runner,
@@ -555,6 +847,48 @@ def test_unlock_eghis_blocks_without_unlocked_credential(monkeypatch) -> None:
 
     assert result.success is False
     assert result.message == "credential unavailable"
+
+
+def test_unlock_eghis_does_not_read_password_when_lock_window_focus_fails(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core.macro_models import MacroStep
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    password_requests: list[str] = []
+    runner = MacroRunner(
+        password_provider=lambda name: password_requests.append(name) or "secret"
+    )
+    monkeypatch.setattr(
+        runner,
+        "_resolve_process_target",
+        lambda _key: (object(), "found"),
+    )
+    monkeypatch.setattr(runner, "_top_level_window_handle", lambda _target: 441)
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.focus_cached_eghis_process_window",
+        lambda _settings, _handle: (False, "foreground mismatch"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_type_secret_and_submit",
+        lambda _value: (_ for _ in ()).throw(
+            AssertionError("A password must never be typed after focus failure.")
+        ),
+    )
+
+    result = runner._run_unlock_eghis(
+        MacroStep(
+            action="unlock_eghis",
+            target_id="shutdown.lock_password",
+            value="eGhis EMR",
+        ),
+        {},
+    )
+
+    assert result.success is False
+    assert result.message == "lock dialog focus failed"
+    assert password_requests == []
 
 
 def test_absent_lock_target_requires_normal_eghis_readiness(monkeypatch) -> None:

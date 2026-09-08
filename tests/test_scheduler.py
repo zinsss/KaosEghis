@@ -315,9 +315,23 @@ def test_scheduler_summary_categorizes_errors_without_storing_raw_details() -> N
         "failed",
         failed_action="not-an-allowed-action",
     )
+    lock_focus = _safe_scheduler_summary(
+        MacroRunResult(False, "lock dialog focus failed", 0, 1),
+        "blocked",
+        failed_action="unlock_eghis",
+    )
+    main_focus = _safe_scheduler_summary(
+        MacroRunResult(False, "main EMR focus failed", 0, 1),
+        "blocked",
+        failed_action="unlock_eghis",
+    )
 
     assert not_connected == "Blocked before macro steps: EMR not connected."
     assert raw_error == "Failed at step 3: Unknown error."
+    assert lock_focus == (
+        "Blocked at step 1 (unlock_eghis): EMR lock dialog focus failed."
+    )
+    assert main_focus == "Blocked at step 1 (unlock_eghis): Main EMR focus failed."
     assert "do-not-store" not in raw_error
     assert "private-host" not in raw_error
 

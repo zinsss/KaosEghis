@@ -14,6 +14,7 @@ from KaosEghis.core.eghis_connector import (
     build_connector_settings,
     ensure_cached_connection_ready,
     ensure_cached_grid_element,
+    focus_cached_eghis_process_window,
     focus_cached_eghis_window,
     get_cached_eghis_state,
     invalidate_cached_grid_element,
@@ -21,6 +22,7 @@ from KaosEghis.core.eghis_connector import (
     validate_cached_connection_identity,
 )
 from KaosEghis.core.eghis_shutdown import (
+    LOCK_PASSWORD_TARGET_KEY,
     POWER_OFF_CHECKBOX_TARGET_KEY,
     POWER_OFF_WINDOW_TITLE,
 )
@@ -33,6 +35,7 @@ from KaosEghis.core.uia_inspector import (
     resolve_target_element_in_named_top_level_window,
     resolve_target_scope_element,
 )
+from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 from KaosEghis.core.wait_engine import WaitCondition, wait_for_target_condition
 from KaosEghis.db.database import connect, get_database_path
 from KaosEghis.db.repositories import (
@@ -324,19 +327,31 @@ class MacroRunner:
 
         target, resolve_message = self._resolve_process_target(step.target_id)
         if target is None:
+            if resolve_message == "lock target ambiguous":
+                return MacroRunResult(False, resolve_message, 0, None)
             ready = ensure_cached_connection_ready(settings)
             if ready.status != "green":
-                return MacroRunResult(False, ready.message or resolve_message, 0, None)
+                return MacroRunResult(False, "main EMR focus failed", 0, None)
             self._connection_ready_confirmed = True
             self._window_focus_applied = True
             return MacroRunResult(True, "eGHIS was already unlocked.", 1, None)
 
+        lock_window_handle = self._top_level_window_handle(target)
+        if lock_window_handle is None:
+            return MacroRunResult(False, "lock dialog focus failed", 0, None)
+        window_focused, _window_focus_message = focus_cached_eghis_process_window(
+            settings,
+            lock_window_handle,
+        )
+        if not window_focused:
+            return MacroRunResult(False, "lock dialog focus failed", 0, None)
+        focused, _focus_message = self._focus_target_element(target)
+        if not focused:
+            return MacroRunResult(False, "lock dialog focus failed", 0, None)
+
         password = self._password_provider(credential_reference)
         if not password:
             return MacroRunResult(False, "credential unavailable", 0, None)
-        focused, _focus_message = self._focus_target_element(target)
-        if not focused:
-            return MacroRunResult(False, "window not ready", 0, None)
         if not self._type_secret_and_submit(password):
             return MacroRunResult(False, "input failed", 0, None)
 
@@ -1151,6 +1166,8 @@ class MacroRunner:
             )
         if target_record is None:
             return None, "target not found"
+        if target_id == LOCK_PASSWORD_TARGET_KEY and target_record.automation_id:
+            return self._resolve_lock_password_target(target_record)
         element, message = resolve_target_element_in_cached_process(target_record)
         if element is None and target_id == POWER_OFF_CHECKBOX_TARGET_KEY:
             element, message = resolve_target_element_in_named_top_level_window(
@@ -1164,6 +1181,151 @@ class MacroRunner:
                 return None, "window not ready"
             return None, "target not found"
         return element, "Target resolved in connected eGHIS process."
+
+    @staticmethod
+    def _resolve_lock_password_target(
+        target_record: UiTargetRecord,
+    ) -> tuple[object | None, str]:
+        """Resolve the lock edit by exact Automation ID without walking eGHIS."""
+
+        state = get_cached_eghis_state()
+        pid = getattr(state, "pid", None)
+        automation_id = str(target_record.automation_id or "").strip()
+        if pid is None or not automation_id:
+            return None, "target not found"
+
+        matches = find_uia_elements_by_automation_ids(
+            (automation_id,),
+            process_ids=(int(pid),),
+            control_type=target_record.control_type or "Edit",
+        )
+        candidates = MacroRunner._matching_visible_target_elements(
+            matches.get(automation_id, []),
+            target_record,
+        )
+        if len(candidates) == 1:
+            return candidates[0], "Lock target found in connected eGHIS process."
+        if len(candidates) > 1:
+            expected_window_title = MacroRunner._first_ancestor_window_title(
+                target_record.ancestor_path
+            )
+            if expected_window_title:
+                candidates = [
+                    candidate
+                    for candidate in candidates
+                    if MacroRunner._top_level_window_title(candidate)
+                    == expected_window_title
+                ]
+            if len(candidates) == 1:
+                return candidates[0], "Lock target found in configured eGHIS window."
+            return None, "lock target ambiguous"
+        return None, "target not found"
+
+    @staticmethod
+    def _matching_visible_target_elements(
+        candidates: list[object],
+        target_record: UiTargetRecord,
+    ) -> list[object]:
+        matches: list[object] = []
+        seen: set[tuple[str, int]] = set()
+        for candidate in candidates:
+            if not MacroRunner._target_element_is_visible(candidate):
+                continue
+            info = getattr(candidate, "element_info", None)
+            expected_name = str(target_record.name or "").strip()
+            expected_class = str(target_record.class_name or "").strip()
+            if expected_name and MacroRunner._element_info_text(info, "name") != expected_name:
+                continue
+            if (
+                expected_class
+                and MacroRunner._element_info_text(info, "class_name") != expected_class
+            ):
+                continue
+            handle = MacroRunner._element_native_handle(candidate)
+            identity = ("handle", handle) if handle is not None else ("object", id(candidate))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            matches.append(candidate)
+        return matches
+
+    @staticmethod
+    def _target_element_is_visible(element: object) -> bool:
+        try:
+            return bool(element.is_visible())
+        except Exception:
+            pass
+        info = getattr(element, "element_info", None)
+        try:
+            visible = getattr(info, "visible", None)
+        except Exception:
+            visible = None
+        if visible is not None:
+            return bool(visible)
+        try:
+            return not bool(getattr(info, "offscreen"))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _element_info_text(info: object, attribute: str) -> str:
+        try:
+            return str(getattr(info, attribute, "") or "").strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _element_native_handle(element: object) -> int | None:
+        handle = getattr(element, "handle", None)
+        if handle is None:
+            handle = getattr(getattr(element, "element_info", None), "handle", None)
+        try:
+            normalized = int(handle)
+        except (TypeError, ValueError):
+            return None
+        return normalized if normalized > 0 else None
+
+    @staticmethod
+    def _top_level_window_handle(element: object) -> int | None:
+        try:
+            top_level = element.top_level_parent()
+        except Exception:
+            return None
+        return MacroRunner._element_native_handle(top_level)
+
+    @staticmethod
+    def _top_level_window_title(element: object) -> str:
+        try:
+            top_level = element.top_level_parent()
+        except Exception:
+            return ""
+        try:
+            return str(top_level.window_text() or "").strip()
+        except Exception:
+            return MacroRunner._element_info_text(
+                getattr(top_level, "element_info", None),
+                "name",
+            )
+
+    @staticmethod
+    def _first_ancestor_window_title(ancestor_path: str | None) -> str | None:
+        if not ancestor_path:
+            return None
+        try:
+            nodes = json.loads(ancestor_path)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(nodes, list):
+            return None
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            if str(node.get("control_type", "") or "").strip().casefold() != "window":
+                continue
+            name = str(node.get("name", "") or "").strip()
+            if name:
+                return name
+        return None
 
     def _wait_for_process_target(
         self,
@@ -1825,6 +1987,9 @@ class MacroRunner:
             "clipboard failed",
             "credential unavailable",
             "window not ready",
+            "lock dialog focus failed",
+            "main emr focus failed",
+            "lock target ambiguous",
             "timeout",
             "unsupported action",
             "unknown error",
