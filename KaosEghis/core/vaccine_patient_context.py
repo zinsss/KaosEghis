@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 import re
+import threading
 import time
 from typing import Any, Callable
 
@@ -50,6 +51,19 @@ class _PatientInformationResolution:
 class _ResolvedChartCandidate:
     element: Any
     value: str
+
+
+@dataclass(frozen=True)
+class _PatientInformationScopeCache:
+    root_pid: int
+    chart_automation_id: str
+    scope_handle: int
+
+
+_PATIENT_INFORMATION_SCOPE_CACHE: dict[
+    tuple[int, str], _PatientInformationScopeCache
+] = {}
+_PATIENT_INFORMATION_SCOPE_CACHE_LOCK = threading.RLock()
 
 
 def resident_id_for_label(resident_id: str) -> str:
@@ -140,6 +154,13 @@ def fetch_vaccine_patient_context(
     deadline = clock() + max(float(timeout_seconds), 0.1)
     patient_resolution = None
     while clock() <= deadline:
+        patient_resolution = _find_cached_patient_information_scope(
+            desktop,
+            int(state.pid),
+            chart_automation_id,
+        )
+        if patient_resolution is not None:
+            break
         # The patient-information window may start in an eGHIS helper process
         # after the opener is clicked, so refresh the trusted family each pass.
         process_ids = process_family_provider(int(state.pid))
@@ -151,6 +172,11 @@ def fetch_vaccine_patient_context(
             process_target_finder=process_target_finder,
         )
         if patient_resolution is not None:
+            _remember_patient_information_scope(
+                int(state.pid),
+                chart_automation_id,
+                patient_resolution.scope,
+            )
             break
         sleeper(0.1)
 
@@ -344,6 +370,67 @@ def _find_patient_information_scope(
         if resolution is not None:
             return resolution
     return None
+
+
+def _find_cached_patient_information_scope(
+    desktop: Any,
+    root_pid: int,
+    chart_automation_id: str,
+) -> _PatientInformationResolution | None:
+    """Reuse a validated Patient Information scope only while its handle survives."""
+
+    key = (int(root_pid), str(chart_automation_id or "").strip())
+    with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
+        cached = _PATIENT_INFORMATION_SCOPE_CACHE.get(key)
+    if cached is None:
+        return None
+
+    scope = None
+    try:
+        scope = desktop.window(handle=cached.scope_handle).wrapper_object()
+        chart_element = _find_element(scope, cached.chart_automation_id)
+    except Exception:
+        chart_element = None
+    resolution = _patient_information_resolution(
+        chart_element,
+        fallback_scope=scope,
+    )
+    if resolution is not None:
+        return resolution
+
+    with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
+        _PATIENT_INFORMATION_SCOPE_CACHE.pop(key, None)
+    return None
+
+
+def _remember_patient_information_scope(
+    root_pid: int,
+    chart_automation_id: str,
+    scope: Any,
+) -> None:
+    scope_handle = _element_handle(scope)
+    normalized_id = str(chart_automation_id or "").strip()
+    if scope_handle is None or scope_handle <= 0 or not normalized_id:
+        return
+    key = (int(root_pid), normalized_id)
+    with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
+        # Handles are meaningful only for one connected eGHIS process. Keep this
+        # small and discard handles left by a previous eGHIS restart.
+        for cached_key in tuple(_PATIENT_INFORMATION_SCOPE_CACHE):
+            if cached_key[0] != int(root_pid):
+                _PATIENT_INFORMATION_SCOPE_CACHE.pop(cached_key, None)
+        _PATIENT_INFORMATION_SCOPE_CACHE[key] = _PatientInformationScopeCache(
+            root_pid=int(root_pid),
+            chart_automation_id=normalized_id,
+            scope_handle=int(scope_handle),
+        )
+
+
+def clear_cached_patient_information_scopes() -> None:
+    """Clear transient Patient Information handles without retaining patient data."""
+
+    with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
+        _PATIENT_INFORMATION_SCOPE_CACHE.clear()
 
 
 def _find_exact_uia_edit_in_processes(

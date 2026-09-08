@@ -1,6 +1,6 @@
 # KaosEghis-vaccine
 
-Last updated: 2026-09-08
+Last updated: 2026-09-09
 
 ## Status
 
@@ -84,6 +84,13 @@ This coordinate is a temporary opener fallback; the patient fields themselves us
 UIA Automation IDs. The fetch never runs on startup or in the background.
 After the configured fields are read, KaosEghis sends one `{ESC}` to close the Patient
 Information view. Escape is never sent when that view could not be resolved.
+
+After a successful fetch, KaosEghis keeps only the transient Patient Information scope
+handle in memory for the connected eGHIS PID. The next explicit fetch tries that handle
+first, avoiding process/window enumeration when eGHIS has kept the view alive. If the
+handle is stale because `{ESC}` destroyed or recreated the view, it is discarded and the
+newly opened form is resolved once and replaces the cache. No patient values, UIA
+wrappers, or handles are written to SQLite.
 
 The opened window is a resolved pywinauto UIA wrapper, so target lookup indexes its
 descendants by exact Automation ID. All configured patient fields are read from one

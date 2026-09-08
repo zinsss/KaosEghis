@@ -312,7 +312,10 @@ process replacement, or explicit invalidation clears it. The first macro `when_r
 check uses the current per-run target. A later `when_ready` for the same target performs
 one fresh resolution because eGHIS can recreate edit controls after patient or status
 changes; the wait then reuses that fresh wrapper instead of scanning the UI tree on every
-poll. No UIA object or handle is saved to SQLite.
+poll. Explicit EMR connect, including startup auto-connect, eagerly primes the five
+configured grid/tab handles. Vaccine caches its Patient Information scope handle only
+after its first explicit fetch; a stale handle is dropped and replaced by a newly
+resolved scope. No UIA object, handle, or patient value is saved to SQLite.
 
 When the marker is present, a large red always-on-top warning asks the operator to
 review the patient memo in EMR. The popup does not display the memo contents, does not

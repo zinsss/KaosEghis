@@ -176,6 +176,115 @@ def test_fetch_opens_patient_info_and_reads_all_fields() -> None:
     assert closes == [True]
 
 
+def test_fetch_reuses_valid_patient_information_scope_cache() -> None:
+    from KaosEghis.core.vaccine_patient_context import (
+        clear_cached_patient_information_scopes,
+        fetch_vaccine_patient_context,
+    )
+
+    class CachedScopeDesktop:
+        def __init__(self) -> None:
+            self.main_root = _Root(1, {})
+            self.patient_root = _Root(2, {"txtPatientNo": "1170"})
+            self.process_calls: list[int] = []
+            self.window_handles: list[int] = []
+
+        def window(self, *, handle: int):
+            self.window_handles.append(handle)
+            if handle == self.main_root.handle:
+                return _Specification(self.main_root)
+            if handle == self.patient_root.handle:
+                return _Specification(self.patient_root)
+            return _Specification(LookupError(handle))
+
+        def windows(self, *, process: int):
+            self.process_calls.append(process)
+            return [self.patient_root] if process == 100 else []
+
+    clear_cached_patient_information_scopes()
+    desktop = CachedScopeDesktop()
+    try:
+        first = fetch_vaccine_patient_context(
+            {},
+            {"chart_no": "txtPatientNo"},
+            connection_checker=lambda _settings: _ready_state(),
+            desktop_factory=lambda **_kwargs: desktop,
+            clicker=lambda _coords: None,
+            closer=lambda: None,
+        )
+        second = fetch_vaccine_patient_context(
+            {},
+            {"chart_no": "txtPatientNo"},
+            connection_checker=lambda _settings: _ready_state(),
+            desktop_factory=lambda **_kwargs: desktop,
+            clicker=lambda _coords: None,
+            closer=lambda: None,
+        )
+    finally:
+        clear_cached_patient_information_scopes()
+
+    assert first.success is True
+    assert second.success is True
+    assert desktop.process_calls == [100]
+    assert desktop.window_handles.count(2) == 1
+
+
+def test_fetch_discards_stale_patient_information_scope_cache_and_replaces_it() -> None:
+    from KaosEghis.core import vaccine_patient_context
+    from KaosEghis.core.vaccine_patient_context import (
+        clear_cached_patient_information_scopes,
+        fetch_vaccine_patient_context,
+    )
+
+    class PatientScopeDesktop:
+        def __init__(self, patient_handle: int) -> None:
+            self.main_root = _Root(1, {})
+            self.patient_root = _Root(patient_handle, {"txtPatientNo": "1170"})
+            self.process_calls: list[int] = []
+
+        def window(self, *, handle: int):
+            if handle == self.main_root.handle:
+                return _Specification(self.main_root)
+            if handle == self.patient_root.handle:
+                return _Specification(self.patient_root)
+            return _Specification(LookupError(handle))
+
+        def windows(self, *, process: int):
+            self.process_calls.append(process)
+            return [self.patient_root] if process == 100 else []
+
+    clear_cached_patient_information_scopes()
+    try:
+        first_desktop = PatientScopeDesktop(2)
+        first = fetch_vaccine_patient_context(
+            {},
+            {"chart_no": "txtPatientNo"},
+            connection_checker=lambda _settings: _ready_state(),
+            desktop_factory=lambda **_kwargs: first_desktop,
+            clicker=lambda _coords: None,
+            closer=lambda: None,
+        )
+        second_desktop = PatientScopeDesktop(3)
+        second = fetch_vaccine_patient_context(
+            {},
+            {"chart_no": "txtPatientNo"},
+            connection_checker=lambda _settings: _ready_state(),
+            desktop_factory=lambda **_kwargs: second_desktop,
+            clicker=lambda _coords: None,
+            closer=lambda: None,
+        )
+        cached = vaccine_patient_context._PATIENT_INFORMATION_SCOPE_CACHE[
+            (100, "txtPatientNo")
+        ]
+    finally:
+        clear_cached_patient_information_scopes()
+
+    assert first.success is True
+    assert second.success is True
+    assert second_desktop.process_calls == [100]
+    assert cached.scope_handle == 3
+
+
 def test_resident_id_formatting_preserves_label_and_normalizes_system_input() -> None:
     from KaosEghis.core.vaccine_patient_context import (
         resident_id_for_label,
