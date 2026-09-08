@@ -256,11 +256,13 @@ Implemented:
 - non-counted exception result pending patient-specific confirmation
 - pediatric early-window manual-check warning
 - boundary and shared-cap tests
+- persistent prepared/printed/completed/cancelled/error lifecycle
+- explicit counted/non-counted completion snapshot and sanitized correction audit
+- daily totals derived only from completed, counted national-program records
 
 Not yet complete:
 
 - explicit exception-reason confirmation UI
-- persistent counted/non-counted completion ledger
 - print-success checkpoint
 - COVID age/risk-group evaluator
 - current-season amendment tracking

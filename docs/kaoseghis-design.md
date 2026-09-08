@@ -147,18 +147,22 @@ Embedded KaosGDD browser surface.
 
 ### `Vaccine`
 
-Placeholder plugin tab.
+Working vaccine preparation foundation.
 
-- no active workflow yet
-- planned editable vaccine catalog and thermal-label workflow
+- editable vaccine catalog and local preparation records
+- explicit general/private, national Influenza, and national COVID classification
+- prepared/printed/completed/cancelled/error lifecycle with completion-derived counts
+- sanitized lifecycle audit containing no patient values
+- planned thermal-label printing and guarded external-system preparation
 - includes a guarded national-influenza program preview driven by explicitly enabled
   schedule and birth-range settings; it performs no print or EMR write
 - preserves the legacy national-influenza age-group, birthday-boundary, schedule,
   exception, and daily-cap model
 - default counted-program cap remains `100`, with seasonal values editable by the
   operator
-- patient identifiers remain transient and are never written to the local vaccine
-  configuration/counter store or routine logs
+- fetched patient identifiers remain transient unless the operator explicitly saves a
+  protected local preparation record; they are never written to routine logs or the
+  lifecycle audit
 - detailed specification: `docs/kaoseghis-vaccine.md`
 
 ### `PACS`

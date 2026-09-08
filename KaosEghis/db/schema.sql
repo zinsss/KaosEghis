@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS vaccine_types (
     name TEXT NOT NULL,
     code TEXT,
     chart_note_template TEXT,
+    program_type TEXT NOT NULL DEFAULT 'general',
     is_active INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -260,6 +261,7 @@ CREATE TABLE IF NOT EXISTS vaccine_records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     vaccine_type_id INTEGER,
     vaccine_type_name TEXT NOT NULL,
+    program_type TEXT NOT NULL DEFAULT 'general',
     patient_chart_no TEXT,
     patient_resident_id TEXT,
     patient_name TEXT,
@@ -268,7 +270,22 @@ CREATE TABLE IF NOT EXISTS vaccine_records (
     patient_phone TEXT,
     patient_address TEXT,
     status TEXT NOT NULL DEFAULT 'prepared',
+    counts_toward_cap INTEGER NOT NULL DEFAULT 0,
+    counted_bucket TEXT,
+    completed_on TEXT,
+    completed_at TEXT,
+    cancelled_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (vaccine_type_id) REFERENCES vaccine_types(id)
+);
+
+CREATE TABLE IF NOT EXISTS vaccine_audit_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vaccine_record_id INTEGER,
+    event_type TEXT NOT NULL,
+    status_before TEXT,
+    status_after TEXT,
+    summary TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

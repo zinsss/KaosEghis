@@ -2,6 +2,7 @@ import json
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 
 DEFAULT_KAOSPACS_WEB_ADMIN_URL = "http://192.168.0.200:8070/imaging/worklist"
 LEGACY_KAOSPACS_WEB_ADMIN_URL = "http://192.168.0.200/admin/worklist"
@@ -362,6 +363,7 @@ class VaccineTypeRecord:
     name: str
     code: str | None
     chart_note_template: str | None
+    program_type: str
     is_active: bool
     sort_order: int
     created_at: str
@@ -373,6 +375,7 @@ class VaccineRecord:
     id: int
     vaccine_type_id: int | None
     vaccine_type_name: str
+    program_type: str
     patient_chart_no: str | None
     patient_resident_id: str | None
     patient_name: str | None
@@ -381,8 +384,24 @@ class VaccineRecord:
     patient_phone: str | None
     patient_address: str | None
     status: str
+    counts_toward_cap: bool
+    counted_bucket: str | None
+    completed_on: str | None
+    completed_at: str | None
+    cancelled_at: str | None
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class VaccineAuditEventRecord:
+    id: int
+    vaccine_record_id: int | None
+    event_type: str
+    status_before: str | None
+    status_after: str | None
+    summary: str
+    created_at: str
 
 
 SUPPORTED_ITEM_TYPES = {"clipboard", "randomized_clipboard", "macro", "workflow"}
@@ -418,6 +437,22 @@ ALLOWED_MACRO_ACTIONS = {
 ALLOWED_SCHEDULER_MISSED_RUN_POLICIES = {"skip", "prompt"}
 ALLOWED_SCHEDULER_RUN_TRIGGERS = {"scheduled", "manual"}
 ALLOWED_SOCL_DOMAINS = {"subjective", "objective"}
+ALLOWED_VACCINE_PROGRAM_TYPES = {
+    "general",
+    "national_influenza",
+    "national_covid",
+}
+ALLOWED_VACCINE_RECORD_STATUSES = {
+    "prepared",
+    "printed",
+    "completed",
+    "cancelled",
+    "error",
+}
+VACCINE_COUNT_BUCKETS = {
+    "national_influenza": "influenza",
+    "national_covid": "covid",
+}
 
 LEGACY_PACS_WORKLIST_STATUS_ALIASES = {
     "done": "completed",
@@ -2600,8 +2635,8 @@ def delete_emr_ui_target(connection: sqlite3.Connection, ui_target_id: int) -> b
 def list_vaccine_types(connection: sqlite3.Connection) -> list[VaccineTypeRecord]:
     rows = connection.execute(
         """
-        SELECT id, name, code, chart_note_template, is_active, sort_order,
-               created_at, updated_at
+        SELECT id, name, code, chart_note_template, program_type, is_active,
+               sort_order, created_at, updated_at
         FROM vaccine_types
         ORDER BY sort_order, id
         """
@@ -2614,8 +2649,8 @@ def get_vaccine_type(
 ) -> VaccineTypeRecord | None:
     row = connection.execute(
         """
-        SELECT id, name, code, chart_note_template, is_active, sort_order,
-               created_at, updated_at
+        SELECT id, name, code, chart_note_template, program_type, is_active,
+               sort_order, created_at, updated_at
         FROM vaccine_types
         WHERE id = ?
         """,
@@ -2632,9 +2667,11 @@ def create_vaccine_type(
     name: str,
     code: str | None = None,
     chart_note_template: str | None = None,
+    program_type: str = "general",
     is_active: bool = True,
     sort_order: int | None = None,
 ) -> VaccineTypeRecord:
+    normalized_program_type = _validate_vaccine_program_type(program_type)
     if sort_order is None:
         current = connection.execute(
             "SELECT COALESCE(MAX(sort_order), 0) FROM vaccine_types"
@@ -2643,14 +2680,15 @@ def create_vaccine_type(
     cursor = connection.execute(
         """
         INSERT INTO vaccine_types (
-            name, code, chart_note_template, is_active, sort_order
+            name, code, chart_note_template, program_type, is_active, sort_order
         )
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
             name.strip(),
             _blank_to_none(code),
             _blank_to_none(chart_note_template),
+            normalized_program_type,
             int(is_active),
             int(sort_order),
         ),
@@ -2669,14 +2707,24 @@ def update_vaccine_type(
     name: str,
     code: str | None = None,
     chart_note_template: str | None = None,
+    program_type: str | None = None,
     is_active: bool = True,
 ) -> VaccineTypeRecord | None:
+    existing = get_vaccine_type(connection, vaccine_type_id)
+    if existing is None:
+        return None
+    normalized_program_type = (
+        existing.program_type
+        if program_type is None
+        else _validate_vaccine_program_type(program_type)
+    )
     connection.execute(
         """
         UPDATE vaccine_types
         SET name = ?,
             code = ?,
             chart_note_template = ?,
+            program_type = ?,
             is_active = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
@@ -2685,6 +2733,7 @@ def update_vaccine_type(
             name.strip(),
             _blank_to_none(code),
             _blank_to_none(chart_note_template),
+            normalized_program_type,
             int(is_active),
             vaccine_type_id,
         ),
@@ -2722,9 +2771,11 @@ def reorder_vaccine_types(
 def list_vaccine_records(connection: sqlite3.Connection) -> list[VaccineRecord]:
     rows = connection.execute(
         """
-        SELECT id, vaccine_type_id, vaccine_type_name, patient_chart_no,
-               patient_resident_id, patient_name, patient_sex, patient_age,
-               patient_phone, patient_address, status, created_at, updated_at
+        SELECT id, vaccine_type_id, vaccine_type_name, program_type,
+               patient_chart_no, patient_resident_id, patient_name, patient_sex,
+               patient_age, patient_phone, patient_address, status,
+               counts_toward_cap, counted_bucket, completed_on, completed_at,
+               cancelled_at, created_at, updated_at
         FROM vaccine_records
         ORDER BY id DESC
         """
@@ -2737,9 +2788,11 @@ def get_vaccine_record(
 ) -> VaccineRecord | None:
     row = connection.execute(
         """
-        SELECT id, vaccine_type_id, vaccine_type_name, patient_chart_no,
-               patient_resident_id, patient_name, patient_sex, patient_age,
-               patient_phone, patient_address, status, created_at, updated_at
+        SELECT id, vaccine_type_id, vaccine_type_name, program_type,
+               patient_chart_no, patient_resident_id, patient_name, patient_sex,
+               patient_age, patient_phone, patient_address, status,
+               counts_toward_cap, counted_bucket, completed_on, completed_at,
+               cancelled_at, created_at, updated_at
         FROM vaccine_records
         WHERE id = ?
         """,
@@ -2762,20 +2815,30 @@ def create_vaccine_record(
     patient_age: str | None = None,
     patient_phone: str | None = None,
     patient_address: str | None = None,
+    program_type: str | None = None,
     status: str = "prepared",
 ) -> VaccineRecord:
+    normalized_status = _validate_vaccine_record_status(status)
+    if normalized_status != "prepared":
+        raise ValueError("New vaccine records must start as prepared.")
+    normalized_program_type = _resolve_vaccine_program_type(
+        connection,
+        vaccine_type_id,
+        program_type,
+    )
     cursor = connection.execute(
         """
         INSERT INTO vaccine_records (
-            vaccine_type_id, vaccine_type_name, patient_chart_no,
+            vaccine_type_id, vaccine_type_name, program_type, patient_chart_no,
             patient_resident_id, patient_name, patient_sex, patient_age,
             patient_phone, patient_address, status
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             vaccine_type_id,
             vaccine_type_name.strip(),
+            normalized_program_type,
             _blank_to_none(patient_chart_no),
             _blank_to_none(patient_resident_id),
             _blank_to_none(patient_name),
@@ -2783,8 +2846,16 @@ def create_vaccine_record(
             _blank_to_none(patient_age),
             _blank_to_none(patient_phone),
             _blank_to_none(patient_address),
-            status.strip() or "prepared",
+            normalized_status,
         ),
+    )
+    _insert_vaccine_audit_event(
+        connection,
+        vaccine_record_id=cursor.lastrowid,
+        event_type="created",
+        status_before=None,
+        status_after="prepared",
+        summary="Vaccine preparation record created.",
     )
     connection.commit()
     created = get_vaccine_record(connection, cursor.lastrowid)
@@ -2806,13 +2877,33 @@ def update_vaccine_record(
     patient_age: str | None = None,
     patient_phone: str | None = None,
     patient_address: str | None = None,
-    status: str = "prepared",
+    program_type: str | None = None,
+    status: str | None = None,
 ) -> VaccineRecord | None:
+    existing = get_vaccine_record(connection, record_id)
+    if existing is None:
+        return None
+    normalized_status = (
+        existing.status
+        if status is None
+        else _validate_vaccine_record_status(status)
+    )
+    if normalized_status != existing.status:
+        raise ValueError("Use an explicit vaccine lifecycle action to change status.")
+    if existing.status in {"printed", "completed", "cancelled"}:
+        normalized_program_type = existing.program_type
+    else:
+        normalized_program_type = _resolve_vaccine_program_type(
+            connection,
+            vaccine_type_id,
+            program_type,
+        )
     connection.execute(
         """
         UPDATE vaccine_records
         SET vaccine_type_id = ?,
             vaccine_type_name = ?,
+            program_type = ?,
             patient_chart_no = ?,
             patient_resident_id = ?,
             patient_name = ?,
@@ -2827,6 +2918,7 @@ def update_vaccine_record(
         (
             vaccine_type_id,
             vaccine_type_name.strip(),
+            normalized_program_type,
             _blank_to_none(patient_chart_no),
             _blank_to_none(patient_resident_id),
             _blank_to_none(patient_name),
@@ -2834,15 +2926,34 @@ def update_vaccine_record(
             _blank_to_none(patient_age),
             _blank_to_none(patient_phone),
             _blank_to_none(patient_address),
-            status.strip() or "prepared",
+            normalized_status,
             record_id,
         ),
+    )
+    _insert_vaccine_audit_event(
+        connection,
+        vaccine_record_id=record_id,
+        event_type="edited",
+        status_before=existing.status,
+        status_after=existing.status,
+        summary="Vaccine preparation record edited.",
     )
     connection.commit()
     return get_vaccine_record(connection, record_id)
 
 
 def delete_vaccine_record(connection: sqlite3.Connection, record_id: int) -> bool:
+    existing = get_vaccine_record(connection, record_id)
+    if existing is None:
+        return False
+    _insert_vaccine_audit_event(
+        connection,
+        vaccine_record_id=record_id,
+        event_type="deleted",
+        status_before=existing.status,
+        status_after=None,
+        summary="Vaccine record deleted by operator.",
+    )
     cursor = connection.execute(
         "DELETE FROM vaccine_records WHERE id = ?",
         (record_id,),
@@ -2851,30 +2962,177 @@ def delete_vaccine_record(connection: sqlite3.Connection, record_id: int) -> boo
     return cursor.rowcount > 0
 
 
+def mark_vaccine_record_printed(
+    connection: sqlite3.Connection,
+    record_id: int,
+) -> VaccineRecord | None:
+    existing = get_vaccine_record(connection, record_id)
+    if existing is None:
+        return None
+    if existing.status == "printed":
+        return existing
+    if existing.status != "prepared":
+        raise ValueError("Only a prepared vaccine record can be marked printed.")
+    connection.execute(
+        """
+        UPDATE vaccine_records
+        SET status = 'printed', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (record_id,),
+    )
+    _insert_vaccine_audit_event(
+        connection,
+        vaccine_record_id=record_id,
+        event_type="printed",
+        status_before=existing.status,
+        status_after="printed",
+        summary="Vaccine label print checkpoint recorded.",
+    )
+    connection.commit()
+    return get_vaccine_record(connection, record_id)
+
+
+def mark_vaccine_record_completed(
+    connection: sqlite3.Connection,
+    record_id: int,
+    *,
+    completed_at: str | None = None,
+    counts_toward_cap: bool | None = None,
+) -> VaccineRecord | None:
+    existing = get_vaccine_record(connection, record_id)
+    if existing is None:
+        return None
+    if existing.status == "completed":
+        return existing
+    if existing.status == "cancelled":
+        raise ValueError("A cancelled vaccine record cannot be marked completed.")
+
+    event_time = _normalize_vaccine_event_time(completed_at)
+    default_counted = existing.program_type in {
+        "national_influenza",
+        "national_covid",
+    }
+    counted = default_counted if counts_toward_cap is None else bool(counts_toward_cap)
+    if counted and not default_counted:
+        raise ValueError("A general vaccine cannot count toward a national daily cap.")
+    counted_bucket = (
+        _count_bucket_for_program_type(existing.program_type) if counted else None
+    )
+    connection.execute(
+        """
+        UPDATE vaccine_records
+        SET status = 'completed',
+            counts_toward_cap = ?,
+            counted_bucket = ?,
+            completed_on = ?,
+            completed_at = ?,
+            cancelled_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            int(counted),
+            counted_bucket,
+            event_time[:10],
+            event_time,
+            record_id,
+        ),
+    )
+    _insert_vaccine_audit_event(
+        connection,
+        vaccine_record_id=record_id,
+        event_type="completed",
+        status_before=existing.status,
+        status_after="completed",
+        summary=(
+            "Vaccination marked completed; national daily count included."
+            if counted
+            else "Vaccination marked completed; national daily count not included."
+        ),
+    )
+    connection.commit()
+    return get_vaccine_record(connection, record_id)
+
+
+def mark_vaccine_record_cancelled(
+    connection: sqlite3.Connection,
+    record_id: int,
+    *,
+    cancelled_at: str | None = None,
+) -> VaccineRecord | None:
+    existing = get_vaccine_record(connection, record_id)
+    if existing is None:
+        return None
+    if existing.status == "cancelled":
+        return existing
+    event_time = _normalize_vaccine_event_time(cancelled_at)
+    connection.execute(
+        """
+        UPDATE vaccine_records
+        SET status = 'cancelled',
+            counts_toward_cap = 0,
+            counted_bucket = NULL,
+            cancelled_at = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (event_time, record_id),
+    )
+    _insert_vaccine_audit_event(
+        connection,
+        vaccine_record_id=record_id,
+        event_type="cancelled",
+        status_before=existing.status,
+        status_after="cancelled",
+        summary="Vaccine record cancelled by operator.",
+    )
+    connection.commit()
+    return get_vaccine_record(connection, record_id)
+
+
 def get_today_vaccine_counts(
     connection: sqlite3.Connection,
     target_date: str,
 ) -> dict[str, int]:
     rows = connection.execute(
         """
-        SELECT
-            LOWER(COALESCE(NULLIF(TRIM(vt.code), ''), NULLIF(TRIM(vr.vaccine_type_name), ''))) AS normalized_code,
-            COUNT(*)
-        FROM vaccine_records vr
-        LEFT JOIN vaccine_types vt ON vt.id = vr.vaccine_type_id
-        WHERE substr(vr.created_at, 1, 10) = ?
-        GROUP BY normalized_code
+        SELECT counted_bucket, COUNT(*)
+        FROM vaccine_records
+        WHERE status = 'completed'
+          AND counts_toward_cap = 1
+          AND completed_on = ?
+          AND counted_bucket IN ('influenza', 'covid')
+        GROUP BY counted_bucket
         """,
         (target_date,),
     ).fetchall()
     counts = {"flu": 0, "covid": 0}
-    for normalized_code, count in rows:
-        code = str(normalized_code or "").strip().lower()
-        if code in {"flu", "influenza"}:
+    for counted_bucket, count in rows:
+        bucket = str(counted_bucket or "").strip().lower()
+        if bucket == "influenza":
             counts["flu"] += int(count or 0)
-        elif code in {"covid", "covid-19", "covid19"}:
+        elif bucket == "covid":
             counts["covid"] += int(count or 0)
     return counts
+
+
+def list_vaccine_audit_events(
+    connection: sqlite3.Connection,
+    *,
+    limit: int = 100,
+) -> list[VaccineAuditEventRecord]:
+    rows = connection.execute(
+        """
+        SELECT id, vaccine_record_id, event_type, status_before, status_after,
+               summary, created_at
+        FROM vaccine_audit_events
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (max(1, min(int(limit), 500)),),
+    ).fetchall()
+    return [_vaccine_audit_event_from_row(row) for row in rows]
 
 
 def reorder_macro_steps(connection: sqlite3.Connection, item_id: int) -> list[MacroStepRecord]:
@@ -3251,10 +3509,11 @@ def _vaccine_type_from_row(row: sqlite3.Row | tuple) -> VaccineTypeRecord:
         name=row[1],
         code=row[2],
         chart_note_template=row[3],
-        is_active=bool(row[4]),
-        sort_order=int(row[5]),
-        created_at=row[6],
-        updated_at=row[7],
+        program_type=row[4],
+        is_active=bool(row[5]),
+        sort_order=int(row[6]),
+        created_at=row[7],
+        updated_at=row[8],
     )
 
 
@@ -3263,16 +3522,36 @@ def _vaccine_record_from_row(row: sqlite3.Row | tuple) -> VaccineRecord:
         id=row[0],
         vaccine_type_id=row[1],
         vaccine_type_name=row[2],
-        patient_chart_no=row[3],
-        patient_resident_id=row[4],
-        patient_name=row[5],
-        patient_sex=row[6],
-        patient_age=row[7],
-        patient_phone=row[8],
-        patient_address=row[9],
-        status=row[10],
-        created_at=row[11],
-        updated_at=row[12],
+        program_type=row[3],
+        patient_chart_no=row[4],
+        patient_resident_id=row[5],
+        patient_name=row[6],
+        patient_sex=row[7],
+        patient_age=row[8],
+        patient_phone=row[9],
+        patient_address=row[10],
+        status=row[11],
+        counts_toward_cap=bool(row[12]),
+        counted_bucket=row[13],
+        completed_on=row[14],
+        completed_at=row[15],
+        cancelled_at=row[16],
+        created_at=row[17],
+        updated_at=row[18],
+    )
+
+
+def _vaccine_audit_event_from_row(
+    row: sqlite3.Row | tuple,
+) -> VaccineAuditEventRecord:
+    return VaccineAuditEventRecord(
+        id=row[0],
+        vaccine_record_id=row[1],
+        event_type=row[2],
+        status_before=row[3],
+        status_after=row[4],
+        summary=row[5],
+        created_at=row[6],
     )
 
 
@@ -3298,6 +3577,78 @@ def _blank_to_none(value: str | None) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _validate_vaccine_program_type(program_type: str) -> str:
+    normalized = str(program_type or "general").strip().lower()
+    if normalized not in ALLOWED_VACCINE_PROGRAM_TYPES:
+        raise ValueError(f"Unsupported vaccine program type: {normalized}")
+    return normalized
+
+
+def _validate_vaccine_record_status(status: str) -> str:
+    normalized = str(status or "prepared").strip().lower()
+    if normalized not in ALLOWED_VACCINE_RECORD_STATUSES:
+        raise ValueError(f"Unsupported vaccine record status: {normalized}")
+    return normalized
+
+
+def _resolve_vaccine_program_type(
+    connection: sqlite3.Connection,
+    vaccine_type_id: int | None,
+    program_type: str | None,
+) -> str:
+    if program_type is not None:
+        return _validate_vaccine_program_type(program_type)
+    if vaccine_type_id is not None:
+        row = connection.execute(
+            "SELECT program_type FROM vaccine_types WHERE id = ?",
+            (vaccine_type_id,),
+        ).fetchone()
+        if row is not None:
+            return _validate_vaccine_program_type(row[0])
+    return "general"
+
+
+def _count_bucket_for_program_type(program_type: str) -> str | None:
+    return VACCINE_COUNT_BUCKETS.get(program_type)
+
+
+def _normalize_vaccine_event_time(value: str | None) -> str:
+    if value is None:
+        return datetime.now().astimezone().isoformat(timespec="seconds")
+    normalized = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("Vaccine lifecycle timestamp must be ISO formatted.") from error
+    return parsed.isoformat(timespec="seconds")
+
+
+def _insert_vaccine_audit_event(
+    connection: sqlite3.Connection,
+    *,
+    vaccine_record_id: int | None,
+    event_type: str,
+    status_before: str | None,
+    status_after: str | None,
+    summary: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO vaccine_audit_events (
+            vaccine_record_id, event_type, status_before, status_after, summary
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            vaccine_record_id,
+            event_type,
+            status_before,
+            status_after,
+            summary.strip(),
+        ),
+    )
 
 
 def _normalize_ancestor_path(value: str | None) -> str | None:

@@ -29,9 +29,85 @@ def test_vaccine_tables_and_seed_types_are_created(tmp_path) -> None:
 
     assert "vaccine_types" in tables
     assert "vaccine_records" in tables
+    assert "vaccine_audit_events" in tables
     assert [entry.name for entry in vaccine_types[:2]] == ["Influenza", "COVID-19"]
+    assert [entry.program_type for entry in vaccine_types[:2]] == [
+        "national_influenza",
+        "national_covid",
+    ]
     assert '"influenza"' in settings["vaccine_schedule_rules_json"]
     assert '"elderly_75_plus"' in settings["vaccine_age_groups_json"]
+
+
+def test_legacy_vaccine_records_migrate_without_becoming_completed(tmp_path) -> None:
+    import sqlite3
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_today_vaccine_counts, list_vaccine_records
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    connection = sqlite3.connect(db_path)
+    connection.executescript(
+        """
+        CREATE TABLE vaccine_types (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            code TEXT,
+            chart_note_template TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE vaccine_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vaccine_type_id INTEGER,
+            vaccine_type_name TEXT NOT NULL,
+            patient_chart_no TEXT,
+            patient_resident_id TEXT,
+            patient_name TEXT,
+            patient_sex TEXT,
+            patient_age TEXT,
+            patient_phone TEXT,
+            patient_address TEXT,
+            status TEXT NOT NULL DEFAULT 'prepared',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO vaccine_types (name, code, sort_order)
+        VALUES ('Influenza', 'flu', 1);
+        INSERT INTO vaccine_records (
+            vaccine_type_id, vaccine_type_name, patient_name, status, created_at
+        )
+        VALUES (1, 'Influenza', 'Legacy Patient', 'prepared', '2026-09-08 09:00:00');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(vaccine_records)"
+            ).fetchall()
+        }
+        record = list_vaccine_records(connection)[0]
+        counts = get_today_vaccine_counts(connection, "2026-09-08")
+
+    assert {
+        "program_type",
+        "counts_toward_cap",
+        "counted_bucket",
+        "completed_on",
+        "completed_at",
+        "cancelled_at",
+    } <= columns
+    assert record.program_type == "national_influenza"
+    assert record.status == "prepared"
+    assert record.counts_toward_cap is False
+    assert counts == {"flu": 0, "covid": 0}
 
 
 def test_vaccine_type_and_record_crud(tmp_path) -> None:
@@ -115,6 +191,21 @@ def test_vaccine_type_and_record_crud(tmp_path) -> None:
     assert deleted_type is True
 
 
+def test_vaccine_type_dialog_records_program_classification() -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTypeDialog
+
+    dialog = VaccineTypeDialog()
+    assert dialog.program_type_combo.currentData() == "general"
+
+    dialog.program_type_combo.setCurrentIndex(
+        dialog.program_type_combo.findData("national_influenza")
+    )
+
+    assert dialog.values()["program_type"] == "national_influenza"
+
+
 def test_vaccine_tab_fetches_patient_context_from_emr_targets(tmp_path, monkeypatch) -> None:
     _app()
 
@@ -190,6 +281,7 @@ def test_today_vaccine_counts_use_only_today_rows(tmp_path) -> None:
         create_vaccine_record,
         get_today_vaccine_counts,
         list_vaccine_types,
+        mark_vaccine_record_completed,
     )
 
     db_path = tmp_path / "KaosEghis.sqlite"
@@ -211,18 +303,178 @@ def test_today_vaccine_counts_use_only_today_rows(tmp_path) -> None:
             vaccine_type_name=covid_type.name,
             patient_name="김민수",
         )
-        connection.execute(
-            "UPDATE vaccine_records SET created_at = '2026-08-09 08:00:00' WHERE id = ?",
-            (flu_record.id,),
+        mark_vaccine_record_completed(
+            connection,
+            flu_record.id,
+            completed_at="2026-08-09T08:00:00+09:00",
         )
-        connection.execute(
-            "UPDATE vaccine_records SET created_at = '2026-08-10 08:00:00' WHERE id = ?",
-            (covid_record.id,),
+        mark_vaccine_record_completed(
+            connection,
+            covid_record.id,
+            completed_at="2026-08-10T08:00:00+09:00",
         )
-        connection.commit()
         counts = get_today_vaccine_counts(connection, "2026-08-10")
 
     assert counts == {"flu": 0, "covid": 1}
+
+
+def test_only_completed_counted_national_records_increment_daily_count(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_record,
+        create_vaccine_type,
+        get_today_vaccine_counts,
+        list_vaccine_audit_events,
+        list_vaccine_types,
+        mark_vaccine_record_cancelled,
+        mark_vaccine_record_completed,
+        mark_vaccine_record_printed,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        vaccine_types = {entry.name: entry for entry in list_vaccine_types(connection)}
+        flu_type = vaccine_types["Influenza"]
+        covid_type = vaccine_types["COVID-19"]
+        private_flu_type = create_vaccine_type(
+            connection,
+            name="Private Influenza",
+            code="private-flu",
+            program_type="general",
+        )
+        prepared_flu = create_vaccine_record(
+            connection,
+            vaccine_type_id=flu_type.id,
+            vaccine_type_name=flu_type.name,
+            patient_name="Prepared Patient",
+        )
+        completed_flu = create_vaccine_record(
+            connection,
+            vaccine_type_id=flu_type.id,
+            vaccine_type_name=flu_type.name,
+            patient_name="Counted Patient",
+        )
+        private_flu = create_vaccine_record(
+            connection,
+            vaccine_type_id=private_flu_type.id,
+            vaccine_type_name=private_flu_type.name,
+            patient_name="Private Patient",
+        )
+        completed_covid = create_vaccine_record(
+            connection,
+            vaccine_type_id=covid_type.id,
+            vaccine_type_name=covid_type.name,
+            patient_name="COVID Patient",
+        )
+
+        assert get_today_vaccine_counts(connection, "2026-09-08") == {
+            "flu": 0,
+            "covid": 0,
+        }
+        mark_vaccine_record_printed(connection, prepared_flu.id)
+        mark_vaccine_record_completed(
+            connection,
+            completed_flu.id,
+            completed_at="2026-09-08T09:00:00+09:00",
+        )
+        first_completion = mark_vaccine_record_completed(
+            connection,
+            completed_flu.id,
+            completed_at="2026-09-09T09:00:00+09:00",
+        )
+        mark_vaccine_record_completed(
+            connection,
+            private_flu.id,
+            completed_at="2026-09-08T09:05:00+09:00",
+        )
+        mark_vaccine_record_completed(
+            connection,
+            completed_covid.id,
+            completed_at="2026-09-08T09:10:00+09:00",
+        )
+        counts_after_completion = get_today_vaccine_counts(connection, "2026-09-08")
+        mark_vaccine_record_cancelled(
+            connection,
+            completed_flu.id,
+            cancelled_at="2026-09-08T10:00:00+09:00",
+        )
+        counts_after_correction = get_today_vaccine_counts(connection, "2026-09-08")
+        audit_events = list_vaccine_audit_events(connection, limit=100)
+
+    assert first_completion is not None
+    assert first_completion.completed_on == "2026-09-08"
+    assert counts_after_completion == {"flu": 1, "covid": 1}
+    assert counts_after_correction == {"flu": 0, "covid": 1}
+    for patient_name in ("Prepared Patient", "Counted Patient", "Private Patient"):
+        assert all(patient_name not in event.summary for event in audit_events)
+    assert any(event.event_type == "completed" for event in audit_events)
+    assert any(event.event_type == "cancelled" for event in audit_events)
+
+
+def test_vaccine_db_actions_complete_and_cancel_explicitly(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_record,
+        get_today_vaccine_counts,
+        get_vaccine_record,
+        list_vaccine_types,
+    )
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        flu_type = next(
+            entry for entry in list_vaccine_types(connection) if entry.name == "Influenza"
+        )
+        record = create_vaccine_record(
+            connection,
+            vaccine_type_id=flu_type.id,
+            vaccine_type_name=flu_type.name,
+            patient_name="Test Patient",
+        )
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+    page = VaccineTab(db_path)
+    page.flu_records_table.selectRow(0)
+    page.mark_selected_record_completed()
+
+    with connect(db_path) as connection:
+        completed = get_vaccine_record(connection, record.id)
+        completed_counts = get_today_vaccine_counts(
+            connection,
+            completed.completed_on,
+        )
+
+    assert completed is not None
+    assert completed.status == "completed"
+    assert completed_counts["flu"] == 1
+
+    page.flu_records_table.selectRow(0)
+    page.cancel_selected_record()
+
+    with connect(db_path) as connection:
+        cancelled = get_vaccine_record(connection, record.id)
+        cancelled_counts = get_today_vaccine_counts(
+            connection,
+            completed.completed_on,
+        )
+
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    assert cancelled_counts["flu"] == 0
 
 
 def test_vaccine_tab_uses_single_structured_program_settings(tmp_path) -> None:

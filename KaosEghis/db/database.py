@@ -539,6 +539,7 @@ def _migrate_vaccine_tables(connection: sqlite3.Connection) -> None:
             name TEXT NOT NULL,
             code TEXT,
             chart_note_template TEXT,
+            program_type TEXT NOT NULL DEFAULT 'general',
             is_active INTEGER NOT NULL DEFAULT 1,
             sort_order INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -552,6 +553,7 @@ def _migrate_vaccine_tables(connection: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             vaccine_type_id INTEGER,
             vaccine_type_name TEXT NOT NULL,
+            program_type TEXT NOT NULL DEFAULT 'general',
             patient_chart_no TEXT,
             patient_resident_id TEXT,
             patient_name TEXT,
@@ -560,9 +562,95 @@ def _migrate_vaccine_tables(connection: sqlite3.Connection) -> None:
             patient_phone TEXT,
             patient_address TEXT,
             status TEXT NOT NULL DEFAULT 'prepared',
+            counts_toward_cap INTEGER NOT NULL DEFAULT 0,
+            counted_bucket TEXT,
+            completed_on TEXT,
+            completed_at TEXT,
+            cancelled_at TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (vaccine_type_id) REFERENCES vaccine_types(id)
+        )
+        """
+    )
+    type_columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(vaccine_types)").fetchall()
+    }
+    type_program_column_added = "program_type" not in type_columns
+    if type_program_column_added:
+        connection.execute(
+            "ALTER TABLE vaccine_types "
+            "ADD COLUMN program_type TEXT NOT NULL DEFAULT 'general'"
+        )
+
+    record_columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(vaccine_records)").fetchall()
+    }
+    record_migrations = {
+        "program_type": "TEXT NOT NULL DEFAULT 'general'",
+        "counts_toward_cap": "INTEGER NOT NULL DEFAULT 0",
+        "counted_bucket": "TEXT",
+        "completed_on": "TEXT",
+        "completed_at": "TEXT",
+        "cancelled_at": "TEXT",
+    }
+    record_program_column_added = "program_type" not in record_columns
+    for column, declaration in record_migrations.items():
+        if column not in record_columns:
+            connection.execute(
+                f"ALTER TABLE vaccine_records ADD COLUMN {column} {declaration}"
+            )
+
+    if type_program_column_added:
+        connection.execute(
+            """
+            UPDATE vaccine_types
+            SET program_type = 'national_influenza'
+            WHERE name = 'Influenza' AND LOWER(COALESCE(code, '')) = 'flu'
+            """
+        )
+        connection.execute(
+            """
+            UPDATE vaccine_types
+            SET program_type = 'national_covid'
+            WHERE name = 'COVID-19' AND LOWER(COALESCE(code, '')) = 'covid'
+            """
+        )
+    if record_program_column_added:
+        connection.execute(
+            """
+            UPDATE vaccine_records
+            SET program_type = COALESCE(
+                (
+                    SELECT vt.program_type
+                    FROM vaccine_types vt
+                    WHERE vt.id = vaccine_records.vaccine_type_id
+                ),
+                'general'
+            )
+            WHERE status = 'prepared'
+              AND counts_toward_cap = 0
+              AND completed_at IS NULL
+            """
+        )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vaccine_records_daily_count
+        ON vaccine_records(status, counts_toward_cap, counted_bucket, completed_on)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vaccine_audit_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vaccine_record_id INTEGER,
+            event_type TEXT NOT NULL,
+            status_before TEXT,
+            status_after TEXT,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -576,12 +664,28 @@ def _seed_default_vaccine_types(connection: sqlite3.Connection) -> None:
         return
     connection.executemany(
         """
-        INSERT INTO vaccine_types (name, code, chart_note_template, is_active, sort_order)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO vaccine_types (
+            name, code, chart_note_template, program_type, is_active, sort_order
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
-            ("Influenza", "flu", "인플루엔자 예방접종 시행함.", 1, 1),
-            ("COVID-19", "covid", "코로나19 예방접종 시행함.", 1, 2),
+            (
+                "Influenza",
+                "flu",
+                "인플루엔자 예방접종 시행함.",
+                "national_influenza",
+                1,
+                1,
+            ),
+            (
+                "COVID-19",
+                "covid",
+                "코로나19 예방접종 시행함.",
+                "national_covid",
+                1,
+                2,
+            ),
         ),
     )
 

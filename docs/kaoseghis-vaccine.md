@@ -12,8 +12,13 @@ Current implemented pieces:
 - SQLite tables:
   - `vaccine_types`
   - `vaccine_records`
+  - `vaccine_audit_events`
 - editable local vaccine type catalog
 - local vaccine preparation record save/load/delete
+- explicit general/private, national Influenza, and national COVID type classification
+- explicit prepared/printed/completed/cancelled/error record lifecycle
+- operator-confirmed completion and cancellation corrections
+- sanitized lifecycle audit without patient values
 - drag/drop ordering for vaccine types
 - EMR-target-based patient context fetch into the Vaccine page
 - visible same-day `Influenza` and `COVID-19` counts
@@ -28,7 +33,7 @@ Still not implemented in this stage:
 - thermal label printing
 - vaccination program automation
 - EMR writeback/charting
-- vaccination completion lifecycle
+- automatic print-success to completion transition
 
 ## EMR Patient Targets
 
@@ -123,10 +128,30 @@ The current `Vaccine` page now exposes:
 - one editable Influenza schedule and one editable COVID schedule
 - explicit program-year labels, date windows, birth-date ranges, activation, and caps
 
-The counts are derived from local `vaccine_records.created_at` rows for the current
-day. The influenza preview uses the current total conservatively when checking the
-configured cap, but previewing never increments the count. The later print/completion
-lifecycle must make the durable counter checkpoint explicit before operational use.
+The counts are derived only from local records whose lifecycle is `completed`, whose
+explicit `counts_toward_cap` snapshot is true, and whose `completed_on` date is today.
+Prepared, printed, cancelled, errored, general/private, and merely previewed records do
+not increment a national count. Repeating completion for the same record is idempotent,
+and cancelling a completed record removes it from the count while retaining a sanitized
+audit event. Until printing is implemented, `Mark completed` is an explicit interim
+operator checkpoint rather than an inferred outcome.
+
+## Vaccine Record Lifecycle
+
+Every new local record starts as `prepared`. The supported lifecycle states are:
+
+- `prepared`: local preparation only; never counted
+- `printed`: reserved print-success checkpoint; never counted by itself
+- `completed`: explicit completion; counted only when its snapshotted program type is
+  national Influenza or national COVID and the workflow marks it counted
+- `cancelled`: explicit correction; excluded from daily counts
+- `error`: failed workflow state; excluded from daily counts
+
+The vaccine type's program classification is copied into the record when it is prepared,
+so later catalog edits cannot silently rewrite completed history. General/private
+vaccinations can never be forced into a national counter. Lifecycle changes and deletion
+are explicit operator actions and create audit entries containing only record ID, event,
+status transition, and a fixed non-patient summary.
 
 ## Current Influenza Program Preview
 
@@ -350,8 +375,8 @@ decision. A season cannot be enabled until all required values are valid.
   influenza cap, matching the legacy behavior.
 - Paid influenza does not consume the national influenza cap.
 - National COVID uses its configured daily counted bucket and cap.
-- A count is committed only after successful explicit printing/confirmation at the
-  workflow checkpoint chosen during implementation.
+- A count is committed only by the explicit completion checkpoint. The printing stage
+  will call that checkpoint only after confirmed print success.
 - A failed, cancelled, or merely previewed workflow must not increase a counter.
 - Counter correction requires an explicit operator action and a local non-PHI audit
   entry.
@@ -487,7 +512,15 @@ and tested against the current installation.
 
 ## Data and Privacy
 
-Patient context is transient. KaosEghis-vaccine must not persist or log:
+EMR patient context remains transient until the operator explicitly chooses `Save
+record`. The existing local `vaccine_records` table then stores the minimum fields shown
+on its preparation form so the operator can edit, reprint, correct, or delete that local
+record. These local records are sensitive clinical workflow data and must remain in the
+protected KaosEghis data directory. They must never be written to routine logs,
+notifications, lifecycle audit summaries, or external services without a separately
+verified workflow.
+
+Routine logs and `vaccine_audit_events` must not contain:
 
 - resident registration number or national ID
 - patient name
@@ -499,20 +532,22 @@ Patient context is transient. KaosEghis-vaccine must not persist or log:
 - EMR notes
 - insurance information
 
-Permitted durable data is configuration and aggregate operational state:
+Durable local data consists of:
 
 - vaccine catalog
 - seasonal eligibility rules
 - label templates
 - printer configuration
-- aggregate daily counters
+- explicit local preparation records created by the operator
+- daily counts derived from completed, counted national-program records
 - sanitized counter corrections and workflow errors
 
 Notifications and routine logs must never contain patient values.
 
 ## Planned Local Model
 
-The implementation should keep configuration separate from aggregate counters:
+The implementation keeps configuration separate from patient workflow records and
+sanitized lifecycle audit:
 
 - vaccine products/catalog
 - program and counter buckets
@@ -520,10 +555,11 @@ The implementation should keep configuration separate from aggregate counters:
 - seasonal schedule windows
 - editable daily cap values
 - label templates
-- aggregate daily counter totals
+- completion-derived daily counter totals
 - sanitized operational audit
 
-Patient-level vaccination history is not part of the local KaosEghis-vaccine model.
+The local records are an operator workflow ledger, not an authoritative replacement for
+eGHIS or the national vaccination system. Final clinical submission remains manual.
 
 ## Safety and Validation
 
@@ -570,8 +606,10 @@ Before operational use, tests must cover:
    exposes duplicate IDs elsewhere, and indexes the remaining fields in one scoped
    query. It does not scan or log raw patient rows.
 3. Pure eligibility/counter decision engine with boundary tests. Done as a guarded
-   preview; child-dose confirmation and the print/completion counter checkpoint remain.
-4. Thermal label preview and printing service.
-5. Guarded external vaccination-program preparation.
-6. eGHIS chart-text preparation.
-7. Final end-to-end dummy-patient validation.
+   preview; child-dose and exception confirmation remain.
+4. Explicit lifecycle, national-program classification, completion-derived count, and
+   sanitized correction audit. Done; automatic print-success completion remains.
+5. Thermal label preview and printing service.
+6. Guarded external vaccination-program preparation.
+7. eGHIS chart-text preparation.
+8. Final end-to-end dummy-patient validation.

@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -48,6 +49,8 @@ from KaosEghis.db.repositories import (
     get_vaccine_type,
     list_vaccine_records,
     list_vaccine_types,
+    mark_vaccine_record_cancelled,
+    mark_vaccine_record_completed,
     reorder_vaccine_types,
     update_vaccine_record,
     update_vaccine_type,
@@ -68,6 +71,12 @@ VACCINE_TARGET_KEYS = {
 
 
 class VaccineTypeDialog(QDialog):
+    PROGRAM_TYPES = (
+        ("General / private", "general"),
+        ("National influenza", "national_influenza"),
+        ("National COVID-19", "national_covid"),
+    )
+
     def __init__(self, parent: QWidget | None = None, vaccine_type=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Vaccine Type")
@@ -77,6 +86,12 @@ class VaccineTypeDialog(QDialog):
         self.chart_note_input = QPlainTextEdit(
             getattr(vaccine_type, "chart_note_template", "") or ""
         )
+        self.program_type_combo = QComboBox()
+        for label, value in self.PROGRAM_TYPES:
+            self.program_type_combo.addItem(label, value)
+        current_program_type = getattr(vaccine_type, "program_type", "general")
+        current_index = self.program_type_combo.findData(current_program_type)
+        self.program_type_combo.setCurrentIndex(max(0, current_index))
         self.active_button = QPushButton("Enabled")
         self.active_button.setCheckable(True)
         self.active_button.setChecked(bool(getattr(vaccine_type, "is_active", True)))
@@ -84,6 +99,7 @@ class VaccineTypeDialog(QDialog):
         form = QFormLayout()
         form.addRow("Name", self.name_input)
         form.addRow("Code", self.code_input)
+        form.addRow("Program", self.program_type_combo)
         form.addRow("Chart note", self.chart_note_input)
         form.addRow("State", self.active_button)
 
@@ -103,6 +119,7 @@ class VaccineTypeDialog(QDialog):
             "name": self.name_input.text().strip(),
             "code": self.code_input.text().strip(),
             "chart_note_template": self.chart_note_input.toPlainText().strip(),
+            "program_type": self.program_type_combo.currentData(),
             "is_active": self.active_button.isChecked(),
         }
 
@@ -210,6 +227,10 @@ class VaccineTab(QWidget):
         self.clear_button.clicked.connect(self.clear_form)
         self.load_button = QPushButton("Load selected")
         self.load_button.clicked.connect(self.load_selected_record)
+        self.complete_button = QPushButton("Mark completed")
+        self.complete_button.clicked.connect(self.mark_selected_record_completed)
+        self.cancel_record_button = QPushButton("Cancel record")
+        self.cancel_record_button.clicked.connect(self.cancel_selected_record)
         self.delete_button = QPushButton("Delete selected")
         self.delete_button.clicked.connect(self.delete_selected_record)
         self.refresh_records_button = QPushButton("Refresh records")
@@ -439,7 +460,7 @@ class VaccineTab(QWidget):
             QMessageBox.question(
                 self,
                 "Delete vaccine record",
-                "Delete selected vaccine record?",
+                "Delete selected vaccine record? The lifecycle audit will remain.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -455,6 +476,74 @@ class VaccineTab(QWidget):
         self.refresh_view()
         self.status_label.setText(
             "Vaccine record deleted." if deleted else "Vaccine record not found."
+        )
+
+    def mark_selected_record_completed(self) -> None:
+        record_id = self._selected_record_id()
+        if record_id is None:
+            self.status_label.setText("Select a vaccine record to complete.")
+            return
+        with connect(self._db_path) as connection:
+            record = get_vaccine_record(connection, record_id)
+        if record is None:
+            self.status_label.setText("Vaccine record not found.")
+            return
+        counted = record.program_type in {
+            "national_influenza",
+            "national_covid",
+        }
+        count_note = (
+            "This will add one to the applicable national daily count."
+            if counted
+            else "This general/private vaccination will not affect a national count."
+        )
+        if (
+            QMessageBox.question(
+                self,
+                "Complete vaccine record",
+                f"Mark the selected vaccination completed?\n\n{count_note}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        try:
+            with connect(self._db_path) as connection:
+                updated = mark_vaccine_record_completed(connection, record_id)
+        except ValueError as error:
+            self.status_label.setText(str(error))
+            return
+        self.refresh_view()
+        self.status_label.setText(
+            "Vaccine record marked completed."
+            if updated is not None
+            else "Vaccine record not found."
+        )
+
+    def cancel_selected_record(self) -> None:
+        record_id = self._selected_record_id()
+        if record_id is None:
+            self.status_label.setText("Select a vaccine record to cancel.")
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Cancel vaccine record",
+                "Cancel the selected vaccine record? Any counted completion will be removed from today's total.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        with connect(self._db_path) as connection:
+            updated = mark_vaccine_record_cancelled(connection, record_id)
+        self.refresh_view()
+        self.status_label.setText(
+            "Vaccine record cancelled."
+            if updated is not None
+            else "Vaccine record not found."
         )
 
     def clear_form(self) -> None:
@@ -595,18 +684,30 @@ class VaccineTab(QWidget):
         for row, record in enumerate(records):
             table.setItem(row, 0, QTableWidgetItem(str(record.id)))
             table.setItem(row, 1, QTableWidgetItem(record.vaccine_type_name))
-            table.setItem(row, 2, QTableWidgetItem(record.patient_name or ""))
             table.setItem(
                 row,
-                3,
+                2,
+                QTableWidgetItem(
+                    {
+                        "general": "General/private",
+                        "national_influenza": "National influenza",
+                        "national_covid": "National COVID-19",
+                    }.get(record.program_type, record.program_type)
+                ),
+            )
+            table.setItem(row, 3, QTableWidgetItem(record.patient_name or ""))
+            table.setItem(
+                row,
+                4,
                 QTableWidgetItem(
                     " / ".join(
                         value for value in (record.patient_sex, record.patient_age) if value
                     )
                 ),
             )
-            table.setItem(row, 4, QTableWidgetItem(record.patient_phone or ""))
-            table.setItem(row, 5, QTableWidgetItem(record.status))
+            table.setItem(row, 5, QTableWidgetItem(record.patient_phone or ""))
+            table.setItem(row, 6, QTableWidgetItem(record.status))
+            table.setItem(row, 7, QTableWidgetItem(record.completed_on or ""))
         table.resizeColumnsToContents()
 
     def _select_vaccine_type(
@@ -751,6 +852,8 @@ class VaccineTab(QWidget):
         page = QWidget()
         controls = QHBoxLayout()
         controls.addWidget(self.load_button)
+        controls.addWidget(self.complete_button)
+        controls.addWidget(self.cancel_record_button)
         controls.addWidget(self.delete_button)
         controls.addWidget(self.refresh_records_button)
         controls.addStretch()
@@ -767,9 +870,18 @@ class VaccineTab(QWidget):
 
     @staticmethod
     def _create_records_table() -> QTableWidget:
-        table = QTableWidget(0, 6)
+        table = QTableWidget(0, 8)
         table.setHorizontalHeaderLabels(
-            ["id", "vaccine", "name", "sex/age", "phone", "status"]
+            [
+                "id",
+                "vaccine",
+                "program",
+                "name",
+                "sex/age",
+                "phone",
+                "status",
+                "completed",
+            ]
         )
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -826,6 +938,10 @@ class VaccineTab(QWidget):
 
     @staticmethod
     def _record_bucket(record) -> str:
+        if getattr(record, "program_type", "") == "national_influenza":
+            return "flu"
+        if getattr(record, "program_type", "") == "national_covid":
+            return "covid"
         code = (getattr(record, "vaccine_type_name", "") or "").strip().lower()
         if code in {"influenza", "flu"}:
             return "flu"

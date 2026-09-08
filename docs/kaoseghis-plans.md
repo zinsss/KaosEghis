@@ -62,6 +62,9 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 ### KaosEghis-vaccine
 
 - next planned plugin implementation priority
+- lifecycle and count foundation completed: only explicitly completed, counted national
+  records contribute to daily totals; cancellation reverses that contribution and all
+  corrections use sanitized audit entries
 - reuse the proven label formats and printing workflow from the former Labeler module
 - preserve the legacy influenza eligibility structure: editable inclusive birthday
   groups, editable age-group schedules, one-dose/two-dose child schedules, and the
