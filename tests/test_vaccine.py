@@ -37,6 +37,178 @@ def test_vaccine_tables_and_seed_types_are_created(tmp_path) -> None:
     ]
     assert '"influenza"' in settings["vaccine_schedule_rules_json"]
     assert '"elderly_75_plus"' in settings["vaccine_age_groups_json"]
+    assert settings["vaccine_label_printer_name"] == "4BARCODE 4B-2054L"
+
+
+def test_vaccine_label_printer_reports_unavailable_printer_without_printing(
+    monkeypatch,
+) -> None:
+    from datetime import datetime
+
+    import KaosEghis.core.printer_service as printer_service
+
+    class _FakePrinter:
+        class PrinterMode:
+            HighResolution = object()
+
+        class OutputFormat:
+            NativeFormat = object()
+
+        class Unit:
+            DevicePixel = object()
+
+        def __init__(self, _mode) -> None:
+            self.begin_called = False
+
+        def setPrinterName(self, _name) -> None:
+            pass
+
+        def setOutputFormat(self, _format) -> None:
+            pass
+
+        def setFullPage(self, _full_page) -> None:
+            pass
+
+        def setPageSize(self, _page_size) -> None:
+            pass
+
+        def setPageMargins(self, _margins, _unit) -> None:
+            pass
+
+        def isValid(self) -> bool:
+            return False
+
+    monkeypatch.setattr(printer_service, "QPrinter", _FakePrinter)
+    content = printer_service.VaccineLabelContent(
+        vaccine_name="Test vaccine",
+        patient_name="Test patient",
+        chart_no="1",
+        resident_id="",
+        phone="",
+        printed_at=datetime(2026, 9, 8, 10, 0),
+    )
+
+    result = printer_service.print_vaccine_label(content, printer_name="Missing")
+
+    assert result.success is False
+    assert result.message == "Vaccine label printer is unavailable."
+
+
+def test_vaccine_label_printer_renders_to_an_available_native_printer(monkeypatch) -> None:
+    from datetime import datetime
+
+    from PySide6.QtCore import QRect
+
+    import KaosEghis.core.printer_service as printer_service
+
+    class _FakePrinter:
+        class PrinterMode:
+            HighResolution = object()
+
+        class OutputFormat:
+            NativeFormat = object()
+
+        class Unit:
+            DevicePixel = object()
+
+        def __init__(self, _mode) -> None:
+            self.printer_name = ""
+            self.page_size = None
+            self.page_margins = None
+
+        def setPrinterName(self, name) -> None:
+            self.printer_name = name
+
+        def setOutputFormat(self, _format) -> None:
+            pass
+
+        def setFullPage(self, _full_page) -> None:
+            pass
+
+        def setPageSize(self, page_size) -> None:
+            self.page_size = page_size
+
+        def setPageMargins(self, margins, unit) -> None:
+            self.page_margins = (margins, unit)
+
+        def isValid(self) -> bool:
+            return True
+
+        def pageRect(self, _unit):
+            return QRect(0, 0, 800, 400)
+
+    class _FakePainter:
+        began = False
+        ended = False
+
+        def begin(self, _printer) -> bool:
+            type(self).began = True
+            return True
+
+        def end(self) -> None:
+            type(self).ended = True
+
+    rendered = []
+    monkeypatch.setattr(printer_service, "QPrinter", _FakePrinter)
+    monkeypatch.setattr(printer_service, "QPainter", _FakePainter)
+    monkeypatch.setattr(
+        printer_service,
+        "_paint_vaccine_label",
+        lambda _painter, rect, content: rendered.append((rect, content)),
+    )
+    content = printer_service.VaccineLabelContent(
+        vaccine_name="Influenza",
+        patient_name="Test patient",
+        chart_no="1",
+        resident_id="000000-0000000",
+        phone="010-0000-0000",
+        printed_at=datetime(2026, 9, 8, 10, 0),
+    )
+
+    result = printer_service.print_vaccine_label(
+        content,
+        printer_name="4BARCODE 4B-2054L",
+    )
+
+    assert result.success is True
+    assert _FakePainter.began is True
+    assert _FakePainter.ended is True
+    assert rendered[0][0].width() == 800
+    assert rendered[0][0].height() == 400
+    assert rendered[0][1] == content
+
+
+def test_vaccine_label_layout_renders_korean_text() -> None:
+    from datetime import datetime
+
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from KaosEghis.core.printer_service import (
+        VaccineLabelContent,
+        _paint_vaccine_label,
+    )
+
+    _app()
+    image = QImage(800, 400, QImage.Format.Format_ARGB32)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    _paint_vaccine_label(
+        painter,
+        QRectF(0, 0, 800, 400),
+        VaccineLabelContent(
+            vaccine_name="인플루엔자",
+            patient_name="홍길동",
+            chart_no="2735",
+            resident_id="700101-1234567",
+            phone="010-0000-0000",
+            printed_at=datetime(2026, 9, 8, 10, 0),
+            count_summary="1/100",
+        ),
+    )
+    painter.end()
+
+    assert image.pixelColor(400, 190).alpha() == 255
 
 
 def test_legacy_vaccine_records_migrate_without_becoming_completed(tmp_path) -> None:
@@ -477,6 +649,112 @@ def test_vaccine_db_actions_complete_and_cancel_explicitly(
     assert cancelled_counts["flu"] == 0
 
 
+def test_successful_label_print_completes_record_once_and_reprint_does_not_count(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    from KaosEghis.core.printer_service import VaccineLabelPrintResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_type,
+        get_today_vaccine_counts,
+        list_vaccine_records,
+    )
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_vaccine_type(
+            connection,
+            name="Tdap",
+            code="tdap",
+            program_type="general",
+        )
+
+    printed = []
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "print_vaccine_label",
+        lambda content, *, printer_name: (
+            printed.append((content, printer_name))
+            or VaccineLabelPrintResult(True, "Vaccine label printed.")
+        ),
+    )
+    page = vaccine_tab_module.VaccineTab(db_path)
+    page._select_vaccine_type(None, "Tdap")
+    page.patient_name_input.setText("Test patient")
+    page.patient_chart_no_input.setText("2735")
+    page.patient_resident_id_input.setText("700101-1234567")
+
+    page.print_label()
+
+    with connect(db_path) as connection:
+        record = list_vaccine_records(connection)[0]
+        counts_after_first_print = get_today_vaccine_counts(
+            connection, record.completed_on
+        )
+    assert record.status == "completed"
+    assert counts_after_first_print == {"flu": 0, "covid": 0}
+    assert len(printed) == 1
+
+    page.print_label()
+
+    with connect(db_path) as connection:
+        reprinted = list_vaccine_records(connection)[0]
+        counts_after_reprint = get_today_vaccine_counts(
+            connection, reprinted.completed_on
+        )
+    assert reprinted.status == "completed"
+    assert counts_after_reprint == {"flu": 0, "covid": 0}
+    assert len(printed) == 2
+
+
+def test_failed_label_print_does_not_complete_or_count_record(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from KaosEghis.core.printer_service import VaccineLabelPrintResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_type,
+        get_today_vaccine_counts,
+        list_vaccine_records,
+    )
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_vaccine_type(
+            connection,
+            name="Tdap",
+            code="tdap",
+            program_type="general",
+        )
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "print_vaccine_label",
+        lambda *_args, **_kwargs: VaccineLabelPrintResult(
+            False, "Vaccine label printer is unavailable."
+        ),
+    )
+    page = vaccine_tab_module.VaccineTab(db_path)
+    page._select_vaccine_type(None, "Tdap")
+    page.patient_name_input.setText("Test patient")
+    page.patient_chart_no_input.setText("2735")
+
+    page.print_label()
+
+    with connect(db_path) as connection:
+        record = list_vaccine_records(connection)[0]
+        counts = get_today_vaccine_counts(connection, "2026-09-08")
+    assert record.status == "prepared"
+    assert counts == {"flu": 0, "covid": 0}
+    assert page.status_label.text() == "Vaccine label printer is unavailable."
+
+
 def test_vaccine_tab_uses_single_structured_program_settings(tmp_path) -> None:
     _app()
     from KaosEghis.db.database import initialize_database
@@ -506,6 +784,8 @@ def test_vaccine_tab_uses_three_internal_pages(tmp_path) -> None:
     assert page.TOP_PAGES == ["Main", "DB", "Settings"]
     assert page.stacked_widget.count() == 3
     assert set(page.nav_buttons) == {"Main", "DB", "Settings"}
+    assert page.print_button.text() == "Print label"
+    assert page.settings_page.printer_name_input.text() == "4BARCODE 4B-2054L"
 
 
 def test_vaccine_tab_db_buckets_split_records_by_type(tmp_path) -> None:

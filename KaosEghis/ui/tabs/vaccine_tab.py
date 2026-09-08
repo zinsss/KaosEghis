@@ -27,6 +27,10 @@ from PySide6.QtWidgets import (
 )
 
 from KaosEghis.core.eghis_connector import build_connector_settings
+from KaosEghis.core.printer_service import (
+    VaccineLabelContent,
+    print_vaccine_label,
+)
 from KaosEghis.core.vaccine_patient_context import (
     fetch_vaccine_patient_context,
     resident_id_for_label,
@@ -51,6 +55,7 @@ from KaosEghis.db.repositories import (
     list_vaccine_types,
     mark_vaccine_record_cancelled,
     mark_vaccine_record_completed,
+    mark_vaccine_record_printed,
     reorder_vaccine_types,
     update_vaccine_record,
     update_vaccine_type,
@@ -223,6 +228,8 @@ class VaccineTab(QWidget):
         self.fetch_button.clicked.connect(self.fetch_current_patient_from_emr)
         self.save_button = QPushButton("Save record")
         self.save_button.clicked.connect(self.save_record)
+        self.print_button = QPushButton("Print label")
+        self.print_button.clicked.connect(self.print_label)
         self.clear_button = QPushButton("Clear form")
         self.clear_button.clicked.connect(self.clear_form)
         self.load_button = QPushButton("Load selected")
@@ -380,21 +387,21 @@ class VaccineTab(QWidget):
         self._show_influenza_check(result)
         return result
 
-    def save_record(self) -> None:
+    def save_record(self):
         selected = self.vaccine_types_list.currentItem()
         if selected is None:
             self.status_label.setText("Select a vaccine type first.")
-            return
+            return None
         vaccine_type_id = selected.data(Qt.ItemDataRole.UserRole)
         vaccine_type_name = selected.text()
         if not self.patient_name_input.text().strip() and not self.patient_resident_id_input.text().strip():
             self.status_label.setText("Load or enter patient context first.")
-            return
+            return None
 
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             if self._current_record_id is None:
-                create_vaccine_record(
+                saved_record = create_vaccine_record(
                     connection,
                     vaccine_type_id=vaccine_type_id if isinstance(vaccine_type_id, int) else None,
                     vaccine_type_name=vaccine_type_name,
@@ -408,7 +415,7 @@ class VaccineTab(QWidget):
                 )
                 self.status_label.setText("Vaccine record saved.")
             else:
-                update_vaccine_record(
+                saved_record = update_vaccine_record(
                     connection,
                     self._current_record_id,
                     vaccine_type_id=vaccine_type_id if isinstance(vaccine_type_id, int) else None,
@@ -423,8 +430,69 @@ class VaccineTab(QWidget):
                 )
                 self.status_label.setText("Vaccine record updated.")
 
-        self._current_record_id = None
+        self._current_record_id = saved_record.id if saved_record is not None else None
         self.refresh_view()
+        return saved_record
+
+    def print_label(self) -> None:
+        """Print the current vaccine label and checkpoint the successful output only."""
+
+        record = self._record_for_label_print()
+        if record is None:
+            return
+        if record.status in {"cancelled", "error"}:
+            self.status_label.setText("Cancelled or errored vaccine records cannot be printed.")
+            return
+
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+            counts = get_today_vaccine_counts(connection, datetime.now().date().isoformat())
+
+        if record.status == "completed":
+            permitted, counts_toward_cap = True, bool(record.counts_toward_cap)
+        else:
+            permitted, counts_toward_cap = self._confirm_program_printing(
+                record,
+                settings,
+                counts,
+            )
+        if not permitted:
+            return
+
+        print_result = print_vaccine_label(
+            self._label_content(record, settings, counts, counts_toward_cap),
+            printer_name=settings.get("vaccine_label_printer_name", ""),
+        )
+        if not print_result.success:
+            self.status_label.setText(print_result.message)
+            return
+
+        try:
+            with connect(self._db_path) as connection:
+                current = get_vaccine_record(connection, record.id)
+                if current is None:
+                    self.status_label.setText("Vaccine record not found after printing.")
+                    return
+                if current.status == "prepared":
+                    current = mark_vaccine_record_printed(connection, current.id)
+                if current is not None and current.status != "completed":
+                    mark_vaccine_record_completed(
+                        connection,
+                        current.id,
+                        counts_toward_cap=counts_toward_cap,
+                    )
+        except ValueError:
+            self.status_label.setText("Vaccine label printed, but record completion needs operator review.")
+            self.refresh_view()
+            return
+
+        self.refresh_view()
+        self.status_label.setText(
+            "Vaccine label reprinted."
+            if record.status == "completed"
+            else "Vaccine label printed and record completed."
+        )
 
     def load_selected_record(self) -> None:
         selected_row = self._selected_record_id()
@@ -800,6 +868,90 @@ class VaccineTab(QWidget):
         self.influenza_check_result.style().unpolish(self.influenza_check_result)
         self.influenza_check_result.style().polish(self.influenza_check_result)
 
+    def _record_for_label_print(self):
+        if self._current_record_id is None:
+            return self.save_record()
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            record = get_vaccine_record(connection, self._current_record_id)
+        if record is None:
+            self._current_record_id = None
+            self.status_label.setText("Save the vaccine record before printing.")
+        return record
+
+    def _confirm_program_printing(
+        self,
+        record,
+        settings: dict[str, str],
+        counts: dict[str, int],
+    ) -> tuple[bool, bool]:
+        if record.program_type == "general":
+            return True, False
+        if record.program_type == "national_covid":
+            self.status_label.setText(
+                "National COVID label printing is unavailable until its program rules are configured."
+            )
+            return False, False
+        if record.program_type != "national_influenza":
+            self.status_label.setText("Vaccine program type needs operator review.")
+            return False, False
+
+        result = evaluate_influenza_program(
+            settings,
+            record.patient_resident_id or "",
+            on_date=datetime.now().date(),
+            counted_today=counts.get("flu", 0),
+        )
+        self._show_influenza_check(result)
+        if result.allowed:
+            return True, result.counted
+        if not result.requires_operator_confirmation:
+            self.status_label.setText("Influenza label printing blocked by the program check.")
+            return False, False
+        if (
+            QMessageBox.question(
+                self,
+                "Confirm influenza program review",
+                result.message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            self.status_label.setText("Influenza label printing cancelled by operator.")
+            return False, False
+        return True, result.counted
+
+    def _label_content(
+        self,
+        record,
+        settings: dict[str, str],
+        counts: dict[str, int],
+        counts_toward_cap: bool,
+    ) -> VaccineLabelContent:
+        count_summary = ""
+        if record.program_type == "national_influenza":
+            cap = settings.get("vaccine_influenza_daily_cap", "100").strip() or "100"
+            printed_count = counts.get("flu", 0)
+            if counts_toward_cap and record.status != "completed":
+                printed_count += 1
+            count_summary = f"{printed_count}/{cap}"
+        elif record.program_type == "national_covid":
+            cap = settings.get("vaccine_covid_daily_cap", "100").strip() or "100"
+            printed_count = counts.get("covid", 0)
+            if counts_toward_cap and record.status != "completed":
+                printed_count += 1
+            count_summary = f"{printed_count}/{cap}"
+        return VaccineLabelContent(
+            vaccine_name=record.vaccine_type_name,
+            patient_name=record.patient_name or "",
+            chart_no=record.patient_chart_no or "",
+            resident_id=resident_id_for_label(record.patient_resident_id or ""),
+            phone=record.patient_phone or "",
+            printed_at=datetime.now(),
+            count_summary=count_summary,
+        )
+
     def _build_main_page(
         self,
         patient_form: QFormLayout,
@@ -810,6 +962,7 @@ class VaccineTab(QWidget):
         controls.addWidget(self.fetch_button)
         controls.addWidget(self.influenza_check_button)
         controls.addWidget(self.save_button)
+        controls.addWidget(self.print_button)
         controls.addWidget(self.clear_button)
         controls.addStretch()
 

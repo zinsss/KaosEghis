@@ -272,6 +272,11 @@ class VaccineSettingsPage(QWidget):
         self.tabs.addTab(self.influenza_editor, "Influenza schedule")
         self.tabs.addTab(self.covid_editor, "COVID schedule")
 
+        self.printer_name_input = QLineEdit()
+        printer_group = QGroupBox("Thermal label printer")
+        printer_form = QFormLayout(printer_group)
+        printer_form.addRow("Windows printer name", self.printer_name_input)
+
         self.save_button = QPushButton("Save vaccine settings")
         self.save_button.clicked.connect(self.save_settings)
         self.reload_button = QPushButton("Reload")
@@ -286,6 +291,7 @@ class VaccineSettingsPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.tabs, 1)
+        layout.addWidget(printer_group)
         layout.addLayout(buttons)
         layout.addWidget(self.status_label)
         self.load_settings()
@@ -307,6 +313,9 @@ class VaccineSettingsPage(QWidget):
             influenza if isinstance(influenza, dict) else {}, groups
         )
         self.covid_editor.load_values(covid if isinstance(covid, dict) else {}, groups)
+        self.printer_name_input.setText(
+            settings.get("vaccine_label_printer_name", "4BARCODE 4B-2054L")
+        )
         self.status_label.setText("Vaccine settings loaded.")
 
     def reload(self) -> None:
@@ -357,6 +366,7 @@ class VaccineSettingsPage(QWidget):
                     "vaccine_covid_daily_cap": str(
                         self.covid_editor.daily_cap_input.value()
                     ),
+                    "vaccine_label_printer_name": self.printer_name_input.text().strip(),
                 },
             )
         self._schedule_data = schedule_data

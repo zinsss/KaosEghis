@@ -62,6 +62,7 @@ DEFAULT_SETTINGS = {
     "pacs_dry_run": "false",
     "vaccine_influenza_daily_cap": "100",
     "vaccine_covid_daily_cap": "100",
+    "vaccine_label_printer_name": "4BARCODE 4B-2054L",
     "vaccine_schedule_rules_json": json.dumps(
         {
             "influenza": {

@@ -27,13 +27,15 @@ Current implemented pieces:
 - configuration-driven national influenza program preview
 - exact inclusive birth-date and schedule-boundary checks
 - daily-cap, child-dose-review, and elderly-exception-review results
+- native Windows thermal-label printing through the configured printer
+- successful first print checkpoints the record as `printed`, then `completed`
+- completed-record reprints that never alter daily counts
 
 Still not implemented in this stage:
 
-- thermal label printing
 - vaccination program automation
 - EMR writeback/charting
-- automatic print-success to completion transition
+- national COVID eligibility evaluation
 
 ## EMR Patient Targets
 
@@ -133,15 +135,15 @@ explicit `counts_toward_cap` snapshot is true, and whose `completed_on` date is 
 Prepared, printed, cancelled, errored, general/private, and merely previewed records do
 not increment a national count. Repeating completion for the same record is idempotent,
 and cancelling a completed record removes it from the count while retaining a sanitized
-audit event. Until printing is implemented, `Mark completed` is an explicit interim
-operator checkpoint rather than an inferred outcome.
+audit event. `Mark completed` remains an explicit correction action. The normal label
+path records the lifecycle only after the Windows print spooler accepts the label.
 
 ## Vaccine Record Lifecycle
 
 Every new local record starts as `prepared`. The supported lifecycle states are:
 
 - `prepared`: local preparation only; never counted
-- `printed`: reserved print-success checkpoint; never counted by itself
+- `printed`: print-success checkpoint; never counted by itself
 - `completed`: explicit completion; counted only when its snapshotted program type is
   national Influenza or national COVID and the workflow marks it counted
 - `cancelled`: explicit correction; excluded from daily counts
@@ -172,8 +174,10 @@ result contains no resident ID or patient name.
 `program_enabled` defaults to `false`. Existing or seeded dates are configuration
 placeholders, not a claim about the current national program. The operator must enter
 and review the official season dates and birth ranges before changing it to `true`.
-This preview performs no printing, counter increment, vaccination-system input, or
-eGHIS write.
+For national Influenza label printing, the same evaluation is mandatory. A blocked
+result stops printing. A child-dose or rural-exception review result requires explicit
+operator confirmation, and the result's count treatment is snapshotted at completion.
+This check performs no vaccination-system input or eGHIS write.
 
 ### Medically Underserved Rural-Area Influenza Rule
 
@@ -376,14 +380,14 @@ decision. A season cannot be enabled until all required values are valid.
 - Paid influenza does not consume the national influenza cap.
 - National COVID uses its configured daily counted bucket and cap.
 - A count is committed only by the explicit completion checkpoint. The printing stage
-  will call that checkpoint only after confirmed print success.
+  calls that checkpoint only after confirmed print success.
 - A failed, cancelled, or merely previewed workflow must not increase a counter.
 - Counter correction requires an explicit operator action and a local non-PHI audit
   entry.
 
 ## Labels and Printing
 
-The first implementation should reuse the visual format of the former Labeler module:
+KaosEghis now reuses the visual hierarchy of the former Labeler module:
 
 - thermal label size: `80 mm x 40 mm`
 - preview before printing
@@ -391,8 +395,22 @@ The first implementation should reuse the visual format of the former Labeler mo
 - configurable label fields and vaccine wording
 - explicit Print action only
 
-The legacy printer name `4BARCODE 4B-2054L` may be offered as a migration default, but
-must not remain hardcoded in the printing service.
+The printer setting `vaccine_label_printer_name` defaults to the legacy Windows printer
+name `4BARCODE 4B-2054L` and is editable under `Vaccine -> Settings`. The print service
+does not hardcode a printer. It uses `QPrinter` in Windows native-spooler mode with an
+`80 mm x 40 mm` page and zero margins. It does not log label fields or raw print errors.
+
+An explicit successful print does the following in order:
+
+1. saves a new preparation record when necessary;
+2. submits the label to the configured Windows printer;
+3. changes `prepared` to `printed` only when submission succeeds;
+4. changes the record to `completed`, applying the evaluated count treatment once.
+
+Reprinting an already completed record sends another label but never changes its
+completion timestamp or daily count. A missing/unavailable printer or failed submission
+leaves a preparation record uncompleted and uncounted. National COVID label printing is
+blocked until a separate evaluated COVID program rule is implemented.
 
 ## Vaccination Program Preparation
 
@@ -608,8 +626,9 @@ Before operational use, tests must cover:
 3. Pure eligibility/counter decision engine with boundary tests. Done as a guarded
    preview; child-dose and exception confirmation remain.
 4. Explicit lifecycle, national-program classification, completion-derived count, and
-   sanitized correction audit. Done; automatic print-success completion remains.
-5. Thermal label preview and printing service.
+   sanitized correction audit. Done.
+5. Thermal label preview and Windows native printing. Done for one explicit label;
+   national COVID remains blocked pending its evaluator.
 6. Guarded external vaccination-program preparation.
 7. eGHIS chart-text preparation.
 8. Final end-to-end dummy-patient validation.

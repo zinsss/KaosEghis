@@ -259,11 +259,12 @@ Implemented:
 - persistent prepared/printed/completed/cancelled/error lifecycle
 - explicit counted/non-counted completion snapshot and sanitized correction audit
 - daily totals derived only from completed, counted national-program records
+- native `80 mm x 40 mm` label printing with an automatic successful-print lifecycle
+  checkpoint for Influenza after its mandatory rule evaluation
 
 Not yet complete:
 
 - explicit exception-reason confirmation UI
-- print-success checkpoint
 - COVID age/risk-group evaluator
 - current-season amendment tracking
 

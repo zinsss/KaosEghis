@@ -153,9 +153,9 @@ Working vaccine preparation foundation.
 - explicit general/private, national Influenza, and national COVID classification
 - prepared/printed/completed/cancelled/error lifecycle with completion-derived counts
 - sanitized lifecycle audit containing no patient values
-- planned thermal-label printing and guarded external-system preparation
-- includes a guarded national-influenza program preview driven by explicitly enabled
-  schedule and birth-range settings; it performs no print or EMR write
+- Windows native `80 mm x 40 mm` thermal-label printing through a configurable printer
+- guarded national-influenza evaluation before label printing; completion/counting occurs
+  only after successful print submission
 - preserves the legacy national-influenza age-group, birthday-boundary, schedule,
   exception, and daily-cap model
 - default counted-program cap remains `100`, with seasonal values editable by the
