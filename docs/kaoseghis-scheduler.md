@@ -1,6 +1,6 @@
 # KaosEghis-scheduler
 
-Last updated: 2026-08-28
+Last updated: 2026-09-09
 
 ## Status
 
@@ -267,8 +267,11 @@ Password field:
 The observed handle `1449044` is transient and must not be saved as a selector. The
 workflow must uniquely resolve `TxtPW` inside the `로그인 안내` window, focus that exact
 field, retrieve only the password from the `eGhis EMR` KaosEghis-pw entry, type it, and
-submit it. If the dialog or field is absent, ambiguous, or not focusable, the workflow
-must block without typing any credential.
+submit it. If Windows refuses to foreground the verified lock dialog, the runner may
+use UIA direct-value input and an Enter message sent only to that exact dialog. It never
+sends the password as global keyboard input in this fallback. If the dialog or field is
+absent, ambiguous, or does not support that direct input, the workflow blocks without
+typing any credential.
 
 #### Close confirmation
 

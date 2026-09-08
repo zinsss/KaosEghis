@@ -343,17 +343,29 @@ class MacroRunner:
             settings,
             lock_window_handle,
         )
-        if not window_focused:
-            return MacroRunResult(False, "lock dialog focus failed", 0, None)
-        focused, _focus_message = self._focus_target_element(target)
-        if not focused:
-            return MacroRunResult(False, "lock dialog focus failed", 0, None)
-
-        password = self._password_provider(credential_reference)
-        if not password:
-            return MacroRunResult(False, "credential unavailable", 0, None)
-        if not self._type_secret_and_submit(password):
-            return MacroRunResult(False, "input failed", 0, None)
+        focused = False
+        if window_focused:
+            focused, _focus_message = self._focus_target_element(target)
+        if not window_focused or not focused:
+            if not self._supports_direct_lock_input(target):
+                return MacroRunResult(False, "lock dialog focus failed", 0, None)
+            password = self._password_provider(credential_reference)
+            if not password:
+                return MacroRunResult(False, "credential unavailable", 0, None)
+            # The lock target was uniquely resolved inside the manually connected
+            # eGHIS process. This fallback never sends keys to the foreground app.
+            if not self._set_secret_on_exact_lock_target_and_submit(
+                target,
+                lock_window_handle,
+                password,
+            ):
+                return MacroRunResult(False, "input failed", 0, None)
+        else:
+            password = self._password_provider(credential_reference)
+            if not password:
+                return MacroRunResult(False, "credential unavailable", 0, None)
+            if not self._type_secret_and_submit(password):
+                return MacroRunResult(False, "input failed", 0, None)
 
         deadline = time.monotonic() + max(float(step.timeout_seconds or 0.0), 0.5)
         while time.monotonic() < deadline:
@@ -1356,6 +1368,53 @@ class MacroRunner:
 
             pyautogui.write(password, interval=0.01)
             MacroRunner._send_keys("{ENTER}")
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _supports_direct_lock_input(target: object) -> bool:
+        if callable(getattr(target, "set_edit_text", None)):
+            return True
+        try:
+            iface_value = getattr(target, "iface_value", None)
+        except Exception:
+            return False
+        return callable(getattr(iface_value, "SetValue", None))
+
+    @staticmethod
+    def _set_secret_on_exact_lock_target_and_submit(
+        target: object,
+        lock_window_handle: int,
+        password: str,
+    ) -> bool:
+        # This is intentionally limited to unlock_eghis after exact process-scoped
+        # resolution. It avoids global keyboard input when Windows blocks focus.
+        entered = MacroRunner._set_edit_text_on_element(target, password)
+        if not entered:
+            entered = MacroRunner._set_text_uia_on_element(target, password)
+        if not entered:
+            return False
+        return MacroRunner._post_enter_to_window(lock_window_handle)
+
+    @staticmethod
+    def _post_enter_to_window(window_handle: int) -> bool:
+        try:
+            import win32con
+            import win32gui
+
+            win32gui.PostMessage(
+                int(window_handle),
+                win32con.WM_KEYDOWN,
+                win32con.VK_RETURN,
+                0,
+            )
+            win32gui.PostMessage(
+                int(window_handle),
+                win32con.WM_KEYUP,
+                win32con.VK_RETURN,
+                0,
+            )
             return True
         except Exception:
             return False

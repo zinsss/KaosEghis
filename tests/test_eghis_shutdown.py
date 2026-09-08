@@ -849,7 +849,7 @@ def test_unlock_eghis_blocks_without_unlocked_credential(monkeypatch) -> None:
     assert result.message == "credential unavailable"
 
 
-def test_unlock_eghis_does_not_read_password_when_lock_window_focus_fails(
+def test_unlock_eghis_does_not_read_password_when_lock_window_focus_fails_without_direct_input(
     monkeypatch,
 ) -> None:
     from KaosEghis.core.macro_models import MacroStep
@@ -889,6 +889,85 @@ def test_unlock_eghis_does_not_read_password_when_lock_window_focus_fails(
     assert result.success is False
     assert result.message == "lock dialog focus failed"
     assert password_requests == []
+
+
+def test_unlock_eghis_uses_exact_target_direct_input_when_window_focus_fails(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core.macro_models import MacroStep
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    target = object()
+    resolutions = iter([(target, "found"), (None, "target not found")])
+    direct_values: list[tuple[object, int, str]] = []
+    runner = MacroRunner(password_provider=lambda _name: "test-lock-password")
+    monkeypatch.setattr(runner, "_resolve_process_target", lambda _key: next(resolutions))
+    monkeypatch.setattr(runner, "_top_level_window_handle", lambda _target: 441)
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.focus_cached_eghis_process_window",
+        lambda _settings, _handle: (False, "foreground mismatch"),
+    )
+    monkeypatch.setattr(runner, "_supports_direct_lock_input", lambda _target: True)
+    monkeypatch.setattr(
+        runner,
+        "_set_secret_on_exact_lock_target_and_submit",
+        lambda resolved_target, handle, value: direct_values.append(
+            (resolved_target, handle, value)
+        )
+        or True,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_type_secret_and_submit",
+        lambda _value: (_ for _ in ()).throw(
+            AssertionError("Direct fallback must not send global keyboard input.")
+        ),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: SimpleNamespace(status="green", message="ready"),
+    )
+
+    result = runner._run_unlock_eghis(
+        MacroStep(
+            action="unlock_eghis",
+            target_id="shutdown.lock_password",
+            value="eGhis EMR",
+            timeout_seconds=0.5,
+        ),
+        {},
+    )
+
+    assert result.success is True
+    assert direct_values == [(target, 441, "test-lock-password")]
+    assert "test-lock-password" not in result.message
+
+
+def test_direct_lock_input_sets_only_exact_target_and_submits_to_lock_window(
+    monkeypatch,
+) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    entered: list[str] = []
+
+    class ExactLockTarget:
+        def set_edit_text(self, value: str) -> None:
+            entered.append(value)
+
+    submitted: list[int] = []
+    monkeypatch.setattr(
+        MacroRunner,
+        "_post_enter_to_window",
+        staticmethod(lambda handle: submitted.append(handle) or True),
+    )
+
+    assert MacroRunner._set_secret_on_exact_lock_target_and_submit(
+        ExactLockTarget(),
+        441,
+        "test-lock-password",
+    )
+    assert entered == ["test-lock-password"]
+    assert submitted == [441]
 
 
 def test_absent_lock_target_requires_normal_eghis_readiness(monkeypatch) -> None:
