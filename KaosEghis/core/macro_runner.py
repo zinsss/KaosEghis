@@ -483,9 +483,14 @@ class MacroRunner:
         if target_record is None:
             return MacroRunResult(False, "target not found", 0, None)
 
+        # eGHIS recreates edit controls after patient/status changes. A second
+        # readiness check for the same key must not wait on the stale wrapper
+        # cached by an earlier step in this run.
+        target_was_cached = step.target_id in self._resolved_target_aliases
         target, resolve_message = self._resolve_runtime_target(
             settings,
             step.target_id,
+            force_refresh=target_was_cached,
         )
         if target is None:
             return MacroRunResult(False, resolve_message, 0, None)

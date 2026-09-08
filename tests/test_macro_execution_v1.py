@@ -563,6 +563,98 @@ def test_when_ready_uses_keyboard_focus_wait(monkeypatch, tmp_path) -> None:
     assert captured["resolved_element"] is resolved_element
 
 
+def test_repeated_when_ready_refreshes_cached_target(monkeypatch, tmp_path) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.core.wait_engine import WaitResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_macro_step, create_ui_target
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_ui_target(connection, target_id="sx", automation_id="eghisRichTextBox")
+        item = create_item(connection, "Repeated Ready Macro", "macro", True)
+        create_macro_step(
+            connection,
+            item.id,
+            1,
+            "when_ready",
+            target_id="sx",
+            timeout_seconds=2.0,
+        )
+        create_macro_step(
+            connection,
+            item.id,
+            2,
+            "when_ready",
+            target_id="sx",
+            timeout_seconds=2.0,
+        )
+
+    class FakeState:
+        status = "green"
+        message = "Connected and active"
+        window_handle = 123
+
+    first_element = object()
+    refreshed_element = object()
+    force_refresh_calls: list[bool] = []
+    waited_elements: list[object] = []
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.ensure_cached_connection_ready",
+        lambda _settings: FakeState(),
+    )
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.get_cached_eghis_state",
+        lambda: None,
+    )
+
+    def fake_resolve(
+        self,
+        settings,
+        target_id,
+        force_refresh=False,
+    ):
+        force_refresh_calls.append(force_refresh)
+        self._resolved_target_aliases[target_id] = (None, target_id, None)
+        return (
+            refreshed_element if force_refresh else first_element,
+            "Target resolved.",
+        )
+
+    monkeypatch.setattr(MacroRunner, "_resolve_runtime_target", fake_resolve)
+
+    def fake_wait(
+        settings,
+        target,
+        condition,
+        timeout_ms=0,
+        poll_ms=0,
+        resolved_element=None,
+    ):
+        waited_elements.append(resolved_element)
+        return WaitResult(
+            success=True,
+            message="Condition satisfied: keyboard_focus.",
+            target_id=target.target_id,
+            condition="keyboard_focus",
+            elapsed_ms=0,
+            attempts=1,
+        )
+
+    monkeypatch.setattr(
+        "KaosEghis.core.macro_runner.wait_for_target_condition",
+        fake_wait,
+    )
+
+    result = MacroRunner(db_path).execute_macro(item.id, dry_run=False)
+
+    assert result.success is True
+    assert force_refresh_calls == [False, True]
+    assert waited_elements == [first_element, refreshed_element]
+
+
 def test_when_ready_times_out_when_keyboard_focus_never_arrives(monkeypatch, tmp_path) -> None:
     from KaosEghis.core.macro_runner import MacroRunner
     from KaosEghis.core.wait_engine import WaitResult
