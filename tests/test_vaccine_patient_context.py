@@ -580,6 +580,43 @@ def test_fetch_derives_missing_birth_date_from_resident_id() -> None:
     assert result.context.patient_birth_date == "1941-02-03"
 
 
+def test_fetch_derives_missing_sex_and_age_from_resident_id() -> None:
+    from datetime import date
+
+    from KaosEghis.core.vaccine_patient_context import (
+        fetch_vaccine_patient_context,
+    )
+
+    desktop = _Desktop(
+        _Root(1, {}),
+        _Root(
+            2,
+            {
+                "txtPatientNo": "1170",
+                "txtResidentNo": "420101-2234567",
+            },
+        ),
+    )
+
+    result = fetch_vaccine_patient_context(
+        {},
+        TARGET_IDS,
+        connection_checker=lambda _settings: _ready_state(),
+        desktop_factory=lambda **_kwargs: desktop,
+        clicker=lambda _coords: None,
+        closer=lambda: None,
+        on_date=date(2026, 9, 8),
+    )
+
+    assert result.success is True
+    assert result.context is not None
+    assert result.context.patient_sex == "F"
+    assert result.context.patient_age == "84"
+    assert result.context.patient_birth_date == "1942-01-01"
+    assert "patient_sex" not in result.missing_fields
+    assert "patient_age" not in result.missing_fields
+
+
 def test_fetch_does_not_click_when_emr_is_not_connected() -> None:
     from KaosEghis.core.vaccine_patient_context import (
         fetch_vaccine_patient_context,

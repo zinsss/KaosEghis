@@ -1,6 +1,6 @@
 # KaosEghis-vaccine
 
-Last updated: 2026-09-01
+Last updated: 2026-09-08
 
 ## Status
 
@@ -48,6 +48,12 @@ Database initialization adds these configurable UIA targets to every EMR profile
 The patient-information DOB control remains the preferred source. If that control is
 empty or unavailable, Vaccine derives DOB from the captured resident number and keeps
 the result only as `YYYY-MM-DD` in the current patient context.
+
+The `lblSexAge`/`txtSexAge` UIA value also remains preferred. Some eGHIS builds do not
+expose that label reliably, even while the other Patient Information fields are
+readable. When it is missing, Vaccine derives `M`/`F` from the captured resident-number
+classification digit and calculates full age from the derived birth date as of the
+current day. No resident number is logged during this fallback.
 
 The target definitions are available under `Macros -> EMR`. Initialization fills an
 untouched placeholder with these verified Automation IDs but never overwrites a target

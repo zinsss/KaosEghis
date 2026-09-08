@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import re
 import time
 from typing import Any, Callable
@@ -75,6 +76,7 @@ def fetch_vaccine_patient_context(
     process_target_finder: Callable[[str, tuple[int, ...]], Any | None] | None = None,
     clicker: Callable[[tuple[int, int]], None] | None = None,
     closer: Callable[[], None] | None = None,
+    on_date: date | None = None,
     clock: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
 ) -> VaccinePatientFetchResult:
@@ -200,9 +202,17 @@ def fetch_vaccine_patient_context(
     resident_id = values.get("resident_id", "").strip()
     sex, age = _split_sex_age(values.get("sex_age", ""))
     birth_date = values.get("birth_date", "").strip()
+    derived_birth_date = birth_date_from_resident_id(resident_id)
     if not birth_date:
-        derived_birth_date = birth_date_from_resident_id(resident_id)
         birth_date = derived_birth_date.isoformat() if derived_birth_date else ""
+    if sex not in {"M", "F"}:
+        derived_sex = _sex_from_resident_id(resident_id)
+        if derived_sex:
+            sex = derived_sex
+    if not age:
+        age_birth_date = _parse_patient_birth_date(birth_date) or derived_birth_date
+        derived_age = _age_on_date(age_birth_date, on_date or date.today())
+        age = str(derived_age) if derived_age is not None else ""
     patient_phone = values.get("mobile_phone", "").strip() or values.get(
         "telephone", ""
     ).strip()
@@ -658,3 +668,40 @@ def _normalize_sex(value: str) -> str:
     if normalized.startswith(("f", "여")):
         return "F"
     return "O" if normalized else ""
+
+
+def _sex_from_resident_id(resident_id: str) -> str:
+    digits = "".join(character for character in str(resident_id) if character.isdigit())
+    if len(digits) != 13:
+        return ""
+    code = digits[6]
+    if code in {"1", "3", "5", "7", "9"}:
+        return "M"
+    if code in {"0", "2", "4", "6", "8"}:
+        return "F"
+    return ""
+
+
+def _parse_patient_birth_date(value: str) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        pass
+    digits = "".join(character for character in text if character.isdigit())
+    if len(digits) < 8:
+        return None
+    try:
+        return date(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))
+    except ValueError:
+        return None
+
+
+def _age_on_date(birth_date: date | None, on_date: date) -> int | None:
+    if birth_date is None or birth_date > on_date:
+        return None
+    return on_date.year - birth_date.year - (
+        (on_date.month, on_date.day) < (birth_date.month, birth_date.day)
+    )
