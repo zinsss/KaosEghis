@@ -245,6 +245,7 @@ def test_eghis_shutdown_targets_are_seeded_for_emr_profiles(tmp_path) -> None:
             assert confirm_target.name_match == "예(Y)"
             assert confirm_target.control_type == "Button"
             assert "확인" in (confirm_target.ancestor_path or "")
+            assert "이지스 전자차트 2.0" not in (confirm_target.ancestor_path or "")
 
             assert backup_target is not None
             assert backup_target.automation_id is None
@@ -300,6 +301,44 @@ def test_shutdown_target_seed_preserves_configured_selectors(tmp_path) -> None:
     assert preserved.automation_id == "verified-close-button"
     assert preserved.name_match == "Updated Yes"
     assert "Updated confirmation" in (preserved.ancestor_path or "")
+
+
+def test_stock_close_confirmation_target_is_migrated_to_modal_scope(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    legacy_path = (
+        '[{"name":"확인","control_type":"Window"},'
+        '{"name":"이지스 전자차트 2.0","control_type":"Window"}]'
+    )
+    with connect(db_path) as connection:
+        profile = get_default_emr_target_profile(connection)
+        assert profile is not None
+        connection.execute(
+            """
+            UPDATE emr_ui_targets
+            SET ancestor_path = ?
+            WHERE profile_id = ? AND target_key = 'shutdown.close_yes'
+            """,
+            (legacy_path, profile.id),
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        migrated = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "shutdown.close_yes",
+        )
+
+    assert migrated is not None
+    assert migrated.ancestor_path == '[{"name":"확인","control_type":"Window"}]'
 
 
 def test_numeric_vaccine_chart_selector_is_replaced_on_startup(tmp_path) -> None:

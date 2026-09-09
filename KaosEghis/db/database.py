@@ -74,10 +74,9 @@ EGHIS_SHUTDOWN_TARGET_DEFAULTS = (
         "automation_id": None,
         "control_type": "Button",
         "name_match": "예(Y)",
-        "ancestor_path": (
-            '[{"name":"확인","control_type":"Window"},'
-            '{"name":"이지스 전자차트 2.0","control_type":"Window"}]'
-        ),
+        # The close prompt is a top-level modal owned by the connected eGHIS PID,
+        # not a descendant of the main eGHIS window.
+        "ancestor_path": '[{"name":"확인","control_type":"Window"}]',
     },
     {
         "target_key": "shutdown.backup_yes",
@@ -145,6 +144,7 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_pacs_audit_events(connection)
         _migrate_emr_target_profiles(connection)
         _migrate_emr_ui_targets(connection)
+        _migrate_eghis_shutdown_confirmation_targets(connection)
         _migrate_unstable_patient_number_selectors(connection)
         _migrate_vaccine_tables(connection)
         _migrate_unconfigured_covid_schedule(connection)
@@ -860,6 +860,33 @@ def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:
         )
     connection.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_emr_ui_targets_profile_target_key ON emr_ui_targets(profile_id, target_key)"
+    )
+
+
+def _migrate_eghis_shutdown_confirmation_targets(
+    connection: sqlite3.Connection,
+) -> None:
+    """Repair the original close-dialog path without replacing custom targets."""
+
+    connection.execute(
+        """
+        UPDATE emr_ui_targets
+        SET ancestor_path = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE target_key = 'shutdown.close_yes'
+          AND automation_id IS NULL
+          AND name_match = '예(Y)'
+          AND control_type = 'Button'
+          AND scope_automation_id IS NULL
+          AND parent_target_key IS NULL
+          AND ancestor_path = ?
+        """,
+        (
+            '[{"name":"확인","control_type":"Window"}]',
+            (
+                '[{"name":"확인","control_type":"Window"},'
+                '{"name":"이지스 전자차트 2.0","control_type":"Window"}]'
+            ),
+        ),
     )
 
 
