@@ -148,6 +148,7 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_unstable_patient_number_selectors(connection)
         _migrate_vaccine_tables(connection)
         _migrate_unconfigured_covid_schedule(connection)
+        _migrate_rural_exception_defaults(connection)
         _seed_default_emr_target_profile(connection)
         _seed_vaccine_emr_targets(connection)
         _seed_eghis_shutdown_targets(connection)
@@ -757,6 +758,47 @@ def _migrate_unconfigured_covid_schedule(connection: sqlite3.Connection) -> None
         "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
         (json.dumps(age_groups, ensure_ascii=False, indent=2), "vaccine_age_groups_json"),
     )
+
+
+def _migrate_rural_exception_defaults(connection: sqlite3.Connection) -> None:
+    """Enable the local rural-exception option only for disabled schedule drafts."""
+
+    row = connection.execute(
+        "SELECT value FROM app_settings WHERE key = 'vaccine_schedule_rules_json'"
+    ).fetchone()
+    if row is None:
+        return
+    try:
+        schedule_data = json.loads(str(row[0] or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        return
+    if not isinstance(schedule_data, dict):
+        return
+
+    changed = False
+    for program in ("influenza", "covid"):
+        schedule = schedule_data.get(program)
+        if not isinstance(schedule, dict):
+            continue
+        if "allow_rural_exception" in schedule:
+            continue
+        if str(schedule.get("program_enabled", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            continue
+        schedule["allow_rural_exception"] = True
+        changed = True
+    if changed:
+        connection.execute(
+            "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+            (
+                json.dumps(schedule_data, ensure_ascii=False, indent=2),
+                "vaccine_schedule_rules_json",
+            ),
+        )
 
 
 def _seed_default_vaccine_types(connection: sqlite3.Connection) -> None:

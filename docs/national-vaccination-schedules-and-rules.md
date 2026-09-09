@@ -24,6 +24,21 @@ Use sources in this order:
 KaosEghis must never silently carry the previous season's dates into a new season.
 Schedules remain disabled until reviewed and enabled explicitly.
 
+## Rural-Area Exceptions
+
+For both seasonal Influenza and COVID age-group programmes, KaosEghis provides a
+local, default-enabled `Allow manually verified rural-area exception` schedule option
+and a per-patient `Rural-area exception manually checked in the national system` box.
+The local default is a workflow convenience for this clinic; it is not evidence that a
+particular patient qualifies.
+
+When a patient's normal age-group opening date has not arrived but the earliest elderly
+window is open, KaosEghis only offers a warning and a separate confirmation. The
+operator must verify the patient's registered-residence or other applicable exception
+in the national vaccination system before continuing. Confirmed exception workflows do
+not consume the regular program daily cap. KaosEghis does not infer eligibility from
+the EMR address or any free-text field.
+
 ## Current Publication Status
 
 The KDCA has published the 2026-2027 COVID schedule for the age-based 65+ programme.

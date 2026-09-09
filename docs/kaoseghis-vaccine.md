@@ -644,9 +644,14 @@ Before operational use, tests must cover:
 4. Explicit lifecycle, national-program classification, completion-derived count, and
    sanitized correction audit. Done.
 5. Thermal label preview and Windows native printing. Done for one explicit label.
-   The published 2026-2027 65+ COVID schedule is represented by a disabled-by-default,
-   editable evaluator. Immunocompromised and facility-resident eligibility remains a
-   manual national-system verification path and is never inferred from eGHIS.
+The published 2026-2027 65+ COVID schedule is represented by a disabled-by-default,
+editable evaluator. Immunocompromised and facility-resident eligibility remains a
+manual national-system verification path and is never inferred from eGHIS.
+
+For both seasonal Flu and COVID, rural-area exceptions are an operator-confirmed path:
+the local option is enabled by default, but every early-group exception still shows a
+confirmation alert and is non-counted. The app never derives that confirmation from an
+EMR address.
 6. Guarded external vaccination-program preparation.
 7. eGHIS chart-text preparation.
 8. Final end-to-end dummy-patient validation.

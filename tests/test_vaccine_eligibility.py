@@ -265,6 +265,51 @@ def test_covid_daily_cap_is_independent_and_enforced() -> None:
     assert result.remaining == 0
 
 
+def test_rural_exception_requires_checked_confirmation_for_flu_and_covid() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_covid_program_for_birth_date,
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    flu_schedule = _schedule(allow_exception=True)
+    flu_checked = evaluate_influenza_program_for_birth_date(
+        flu_schedule,
+        _age_groups(),
+        date(1953, 1, 1),
+        on_date=date(2026, 10, 12),
+        rural_exception_checked=True,
+    )
+    flu_unchecked = evaluate_influenza_program_for_birth_date(
+        flu_schedule,
+        _age_groups(),
+        date(1953, 1, 1),
+        on_date=date(2026, 10, 12),
+        rural_exception_checked=False,
+    )
+    covid_schedule = _covid_schedule()
+    covid_schedule["allow_rural_exception"] = True
+    covid_checked = evaluate_covid_program_for_birth_date(
+        covid_schedule,
+        _covid_groups(),
+        date(1953, 1, 1),
+        on_date=date(2026, 10, 12),
+        rural_exception_checked=True,
+    )
+    covid_unchecked = evaluate_covid_program_for_birth_date(
+        covid_schedule,
+        _covid_groups(),
+        date(1953, 1, 1),
+        on_date=date(2026, 10, 12),
+        rural_exception_checked=False,
+    )
+
+    assert flu_checked.status == covid_checked.status == "review_required"
+    assert flu_checked.counted is covid_checked.counted is False
+    assert flu_checked.requires_operator_confirmation is True
+    assert covid_checked.requires_operator_confirmation is True
+    assert flu_unchecked.status == covid_unchecked.status == "blocked"
+
+
 def test_invalid_influenza_cap_blocks_as_configuration_error() -> None:
     from KaosEghis.core.vaccine_eligibility import evaluate_influenza_program
 
@@ -480,3 +525,19 @@ def test_vaccine_page_can_preview_configured_covid_gate(tmp_path) -> None:
     assert "Eligible by configured rules" in page.covid_check_result.text()
     assert page.covid_check_result.property("resultState") == "success"
     assert "500101" not in page.covid_check_result.text()
+
+
+def test_vaccine_page_defaults_rural_exception_check_to_checked(tmp_path) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineTab(db_path)
+
+    assert page.rural_exception_check.isChecked() is True

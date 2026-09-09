@@ -127,7 +127,7 @@ class VaccineProgramEditor(QWidget):
                 self.date_inputs[end_key] = end
                 grid.addWidget(end, row, 2)
         self.allow_exception_check = QCheckBox(
-            "Enable medically underserved rural-area exception"
+            "Allow manually verified rural-area exception"
         )
         grid.addWidget(self.allow_exception_check, len(rows) + 1, 0, 1, 3)
         return group
@@ -161,6 +161,10 @@ class VaccineProgramEditor(QWidget):
             self.date_inputs[key] = date_input
             grid.addWidget(QLabel(label), row, 0)
             grid.addWidget(date_input, row, 1)
+        self.allow_exception_check = QCheckBox(
+            "Allow manually verified rural-area exception"
+        )
+        grid.addWidget(self.allow_exception_check, len(rows), 0, 1, 2)
         return group
 
     def _build_covid_birth_ranges(self) -> QGroupBox:
@@ -196,7 +200,12 @@ class VaccineProgramEditor(QWidget):
             date_input.set_value(schedule.get(key))
         if self.allow_exception_check is not None:
             self.allow_exception_check.setChecked(
-                _as_bool(schedule.get("allow_elderly_exception", False))
+                _as_bool(
+                    schedule.get(
+                        "allow_rural_exception",
+                        schedule.get("allow_elderly_exception", True),
+                    )
+                )
             )
         for key, (lower, upper) in self.birth_inputs.items():
             source = groups.get(key, {})
@@ -213,7 +222,7 @@ class VaccineProgramEditor(QWidget):
         }
         values.update({key: widget.value() for key, widget in self.date_inputs.items()})
         if self.allow_exception_check is not None:
-            values["allow_elderly_exception"] = self.allow_exception_check.isChecked()
+            values["allow_rural_exception"] = self.allow_exception_check.isChecked()
         return values
 
     def age_group_values(self) -> list[dict[str, object]]:

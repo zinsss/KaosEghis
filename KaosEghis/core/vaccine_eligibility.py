@@ -55,6 +55,7 @@ class CovidEligibilityResult:
     today_count: int
     daily_cap: int
     remaining: int
+    requires_operator_confirmation: bool = False
 
 
 def birth_date_from_resident_id(resident_id: str) -> date | None:
@@ -84,6 +85,7 @@ def evaluate_influenza_program(
     *,
     on_date: date | None = None,
     counted_today: int = 0,
+    rural_exception_checked: bool = True,
 ) -> InfluenzaEligibilityResult:
     today = on_date or date.today()
     schedule_data = _load_json_object(settings.get("vaccine_schedule_rules_json", ""))
@@ -132,6 +134,7 @@ def evaluate_influenza_program(
         birth_date,
         on_date=today,
         counted_today=counted_today,
+        rural_exception_checked=rural_exception_checked,
     )
 
 
@@ -142,6 +145,7 @@ def evaluate_influenza_program_for_birth_date(
     *,
     on_date: date,
     counted_today: int = 0,
+    rural_exception_checked: bool = True,
 ) -> InfluenzaEligibilityResult:
     cap = _daily_cap(influenza_schedule)
     if cap is None:
@@ -236,8 +240,10 @@ def evaluate_influenza_program_for_birth_date(
         )
 
     if on_date < start:
-        if group_key in INFLUENZA_ELDERLY_GROUPS and _as_bool(
-            influenza_schedule.get("allow_elderly_exception", False)
+        if (
+            group_key in INFLUENZA_ELDERLY_GROUPS
+            and rural_exception_checked
+            and _allows_rural_exception(influenza_schedule)
         ):
             earliest = _parse_date(influenza_schedule.get("elderly_75_plus_start"))
             if earliest is not None and earliest <= on_date <= end:
@@ -309,6 +315,7 @@ def evaluate_covid_program(
     *,
     on_date: date | None = None,
     counted_today: int = 0,
+    rural_exception_checked: bool = True,
 ) -> CovidEligibilityResult:
     """Evaluate only the published age-based 2026-2027 COVID schedule."""
 
@@ -358,6 +365,7 @@ def evaluate_covid_program(
         birth_date,
         on_date=today,
         counted_today=counted_today,
+        rural_exception_checked=rural_exception_checked,
     )
 
 
@@ -368,6 +376,7 @@ def evaluate_covid_program_for_birth_date(
     *,
     on_date: date,
     counted_today: int = 0,
+    rural_exception_checked: bool = True,
 ) -> CovidEligibilityResult:
     cap = _daily_cap(covid_schedule)
     if cap is None:
@@ -439,6 +448,24 @@ def evaluate_covid_program_for_birth_date(
             daily_cap=cap,
         )
     if on_date < start:
+        if rural_exception_checked and _allows_rural_exception(covid_schedule):
+            earliest = _parse_date(covid_schedule.get("elderly_75_plus_start"))
+            if earliest is not None and earliest <= on_date <= end:
+                return _covid_result(
+                    "review_required",
+                    "This age group's standard opening date has not arrived. Verify "
+                    "the patient-specific rural-area exception in the national "
+                    "vaccination system before proceeding. A confirmed exception "
+                    "does not consume the regular COVID daily cap.",
+                    group_key=group_key,
+                    group_label=group_label,
+                    schedule_start=start.isoformat(),
+                    schedule_end=end.isoformat(),
+                    counted=False,
+                    counted_today=counted_today,
+                    daily_cap=cap,
+                    requires_operator_confirmation=True,
+                )
         return _covid_result(
             "blocked",
             "The configured COVID vaccination window has not started for this group.",
@@ -646,6 +673,7 @@ def _covid_result(
     counted: bool = False,
     counted_today: int = 0,
     daily_cap: int = 100,
+    requires_operator_confirmation: bool = False,
 ) -> CovidEligibilityResult:
     normalized_count = max(0, int(counted_today))
     normalized_cap = max(0, int(daily_cap))
@@ -661,6 +689,7 @@ def _covid_result(
         today_count=normalized_count,
         daily_cap=normalized_cap,
         remaining=max(0, normalized_cap - normalized_count),
+        requires_operator_confirmation=requires_operator_confirmation,
     )
 
 
@@ -702,3 +731,11 @@ def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allows_rural_exception(schedule: dict[str, Any]) -> bool:
+    """Prefer the explicit shared setting while accepting the former Flu key."""
+
+    if "allow_rural_exception" in schedule:
+        return _as_bool(schedule.get("allow_rural_exception"))
+    return _as_bool(schedule.get("allow_elderly_exception", False))

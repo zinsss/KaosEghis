@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -166,6 +167,16 @@ class VaccineTab(QWidget):
         self.covid_check_result = QLabel("COVID program: Not checked.")
         self.covid_check_result.setObjectName("covidProgramResult")
         self.covid_check_result.setWordWrap(True)
+        self.rural_exception_check = QCheckBox(
+            "Rural-area exception manually checked in the national system"
+        )
+        self.rural_exception_check.setChecked(True)
+        self.rural_exception_check.setToolTip(
+            "This does not establish eligibility. Early group printing still requires confirmation."
+        )
+        self.rural_exception_check.toggled.connect(
+            lambda _checked: self._reset_program_checks()
+        )
 
         patient_form = QFormLayout()
         patient_form.addRow("Chart No", self.patient_chart_no_input)
@@ -392,6 +403,7 @@ class VaccineTab(QWidget):
             self.patient_resident_id_input.text(),
             on_date=today,
             counted_today=counts.get("flu", 0),
+            rural_exception_checked=self.rural_exception_check.isChecked(),
         )
         self._show_influenza_check(result)
         return result
@@ -407,6 +419,7 @@ class VaccineTab(QWidget):
             self.patient_resident_id_input.text(),
             on_date=today,
             counted_today=counts.get("covid", 0),
+            rural_exception_checked=self.rural_exception_check.isChecked(),
         )
         self._show_covid_check(result)
         return result
@@ -651,6 +664,7 @@ class VaccineTab(QWidget):
             self.patient_address_input,
         ):
             widget.clear()
+        self.rural_exception_check.setChecked(True)
         self.status_label.setText("Form cleared.")
 
     def start_new_vaccine_record(self) -> None:
@@ -919,6 +933,7 @@ class VaccineTab(QWidget):
             "eligible": "Eligible by configured rules",
             "blocked": "Blocked",
             "cap_reached": "Daily cap reached",
+            "review_required": "Operator review required",
             "manual_verification_required": "Manual national-system verification required",
             "configuration_required": "Configuration review required",
             "configuration_error": "Configuration error",
@@ -938,7 +953,9 @@ class VaccineTab(QWidget):
         self.covid_check_result.setProperty(
             "resultState",
             "success" if result.allowed else (
-                "warning" if result.status == "manual_verification_required" else "error"
+                "warning"
+                if result.status in {"manual_verification_required", "review_required"}
+                else "error"
             ),
         )
         self.covid_check_result.style().unpolish(self.covid_check_result)
@@ -969,10 +986,13 @@ class VaccineTab(QWidget):
                 record.patient_resident_id or "",
                 on_date=datetime.now().date(),
                 counted_today=counts.get("covid", 0),
+                rural_exception_checked=self.rural_exception_check.isChecked(),
             )
             self._show_covid_check(result)
             if result.allowed:
                 return True, result.counted
+            if result.requires_operator_confirmation:
+                return self._confirm_rural_exception_printing("COVID", result)
             self.status_label.setText("COVID label printing blocked by the program check.")
             return False, False
         if record.program_type != "national_influenza":
@@ -984,6 +1004,7 @@ class VaccineTab(QWidget):
             record.patient_resident_id or "",
             on_date=datetime.now().date(),
             counted_today=counts.get("flu", 0),
+            rural_exception_checked=self.rural_exception_check.isChecked(),
         )
         self._show_influenza_check(result)
         if result.allowed:
@@ -991,17 +1012,25 @@ class VaccineTab(QWidget):
         if not result.requires_operator_confirmation:
             self.status_label.setText("Influenza label printing blocked by the program check.")
             return False, False
+        return self._confirm_rural_exception_printing("Influenza", result)
+
+    def _confirm_rural_exception_printing(self, program: str, result) -> tuple[bool, bool]:
+        confirmation = (
+            f"{result.message}\n\n"
+            "Proceed only after manually verifying the individual patient's "
+            "rural-area exception in the national vaccination system."
+        )
         if (
             QMessageBox.question(
                 self,
-                "Confirm influenza program review",
-                result.message,
+                f"Confirm {program} rural-area exception",
+                confirmation,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             != QMessageBox.StandardButton.Yes
         ):
-            self.status_label.setText("Influenza label printing cancelled by operator.")
+            self.status_label.setText(f"{program} exception printing cancelled by operator.")
             return False, False
         return True, result.counted
 
@@ -1082,6 +1111,7 @@ class VaccineTab(QWidget):
         layout = QVBoxLayout(page)
         layout.addLayout(controls)
         layout.addLayout(counts_row)
+        layout.addWidget(self.rural_exception_check)
         layout.addWidget(self.influenza_check_result)
         layout.addWidget(self.covid_check_result)
         layout.addLayout(content, 1)
