@@ -8,8 +8,9 @@ saved target definitions, and any shutdown-stage windows currently visible. It n
 opens a window, sends input, enables the macro, or changes a schedule.
 
 Lock and confirmation targets remain restricted to windows owned by the cached eGHIS
-PID. `shutdown.close_yes` scopes directly to its exact top-level `확인` modal because
-Windows exposes that prompt separately from the main eGHIS window. The final
+PID. `shutdown.close_yes` and `shutdown.backup_yes` resolve directly in their exact
+top-level `확인` modal because Windows exposes those prompts separately from the main
+eGHIS window. The final
 `shutdown.power_off_after_backup` checkbox may resolve outside that PID only inside an
 exact top-level window titled `이지스 백업`; this accommodates the eGHIS backup helper
 while preventing a general cross-application target search.

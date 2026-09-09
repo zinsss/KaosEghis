@@ -22,6 +22,8 @@ from KaosEghis.core.eghis_connector import (
     validate_cached_connection_identity,
 )
 from KaosEghis.core.eghis_shutdown import (
+    BACKUP_CONFIRM_TARGET_KEY,
+    CLOSE_CONFIRM_TARGET_KEY,
     LOCK_PASSWORD_TARGET_KEY,
     POWER_OFF_CHECKBOX_TARGET_KEY,
     POWER_OFF_WINDOW_TITLE,
@@ -1185,7 +1187,9 @@ class MacroRunner:
             return None, "target not found"
         if target_id == LOCK_PASSWORD_TARGET_KEY and target_record.automation_id:
             return self._resolve_lock_password_target(target_record)
-        element, message = resolve_target_element_in_cached_process(target_record)
+        element, message = self._resolve_confirmation_modal_target(target_id, target_record)
+        if element is None:
+            element, message = resolve_target_element_in_cached_process(target_record)
         if element is None and target_id == POWER_OFF_CHECKBOX_TARGET_KEY:
             element, message = resolve_target_element_in_named_top_level_window(
                 target_record,
@@ -1198,6 +1202,28 @@ class MacroRunner:
                 return None, "window not ready"
             return None, "target not found"
         return element, "Target resolved in connected eGHIS process."
+
+    @staticmethod
+    def _resolve_confirmation_modal_target(
+        target_id: str,
+        target_record: UiTargetRecord,
+    ) -> tuple[object | None, str]:
+        """Resolve the known eGHIS confirmation modal inside the connected PID only."""
+
+        if target_id not in {CLOSE_CONFIRM_TARGET_KEY, BACKUP_CONFIRM_TARGET_KEY}:
+            return None, "target not found"
+        window_title = MacroRunner._first_ancestor_window_title(
+            target_record.ancestor_path
+        )
+        state = get_cached_eghis_state()
+        pid = getattr(state, "pid", None)
+        if not window_title or pid is None:
+            return None, "target not found"
+        return resolve_target_element_in_named_top_level_window(
+            target_record,
+            window_title,
+            process_id=int(pid),
+        )
 
     @staticmethod
     def _resolve_lock_password_target(

@@ -598,6 +598,78 @@ def test_non_backup_target_never_uses_cross_process_window_fallback(
     assert message == "target not found"
 
 
+def test_shutdown_confirmations_resolve_only_in_cached_eghis_modal(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import contextlib
+
+    from KaosEghis.core import macro_runner
+    from KaosEghis.core.eghis_shutdown import (
+        BACKUP_CONFIRM_TARGET_KEY,
+        CLOSE_CONFIRM_TARGET_KEY,
+    )
+    from KaosEghis.core.macro_runner import MacroRunner
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    modal_button = object()
+    calls: list[tuple[str, int | None]] = []
+    runner = MacroRunner(tmp_path / "runner.sqlite")
+    monkeypatch.setattr(macro_runner, "connect", lambda _path: contextlib.nullcontext(object()))
+    monkeypatch.setattr(
+        macro_runner,
+        "get_cached_eghis_state",
+        lambda: SimpleNamespace(pid=721),
+    )
+    monkeypatch.setattr(
+        macro_runner,
+        "resolve_target_element_in_cached_process",
+        lambda _target: (_ for _ in ()).throw(
+            AssertionError("Confirmation target should use its exact modal first.")
+        ),
+    )
+
+    def resolve_named(target, title, *, process_id=None, desktop_type=None):
+        calls.append((title, process_id))
+        assert target.name == "예(Y)"
+        return modal_button, "found"
+
+    monkeypatch.setattr(
+        macro_runner,
+        "resolve_target_element_in_named_top_level_window",
+        resolve_named,
+    )
+
+    for target_key in (CLOSE_CONFIRM_TARGET_KEY, BACKUP_CONFIRM_TARGET_KEY):
+        target_record = UiTargetRecord(
+            id=1,
+            target_id=target_key,
+            parent_target_id=None,
+            parent_automation_id=None,
+            automation_id=None,
+            name="예(Y)",
+            control_type="Button",
+            class_name=None,
+            created_at="2026-09-09T00:00:00",
+            ancestor_path='[{"name":"확인","control_type":"Window"}]',
+        )
+        monkeypatch.setattr(
+            runner,
+            "_load_runtime_target_record",
+            lambda _connection, _target_id, target=target_record: (
+                target,
+                (1, target.target_id, None),
+            ),
+        )
+
+        resolved, message = runner._resolve_process_target(target_key)
+
+        assert resolved is modal_button
+        assert "connected eGHIS process" in message
+
+    assert calls == [("확인", 721), ("확인", 721)]
+
+
 def test_shutdown_preflight_reports_disabled_macro_without_exposing_secret(
     tmp_path,
     monkeypatch,
