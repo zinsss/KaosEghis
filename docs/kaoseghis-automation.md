@@ -259,11 +259,13 @@ full eGHIS descendant tree. Before retrieving the password, KaosEghis verifies t
 target's actual top-level lock dialog belongs to that PID. It first requires ordinary
 foreground confirmation. When Windows rejects foreground activation from the Scheduler
 worker, the narrowly scoped fallback writes through the verified UIA Edit and sends an
-Enter message to that exact lock-dialog HWND; it never sends the password through global
-keyboard input. A target that is absent, ambiguous, outside the connected PID, or unable
-to accept direct input still blocks the sequence. Scheduler history distinguishes lock
-dialog focus failure from main-EMR focus failure without recording raw exceptions or
-credentials. A locked Windows desktop or secure desktop remains intentionally blocked.
+Enter key-down, character, and key-up sequence to that exact password Edit HWND (falling
+back to the verified lock-dialog HWND only when the Edit has no native handle); it never
+sends the password through global keyboard input. A target that is absent, ambiguous,
+outside the connected PID, or unable to accept direct input still blocks the sequence.
+Scheduler history distinguishes lock dialog focus failure from main-EMR focus failure
+without recording raw exceptions or credentials. A locked Windows desktop or secure
+desktop remains intentionally blocked.
 
 - hidden background macro service
 - generic recorder

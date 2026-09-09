@@ -1421,7 +1421,12 @@ class MacroRunner:
             entered = MacroRunner._set_text_uia_on_element(target, password)
         if not entered:
             return False
-        return MacroRunner._post_enter_to_window(lock_window_handle)
+        # WinForms routes Enter from the password Edit to the dialog's accept
+        # action. Post it to that verified control when it has a native handle;
+        # posting to the form alone bypasses normal child-control key handling.
+        time.sleep(0.05)
+        submit_handle = MacroRunner._element_native_handle(target) or lock_window_handle
+        return MacroRunner._post_enter_to_window(submit_handle)
 
     @staticmethod
     def _post_enter_to_window(window_handle: int) -> bool:
@@ -1429,17 +1434,28 @@ class MacroRunner:
             import win32con
             import win32gui
 
+            # PostMessage does not pass through TranslateMessage, so the WM_CHAR
+            # event must accompany the normal key-down/up sequence. The scan-code
+            # bits make this a real Enter event for the WinForms password Edit.
+            key_down_lparam = 0x001C0001
+            key_up_lparam = 0xC01C0001
             win32gui.PostMessage(
                 int(window_handle),
                 win32con.WM_KEYDOWN,
                 win32con.VK_RETURN,
-                0,
+                key_down_lparam,
+            )
+            win32gui.PostMessage(
+                int(window_handle),
+                win32con.WM_CHAR,
+                win32con.VK_RETURN,
+                key_down_lparam,
             )
             win32gui.PostMessage(
                 int(window_handle),
                 win32con.WM_KEYUP,
                 win32con.VK_RETURN,
-                0,
+                key_up_lparam,
             )
             return True
         except Exception:

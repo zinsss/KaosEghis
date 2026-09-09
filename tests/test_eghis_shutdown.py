@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 
@@ -1040,6 +1041,57 @@ def test_direct_lock_input_sets_only_exact_target_and_submits_to_lock_window(
     )
     assert entered == ["test-lock-password"]
     assert submitted == [441]
+
+
+def test_direct_lock_input_submits_to_exact_password_edit_handle(monkeypatch) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    submitted: list[int] = []
+
+    class ExactLockTarget:
+        handle = 442
+
+        def set_edit_text(self, _value: str) -> None:
+            return None
+
+    monkeypatch.setattr(
+        MacroRunner,
+        "_post_enter_to_window",
+        staticmethod(lambda handle: submitted.append(handle) or True),
+    )
+
+    assert MacroRunner._set_secret_on_exact_lock_target_and_submit(
+        ExactLockTarget(),
+        441,
+        "test-lock-password",
+    )
+    assert submitted == [442]
+
+
+def test_post_enter_to_window_posts_complete_enter_sequence(monkeypatch) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    messages: list[tuple[int, int, int, int]] = []
+    fake_win32con = SimpleNamespace(
+        WM_KEYDOWN=0x0100,
+        WM_CHAR=0x0102,
+        WM_KEYUP=0x0101,
+        VK_RETURN=0x0D,
+    )
+    fake_win32gui = SimpleNamespace(
+        PostMessage=lambda handle, message, key, lparam: messages.append(
+            (handle, message, key, lparam)
+        )
+    )
+    monkeypatch.setitem(sys.modules, "win32con", fake_win32con)
+    monkeypatch.setitem(sys.modules, "win32gui", fake_win32gui)
+
+    assert MacroRunner._post_enter_to_window(441) is True
+    assert messages == [
+        (441, fake_win32con.WM_KEYDOWN, fake_win32con.VK_RETURN, 0x001C0001),
+        (441, fake_win32con.WM_CHAR, fake_win32con.VK_RETURN, 0x001C0001),
+        (441, fake_win32con.WM_KEYUP, fake_win32con.VK_RETURN, 0xC01C0001),
+    ]
 
 
 def test_absent_lock_target_requires_normal_eghis_readiness(monkeypatch) -> None:
