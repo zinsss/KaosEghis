@@ -834,6 +834,37 @@ def test_new_vaccine_record_retains_patient_context_for_simultaneous_vaccination
     ]
 
 
+def test_prepare_flu_and_covid_creates_two_separate_records_from_one_context(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import list_vaccine_records
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineTab(db_path)
+    page.patient_chart_no_input.setText("2735")
+    page.patient_resident_id_input.setText("500101-1234567")
+    page.patient_name_input.setText("Test Patient")
+
+    pair = page.prepare_flu_and_covid()
+
+    assert pair is not None
+    assert [record.program_type for record in pair] == [
+        "national_influenza",
+        "national_covid",
+    ]
+    assert all(record.status == "prepared" for record in pair)
+    assert page._prepared_pair_ids == (pair[0].id, pair[1].id)
+    assert "Two separate records prepared" in page.prepared_pair_label.text()
+    assert page.prepare_flu_covid_button.text() == "Prepare Flu + COVID"
+    assert page.print_prepared_pair_button.text() == "Print prepared pair"
+    with connect(db_path) as connection:
+        records = list_vaccine_records(connection)
+    assert [record.vaccine_type_name for record in records] == ["COVID-19", "Influenza"]
+
+
 def test_vaccine_tab_db_buckets_split_records_by_type(tmp_path) -> None:
     _app()
 

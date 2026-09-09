@@ -139,6 +139,7 @@ class VaccineTab(QWidget):
         super().__init__()
         self._db_path = db_path
         self._current_record_id: int | None = None
+        self._prepared_pair_ids: tuple[int, int] | None = None
         self.nav_buttons: dict[str, QPushButton] = {}
         self.top_nav_row = QHBoxLayout()
         self.stacked_widget = QStackedWidget()
@@ -177,6 +178,8 @@ class VaccineTab(QWidget):
         self.rural_exception_check.toggled.connect(
             lambda _checked: self._reset_program_checks()
         )
+        self.prepared_pair_label = QLabel("Flu + COVID: Not prepared.")
+        self.prepared_pair_label.setWordWrap(True)
 
         patient_form = QFormLayout()
         patient_form.addRow("Chart No", self.patient_chart_no_input)
@@ -248,8 +251,12 @@ class VaccineTab(QWidget):
         self.save_button.clicked.connect(self.save_record)
         self.new_record_button = QPushButton("New vaccine record")
         self.new_record_button.clicked.connect(self.start_new_vaccine_record)
+        self.prepare_flu_covid_button = QPushButton("Prepare Flu + COVID")
+        self.prepare_flu_covid_button.clicked.connect(self.prepare_flu_and_covid)
         self.print_button = QPushButton("Print label")
         self.print_button.clicked.connect(self.print_label)
+        self.print_prepared_pair_button = QPushButton("Print prepared pair")
+        self.print_prepared_pair_button.clicked.connect(self.print_prepared_pair)
         self.clear_button = QPushButton("Clear form")
         self.clear_button.clicked.connect(self.clear_form)
         self.load_button = QPushButton("Load selected")
@@ -471,6 +478,104 @@ class VaccineTab(QWidget):
         self.refresh_view()
         return saved_record
 
+    def prepare_flu_and_covid(self) -> tuple[object, object] | None:
+        """Create separate Flu and COVID preparation records from one patient context."""
+
+        if (
+            not self.patient_name_input.text().strip()
+            and not self.patient_resident_id_input.text().strip()
+        ):
+            self.status_label.setText("Load or enter patient context first.")
+            return None
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            vaccine_types = list_vaccine_types(connection)
+            flu_types = [
+                entry
+                for entry in vaccine_types
+                if entry.is_active and entry.program_type == "national_influenza"
+            ]
+            covid_types = [
+                entry
+                for entry in vaccine_types
+                if entry.is_active and entry.program_type == "national_covid"
+            ]
+            if len(flu_types) != 1 or len(covid_types) != 1:
+                self.status_label.setText(
+                    "Prepare Flu + COVID requires exactly one active national Flu and COVID type."
+                )
+                return None
+            flu_type = flu_types[0]
+            covid_type = covid_types[0]
+            flu_record = self._create_record_for_type(connection, flu_type)
+            covid_record = self._create_record_for_type(connection, covid_type)
+
+        self._prepared_pair_ids = (flu_record.id, covid_record.id)
+        self._current_record_id = flu_record.id
+        self._select_vaccine_type(flu_record.vaccine_type_id, flu_record.vaccine_type_name)
+        self.prepared_pair_label.setText(
+            "Flu + COVID: Two separate records prepared. Review and print the pair explicitly."
+        )
+        self.refresh_view()
+        self.status_label.setText("Flu + COVID prepared from one patient context.")
+        return flu_record, covid_record
+
+    def print_prepared_pair(self) -> None:
+        if self._prepared_pair_ids is None:
+            self.status_label.setText("Prepare a Flu + COVID pair first.")
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Print Flu + COVID labels",
+                "Print two separate labels after their individual program checks?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            self.status_label.setText("Flu + COVID pair printing cancelled by operator.")
+            return
+
+        printed: list[str] = []
+        for record_id in self._prepared_pair_ids:
+            initialize_database(self._db_path)
+            with connect(self._db_path) as connection:
+                record = get_vaccine_record(connection, record_id)
+            if record is None:
+                self.status_label.setText("A prepared pair record is no longer available.")
+                return
+            self._current_record_id = record.id
+            self._select_vaccine_type(record.vaccine_type_id, record.vaccine_type_name)
+            self.print_label()
+            with connect(self._db_path) as connection:
+                refreshed = get_vaccine_record(connection, record.id)
+            if refreshed is None or refreshed.status != "completed":
+                completed = ", ".join(printed) or "No labels"
+                self.status_label.setText(
+                    f"{completed} printed; {record.vaccine_type_name} needs operator review."
+                )
+                self.refresh_view()
+                return
+            printed.append(record.vaccine_type_name)
+
+        self.refresh_view()
+        self.status_label.setText("Flu + COVID labels printed and completed separately.")
+
+    def _create_record_for_type(self, connection, vaccine_type):
+        return create_vaccine_record(
+            connection,
+            vaccine_type_id=vaccine_type.id,
+            vaccine_type_name=vaccine_type.name,
+            patient_chart_no=self.patient_chart_no_input.text(),
+            patient_resident_id=self.patient_resident_id_input.text(),
+            patient_name=self.patient_name_input.text(),
+            patient_sex=self.patient_sex_input.text(),
+            patient_age=self.patient_age_input.text(),
+            patient_phone=self.patient_phone_input.text(),
+            patient_address=self.patient_address_input.text(),
+        )
+
     def print_label(self) -> None:
         """Print the current vaccine label and checkpoint the successful output only."""
 
@@ -653,6 +758,7 @@ class VaccineTab(QWidget):
 
     def clear_form(self) -> None:
         self._current_record_id = None
+        self._prepared_pair_ids = None
         for widget in (
             self.patient_chart_no_input,
             self.patient_resident_id_input,
@@ -671,6 +777,8 @@ class VaccineTab(QWidget):
         """Keep the fetched patient context while preparing another vaccine entry."""
 
         self._current_record_id = None
+        self._prepared_pair_ids = None
+        self.prepared_pair_label.setText("Flu + COVID: Not prepared.")
         self.vaccine_types_list.clearSelection()
         self.vaccine_types_list.setCurrentItem(None)
         self.chart_note_preview.clear()
@@ -1076,7 +1184,9 @@ class VaccineTab(QWidget):
         controls.addWidget(self.covid_check_button)
         controls.addWidget(self.save_button)
         controls.addWidget(self.new_record_button)
+        controls.addWidget(self.prepare_flu_covid_button)
         controls.addWidget(self.print_button)
+        controls.addWidget(self.print_prepared_pair_button)
         controls.addWidget(self.clear_button)
         controls.addStretch()
 
@@ -1112,6 +1222,7 @@ class VaccineTab(QWidget):
         layout.addLayout(controls)
         layout.addLayout(counts_row)
         layout.addWidget(self.rural_exception_check)
+        layout.addWidget(self.prepared_pair_label)
         layout.addWidget(self.influenza_check_result)
         layout.addWidget(self.covid_check_result)
         layout.addLayout(content, 1)
