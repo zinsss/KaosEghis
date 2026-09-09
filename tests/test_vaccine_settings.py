@@ -131,6 +131,77 @@ def test_disabled_incomplete_schedule_can_be_saved_as_draft(tmp_path) -> None:
     assert page.save_settings()
 
 
+def test_covid_editor_has_the_published_staged_age_group_schedule(tmp_path) -> None:
+    _app()
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.vaccine_settings_page import VaccineSettingsPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineSettingsPage(db_path)
+
+    covid = page.covid_editor
+    assert covid.program_enabled_check.isChecked() is False
+    assert covid.date_inputs["elderly_75_plus_start"].value() == "2026-10-12"
+    assert covid.date_inputs["elderly_70_74_start"].value() == "2026-10-15"
+    assert covid.date_inputs["elderly_65_69_start"].value() == "2026-10-19"
+    assert covid.date_inputs["elderly_program_end"].value() == "2027-06-30"
+    assert set(covid.birth_inputs) == {
+        "covid_elderly_75_plus",
+        "covid_elderly_70_74",
+        "covid_elderly_65_69",
+    }
+
+
+def test_blank_existing_covid_draft_is_migrated_but_not_enabled(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "vaccine_schedule_rules_json": json.dumps(
+                    {
+                        "covid": {
+                            "season_name": "2026-2027",
+                            "program_start": "",
+                            "program_end": "",
+                            "daily_cap": 100,
+                        }
+                    }
+                ),
+                "vaccine_age_groups_json": json.dumps(
+                    [
+                        {
+                            "key": "national_covid",
+                            "vaccine": "covid",
+                            "birth_date_from": "",
+                            "birth_date_to": "",
+                        }
+                    ]
+                ),
+            },
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+    schedules = json.loads(settings["vaccine_schedule_rules_json"])
+    groups = json.loads(settings["vaccine_age_groups_json"])
+
+    assert schedules["covid"]["program_enabled"] is False
+    assert schedules["covid"]["elderly_75_plus_start"] == "2026-10-12"
+    assert schedules["covid"]["elderly_program_end"] == "2027-06-30"
+    assert {group["key"] for group in groups} == {
+        "covid_elderly_75_plus",
+        "covid_elderly_70_74",
+        "covid_elderly_65_69",
+    }
+
+
 def test_database_has_no_multi_year_vaccine_season_table(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
 

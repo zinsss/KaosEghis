@@ -19,6 +19,11 @@ INFLUENZA_SCHEDULE_KEYS = {
     "child_two_dose": ("child_two_dose_start", "child_two_dose_end"),
     "child_one_dose": ("child_one_dose_start", "child_one_dose_end"),
 }
+COVID_ELDERLY_SCHEDULE_KEYS = {
+    "covid_elderly_75_plus": ("elderly_75_plus_start", "elderly_program_end"),
+    "covid_elderly_70_74": ("elderly_70_74_start", "elderly_program_end"),
+    "covid_elderly_65_69": ("elderly_65_69_start", "elderly_program_end"),
+}
 
 
 @dataclass(frozen=True)
@@ -35,6 +40,21 @@ class InfluenzaEligibilityResult:
     daily_cap: int
     remaining: int
     requires_operator_confirmation: bool = False
+
+
+@dataclass(frozen=True)
+class CovidEligibilityResult:
+    status: str
+    allowed: bool
+    message: str
+    group_key: str | None
+    group_label: str | None
+    schedule_start: str | None
+    schedule_end: str | None
+    counted: bool
+    today_count: int
+    daily_cap: int
+    remaining: int
 
 
 def birth_date_from_resident_id(resident_id: str) -> date | None:
@@ -283,6 +303,189 @@ def evaluate_influenza_program_for_birth_date(
     )
 
 
+def evaluate_covid_program(
+    settings: dict[str, str],
+    resident_id: str,
+    *,
+    on_date: date | None = None,
+    counted_today: int = 0,
+) -> CovidEligibilityResult:
+    """Evaluate only the published age-based 2026-2027 COVID schedule."""
+
+    today = on_date or date.today()
+    schedule_data = _load_json_object(settings.get("vaccine_schedule_rules_json", ""))
+    age_groups = _load_json_list(settings.get("vaccine_age_groups_json", ""))
+    if schedule_data is None or age_groups is None:
+        return _covid_result(
+            "configuration_error",
+            "COVID schedule or age-group settings are invalid JSON.",
+            counted_today=counted_today,
+        )
+    covid = schedule_data.get("covid")
+    if not isinstance(covid, dict):
+        return _covid_result(
+            "configuration_error",
+            "COVID schedule settings are missing.",
+            counted_today=counted_today,
+        )
+    cap = _daily_cap(covid)
+    if cap is None:
+        return _covid_result(
+            "configuration_error",
+            "COVID daily cap must be a whole number greater than or equal to zero.",
+            counted_today=counted_today,
+            daily_cap=0,
+        )
+    if not _as_bool(covid.get("program_enabled", False)):
+        return _covid_result(
+            "configuration_required",
+            "COVID schedule is disabled until its official dates are reviewed.",
+            counted_today=counted_today,
+            daily_cap=cap,
+        )
+
+    birth_date = birth_date_from_resident_id(resident_id)
+    if birth_date is None:
+        return _covid_result(
+            "patient_context_required",
+            "A complete resident ID is required to determine the COVID age group.",
+            counted_today=counted_today,
+            daily_cap=cap,
+        )
+    return evaluate_covid_program_for_birth_date(
+        covid,
+        age_groups,
+        birth_date,
+        on_date=today,
+        counted_today=counted_today,
+    )
+
+
+def evaluate_covid_program_for_birth_date(
+    covid_schedule: dict[str, Any],
+    age_groups: list[Any],
+    birth_date: date,
+    *,
+    on_date: date,
+    counted_today: int = 0,
+) -> CovidEligibilityResult:
+    cap = _daily_cap(covid_schedule)
+    if cap is None:
+        return _covid_result(
+            "configuration_error",
+            "COVID daily cap must be a whole number greater than or equal to zero.",
+            counted_today=counted_today,
+            daily_cap=0,
+        )
+
+    matches: list[tuple[str, str]] = []
+    for raw_group in age_groups:
+        if not isinstance(raw_group, dict):
+            continue
+        if str(raw_group.get("vaccine", "")).strip().lower() != "covid":
+            continue
+        key = str(raw_group.get("key", "")).strip()
+        if key not in COVID_ELDERLY_SCHEDULE_KEYS:
+            continue
+        label = str(raw_group.get("label", "")).strip() or key
+        lower_text = str(raw_group.get("birth_date_from", "")).strip()
+        upper_text = str(raw_group.get("birth_date_to", "")).strip()
+        lower = _parse_date(lower_text) if lower_text else None
+        upper = _parse_date(upper_text) if upper_text else None
+        if (
+            not lower_text
+            or not upper_text
+            or lower is None
+            or upper is None
+            or lower > upper
+        ):
+            return _covid_result(
+                "configuration_error",
+                f"Birth-date range for '{label}' is incomplete or invalid.",
+                counted_today=counted_today,
+                daily_cap=cap,
+            )
+        if lower <= birth_date <= upper:
+            matches.append((key, label))
+
+    if not matches:
+        return _covid_result(
+            "manual_verification_required",
+            "This patient is not in a configured 65+ COVID group. Verify any "
+            "immunocompromised or facility-resident eligibility in the national "
+            "vaccination system before proceeding.",
+            counted_today=counted_today,
+            daily_cap=cap,
+        )
+    if len(matches) > 1:
+        return _covid_result(
+            "configuration_error",
+            "Multiple COVID birth-date groups overlap for this patient.",
+            counted_today=counted_today,
+            daily_cap=cap,
+        )
+
+    group_key, group_label = matches[0]
+    start_key, end_key = COVID_ELDERLY_SCHEDULE_KEYS[group_key]
+    start = _parse_date(covid_schedule.get(start_key))
+    end = _parse_date(covid_schedule.get(end_key))
+    if start is None or end is None or start > end:
+        return _covid_result(
+            "configuration_error",
+            f"Schedule dates for '{group_label}' are incomplete or invalid.",
+            group_key=group_key,
+            group_label=group_label,
+            counted_today=counted_today,
+            daily_cap=cap,
+        )
+    if on_date < start:
+        return _covid_result(
+            "blocked",
+            "The configured COVID vaccination window has not started for this group.",
+            group_key=group_key,
+            group_label=group_label,
+            schedule_start=start.isoformat(),
+            schedule_end=end.isoformat(),
+            counted_today=counted_today,
+            daily_cap=cap,
+        )
+    if on_date > end:
+        return _covid_result(
+            "blocked",
+            "The configured COVID vaccination window has ended for this group.",
+            group_key=group_key,
+            group_label=group_label,
+            schedule_start=start.isoformat(),
+            schedule_end=end.isoformat(),
+            counted_today=counted_today,
+            daily_cap=cap,
+        )
+    if counted_today >= cap:
+        return _covid_result(
+            "cap_reached",
+            "The configured COVID daily cap has been reached.",
+            group_key=group_key,
+            group_label=group_label,
+            schedule_start=start.isoformat(),
+            schedule_end=end.isoformat(),
+            counted=True,
+            counted_today=counted_today,
+            daily_cap=cap,
+        )
+    return _covid_result(
+        "eligible",
+        "Configured COVID age, date, and cap checks passed.",
+        allowed=True,
+        group_key=group_key,
+        group_label=group_label,
+        schedule_start=start.isoformat(),
+        schedule_end=end.isoformat(),
+        counted=True,
+        counted_today=counted_today,
+        daily_cap=cap,
+    )
+
+
 def _evaluate_child_program(
     influenza_schedule: dict[str, Any],
     matches: list[tuple[str, str]],
@@ -428,6 +631,36 @@ def _result(
         daily_cap=normalized_cap,
         remaining=max(0, normalized_cap - normalized_count),
         requires_operator_confirmation=requires_operator_confirmation,
+    )
+
+
+def _covid_result(
+    status: str,
+    message: str,
+    *,
+    allowed: bool = False,
+    group_key: str | None = None,
+    group_label: str | None = None,
+    schedule_start: str | None = None,
+    schedule_end: str | None = None,
+    counted: bool = False,
+    counted_today: int = 0,
+    daily_cap: int = 100,
+) -> CovidEligibilityResult:
+    normalized_count = max(0, int(counted_today))
+    normalized_cap = max(0, int(daily_cap))
+    return CovidEligibilityResult(
+        status=status,
+        allowed=allowed,
+        message=message,
+        group_key=group_key,
+        group_label=group_label,
+        schedule_start=schedule_start,
+        schedule_end=schedule_end,
+        counted=counted,
+        today_count=normalized_count,
+        daily_cap=normalized_cap,
+        remaining=max(0, normalized_cap - normalized_count),
     )
 
 

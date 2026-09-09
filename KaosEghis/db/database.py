@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -146,6 +147,7 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_emr_ui_targets(connection)
         _migrate_unstable_patient_number_selectors(connection)
         _migrate_vaccine_tables(connection)
+        _migrate_unconfigured_covid_schedule(connection)
         _seed_default_emr_target_profile(connection)
         _seed_vaccine_emr_targets(connection)
         _seed_eghis_shutdown_targets(connection)
@@ -653,6 +655,107 @@ def _migrate_vaccine_tables(connection: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
+    )
+
+
+def _migrate_unconfigured_covid_schedule(connection: sqlite3.Connection) -> None:
+    """Seed published 2026-2027 COVID 65+ data without enabling it."""
+
+    schedule_row = connection.execute(
+        "SELECT value FROM app_settings WHERE key = 'vaccine_schedule_rules_json'"
+    ).fetchone()
+    groups_row = connection.execute(
+        "SELECT value FROM app_settings WHERE key = 'vaccine_age_groups_json'"
+    ).fetchone()
+    if schedule_row is None or groups_row is None:
+        return
+    try:
+        schedule_data = json.loads(str(schedule_row[0] or "{}"))
+        age_groups = json.loads(str(groups_row[0] or "[]"))
+    except (TypeError, json.JSONDecodeError):
+        return
+    if not isinstance(schedule_data, dict) or not isinstance(age_groups, list):
+        return
+    covid = schedule_data.get("covid")
+    if not isinstance(covid, dict):
+        return
+    season_name = str(covid.get("season_name", "")).strip()
+    if season_name and season_name != "2026-2027":
+        return
+
+    staged_keys = {
+        "elderly_75_plus_start",
+        "elderly_70_74_start",
+        "elderly_65_69_start",
+        "elderly_program_end",
+    }
+    if any(str(covid.get(key, "")).strip() for key in staged_keys):
+        return
+    if any(str(covid.get(key, "")).strip() for key in ("program_start", "program_end")):
+        return
+    if any(
+        isinstance(group, dict)
+        and str(group.get("vaccine", "")).lower() == "covid"
+        and (
+            str(group.get("birth_date_from", "")).strip()
+            or str(group.get("birth_date_to", "")).strip()
+        )
+        for group in age_groups
+    ):
+        return
+
+    updated_covid = dict(covid)
+    updated_covid.update(
+        {
+            "season_name": "2026-2027",
+            "program_enabled": False,
+            "elderly_75_plus_start": "2026-10-12",
+            "elderly_70_74_start": "2026-10-15",
+            "elderly_65_69_start": "2026-10-19",
+            "elderly_program_end": "2027-06-30",
+        }
+    )
+    schedule_data["covid"] = updated_covid
+    age_groups = [
+        group
+        for group in age_groups
+        if not (
+            isinstance(group, dict)
+            and str(group.get("key", "")) == "national_covid"
+        )
+    ]
+    age_groups.extend(
+        (
+            {
+                "key": "covid_elderly_75_plus",
+                "label": "COVID 75+",
+                "vaccine": "covid",
+                "birth_date_from": "1800-01-01",
+                "birth_date_to": "1951-12-31",
+            },
+            {
+                "key": "covid_elderly_70_74",
+                "label": "COVID 70-74",
+                "vaccine": "covid",
+                "birth_date_from": "1952-01-01",
+                "birth_date_to": "1956-12-31",
+            },
+            {
+                "key": "covid_elderly_65_69",
+                "label": "COVID 65-69",
+                "vaccine": "covid",
+                "birth_date_from": "1957-01-01",
+                "birth_date_to": "1961-12-31",
+            },
+        )
+    )
+    connection.execute(
+        "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+        (json.dumps(schedule_data, ensure_ascii=False, indent=2), "vaccine_schedule_rules_json"),
+    )
+    connection.execute(
+        "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+        (json.dumps(age_groups, ensure_ascii=False, indent=2), "vaccine_age_groups_json"),
     )
 
 

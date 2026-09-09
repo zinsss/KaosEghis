@@ -63,6 +63,11 @@ class VaccineProgramEditor(QWidget):
         ("elderly_65_69", "Elderly 65-69"),
         ("child_two_dose", "Eligible child"),
     )
+    COVID_GROUPS = (
+        ("covid_elderly_75_plus", "COVID 75+"),
+        ("covid_elderly_70_74", "COVID 70-74"),
+        ("covid_elderly_65_69", "COVID 65-69"),
+    )
 
     def __init__(self, program: str) -> None:
         super().__init__()
@@ -88,7 +93,7 @@ class VaccineProgramEditor(QWidget):
             editor_layout.addWidget(self._build_influenza_birth_ranges())
         else:
             editor_layout.addWidget(self._build_covid_dates())
-            editor_layout.addWidget(self._build_covid_birth_range())
+            editor_layout.addWidget(self._build_covid_birth_ranges())
         editor_layout.addStretch()
 
         scroll = QScrollArea()
@@ -144,23 +149,33 @@ class VaccineProgramEditor(QWidget):
 
     def _build_covid_dates(self) -> QGroupBox:
         group = QGroupBox("Program dates")
-        form = QFormLayout(group)
-        for label, key in (("Program start", "program_start"), ("Program end", "program_end")):
+        grid = QGridLayout(group)
+        rows = (
+            ("75+ start", "elderly_75_plus_start"),
+            ("70-74 start", "elderly_70_74_start"),
+            ("65-69 start", "elderly_65_69_start"),
+            ("Program end", "elderly_program_end"),
+        )
+        for row, (label, key) in enumerate(rows):
             date_input = OptionalDateInput()
             self.date_inputs[key] = date_input
-            form.addRow(label, date_input)
+            grid.addWidget(QLabel(label), row, 0)
+            grid.addWidget(date_input, row, 1)
         return group
 
-    def _build_covid_birth_range(self) -> QGroupBox:
-        group = QGroupBox("Inclusive birth-date range")
+    def _build_covid_birth_ranges(self) -> QGroupBox:
+        group = QGroupBox("Inclusive birth-date ranges")
         grid = QGridLayout(group)
-        lower = OptionalDateInput()
-        upper = OptionalDateInput()
-        self.birth_inputs["national_covid"] = (lower, upper)
-        grid.addWidget(QLabel("From"), 0, 0)
-        grid.addWidget(QLabel("To"), 0, 1)
-        grid.addWidget(lower, 1, 0)
-        grid.addWidget(upper, 1, 1)
+        grid.addWidget(QLabel("Group"), 0, 0)
+        grid.addWidget(QLabel("From"), 0, 1)
+        grid.addWidget(QLabel("To"), 0, 2)
+        for row, (key, label) in enumerate(self.COVID_GROUPS, start=1):
+            lower = OptionalDateInput()
+            upper = OptionalDateInput()
+            self.birth_inputs[key] = (lower, upper)
+            grid.addWidget(QLabel(label), row, 0)
+            grid.addWidget(lower, row, 1)
+            grid.addWidget(upper, row, 2)
         return group
 
     def load_values(
@@ -203,15 +218,16 @@ class VaccineProgramEditor(QWidget):
 
     def age_group_values(self) -> list[dict[str, object]]:
         if self.program == "covid":
-            lower, upper = self.birth_inputs["national_covid"]
+            labels = dict(self.COVID_GROUPS)
             return [
                 {
-                    "key": "national_covid",
-                    "label": "National COVID",
+                    "key": key,
+                    "label": labels[key],
                     "vaccine": "covid",
                     "birth_date_from": lower.value(),
                     "birth_date_to": upper.value(),
                 }
+                for key, (lower, upper) in self.birth_inputs.items()
             ]
         labels = dict(self.INFLUENZA_GROUPS)
         values: list[dict[str, object]] = []
@@ -248,7 +264,11 @@ class VaccineProgramEditor(QWidget):
 
     def _date_pairs(self) -> tuple[tuple[str, str], ...]:
         if self.program == "covid":
-            return (("program_start", "program_end"),)
+            return (
+                ("elderly_75_plus_start", "elderly_program_end"),
+                ("elderly_70_74_start", "elderly_program_end"),
+                ("elderly_65_69_start", "elderly_program_end"),
+            )
         return (
             ("elderly_75_plus_start", "elderly_program_end"),
             ("elderly_70_74_start", "elderly_program_end"),
@@ -341,6 +361,7 @@ class VaccineSettingsPage(QWidget):
             + self.covid_editor.age_group_values()
         )
         replaced_keys = {str(group["key"]) for group in replacement_groups}
+        replaced_keys.add("national_covid")
         age_groups = [
             group
             for group in self._age_groups

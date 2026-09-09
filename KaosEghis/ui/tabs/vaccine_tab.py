@@ -36,7 +36,9 @@ from KaosEghis.core.vaccine_patient_context import (
     resident_id_for_label,
 )
 from KaosEghis.core.vaccine_eligibility import (
+    CovidEligibilityResult,
     InfluenzaEligibilityResult,
+    evaluate_covid_program,
     evaluate_influenza_program,
 )
 from KaosEghis.db.database import connect, initialize_database
@@ -159,6 +161,11 @@ class VaccineTab(QWidget):
         self.influenza_check_result = QLabel("Influenza program: Not checked.")
         self.influenza_check_result.setObjectName("influenzaProgramResult")
         self.influenza_check_result.setWordWrap(True)
+        self.covid_check_button = QPushButton("Check COVID program")
+        self.covid_check_button.clicked.connect(self.check_covid_program)
+        self.covid_check_result = QLabel("COVID program: Not checked.")
+        self.covid_check_result.setObjectName("covidProgramResult")
+        self.covid_check_result.setWordWrap(True)
 
         patient_form = QFormLayout()
         patient_form.addRow("Chart No", self.patient_chart_no_input)
@@ -216,7 +223,7 @@ class VaccineTab(QWidget):
         ):
             widget.textChanged.connect(self._refresh_previews)
         self.patient_resident_id_input.textChanged.connect(
-            lambda _text: self._reset_influenza_check()
+            lambda _text: self._reset_program_checks()
         )
 
         self.records_table = self._create_records_table()
@@ -387,6 +394,21 @@ class VaccineTab(QWidget):
             counted_today=counts.get("flu", 0),
         )
         self._show_influenza_check(result)
+        return result
+
+    def check_covid_program(self) -> CovidEligibilityResult:
+        initialize_database(self._db_path)
+        today = datetime.now().date()
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+            counts = get_today_vaccine_counts(connection, today.isoformat())
+        result = evaluate_covid_program(
+            settings,
+            self.patient_resident_id_input.text(),
+            on_date=today,
+            counted_today=counts.get("covid", 0),
+        )
+        self._show_covid_check(result)
         return result
 
     def save_record(self):
@@ -838,11 +860,20 @@ class VaccineTab(QWidget):
             f"COVID-19 today: {counts.get('covid', 0)} / {covid_cap}"
         )
 
-    def _reset_influenza_check(self) -> None:
+    def _reset_program_checks(self) -> None:
         self.influenza_check_result.setText("Influenza program: Not checked.")
         self.influenza_check_result.setProperty("resultState", "neutral")
         self.influenza_check_result.style().unpolish(self.influenza_check_result)
         self.influenza_check_result.style().polish(self.influenza_check_result)
+        self.covid_check_result.setText("COVID program: Not checked.")
+        self.covid_check_result.setProperty("resultState", "neutral")
+        self.covid_check_result.style().unpolish(self.covid_check_result)
+        self.covid_check_result.style().polish(self.covid_check_result)
+
+    def _reset_influenza_check(self) -> None:
+        """Compatibility shim for callers from the earlier single-program UI."""
+
+        self._reset_program_checks()
 
     def _show_influenza_check(self, result: InfluenzaEligibilityResult) -> None:
         labels = {
@@ -883,6 +914,36 @@ class VaccineTab(QWidget):
         self.influenza_check_result.style().unpolish(self.influenza_check_result)
         self.influenza_check_result.style().polish(self.influenza_check_result)
 
+    def _show_covid_check(self, result: CovidEligibilityResult) -> None:
+        labels = {
+            "eligible": "Eligible by configured rules",
+            "blocked": "Blocked",
+            "cap_reached": "Daily cap reached",
+            "manual_verification_required": "Manual national-system verification required",
+            "configuration_required": "Configuration review required",
+            "configuration_error": "Configuration error",
+            "patient_context_required": "Patient context required",
+        }
+        lines = [f"COVID program: {labels.get(result.status, result.status)}"]
+        if result.group_label:
+            lines.append(f"Group: {result.group_label}")
+        if result.schedule_start and result.schedule_end:
+            lines.append(f"Window: {result.schedule_start} to {result.schedule_end}")
+        lines.append(
+            f"Counted today: {result.today_count} / {result.daily_cap} "
+            f"(remaining {result.remaining})"
+        )
+        lines.append(result.message)
+        self.covid_check_result.setText("\n".join(lines))
+        self.covid_check_result.setProperty(
+            "resultState",
+            "success" if result.allowed else (
+                "warning" if result.status == "manual_verification_required" else "error"
+            ),
+        )
+        self.covid_check_result.style().unpolish(self.covid_check_result)
+        self.covid_check_result.style().polish(self.covid_check_result)
+
     def _record_for_label_print(self):
         if self._current_record_id is None:
             return self.save_record()
@@ -903,9 +964,16 @@ class VaccineTab(QWidget):
         if record.program_type == "general":
             return True, False
         if record.program_type == "national_covid":
-            self.status_label.setText(
-                "National COVID label printing is unavailable until its program rules are configured."
+            result = evaluate_covid_program(
+                settings,
+                record.patient_resident_id or "",
+                on_date=datetime.now().date(),
+                counted_today=counts.get("covid", 0),
             )
+            self._show_covid_check(result)
+            if result.allowed:
+                return True, result.counted
+            self.status_label.setText("COVID label printing blocked by the program check.")
             return False, False
         if record.program_type != "national_influenza":
             self.status_label.setText("Vaccine program type needs operator review.")
@@ -976,6 +1044,7 @@ class VaccineTab(QWidget):
         controls = QHBoxLayout()
         controls.addWidget(self.fetch_button)
         controls.addWidget(self.influenza_check_button)
+        controls.addWidget(self.covid_check_button)
         controls.addWidget(self.save_button)
         controls.addWidget(self.new_record_button)
         controls.addWidget(self.print_button)
@@ -1014,6 +1083,7 @@ class VaccineTab(QWidget):
         layout.addLayout(controls)
         layout.addLayout(counts_row)
         layout.addWidget(self.influenza_check_result)
+        layout.addWidget(self.covid_check_result)
         layout.addLayout(content, 1)
         return page
 

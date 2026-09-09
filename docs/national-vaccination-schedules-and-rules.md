@@ -1,6 +1,6 @@
 # National Vaccination Schedules and Rules
 
-Last reviewed: 2026-08-21
+Last reviewed: 2026-09-09
 
 ## Purpose
 
@@ -26,14 +26,15 @@ Schedules remain disabled until reviewed and enabled explicitly.
 
 ## Current Publication Status
 
-As of 2026-08-21, the reviewed official sources provide complete 2025-2026 seasonal
-dates and general 2026 implementation rules. A final 2026-2027 schedule was not present
-in the sources reviewed for this document. Therefore:
+The KDCA has published the 2026-2027 COVID schedule for the age-based 65+ programme.
+KaosEghis seeds those dates into the editable COVID schedule below, but leaves the
+programme disabled until the operator reviews and enables it in `Vaccine -> Settings`.
+This protects against a seasonal notice being amended locally or nationally.
 
-- the 2025-2026 dates below are historical reference values only
-- they must not be activated as 2026-2027 operational dates
-- the editable 2026-2027 KaosEghis schedule must remain disabled until the final KDCA
-  notice is entered and independently checked
+The published notice does not make KaosEghis able to infer immunocompromise or
+facility-residence eligibility from eGHIS. The application therefore blocks patients
+outside the configured 65+ birth groups and requires verification in the national
+vaccination system; it does not guess or auto-authorize that path.
 
 ## Shared Daily Count Rules
 
@@ -131,7 +132,24 @@ only window it must:
 After the one-dose window opens, that early-window confirmation is no longer required,
 but normal age, date, count, and contraindication review still applies.
 
-## COVID Reference Schedule
+## COVID Schedule
+
+### Published 2026-2027 age-based 65+ schedule
+
+| Group | Birth boundary | Opening | Closing |
+| --- | --- | --- | --- |
+| 75+ | Born on or before 1951-12-31 | 2026-10-12 | 2027-06-30 |
+| 70-74 | 1952-01-01 through 1956-12-31 | 2026-10-15 | 2027-06-30 |
+| 65-69 | 1957-01-01 through 1961-12-31 | 2026-10-19 | 2027-06-30 |
+
+These fields are seeded as an editable draft, disabled by default. The COVID evaluator
+uses the three staged windows and the independent configured COVID daily cap only after
+the schedule is explicitly enabled. It never derives high-risk eligibility from a
+resident ID, diagnosis, address, or free text.
+
+Sources: [KDCA 2026-2027 influenza/COVID vaccination notice](https://www.kdca.go.kr/kdca/2854/subview.do?enc=Zm5jdDF8QEB8JTJGYmJzJTJGa2RjYSUyRjQ2JTJGMzEyMzE1JTJGYXJ0Y2xWaWV3LmRvJTNGcGFzc3dvcmQlM0QlMjZyZ3NCZ25kZVN0ciUzRCUyNmZpbmRPcG53cmQlM0QlMjZmaW5kV29yZCUzRCUyNnJnc0VuZGRlU3RyJTNEJTI2ZmluZFR5cGUlM0QlMjZmaW5kQ2xTZXElM0QlMjZwYWdlJTNEMSUyNg%3D%3D) and [KDCA 2026-2027 COVID vaccine procurement notice](https://www.kdca.go.kr/bbs/kdca/42/311771/artclView.do).
+
+### Historical 2025-2026 reference
 
 For 2025-2026, the reviewed NIP page listed:
 

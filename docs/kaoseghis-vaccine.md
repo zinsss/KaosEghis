@@ -423,8 +423,10 @@ An explicit successful print does the following in order:
 
 Reprinting an already completed record sends another label but never changes its
 completion timestamp or daily count. A missing/unavailable printer or failed submission
-leaves a preparation record uncompleted and uncounted. National COVID label printing is
-blocked until a separate evaluated COVID program rule is implemented.
+leaves a preparation record uncompleted and uncounted. National COVID printing uses the
+editable, disabled-by-default 2026-2027 65+ evaluator. Patients outside those configured
+age groups remain blocked for manual verification in the national vaccination system;
+KaosEghis does not infer high-risk eligibility.
 
 ## Vaccination Program Preparation
 
@@ -641,8 +643,10 @@ Before operational use, tests must cover:
    preview; child-dose and exception confirmation remain.
 4. Explicit lifecycle, national-program classification, completion-derived count, and
    sanitized correction audit. Done.
-5. Thermal label preview and Windows native printing. Done for one explicit label;
-   national COVID remains blocked pending its evaluator.
+5. Thermal label preview and Windows native printing. Done for one explicit label.
+   The published 2026-2027 65+ COVID schedule is represented by a disabled-by-default,
+   editable evaluator. Immunocompromised and facility-resident eligibility remains a
+   manual national-system verification path and is never inferred from eGHIS.
 6. Guarded external vaccination-program preparation.
 7. eGHIS chart-text preparation.
 8. Final end-to-end dummy-patient validation.
