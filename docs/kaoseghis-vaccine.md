@@ -21,6 +21,7 @@ Current implemented pieces:
 - sanitized lifecycle audit without patient values
 - drag/drop ordering for vaccine types
 - EMR-target-based patient context fetch into the Vaccine page
+- one fetched patient context can create separate simultaneous-vaccination records
 - visible same-day `Influenza` and `COVID-19` counts
 - structured single-current-year Influenza and COVID schedule settings
 - date-picker-based program windows and inclusive birth-date ranges
@@ -84,6 +85,12 @@ This coordinate is a temporary opener fallback; the patient fields themselves us
 UIA Automation IDs. The fetch never runs on startup or in the background.
 After the configured fields are read, KaosEghis sends one `{ESC}` to close the Patient
 Information view. Escape is never sent when that view could not be resolved.
+
+For simultaneous vaccinations, fetch this patient context once. Save and, where
+appropriate, print the first vaccine record, then use `New vaccine record` before
+selecting the next vaccine type. That action clears only the current record reference
+and vaccine selection; it retains the displayed patient context so influenza and COVID
+records are separate local records without a second eGHIS read.
 
 After a successful fetch, KaosEghis keeps only the transient Patient Information scope
 handle in memory for the connected eGHIS PID. The next explicit fetch tries that handle

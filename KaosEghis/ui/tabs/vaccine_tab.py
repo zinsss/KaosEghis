@@ -228,6 +228,8 @@ class VaccineTab(QWidget):
         self.fetch_button.clicked.connect(self.fetch_current_patient_from_emr)
         self.save_button = QPushButton("Save record")
         self.save_button.clicked.connect(self.save_record)
+        self.new_record_button = QPushButton("New vaccine record")
+        self.new_record_button.clicked.connect(self.start_new_vaccine_record)
         self.print_button = QPushButton("Print label")
         self.print_button.clicked.connect(self.print_label)
         self.clear_button = QPushButton("Clear form")
@@ -629,6 +631,19 @@ class VaccineTab(QWidget):
             widget.clear()
         self.status_label.setText("Form cleared.")
 
+    def start_new_vaccine_record(self) -> None:
+        """Keep the fetched patient context while preparing another vaccine entry."""
+
+        self._current_record_id = None
+        self.vaccine_types_list.clearSelection()
+        self.vaccine_types_list.setCurrentItem(None)
+        self.chart_note_preview.clear()
+        self._reset_influenza_check()
+        self._refresh_previews()
+        self.status_label.setText(
+            "Patient context retained. Select the next vaccine type."
+        )
+
     def save_vaccine_settings(self) -> None:
         if self.settings_page.save_settings():
             self.status_label.setText("Vaccine settings saved.")
@@ -962,6 +977,7 @@ class VaccineTab(QWidget):
         controls.addWidget(self.fetch_button)
         controls.addWidget(self.influenza_check_button)
         controls.addWidget(self.save_button)
+        controls.addWidget(self.new_record_button)
         controls.addWidget(self.print_button)
         controls.addWidget(self.clear_button)
         controls.addStretch()

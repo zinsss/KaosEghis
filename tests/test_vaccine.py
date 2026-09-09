@@ -788,6 +788,52 @@ def test_vaccine_tab_uses_three_internal_pages(tmp_path) -> None:
     assert page.settings_page.printer_name_input.text() == "4BARCODE 4B-2054L"
 
 
+def test_new_vaccine_record_retains_patient_context_for_simultaneous_vaccinations(
+    tmp_path,
+) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import list_vaccine_records
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineTab(db_path)
+    page.patient_chart_no_input.setText("2735")
+    page.patient_resident_id_input.setText("700101-1234567")
+    page.patient_name_input.setText("Test Patient")
+    page.patient_sex_input.setText("M")
+    page.patient_age_input.setText("56")
+    page.patient_phone_input.setText("010-1111-2222")
+
+    page._select_vaccine_type(None, "Influenza")
+    first = page.save_record()
+
+    assert first is not None
+    assert page._current_record_id == first.id
+
+    page.start_new_vaccine_record()
+
+    assert page._current_record_id is None
+    assert page.patient_chart_no_input.text() == "2735"
+    assert page.patient_resident_id_input.text() == "700101-1234567"
+    assert page.patient_name_input.text() == "Test Patient"
+    assert page.vaccine_types_list.currentItem() is None
+
+    page._select_vaccine_type(None, "COVID-19")
+    second = page.save_record()
+
+    assert second is not None
+    assert second.id != first.id
+    with connect(db_path) as connection:
+        records = list_vaccine_records(connection)
+    assert [(record.vaccine_type_name, record.patient_chart_no) for record in records] == [
+        ("COVID-19", "2735"),
+        ("Influenza", "2735"),
+    ]
+
+
 def test_vaccine_tab_db_buckets_split_records_by_type(tmp_path) -> None:
     _app()
 
