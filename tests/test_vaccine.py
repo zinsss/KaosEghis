@@ -915,3 +915,34 @@ def test_vaccine_tab_db_buckets_split_records_by_type(tmp_path) -> None:
     assert page.flu_records_table.rowCount() == 1
     assert page.covid_records_table.rowCount() == 1
     assert page.general_records_table.rowCount() == 1
+
+
+def test_session_keeper_is_opt_in_and_never_clicks_during_vaccine_tab_startup(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+    from KaosEghis.ui.tabs import vaccine_tab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(connection, {"vaccine_session_keeper_enabled": "true"})
+
+    reset_calls = []
+    monkeypatch.setattr(
+        vaccine_tab,
+        "reset_vaccine_session",
+        lambda target: reset_calls.append(target),
+    )
+    page = vaccine_tab.VaccineTab(db_path)
+
+    assert reset_calls == []
+    assert set(page._session_keeper_timers) == {"general", "covid"}
+    assert all(timer.isActive() for timer in page._session_keeper_timers.values())
+    assert "first check in 90 minutes" in (
+        page.settings_page.system_targets_editor.session_keeper_status_label.text()
+    )

@@ -241,6 +241,7 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     assert targets.covid_resident_y_input.value() == 2107
     assert targets.covid_keepalive_x_input.value() == 2456
     assert targets.covid_keepalive_y_input.value() == 1982
+    assert targets.session_keeper_enabled_check.isChecked() is False
 
 
 def test_system_target_settings_save_editable_stable_values_without_handle(
@@ -286,6 +287,24 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
     assert settings["vaccine_covid_system_keepalive_x"] == "401"
     assert settings["vaccine_covid_system_keepalive_y"] == "402"
     assert "1513248" not in settings.values()
+
+
+def test_system_target_settings_save_session_keeper_opt_in(tmp_path) -> None:
+    _app()
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings
+    from KaosEghis.ui.tabs.vaccine_settings_page import VaccineSettingsPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineSettingsPage(db_path)
+    page.system_targets_editor.session_keeper_enabled_check.setChecked(True)
+
+    assert page.save_settings()
+
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+    assert settings["vaccine_session_keeper_enabled"] == "true"
 
 
 def test_external_system_coordinate_migration_updates_only_old_seed_values(tmp_path) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -35,6 +35,12 @@ from KaosEghis.core.printer_service import (
 from KaosEghis.core.vaccine_patient_context import (
     fetch_vaccine_patient_context,
     resident_id_for_label,
+)
+from KaosEghis.core.vaccine_session_keeper import (
+    SESSION_KEEPER_INTERVAL_MS,
+    VaccineSessionResetTarget,
+    configured_session_reset_targets,
+    reset_vaccine_session,
 )
 from KaosEghis.core.vaccine_eligibility import (
     CovidEligibilityResult,
@@ -140,6 +146,8 @@ class VaccineTab(QWidget):
         self._db_path = db_path
         self._current_record_id: int | None = None
         self._prepared_pair_ids: tuple[int, int] | None = None
+        self._session_keeper_targets: dict[str, VaccineSessionResetTarget] = {}
+        self._session_keeper_timers: dict[str, QTimer] = {}
         self.nav_buttons: dict[str, QPushButton] = {}
         self.top_nav_row = QHBoxLayout()
         self.stacked_widget = QStackedWidget()
@@ -299,6 +307,7 @@ class VaccineTab(QWidget):
 
         self.show_page(0)
         self.refresh_view()
+        self._configure_session_keeper()
 
     def activate_page(self) -> None:
         self.refresh_view()
@@ -806,7 +815,67 @@ class VaccineTab(QWidget):
             )
         self._update_today_counts(settings, counts)
         self._reset_influenza_check()
+        self._configure_session_keeper(settings)
         self.status_label.setText("Vaccine settings loaded.")
+
+    def _configure_session_keeper(self, settings: dict[str, str] | None = None) -> None:
+        """Arm independent General/COVID timers only after opt-in configuration."""
+
+        if settings is None:
+            initialize_database(self._db_path)
+            with connect(self._db_path) as connection:
+                settings = get_settings(connection)
+
+        for timer in self._session_keeper_timers.values():
+            timer.stop()
+        self._session_keeper_targets.clear()
+
+        enabled = str(settings.get("vaccine_session_keeper_enabled", "false")).strip().lower()
+        if enabled not in {"1", "true", "yes", "on"}:
+            self.settings_page.system_targets_editor.set_session_keeper_status(
+                "Session keeper: off."
+            )
+            return
+
+        missing = []
+        for target in configured_session_reset_targets(settings):
+            if not target.is_configured:
+                missing.append(target.label)
+                continue
+            self._session_keeper_targets[target.key] = target
+            timer = self._session_keeper_timers.get(target.key)
+            if timer is None:
+                timer = QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(
+                    lambda target_key=target.key: self._run_session_keeper(target_key)
+                )
+                self._session_keeper_timers[target.key] = timer
+            # First action is delayed: construction/configuration never clicks a system.
+            timer.start(SESSION_KEEPER_INTERVAL_MS)
+
+        if missing:
+            self.settings_page.system_targets_editor.set_session_keeper_status(
+                "Session keeper: configuration required for " + ", ".join(missing) + "."
+            )
+        else:
+            self.settings_page.system_targets_editor.set_session_keeper_status(
+                "Session keeper: armed for General and COVID; first check in 90 minutes."
+            )
+
+    def _run_session_keeper(self, target_key: str) -> None:
+        target = self._session_keeper_targets.get(target_key)
+        timer = self._session_keeper_timers.get(target_key)
+        if target is None or timer is None:
+            return
+
+        result = reset_vaccine_session(target)
+        self.settings_page.system_targets_editor.set_session_keeper_status(
+            f"{target.label}: {result.message}"
+        )
+        # A closed, moved, or covered system is skipped. The next independent check
+        # remains delayed by the full interval rather than repeatedly probing it.
+        timer.start(SESSION_KEEPER_INTERVAL_MS)
 
     def add_vaccine_type(self) -> None:
         dialog = VaccineTypeDialog(self)

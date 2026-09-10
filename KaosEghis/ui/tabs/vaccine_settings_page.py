@@ -288,7 +288,7 @@ class VaccineProgramEditor(QWidget):
 
 
 class VaccineSystemTargetsEditor(QWidget):
-    """Editable stable selectors for the future external-system handoff."""
+    """Editable stable selectors for external-system handoff and session reset."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -312,6 +312,11 @@ class VaccineSystemTargetsEditor(QWidget):
         self.covid_resident_y_input = self._coordinate_input()
         self.covid_keepalive_x_input = self._coordinate_input()
         self.covid_keepalive_y_input = self._coordinate_input()
+        self.session_keeper_enabled_check = QCheckBox(
+            "Keep General and COVID sessions active every 90 minutes"
+        )
+        self.session_keeper_status_label = QLabel("Session keeper: off.")
+        self.session_keeper_status_label.setWordWrap(True)
 
         general_group = QGroupBox("General vaccine system")
         general_form = QFormLayout(general_group)
@@ -355,11 +360,21 @@ class VaccineSystemTargetsEditor(QWidget):
             "coordinates instead. These settings do not submit vaccination records."
         )
         note.setWordWrap(True)
+        session_note = QLabel(
+            "When enabled, KaosEghis checks only the configured General and COVID "
+            "native windows every 90 minutes. It clicks the saved session-reset point "
+            "only when that exact visible window owns the point. It never runs for "
+            "the Influenza browser, types credentials, or changes vaccination records."
+        )
+        session_note.setWordWrap(True)
 
         layout = QVBoxLayout(self)
         layout.addWidget(general_group)
         layout.addWidget(influenza_group)
         layout.addWidget(covid_group)
+        layout.addWidget(self.session_keeper_enabled_check)
+        layout.addWidget(session_note)
+        layout.addWidget(self.session_keeper_status_label)
         layout.addWidget(note)
         layout.addStretch()
 
@@ -426,6 +441,9 @@ class VaccineSystemTargetsEditor(QWidget):
         self.covid_keepalive_y_input.setValue(
             _setting_coordinate(settings, "vaccine_covid_system_keepalive_y")
         )
+        self.session_keeper_enabled_check.setChecked(
+            _as_bool(settings.get("vaccine_session_keeper_enabled", "false"))
+        )
 
     def values(self) -> dict[str, str]:
         return {
@@ -483,7 +501,13 @@ class VaccineSystemTargetsEditor(QWidget):
             "vaccine_covid_system_keepalive_y": str(
                 self.covid_keepalive_y_input.value()
             ),
+            "vaccine_session_keeper_enabled": (
+                "true" if self.session_keeper_enabled_check.isChecked() else "false"
+            ),
         }
+
+    def set_session_keeper_status(self, message: str) -> None:
+        self.session_keeper_status_label.setText(message)
 
 
 class VaccineSettingsPage(QWidget):

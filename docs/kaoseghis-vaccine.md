@@ -322,9 +322,28 @@ stable UIA automation IDs, and coordinate fallbacks. It intentionally does not s
 numeric Windows/UIA Handle values because the operating system recreates them every
 application launch.
 
-The saved General/COVID session-reset coordinates are reserved for the planned opt-in
-two-hour session keeper. The Influenza browser system has no corresponding idle timeout
-or reset action and is excluded. Saving these values does not enable background clicks.
+### Opt-in Native Session Keeper
+
+General and COVID are native systems that time out after approximately two hours. Their
+saved session-reset coordinates can be used by the opt-in **Keep General and COVID
+sessions active every 90 minutes** setting in `Vaccine -> Settings -> System targets`.
+
+When enabled, KaosEghis starts two independent, process-local 90-minute timers. Startup
+and enabling the setting do **not** click either system; the first check occurs only
+after the full interval. At a due time, KaosEghis clicks a reset point only after all of
+the following are true:
+
+- exactly one visible native window has the configured exact title and class;
+- the window is not minimized;
+- the saved reset point is inside that window; and
+- the window at that point belongs to the verified system rather than an overlapping
+  application.
+
+If any check fails, KaosEghis sends no input and tries again only at that system's next
+90-minute interval. The status is shown in System targets. The keeper never interacts
+with the Influenza browser, enters credentials, searches for patients, reads patient
+data, or changes/submits vaccination records. It is only a non-clinical idle-session
+reset convenience and remains disabled by default.
 
 ## Combined Influenza + COVID Workflow
 

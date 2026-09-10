@@ -81,6 +81,7 @@ DEFAULT_SETTINGS = {
     "vaccine_covid_system_resident_y": "2107",
     "vaccine_covid_system_keepalive_x": "2456",
     "vaccine_covid_system_keepalive_y": "1982",
+    "vaccine_session_keeper_enabled": "false",
     "vaccine_schedule_rules_json": json.dumps(
         {
             "influenza": {
