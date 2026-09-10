@@ -134,6 +134,9 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - Raspberry Pi OS Lite kiosk with no mouse exit, automatic recovery, and scheduled
   display wake/sleep
 - no Raspberry Pi durable PHI storage
+- the current successor direction is a separate KaosOrders service with signal-driven,
+  read-only reconciliation after eGHIS F6/F7 actions; captured target and timing notes:
+  `docs/kaosorders.md`
 
 ### KaosEghis-scan
 
