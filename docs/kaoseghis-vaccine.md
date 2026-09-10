@@ -1,6 +1,6 @@
 # KaosEghis-vaccine
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 ## Status
 
@@ -277,13 +277,43 @@ engine remains compatible.
    counter state, and reason for any block or exception.
 6. The operator reviews or edits the prepared label and chart text.
 7. An explicit action prints the thermal label.
-8. An explicit action focuses the selected vaccination program and enters the
-   patient's national ID into its known input field.
+8. An explicit action focuses the system configured for the selected vaccine, enters
+   the patient's normalized resident number into its verified input field, and sends
+   one `Enter` to start that system's patient lookup.
 9. KaosEghis returns focus to eGHIS and prepares the configured vaccination chart text.
 10. The operator confirms or edits the entry in both eGHIS and the vaccination program.
 
 KaosEghis must never submit the final vaccination record without an explicit operator
 action.
+
+### External System Handoff
+
+The future `Prepare selected system` action is limited to the selected vaccine's
+configured external system:
+
+1. Verify and focus the expected system window.
+2. Resolve or click its configured resident-number input.
+3. Type the resident number with its hyphen removed.
+4. Send one `Enter` to request that system's patient lookup.
+5. Stop. All subsequent search-result review, eligibility confirmation, entry, and
+   final registration remain manual operator actions.
+
+It must never open an unrelated system, select a vaccine program implicitly, submit a
+vaccination record, or continue after an unexpected window/target failure.
+
+Current captured target directions are configuration, not active automation:
+
+- General vaccine system: top-level window name `예방접종통합관리시스템`, class
+  `CyWindowClass`, with a configured resident-number click coordinate because the
+  input does not expose a distinct UIA control.
+- Influenza browser system: the resident-number field exposes Automation ID
+  `edtPtntRrn1` (`Edit`, `w2input`). It still requires a configured browser-window/tab
+  scope before the field may be resolved.
+- COVID system: its verified window scope and resident-number target remain to be
+  captured before any handoff action can be enabled.
+
+Resident numbers remain available only to the selected workflow's transient input path;
+they must not appear in automation logs or status messages.
 
 ## Combined Influenza + COVID Workflow
 
