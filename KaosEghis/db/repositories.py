@@ -63,6 +63,20 @@ DEFAULT_SETTINGS = {
     "vaccine_influenza_daily_cap": "100",
     "vaccine_covid_daily_cap": "100",
     "vaccine_label_printer_name": "4BARCODE 4B-2054L",
+    "vaccine_general_system_window_title": "예방접종통합관리시스템",
+    "vaccine_general_system_window_class": "CyWindowClass",
+    "vaccine_general_system_resident_x": "443",
+    "vaccine_general_system_resident_y": "2076",
+    "vaccine_influenza_system_window_title": "",
+    "vaccine_influenza_system_resident_automation_id": "edtPtntRrn1",
+    "vaccine_influenza_system_resident_control_type": "Edit",
+    "vaccine_influenza_system_resident_class": "w2input w2input_focus",
+    "vaccine_influenza_system_resident_x": "2924",
+    "vaccine_influenza_system_resident_y": "1415",
+    "vaccine_covid_system_window_title": "",
+    "vaccine_covid_system_window_class": "",
+    "vaccine_covid_system_resident_x": "0",
+    "vaccine_covid_system_resident_y": "0",
     "vaccine_schedule_rules_json": json.dumps(
         {
             "influenza": {

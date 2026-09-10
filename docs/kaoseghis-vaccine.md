@@ -315,6 +315,11 @@ Current captured target directions are configuration, not active automation:
 Resident numbers remain available only to the selected workflow's transient input path;
 they must not appear in automation logs or status messages.
 
+`Vaccine -> Settings -> System targets` stores these editable window titles, classes,
+stable UIA automation IDs, and coordinate fallbacks. It intentionally does not store
+numeric Windows/UIA Handle values because the operating system recreates them every
+application launch.
+
 ## Combined Influenza + COVID Workflow
 
 National influenza and COVID vaccination seasons commonly overlap. KaosEghis-vaccine

@@ -213,3 +213,60 @@ def test_database_has_no_multi_year_vaccine_season_table(tmp_path) -> None:
             "AND name = 'vaccine_program_seasons'"
         ).fetchone()
     assert table is None
+
+
+def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None:
+    _app()
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.vaccine_settings_page import VaccineSettingsPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineSettingsPage(db_path)
+    targets = page.system_targets_editor
+
+    assert page.tabs.tabText(2) == "System targets"
+    assert targets.general_window_title_input.text() == "예방접종통합관리시스템"
+    assert targets.general_window_class_input.text() == "CyWindowClass"
+    assert targets.general_resident_x_input.value() == 443
+    assert targets.general_resident_y_input.value() == 2076
+    assert targets.influenza_resident_automation_id_input.text() == "edtPtntRrn1"
+    assert targets.influenza_resident_x_input.value() == 2924
+    assert targets.influenza_resident_y_input.value() == 1415
+
+
+def test_system_target_settings_save_editable_stable_values_without_handle(
+    tmp_path,
+) -> None:
+    _app()
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings
+    from KaosEghis.ui.tabs.vaccine_settings_page import VaccineSettingsPage
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineSettingsPage(db_path)
+    targets = page.system_targets_editor
+    targets.general_window_title_input.setText("Updated general system")
+    targets.general_resident_x_input.setValue(100)
+    targets.general_resident_y_input.setValue(200)
+    targets.influenza_window_title_input.setText("Influenza browser")
+    targets.influenza_resident_automation_id_input.setText("updatedResidentInput")
+    targets.influenza_resident_x_input.setValue(300)
+    targets.influenza_resident_y_input.setValue(400)
+
+    assert page.save_settings()
+
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+    assert settings["vaccine_general_system_window_title"] == "Updated general system"
+    assert settings["vaccine_general_system_resident_x"] == "100"
+    assert settings["vaccine_general_system_resident_y"] == "200"
+    assert settings["vaccine_influenza_system_window_title"] == "Influenza browser"
+    assert (
+        settings["vaccine_influenza_system_resident_automation_id"]
+        == "updatedResidentInput"
+    )
+    assert settings["vaccine_influenza_system_resident_x"] == "300"
+    assert settings["vaccine_influenza_system_resident_y"] == "400"
+    assert "1513248" not in settings.values()

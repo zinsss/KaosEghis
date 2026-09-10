@@ -38,6 +38,13 @@ def test_vaccine_tables_and_seed_types_are_created(tmp_path) -> None:
     assert '"influenza"' in settings["vaccine_schedule_rules_json"]
     assert '"elderly_75_plus"' in settings["vaccine_age_groups_json"]
     assert settings["vaccine_label_printer_name"] == "4BARCODE 4B-2054L"
+    assert settings["vaccine_general_system_window_title"] == "예방접종통합관리시스템"
+    assert settings["vaccine_general_system_window_class"] == "CyWindowClass"
+    assert settings["vaccine_general_system_resident_x"] == "443"
+    assert settings["vaccine_general_system_resident_y"] == "2076"
+    assert settings["vaccine_influenza_system_resident_automation_id"] == "edtPtntRrn1"
+    assert settings["vaccine_influenza_system_resident_x"] == "2924"
+    assert settings["vaccine_influenza_system_resident_y"] == "1415"
 
 
 def test_vaccine_label_printer_reports_unavailable_printer_without_printing(

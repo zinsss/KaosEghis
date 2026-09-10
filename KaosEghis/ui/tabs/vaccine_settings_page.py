@@ -287,6 +287,173 @@ class VaccineProgramEditor(QWidget):
         )
 
 
+class VaccineSystemTargetsEditor(QWidget):
+    """Editable stable selectors for the future external-system handoff."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.general_window_title_input = QLineEdit()
+        self.general_window_class_input = QLineEdit()
+        self.general_resident_x_input = self._coordinate_input()
+        self.general_resident_y_input = self._coordinate_input()
+
+        self.influenza_window_title_input = QLineEdit()
+        self.influenza_resident_automation_id_input = QLineEdit()
+        self.influenza_resident_control_type_input = QLineEdit()
+        self.influenza_resident_class_input = QLineEdit()
+        self.influenza_resident_x_input = self._coordinate_input()
+        self.influenza_resident_y_input = self._coordinate_input()
+
+        self.covid_window_title_input = QLineEdit()
+        self.covid_window_class_input = QLineEdit()
+        self.covid_resident_x_input = self._coordinate_input()
+        self.covid_resident_y_input = self._coordinate_input()
+
+        general_group = QGroupBox("General vaccine system")
+        general_form = QFormLayout(general_group)
+        general_form.addRow("Window title", self.general_window_title_input)
+        general_form.addRow("Window class", self.general_window_class_input)
+        general_form.addRow("Resident input X", self.general_resident_x_input)
+        general_form.addRow("Resident input Y", self.general_resident_y_input)
+
+        influenza_group = QGroupBox("Influenza browser system")
+        influenza_form = QFormLayout(influenza_group)
+        influenza_form.addRow("Window or tab title", self.influenza_window_title_input)
+        influenza_form.addRow(
+            "Resident input automation ID",
+            self.influenza_resident_automation_id_input,
+        )
+        influenza_form.addRow(
+            "Resident input control type",
+            self.influenza_resident_control_type_input,
+        )
+        influenza_form.addRow(
+            "Resident input class",
+            self.influenza_resident_class_input,
+        )
+        influenza_form.addRow("Fallback input X", self.influenza_resident_x_input)
+        influenza_form.addRow("Fallback input Y", self.influenza_resident_y_input)
+
+        covid_group = QGroupBox("COVID system")
+        covid_form = QFormLayout(covid_group)
+        covid_form.addRow("Window title", self.covid_window_title_input)
+        covid_form.addRow("Window class", self.covid_window_class_input)
+        covid_form.addRow("Resident input X", self.covid_resident_x_input)
+        covid_form.addRow("Resident input Y", self.covid_resident_y_input)
+
+        note = QLabel(
+            "Windows Handle values are not saved because they change each time an "
+            "application starts. Save stable window titles, UIA automation IDs, and "
+            "coordinates instead. These settings do not submit vaccination records."
+        )
+        note.setWordWrap(True)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(general_group)
+        layout.addWidget(influenza_group)
+        layout.addWidget(covid_group)
+        layout.addWidget(note)
+        layout.addStretch()
+
+    @staticmethod
+    def _coordinate_input() -> QSpinBox:
+        input_widget = QSpinBox()
+        input_widget.setRange(0, 9999)
+        return input_widget
+
+    def load_values(self, settings: dict[str, str]) -> None:
+        self.general_window_title_input.setText(
+            settings.get("vaccine_general_system_window_title", "")
+        )
+        self.general_window_class_input.setText(
+            settings.get("vaccine_general_system_window_class", "")
+        )
+        self.general_resident_x_input.setValue(
+            _setting_coordinate(settings, "vaccine_general_system_resident_x")
+        )
+        self.general_resident_y_input.setValue(
+            _setting_coordinate(settings, "vaccine_general_system_resident_y")
+        )
+
+        self.influenza_window_title_input.setText(
+            settings.get("vaccine_influenza_system_window_title", "")
+        )
+        self.influenza_resident_automation_id_input.setText(
+            settings.get("vaccine_influenza_system_resident_automation_id", "")
+        )
+        self.influenza_resident_control_type_input.setText(
+            settings.get("vaccine_influenza_system_resident_control_type", "")
+        )
+        self.influenza_resident_class_input.setText(
+            settings.get("vaccine_influenza_system_resident_class", "")
+        )
+        self.influenza_resident_x_input.setValue(
+            _setting_coordinate(settings, "vaccine_influenza_system_resident_x")
+        )
+        self.influenza_resident_y_input.setValue(
+            _setting_coordinate(settings, "vaccine_influenza_system_resident_y")
+        )
+
+        self.covid_window_title_input.setText(
+            settings.get("vaccine_covid_system_window_title", "")
+        )
+        self.covid_window_class_input.setText(
+            settings.get("vaccine_covid_system_window_class", "")
+        )
+        self.covid_resident_x_input.setValue(
+            _setting_coordinate(settings, "vaccine_covid_system_resident_x")
+        )
+        self.covid_resident_y_input.setValue(
+            _setting_coordinate(settings, "vaccine_covid_system_resident_y")
+        )
+
+    def values(self) -> dict[str, str]:
+        return {
+            "vaccine_general_system_window_title": (
+                self.general_window_title_input.text().strip()
+            ),
+            "vaccine_general_system_window_class": (
+                self.general_window_class_input.text().strip()
+            ),
+            "vaccine_general_system_resident_x": str(
+                self.general_resident_x_input.value()
+            ),
+            "vaccine_general_system_resident_y": str(
+                self.general_resident_y_input.value()
+            ),
+            "vaccine_influenza_system_window_title": (
+                self.influenza_window_title_input.text().strip()
+            ),
+            "vaccine_influenza_system_resident_automation_id": (
+                self.influenza_resident_automation_id_input.text().strip()
+            ),
+            "vaccine_influenza_system_resident_control_type": (
+                self.influenza_resident_control_type_input.text().strip()
+            ),
+            "vaccine_influenza_system_resident_class": (
+                self.influenza_resident_class_input.text().strip()
+            ),
+            "vaccine_influenza_system_resident_x": str(
+                self.influenza_resident_x_input.value()
+            ),
+            "vaccine_influenza_system_resident_y": str(
+                self.influenza_resident_y_input.value()
+            ),
+            "vaccine_covid_system_window_title": (
+                self.covid_window_title_input.text().strip()
+            ),
+            "vaccine_covid_system_window_class": (
+                self.covid_window_class_input.text().strip()
+            ),
+            "vaccine_covid_system_resident_x": str(
+                self.covid_resident_x_input.value()
+            ),
+            "vaccine_covid_system_resident_y": str(
+                self.covid_resident_y_input.value()
+            ),
+        }
+
+
 class VaccineSettingsPage(QWidget):
     settings_changed = Signal()
 
@@ -298,8 +465,10 @@ class VaccineSettingsPage(QWidget):
         self.tabs = QTabWidget()
         self.influenza_editor = VaccineProgramEditor("influenza")
         self.covid_editor = VaccineProgramEditor("covid")
+        self.system_targets_editor = VaccineSystemTargetsEditor()
         self.tabs.addTab(self.influenza_editor, "Influenza schedule")
         self.tabs.addTab(self.covid_editor, "COVID schedule")
+        self.tabs.addTab(self.system_targets_editor, "System targets")
 
         self.printer_name_input = QLineEdit()
         printer_group = QGroupBox("Thermal label printer")
@@ -345,6 +514,7 @@ class VaccineSettingsPage(QWidget):
         self.printer_name_input.setText(
             settings.get("vaccine_label_printer_name", "4BARCODE 4B-2054L")
         )
+        self.system_targets_editor.load_values(settings)
         self.status_label.setText("Vaccine settings loaded.")
 
     def reload(self) -> None:
@@ -397,7 +567,8 @@ class VaccineSettingsPage(QWidget):
                         self.covid_editor.daily_cap_input.value()
                     ),
                     "vaccine_label_printer_name": self.printer_name_input.text().strip(),
-                },
+                }
+                | self.system_targets_editor.values(),
             )
         self._schedule_data = schedule_data
         self._age_groups = age_groups
@@ -426,3 +597,10 @@ def _as_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _setting_coordinate(settings: dict[str, str], key: str) -> int:
+    try:
+        return max(0, min(int(settings.get(key, "0")), 9999))
+    except (TypeError, ValueError):
+        return 0
