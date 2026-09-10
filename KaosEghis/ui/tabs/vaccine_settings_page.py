@@ -296,6 +296,8 @@ class VaccineSystemTargetsEditor(QWidget):
         self.general_window_class_input = QLineEdit()
         self.general_resident_x_input = self._coordinate_input()
         self.general_resident_y_input = self._coordinate_input()
+        self.general_keepalive_x_input = self._coordinate_input()
+        self.general_keepalive_y_input = self._coordinate_input()
 
         self.influenza_window_title_input = QLineEdit()
         self.influenza_resident_automation_id_input = QLineEdit()
@@ -308,6 +310,8 @@ class VaccineSystemTargetsEditor(QWidget):
         self.covid_window_class_input = QLineEdit()
         self.covid_resident_x_input = self._coordinate_input()
         self.covid_resident_y_input = self._coordinate_input()
+        self.covid_keepalive_x_input = self._coordinate_input()
+        self.covid_keepalive_y_input = self._coordinate_input()
 
         general_group = QGroupBox("General vaccine system")
         general_form = QFormLayout(general_group)
@@ -315,6 +319,8 @@ class VaccineSystemTargetsEditor(QWidget):
         general_form.addRow("Window class", self.general_window_class_input)
         general_form.addRow("Resident input X", self.general_resident_x_input)
         general_form.addRow("Resident input Y", self.general_resident_y_input)
+        general_form.addRow("Session reset X", self.general_keepalive_x_input)
+        general_form.addRow("Session reset Y", self.general_keepalive_y_input)
 
         influenza_group = QGroupBox("Influenza browser system")
         influenza_form = QFormLayout(influenza_group)
@@ -340,6 +346,8 @@ class VaccineSystemTargetsEditor(QWidget):
         covid_form.addRow("Window class", self.covid_window_class_input)
         covid_form.addRow("Resident input X", self.covid_resident_x_input)
         covid_form.addRow("Resident input Y", self.covid_resident_y_input)
+        covid_form.addRow("Session reset X", self.covid_keepalive_x_input)
+        covid_form.addRow("Session reset Y", self.covid_keepalive_y_input)
 
         note = QLabel(
             "Windows Handle values are not saved because they change each time an "
@@ -374,6 +382,12 @@ class VaccineSystemTargetsEditor(QWidget):
         self.general_resident_y_input.setValue(
             _setting_coordinate(settings, "vaccine_general_system_resident_y")
         )
+        self.general_keepalive_x_input.setValue(
+            _setting_coordinate(settings, "vaccine_general_system_keepalive_x")
+        )
+        self.general_keepalive_y_input.setValue(
+            _setting_coordinate(settings, "vaccine_general_system_keepalive_y")
+        )
 
         self.influenza_window_title_input.setText(
             settings.get("vaccine_influenza_system_window_title", "")
@@ -406,6 +420,12 @@ class VaccineSystemTargetsEditor(QWidget):
         self.covid_resident_y_input.setValue(
             _setting_coordinate(settings, "vaccine_covid_system_resident_y")
         )
+        self.covid_keepalive_x_input.setValue(
+            _setting_coordinate(settings, "vaccine_covid_system_keepalive_x")
+        )
+        self.covid_keepalive_y_input.setValue(
+            _setting_coordinate(settings, "vaccine_covid_system_keepalive_y")
+        )
 
     def values(self) -> dict[str, str]:
         return {
@@ -420,6 +440,12 @@ class VaccineSystemTargetsEditor(QWidget):
             ),
             "vaccine_general_system_resident_y": str(
                 self.general_resident_y_input.value()
+            ),
+            "vaccine_general_system_keepalive_x": str(
+                self.general_keepalive_x_input.value()
+            ),
+            "vaccine_general_system_keepalive_y": str(
+                self.general_keepalive_y_input.value()
             ),
             "vaccine_influenza_system_window_title": (
                 self.influenza_window_title_input.text().strip()
@@ -450,6 +476,12 @@ class VaccineSystemTargetsEditor(QWidget):
             ),
             "vaccine_covid_system_resident_y": str(
                 self.covid_resident_y_input.value()
+            ),
+            "vaccine_covid_system_keepalive_x": str(
+                self.covid_keepalive_x_input.value()
+            ),
+            "vaccine_covid_system_keepalive_y": str(
+                self.covid_keepalive_y_input.value()
             ),
         }
 

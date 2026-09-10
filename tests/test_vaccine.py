@@ -42,9 +42,15 @@ def test_vaccine_tables_and_seed_types_are_created(tmp_path) -> None:
     assert settings["vaccine_general_system_window_class"] == "CyWindowClass"
     assert settings["vaccine_general_system_resident_x"] == "443"
     assert settings["vaccine_general_system_resident_y"] == "2076"
+    assert settings["vaccine_general_system_keepalive_x"] == "1154"
+    assert settings["vaccine_general_system_keepalive_y"] == "1968"
     assert settings["vaccine_influenza_system_resident_automation_id"] == "edtPtntRrn1"
     assert settings["vaccine_influenza_system_resident_x"] == "2924"
     assert settings["vaccine_influenza_system_resident_y"] == "1415"
+    assert settings["vaccine_covid_system_window_title"] == "코로나19통합관리시스템"
+    assert settings["vaccine_covid_system_window_class"] == "CyWindowClass"
+    assert settings["vaccine_covid_system_keepalive_x"] == "2456"
+    assert settings["vaccine_covid_system_keepalive_y"] == "1982"
 
 
 def test_vaccine_label_printer_reports_unavailable_printer_without_printing(

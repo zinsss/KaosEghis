@@ -67,16 +67,20 @@ DEFAULT_SETTINGS = {
     "vaccine_general_system_window_class": "CyWindowClass",
     "vaccine_general_system_resident_x": "443",
     "vaccine_general_system_resident_y": "2076",
+    "vaccine_general_system_keepalive_x": "1154",
+    "vaccine_general_system_keepalive_y": "1968",
     "vaccine_influenza_system_window_title": "",
     "vaccine_influenza_system_resident_automation_id": "edtPtntRrn1",
     "vaccine_influenza_system_resident_control_type": "Edit",
     "vaccine_influenza_system_resident_class": "w2input w2input_focus",
     "vaccine_influenza_system_resident_x": "2924",
     "vaccine_influenza_system_resident_y": "1415",
-    "vaccine_covid_system_window_title": "",
-    "vaccine_covid_system_window_class": "",
+    "vaccine_covid_system_window_title": "코로나19통합관리시스템",
+    "vaccine_covid_system_window_class": "CyWindowClass",
     "vaccine_covid_system_resident_x": "0",
     "vaccine_covid_system_resident_y": "0",
+    "vaccine_covid_system_keepalive_x": "2456",
+    "vaccine_covid_system_keepalive_y": "1982",
     "vaccine_schedule_rules_json": json.dumps(
         {
             "influenza": {

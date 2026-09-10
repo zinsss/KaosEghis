@@ -305,12 +305,15 @@ Current captured target directions are configuration, not active automation:
 
 - General vaccine system: top-level window name `예방접종통합관리시스템`, class
   `CyWindowClass`, with a configured resident-number click coordinate because the
-  input does not expose a distinct UIA control.
+  input does not expose a distinct UIA control. Its configured non-clinical
+  session-reset coordinate is `(1154, 1968)`.
 - Influenza browser system: the resident-number field exposes Automation ID
   `edtPtntRrn1` (`Edit`, `w2input`). It still requires a configured browser-window/tab
   scope before the field may be resolved.
-- COVID system: its verified window scope and resident-number target remain to be
-  captured before any handoff action can be enabled.
+- COVID system: top-level window name `코로나19통합관리시스템`, class
+  `CyWindowClass`. Its configured non-clinical session-reset coordinate is
+  `(2456, 1982)`; its resident-number target remains to be captured before a COVID
+  handoff action can be enabled.
 
 Resident numbers remain available only to the selected workflow's transient input path;
 they must not appear in automation logs or status messages.
@@ -319,6 +322,10 @@ they must not appear in automation logs or status messages.
 stable UIA automation IDs, and coordinate fallbacks. It intentionally does not store
 numeric Windows/UIA Handle values because the operating system recreates them every
 application launch.
+
+The saved General/COVID session-reset coordinates are reserved for the planned opt-in
+two-hour session keeper. The Influenza browser system has no corresponding idle timeout
+or reset action and is excluded. Saving these values does not enable background clicks.
 
 ## Combined Influenza + COVID Workflow
 
