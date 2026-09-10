@@ -149,6 +149,7 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_vaccine_tables(connection)
         _migrate_unconfigured_covid_schedule(connection)
         _migrate_rural_exception_defaults(connection)
+        _migrate_vaccine_external_system_coordinates(connection)
         _seed_default_emr_target_profile(connection)
         _seed_vaccine_emr_targets(connection)
         _seed_eghis_shutdown_targets(connection)
@@ -798,6 +799,42 @@ def _migrate_rural_exception_defaults(connection: sqlite3.Connection) -> None:
                 json.dumps(schedule_data, ensure_ascii=False, indent=2),
                 "vaccine_schedule_rules_json",
             ),
+        )
+
+
+def _migrate_vaccine_external_system_coordinates(connection: sqlite3.Connection) -> None:
+    """Correct only the short-lived seed coordinates captured before final review."""
+
+    coordinate_updates = (
+        (
+            "vaccine_general_system_resident_x",
+            "vaccine_general_system_resident_y",
+            ("443", "2076"),
+            ("448", "2074"),
+        ),
+        (
+            "vaccine_covid_system_resident_x",
+            "vaccine_covid_system_resident_y",
+            ("0", "0"),
+            ("1466", "2107"),
+        ),
+    )
+    for x_key, y_key, old_values, new_values in coordinate_updates:
+        rows = dict(
+            connection.execute(
+                "SELECT key, value FROM app_settings WHERE key IN (?, ?)",
+                (x_key, y_key),
+            ).fetchall()
+        )
+        if (rows.get(x_key), rows.get(y_key)) != old_values:
+            continue
+        connection.execute(
+            "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+            (new_values[0], x_key),
+        )
+        connection.execute(
+            "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+            (new_values[1], y_key),
         )
 
 

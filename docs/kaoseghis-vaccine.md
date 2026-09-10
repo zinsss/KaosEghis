@@ -304,7 +304,7 @@ vaccination record, or continue after an unexpected window/target failure.
 Current captured target directions are configuration, not active automation:
 
 - General vaccine system: top-level window name `예방접종통합관리시스템`, class
-  `CyWindowClass`, with a configured resident-number click coordinate because the
+  `CyWindowClass`, with resident-number input coordinate `(448, 2074)` because the
   input does not expose a distinct UIA control. Its configured non-clinical
   session-reset coordinate is `(1154, 1968)`.
 - Influenza browser system: the resident-number field exposes Automation ID
@@ -312,8 +312,7 @@ Current captured target directions are configuration, not active automation:
   scope before the field may be resolved.
 - COVID system: top-level window name `코로나19통합관리시스템`, class
   `CyWindowClass`. Its configured non-clinical session-reset coordinate is
-  `(2456, 1982)`; its resident-number target remains to be captured before a COVID
-  handoff action can be enabled.
+  `(2456, 1982)` and its resident-number input coordinate is `(1466, 2107)`.
 
 Resident numbers remain available only to the selected workflow's transient input path;
 they must not appear in automation logs or status messages.

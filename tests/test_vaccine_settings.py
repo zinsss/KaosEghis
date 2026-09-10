@@ -228,8 +228,8 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     assert page.tabs.tabText(2) == "System targets"
     assert targets.general_window_title_input.text() == "예방접종통합관리시스템"
     assert targets.general_window_class_input.text() == "CyWindowClass"
-    assert targets.general_resident_x_input.value() == 443
-    assert targets.general_resident_y_input.value() == 2076
+    assert targets.general_resident_x_input.value() == 448
+    assert targets.general_resident_y_input.value() == 2074
     assert targets.general_keepalive_x_input.value() == 1154
     assert targets.general_keepalive_y_input.value() == 1968
     assert targets.influenza_resident_automation_id_input.text() == "edtPtntRrn1"
@@ -237,6 +237,8 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     assert targets.influenza_resident_y_input.value() == 1415
     assert targets.covid_window_title_input.text() == "코로나19통합관리시스템"
     assert targets.covid_window_class_input.text() == "CyWindowClass"
+    assert targets.covid_resident_x_input.value() == 1466
+    assert targets.covid_resident_y_input.value() == 2107
     assert targets.covid_keepalive_x_input.value() == 2456
     assert targets.covid_keepalive_y_input.value() == 1982
 
@@ -284,3 +286,55 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
     assert settings["vaccine_covid_system_keepalive_x"] == "401"
     assert settings["vaccine_covid_system_keepalive_y"] == "402"
     assert "1513248" not in settings.values()
+
+
+def test_external_system_coordinate_migration_updates_only_old_seed_values(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "vaccine_general_system_resident_x": "443",
+                "vaccine_general_system_resident_y": "2076",
+                "vaccine_covid_system_resident_x": "0",
+                "vaccine_covid_system_resident_y": "0",
+            },
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+    assert settings["vaccine_general_system_resident_x"] == "448"
+    assert settings["vaccine_general_system_resident_y"] == "2074"
+    assert settings["vaccine_covid_system_resident_x"] == "1466"
+    assert settings["vaccine_covid_system_resident_y"] == "2107"
+
+
+def test_external_system_coordinate_migration_preserves_custom_values(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "vaccine_general_system_resident_x": "449",
+                "vaccine_general_system_resident_y": "2074",
+                "vaccine_covid_system_resident_x": "1466",
+                "vaccine_covid_system_resident_y": "2107",
+            },
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+    assert settings["vaccine_general_system_resident_x"] == "449"
+    assert settings["vaccine_general_system_resident_y"] == "2074"
+    assert settings["vaccine_covid_system_resident_x"] == "1466"
+    assert settings["vaccine_covid_system_resident_y"] == "2107"
