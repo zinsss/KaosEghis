@@ -1393,7 +1393,10 @@ class MacroRunner:
             import pyautogui
 
             pyautogui.write(password, interval=0.01)
-            MacroRunner._send_keys("{ENTER}")
+            # The eGHIS WinForms lock dialog handles a real foreground Enter through
+            # its dialog loop. A synthetic UIA key message can leave the visible
+            # password dialog open even though the password text was accepted.
+            pyautogui.press("enter")
             return True
         except Exception:
             return False

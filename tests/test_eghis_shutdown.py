@@ -881,6 +881,35 @@ def test_unlock_eghis_uses_vault_password_only_after_target_resolves(
     assert "test-lock-password" not in result.message
 
 
+def test_lock_password_submission_uses_physical_enter_after_typing(monkeypatch) -> None:
+    from KaosEghis.core.macro_runner import MacroRunner
+
+    events: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        "pyautogui.write",
+        lambda value, interval: events.append(("write", (value, interval))),
+    )
+    monkeypatch.setattr(
+        "pyautogui.press",
+        lambda key: events.append(("press", key)),
+    )
+    monkeypatch.setattr(
+        MacroRunner,
+        "_send_keys",
+        staticmethod(
+            lambda _keys: (_ for _ in ()).throw(
+                AssertionError("Lock submission must not use a synthetic key message.")
+            )
+        ),
+    )
+
+    assert MacroRunner._type_secret_and_submit("test-lock-password")
+    assert events == [
+        ("write", ("test-lock-password", 0.01)),
+        ("press", "enter"),
+    ]
+
+
 def test_unlock_eghis_blocks_without_unlocked_credential(monkeypatch) -> None:
     from KaosEghis.core.macro_models import MacroStep
     from KaosEghis.core.macro_runner import MacroRunner
