@@ -349,8 +349,9 @@ as a retry loop.
 
 The editable configuration under `Vaccine -> Settings -> System targets` contains only
 non-secret selectors: the portal URL, browser-title fragment, `공동인증서 로그인` control
-text, certificate-picker/password-window title fragments, certificate label, optional
-password Automation ID, password control type, confirmation-control text, and the
+text, optional captured login-button X/Y fallback, certificate-picker/password-window
+title fragments, certificate label, optional password Automation ID, password control
+type, confirmation-control text, and the
 KaosEghis-pw credential-entry reference. The initial certificate label is `이진성34`; the
 initial credential entry reference is `공인인증서 - 이진성`.
 
@@ -361,6 +362,12 @@ It types the vault password as Windows Unicode keyboard input directly into that
 verified control without using clipboard. Missing, stale, or ambiguous controls stop the
 sequence before the password is typed. The final status is only **login submitted**; the
 operator must still verify the portal completed authentication.
+
+Some Chrome installations do not expose portal controls through Windows UI Automation.
+For only the `공동인증서 로그인` portal button, the operator may save an Inspector-captured
+screen X/Y fallback. KaosEghis uses it only after it has identified exactly one visible
+KDCA browser window and verified that the screen point belongs to that same unminimized
+window. A zero coordinate disables this fallback; no generic foreground click occurs.
 
 The certificate password remains encrypted in KaosEghis-pw and is never copied to
 SQLite settings, macros, clipboard history, notifications, or logs. If the certificate

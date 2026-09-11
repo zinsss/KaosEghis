@@ -279,6 +279,8 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
     targets.influenza_resident_automation_id_input.setText("updatedResidentInput")
     targets.influenza_resident_x_input.setValue(300)
     targets.influenza_resident_y_input.setValue(400)
+    targets.kdca_login_x_input.setValue(500)
+    targets.kdca_login_y_input.setValue(600)
     targets.covid_keepalive_x_input.setValue(401)
     targets.covid_keepalive_y_input.setValue(402)
     targets.covid_launch_url_input.setText("https://example.test/covid")
@@ -301,6 +303,8 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
     )
     assert settings["vaccine_influenza_system_resident_x"] == "300"
     assert settings["vaccine_influenza_system_resident_y"] == "400"
+    assert settings["vaccine_kdca_login_x"] == "500"
+    assert settings["vaccine_kdca_login_y"] == "600"
     assert settings["vaccine_covid_system_keepalive_x"] == "401"
     assert settings["vaccine_covid_system_keepalive_y"] == "402"
     assert settings["vaccine_covid_system_launch_url"] == "https://example.test/covid"

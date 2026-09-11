@@ -20,6 +20,8 @@ class KdcaCertificateLoginConfig:
     portal_url: str
     browser_window_title_contains: str
     login_control_name: str
+    login_x: int
+    login_y: int
     certificate_window_title_contains: str
     certificate_name: str
     password_window_title_contains: str
@@ -39,6 +41,8 @@ class KdcaCertificateLoginConfig:
             login_control_name=str(
                 settings.get("vaccine_kdca_login_control_name", "")
             ).strip(),
+            login_x=_coordinate(settings.get("vaccine_kdca_login_x")),
+            login_y=_coordinate(settings.get("vaccine_kdca_login_y")),
             certificate_window_title_contains=str(
                 settings.get("vaccine_kdca_certificate_window_title_contains", "")
             ).strip(),
@@ -131,17 +135,19 @@ def start_kdca_certificate_login(
         browser_window,
         name=config.login_control_name,
     )
-    if login_control is None:
+    if login_control is not None:
+        if not _activate(login_control):
+            return _result(
+                False,
+                "login_control_failed",
+                "KDCA certificate login control could not be activated.",
+            )
+    elif not _click_configured_login_point(browser_window, config):
         return _result(
             False,
             "login_control_not_found",
-            "KDCA certificate login control was not found. No certificate password was typed.",
-        )
-    if not _activate(login_control):
-        return _result(
-            False,
-            "login_control_failed",
-            "KDCA certificate login control could not be activated.",
+            "KDCA certificate login control was not found. Set its captured X/Y fallback "
+            "in Vaccine System targets; no certificate password was typed.",
         )
 
     certificate_window = _wait_for_single_window(
@@ -216,6 +222,52 @@ def start_kdca_certificate_login(
 def _open_portal(url: str) -> bool:
     try:
         return bool(webbrowser.open(url, new=2, autoraise=True))
+    except Exception:
+        return False
+
+
+def _click_configured_login_point(
+    browser_window: Any,
+    config: KdcaCertificateLoginConfig,
+) -> bool:
+    """Use a captured portal point only while it belongs to the one trusted browser."""
+
+    if config.login_x <= 0 or config.login_y <= 0:
+        return False
+    browser_handle = _window_handle(browser_window)
+    if browser_handle is None or not _screen_point_belongs_to_window(
+        browser_handle,
+        config.login_x,
+        config.login_y,
+    ):
+        return False
+    try:
+        browser_window.set_focus()
+    except Exception:
+        return False
+    try:
+        import pyautogui
+
+        pyautogui.click(x=config.login_x, y=config.login_y, duration=0)
+        return True
+    except Exception:
+        return False
+
+
+def _screen_point_belongs_to_window(window_handle: int, x: int, y: int) -> bool:
+    try:
+        import win32con
+        import win32gui
+
+        if bool(win32gui.IsIconic(window_handle)):
+            return False
+        left, top, right, bottom = win32gui.GetWindowRect(window_handle)
+        if not (left <= x < right and top <= y < bottom):
+            return False
+        point_handle = int(win32gui.WindowFromPoint((x, y)) or 0)
+        if not point_handle:
+            return False
+        return int(win32gui.GetAncestor(point_handle, win32con.GA_ROOT)) == window_handle
     except Exception:
         return False
 
@@ -499,6 +551,13 @@ def _is_enabled(element: Any) -> bool:
 
 def _matches_text(actual: str, expected: str) -> bool:
     return actual.strip().casefold() == expected.strip().casefold()
+
+
+def _coordinate(value: object) -> int:
+    try:
+        return max(0, int(str(value or "0")))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _title_contains(actual: str, expected: str) -> bool:

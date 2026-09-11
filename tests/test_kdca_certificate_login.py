@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 from KaosEghis.core import kdca_certificate_login
@@ -208,4 +209,43 @@ def test_default_kdca_settings_are_non_secret_selectors() -> None:
     assert config.portal_url == "https://is.kdca.go.kr/"
     assert config.certificate_name == "이진성34"
     assert config.credential_reference == "공인인증서 - 이진성"
+    assert (config.login_x, config.login_y) == (0, 0)
     assert "password" not in config.credential_reference.casefold()
+
+
+def test_kdca_login_coordinate_fallback_requires_the_trusted_browser_point(
+    monkeypatch,
+) -> None:
+    config = kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(
+        _settings() | {"vaccine_kdca_login_x": "100", "vaccine_kdca_login_y": "200"}
+    )
+    browser = _Element(name="질병관리청", handle=101)
+    clicks: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        kdca_certificate_login,
+        "_screen_point_belongs_to_window",
+        lambda handle, x, y: (handle, x, y) == (101, 100, 200),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "pyautogui",
+        SimpleNamespace(click=lambda *, x, y, duration: clicks.append((x, y))),
+    )
+
+    assert kdca_certificate_login._click_configured_login_point(browser, config) is True
+    assert browser.focused is True
+    assert clicks == [(100, 200)]
+
+
+def test_kdca_login_coordinate_fallback_never_clicks_outside_browser(monkeypatch) -> None:
+    config = kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(
+        _settings() | {"vaccine_kdca_login_x": "100", "vaccine_kdca_login_y": "200"}
+    )
+    browser = _Element(name="질병관리청", handle=101)
+    monkeypatch.setattr(
+        kdca_certificate_login,
+        "_screen_point_belongs_to_window",
+        lambda *_args: False,
+    )
+
+    assert kdca_certificate_login._click_configured_login_point(browser, config) is False

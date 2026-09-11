@@ -88,6 +88,8 @@ DEFAULT_SETTINGS = {
     "vaccine_kdca_portal_url": "https://is.kdca.go.kr/",
     "vaccine_kdca_browser_window_title_contains": "질병관리청",
     "vaccine_kdca_login_control_name": "공동인증서 로그인",
+    "vaccine_kdca_login_x": "0",
+    "vaccine_kdca_login_y": "0",
     "vaccine_kdca_certificate_window_title_contains": "인증서",
     "vaccine_kdca_certificate_name": "이진성34",
     "vaccine_kdca_password_window_title_contains": "인증서",
