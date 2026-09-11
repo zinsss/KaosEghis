@@ -315,6 +315,17 @@ class VaccineSystemTargetsEditor(QWidget):
         self.covid_resident_y_input = self._coordinate_input()
         self.covid_keepalive_x_input = self._coordinate_input()
         self.covid_keepalive_y_input = self._coordinate_input()
+
+        self.kdca_portal_url_input = QLineEdit()
+        self.kdca_browser_title_input = QLineEdit()
+        self.kdca_login_control_name_input = QLineEdit()
+        self.kdca_certificate_window_title_input = QLineEdit()
+        self.kdca_certificate_name_input = QLineEdit()
+        self.kdca_password_window_title_input = QLineEdit()
+        self.kdca_password_automation_id_input = QLineEdit()
+        self.kdca_password_control_type_input = QLineEdit()
+        self.kdca_confirm_control_name_input = QLineEdit()
+        self.kdca_credential_reference_input = QLineEdit()
         self.session_keeper_enabled_check = QCheckBox(
             "Keep General and COVID sessions active every 90 minutes"
         )
@@ -360,6 +371,34 @@ class VaccineSystemTargetsEditor(QWidget):
         covid_form.addRow("Session reset X", self.covid_keepalive_x_input)
         covid_form.addRow("Session reset Y", self.covid_keepalive_y_input)
 
+        kdca_group = QGroupBox("KDCA certificate login")
+        kdca_form = QFormLayout(kdca_group)
+        kdca_form.addRow("Portal URL", self.kdca_portal_url_input)
+        kdca_form.addRow("Browser title contains", self.kdca_browser_title_input)
+        kdca_form.addRow("Login control text", self.kdca_login_control_name_input)
+        kdca_form.addRow(
+            "Certificate picker title contains",
+            self.kdca_certificate_window_title_input,
+        )
+        kdca_form.addRow("Certificate label", self.kdca_certificate_name_input)
+        kdca_form.addRow(
+            "Password window title contains",
+            self.kdca_password_window_title_input,
+        )
+        kdca_form.addRow(
+            "Password automation ID (optional)",
+            self.kdca_password_automation_id_input,
+        )
+        kdca_form.addRow(
+            "Password control type",
+            self.kdca_password_control_type_input,
+        )
+        kdca_form.addRow("Confirm control text", self.kdca_confirm_control_name_input)
+        kdca_form.addRow(
+            "KaosEghis-pw credential entry",
+            self.kdca_credential_reference_input,
+        )
+
         note = QLabel(
             "Windows Handle values are not saved because they change each time an "
             "application starts. Save stable window titles, UIA automation IDs, and "
@@ -373,11 +412,20 @@ class VaccineSystemTargetsEditor(QWidget):
             "the Influenza browser, types credentials, or changes vaccination records."
         )
         session_note.setWordWrap(True)
+        kdca_note = QLabel(
+            "KDCA certificate login runs only when the operator presses Log in to KDCA. "
+            "It opens the portal, requires one visible matching browser, certificate, "
+            "password field, and confirmation control, then types the encrypted vault "
+            "password without using clipboard. It never runs at startup or retries blindly."
+        )
+        kdca_note.setWordWrap(True)
 
         layout = QVBoxLayout(self)
         layout.addWidget(general_group)
         layout.addWidget(influenza_group)
         layout.addWidget(covid_group)
+        layout.addWidget(kdca_group)
+        layout.addWidget(kdca_note)
         layout.addWidget(self.session_keeper_enabled_check)
         layout.addWidget(session_note)
         layout.addWidget(self.session_keeper_status_label)
@@ -456,6 +504,34 @@ class VaccineSystemTargetsEditor(QWidget):
         self.covid_keepalive_y_input.setValue(
             _setting_coordinate(settings, "vaccine_covid_system_keepalive_y")
         )
+        self.kdca_portal_url_input.setText(settings.get("vaccine_kdca_portal_url", ""))
+        self.kdca_browser_title_input.setText(
+            settings.get("vaccine_kdca_browser_window_title_contains", "")
+        )
+        self.kdca_login_control_name_input.setText(
+            settings.get("vaccine_kdca_login_control_name", "")
+        )
+        self.kdca_certificate_window_title_input.setText(
+            settings.get("vaccine_kdca_certificate_window_title_contains", "")
+        )
+        self.kdca_certificate_name_input.setText(
+            settings.get("vaccine_kdca_certificate_name", "")
+        )
+        self.kdca_password_window_title_input.setText(
+            settings.get("vaccine_kdca_password_window_title_contains", "")
+        )
+        self.kdca_password_automation_id_input.setText(
+            settings.get("vaccine_kdca_password_automation_id", "")
+        )
+        self.kdca_password_control_type_input.setText(
+            settings.get("vaccine_kdca_password_control_type", "Edit")
+        )
+        self.kdca_confirm_control_name_input.setText(
+            settings.get("vaccine_kdca_confirm_control_name", "")
+        )
+        self.kdca_credential_reference_input.setText(
+            settings.get("vaccine_kdca_credential_reference", "")
+        )
         self.session_keeper_enabled_check.setChecked(
             _as_bool(settings.get("vaccine_session_keeper_enabled", "false"))
         )
@@ -524,6 +600,34 @@ class VaccineSystemTargetsEditor(QWidget):
             ),
             "vaccine_covid_system_keepalive_y": str(
                 self.covid_keepalive_y_input.value()
+            ),
+            "vaccine_kdca_portal_url": self.kdca_portal_url_input.text().strip(),
+            "vaccine_kdca_browser_window_title_contains": (
+                self.kdca_browser_title_input.text().strip()
+            ),
+            "vaccine_kdca_login_control_name": (
+                self.kdca_login_control_name_input.text().strip()
+            ),
+            "vaccine_kdca_certificate_window_title_contains": (
+                self.kdca_certificate_window_title_input.text().strip()
+            ),
+            "vaccine_kdca_certificate_name": (
+                self.kdca_certificate_name_input.text().strip()
+            ),
+            "vaccine_kdca_password_window_title_contains": (
+                self.kdca_password_window_title_input.text().strip()
+            ),
+            "vaccine_kdca_password_automation_id": (
+                self.kdca_password_automation_id_input.text().strip()
+            ),
+            "vaccine_kdca_password_control_type": (
+                self.kdca_password_control_type_input.text().strip()
+            ),
+            "vaccine_kdca_confirm_control_name": (
+                self.kdca_confirm_control_name_input.text().strip()
+            ),
+            "vaccine_kdca_credential_reference": (
+                self.kdca_credential_reference_input.text().strip()
             ),
             "vaccine_session_keeper_enabled": (
                 "true" if self.session_keeper_enabled_check.isChecked() else "false"

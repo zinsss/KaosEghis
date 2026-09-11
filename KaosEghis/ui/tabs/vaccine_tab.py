@@ -36,6 +36,7 @@ from KaosEghis.core.vaccine_patient_context import (
     fetch_vaccine_patient_context,
     resident_id_for_label,
 )
+from KaosEghis.core.kdca_certificate_login import start_kdca_certificate_login
 from KaosEghis.core.vaccine_session_keeper import (
     SESSION_KEEPER_INTERVAL_MS,
     VaccineSessionResetTarget,
@@ -255,6 +256,8 @@ class VaccineTab(QWidget):
 
         self.fetch_button = QPushButton("Fetch from EMR")
         self.fetch_button.clicked.connect(self.fetch_current_patient_from_emr)
+        self.kdca_login_button = QPushButton("Log in to KDCA")
+        self.kdca_login_button.clicked.connect(self.log_in_to_kdca)
         self.save_button = QPushButton("Save record")
         self.save_button.clicked.connect(self.save_record)
         self.new_record_button = QPushButton("New vaccine record")
@@ -407,6 +410,16 @@ class VaccineTab(QWidget):
         self.patient_address_input.setText(context.patient_address)
         self.status_label.setText(result.message)
         return True
+
+    def log_in_to_kdca(self) -> bool:
+        """Run one explicit certificate-login attempt using the unlocked vault only."""
+
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+        result = start_kdca_certificate_login(settings)
+        self.status_label.setText(result.message)
+        return result.success
 
     def check_influenza_program(self) -> InfluenzaEligibilityResult:
         initialize_database(self._db_path)
@@ -1249,6 +1262,7 @@ class VaccineTab(QWidget):
         page = QWidget()
         controls = QHBoxLayout()
         controls.addWidget(self.fetch_button)
+        controls.addWidget(self.kdca_login_button)
         controls.addWidget(self.influenza_check_button)
         controls.addWidget(self.covid_check_button)
         controls.addWidget(self.save_button)

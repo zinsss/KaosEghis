@@ -958,3 +958,37 @@ def test_session_keeper_is_opt_in_and_never_clicks_during_vaccine_tab_startup(
     assert "first check in 90 minutes" in (
         page.settings_page.system_targets_editor.session_keeper_status_label.text()
     )
+
+
+def test_kdca_login_is_explicit_and_uses_vaccine_settings(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from KaosEghis.core.kdca_certificate_login import KdcaCertificateLoginResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+    from KaosEghis.ui.tabs import vaccine_tab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(connection, {"vaccine_kdca_certificate_name": "Test certificate"})
+
+    calls: list[dict[str, str]] = []
+    monkeypatch.setattr(
+        vaccine_tab,
+        "start_kdca_certificate_login",
+        lambda settings: calls.append(settings)
+        or KdcaCertificateLoginResult(
+            True,
+            "submitted",
+            "KDCA certificate login was submitted. Verify the portal completed sign-in.",
+        ),
+    )
+
+    page = vaccine_tab.VaccineTab(db_path)
+
+    assert page.kdca_login_button.text() == "Log in to KDCA"
+    assert calls == []
+    assert page.log_in_to_kdca() is True
+    assert calls[0]["vaccine_kdca_certificate_name"] == "Test certificate"
+    assert "submitted" in page.status_label.text()

@@ -1,6 +1,6 @@
 # KaosEghis-vaccine
 
-Last updated: 2026-09-10
+Last updated: 2026-09-11
 
 ## Status
 
@@ -340,6 +340,33 @@ patient values, or vaccination data. KaosEghis stores them for the upcoming expl
 system-launch action; this configuration change does not open a browser or automate a
 login.
 
+### Explicit KDCA Certificate Login
+
+`Vaccine -> Main -> Log in to KDCA` is an explicit, one-at-a-time certificate-login
+helper for the KDCA portal at `https://is.kdca.go.kr/`. It is not a generic browser
+autofill feature and never runs at startup, on a timer, after a vaccination action, or
+as a retry loop.
+
+The editable configuration under `Vaccine -> Settings -> System targets` contains only
+non-secret selectors: the portal URL, browser-title fragment, `공동인증서 로그인` control
+text, certificate-picker/password-window title fragments, certificate label, optional
+password Automation ID, password control type, confirmation-control text, and the
+KaosEghis-pw credential-entry reference. The initial certificate label is `이진성34`; the
+initial credential entry reference is `공인인증서 - 이진성`.
+
+On an explicit click, KaosEghis first requires the KaosEghis-pw vault to be unlocked.
+It opens the configured portal, then requires exactly one visible matching browser
+window, certificate picker, certificate label, password field, and confirmation control.
+It types the vault password as Windows Unicode keyboard input directly into that one
+verified control without using clipboard. Missing, stale, or ambiguous controls stop the
+sequence before the password is typed. The final status is only **login submitted**; the
+operator must still verify the portal completed authentication.
+
+The certificate password remains encrypted in KaosEghis-pw and is never copied to
+SQLite settings, macros, clipboard history, notifications, or logs. If the certificate
+provider blocks synthetic keyboard input or changes its password dialog, KaosEghis stops
+for manual entry; it does not guess a replacement control.
+
 ### Opt-in Native Session Keeper
 
 General and COVID are native systems that time out after approximately two hours. Their
@@ -541,17 +568,16 @@ indicators:
 
 The intended start-of-day sequence is:
 
-1. `Open Vaccine Systems` displays a masked certificate-password prompt with no saved or
-   prefilled value. Cancelling the prompt performs no login or launch action.
-2. KaosEghis opens the configured government portal URL.
-3. KaosEghis verifies the expected certificate login window and inserts the transient
-   password only into that positively identified password field.
-4. KaosEghis follows the configured portal links that launch the required desktop
+1. The operator explicitly presses `Log in to KDCA`; the action requires an unlocked
+   KaosEghis-pw vault and makes no attempt when the vault is locked.
+2. KaosEghis opens the configured government portal URL and verifies the configured
+   certificate-picker/password targets before typing the vault password.
+3. KaosEghis follows the configured portal links that launch the required desktop
    applications and influenza browser page.
-5. KaosEghis verifies each destination independently and caches only non-secret runtime
+4. KaosEghis verifies each destination independently and caches only non-secret runtime
    identity such as process ID, window handle/title, or configured browser target.
-6. Patient workflows use the cached destinations while they remain valid.
-7. A closed, restarted, mismatched, or stale destination is marked `Reconnect required`
+5. Patient workflows use the cached destinations while they remain valid.
+6. A closed, restarted, mismatched, or stale destination is marked `Reconnect required`
    and only that destination must be prepared again.
 
 No patient workflow may attempt a program insertion until the required destination is
@@ -593,12 +619,11 @@ patient lookup, label printing, counters, and charting.
 
 - KaosEghis must not store the Korean digital-certificate password in SQLite, settings,
   logs, notifications, or workflow history.
-- `Open Vaccine Systems` prompts for the password every time with a masked input field.
-- The prompt has no `Remember password` option and must never be prefilled.
-- The password exists only in transient process memory for the current launch sequence.
-- Clear the prompt immediately and release password references as soon as login succeeds,
-  fails, or is cancelled. Python cannot guarantee physical memory zeroization, so the
-  value must never be retained beyond the shortest practical scope.
+- `Log in to KDCA` reads the password only from an already unlocked KaosEghis-pw entry;
+  it never presents, remembers, or persists the value in the Vaccine surface.
+- The password exists only in transient process memory for the one explicit login
+  sequence. Python cannot guarantee physical memory zeroization, so it must never be
+  retained beyond the shortest practical scope.
 - Do not place the password on the clipboard.
 - Do not record password keystrokes, screenshots, target values, or raw login errors.
 - Insert the password only after verifying the expected certificate login window and
@@ -690,8 +715,8 @@ Before operational use, tests must cover:
 - combined workflow produces two distinct label previews and supports one explicit
   print-both action
 - startup performs no certificate login and stores no certificate password
-- `Open Vaccine Systems` uses a fresh masked password prompt and never persists or copies
-  the supplied value
+- `Log in to KDCA` requires an unlocked KaosEghis-pw credential and never persists,
+  copies, or logs the supplied value
 - password insertion occurs only after positive certificate-window/field verification
 - login failure/cancellation discards the transient password and launches no blind clicks
 - each external destination has an independent ready/stale state

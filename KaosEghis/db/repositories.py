@@ -85,6 +85,16 @@ DEFAULT_SETTINGS = {
     "vaccine_covid_system_keepalive_x": "2456",
     "vaccine_covid_system_keepalive_y": "1982",
     "vaccine_session_keeper_enabled": "false",
+    "vaccine_kdca_portal_url": "https://is.kdca.go.kr/",
+    "vaccine_kdca_browser_window_title_contains": "질병관리청",
+    "vaccine_kdca_login_control_name": "공동인증서 로그인",
+    "vaccine_kdca_certificate_window_title_contains": "인증서",
+    "vaccine_kdca_certificate_name": "이진성34",
+    "vaccine_kdca_password_window_title_contains": "인증서",
+    "vaccine_kdca_password_automation_id": "",
+    "vaccine_kdca_password_control_type": "Edit",
+    "vaccine_kdca_confirm_control_name": "확인",
+    "vaccine_kdca_credential_reference": "공인인증서 - 이진성",
     "vaccine_schedule_rules_json": json.dumps(
         {
             "influenza": {
