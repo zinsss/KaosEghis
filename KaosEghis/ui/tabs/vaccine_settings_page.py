@@ -292,6 +292,7 @@ class VaccineSystemTargetsEditor(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.general_launch_url_input = QLineEdit()
         self.general_window_title_input = QLineEdit()
         self.general_window_class_input = QLineEdit()
         self.general_resident_x_input = self._coordinate_input()
@@ -300,6 +301,7 @@ class VaccineSystemTargetsEditor(QWidget):
         self.general_keepalive_y_input = self._coordinate_input()
 
         self.influenza_window_title_input = QLineEdit()
+        self.influenza_launch_url_input = QLineEdit()
         self.influenza_resident_automation_id_input = QLineEdit()
         self.influenza_resident_control_type_input = QLineEdit()
         self.influenza_resident_class_input = QLineEdit()
@@ -307,6 +309,7 @@ class VaccineSystemTargetsEditor(QWidget):
         self.influenza_resident_y_input = self._coordinate_input()
 
         self.covid_window_title_input = QLineEdit()
+        self.covid_launch_url_input = QLineEdit()
         self.covid_window_class_input = QLineEdit()
         self.covid_resident_x_input = self._coordinate_input()
         self.covid_resident_y_input = self._coordinate_input()
@@ -320,6 +323,7 @@ class VaccineSystemTargetsEditor(QWidget):
 
         general_group = QGroupBox("General vaccine system")
         general_form = QFormLayout(general_group)
+        general_form.addRow("Launch URL", self.general_launch_url_input)
         general_form.addRow("Window title", self.general_window_title_input)
         general_form.addRow("Window class", self.general_window_class_input)
         general_form.addRow("Resident input X", self.general_resident_x_input)
@@ -329,6 +333,7 @@ class VaccineSystemTargetsEditor(QWidget):
 
         influenza_group = QGroupBox("Influenza browser system")
         influenza_form = QFormLayout(influenza_group)
+        influenza_form.addRow("Launch URL", self.influenza_launch_url_input)
         influenza_form.addRow("Window or tab title", self.influenza_window_title_input)
         influenza_form.addRow(
             "Resident input automation ID",
@@ -347,6 +352,7 @@ class VaccineSystemTargetsEditor(QWidget):
 
         covid_group = QGroupBox("COVID system")
         covid_form = QFormLayout(covid_group)
+        covid_form.addRow("Launch URL", self.covid_launch_url_input)
         covid_form.addRow("Window title", self.covid_window_title_input)
         covid_form.addRow("Window class", self.covid_window_class_input)
         covid_form.addRow("Resident input X", self.covid_resident_x_input)
@@ -388,6 +394,9 @@ class VaccineSystemTargetsEditor(QWidget):
         self.general_window_title_input.setText(
             settings.get("vaccine_general_system_window_title", "")
         )
+        self.general_launch_url_input.setText(
+            settings.get("vaccine_general_system_launch_url", "")
+        )
         self.general_window_class_input.setText(
             settings.get("vaccine_general_system_window_class", "")
         )
@@ -407,6 +416,9 @@ class VaccineSystemTargetsEditor(QWidget):
         self.influenza_window_title_input.setText(
             settings.get("vaccine_influenza_system_window_title", "")
         )
+        self.influenza_launch_url_input.setText(
+            settings.get("vaccine_influenza_system_launch_url", "")
+        )
         self.influenza_resident_automation_id_input.setText(
             settings.get("vaccine_influenza_system_resident_automation_id", "")
         )
@@ -425,6 +437,9 @@ class VaccineSystemTargetsEditor(QWidget):
 
         self.covid_window_title_input.setText(
             settings.get("vaccine_covid_system_window_title", "")
+        )
+        self.covid_launch_url_input.setText(
+            settings.get("vaccine_covid_system_launch_url", "")
         )
         self.covid_window_class_input.setText(
             settings.get("vaccine_covid_system_window_class", "")
@@ -447,6 +462,9 @@ class VaccineSystemTargetsEditor(QWidget):
 
     def values(self) -> dict[str, str]:
         return {
+            "vaccine_general_system_launch_url": (
+                self.general_launch_url_input.text().strip()
+            ),
             "vaccine_general_system_window_title": (
                 self.general_window_title_input.text().strip()
             ),
@@ -468,6 +486,9 @@ class VaccineSystemTargetsEditor(QWidget):
             "vaccine_influenza_system_window_title": (
                 self.influenza_window_title_input.text().strip()
             ),
+            "vaccine_influenza_system_launch_url": (
+                self.influenza_launch_url_input.text().strip()
+            ),
             "vaccine_influenza_system_resident_automation_id": (
                 self.influenza_resident_automation_id_input.text().strip()
             ),
@@ -485,6 +506,9 @@ class VaccineSystemTargetsEditor(QWidget):
             ),
             "vaccine_covid_system_window_title": (
                 self.covid_window_title_input.text().strip()
+            ),
+            "vaccine_covid_system_launch_url": (
+                self.covid_launch_url_input.text().strip()
             ),
             "vaccine_covid_system_window_class": (
                 self.covid_window_class_input.text().strip()

@@ -322,6 +322,24 @@ stable UIA automation IDs, and coordinate fallbacks. It intentionally does not s
 numeric Windows/UIA Handle values because the operating system recreates them every
 application launch.
 
+### KDCA OIS Launch URLs
+
+The System targets page also stores the clinic's editable static OIS deep links. These
+are system-entry pages, not `menuid` portal-navigation URLs and not session-bearing
+links:
+
+| System | Default launch URL |
+| --- | --- |
+| General vaccine | `https://ois.kdca.go.kr/iris/index_run.jsp` |
+| COVID | `https://ois.kdca.go.kr/covr/index_run.jsp` |
+| Influenza | `https://ois.kdca.go.kr/iroi/indexWSP.jsp` |
+
+The intended operator flow is to open the OIS service, complete its normal login, then
+open the relevant saved system-entry URL. The URLs contain no credentials, session IDs,
+patient values, or vaccination data. KaosEghis stores them for the upcoming explicit
+system-launch action; this configuration change does not open a browser or automate a
+login.
+
 ### Opt-in Native Session Keeper
 
 General and COVID are native systems that time out after approximately two hours. Their

@@ -38,6 +38,10 @@ def test_vaccine_tables_and_seed_types_are_created(tmp_path) -> None:
     assert '"influenza"' in settings["vaccine_schedule_rules_json"]
     assert '"elderly_75_plus"' in settings["vaccine_age_groups_json"]
     assert settings["vaccine_label_printer_name"] == "4BARCODE 4B-2054L"
+    assert (
+        settings["vaccine_general_system_launch_url"]
+        == "https://ois.kdca.go.kr/iris/index_run.jsp"
+    )
     assert settings["vaccine_general_system_window_title"] == "예방접종통합관리시스템"
     assert settings["vaccine_general_system_window_class"] == "CyWindowClass"
     assert settings["vaccine_general_system_resident_x"] == "448"
@@ -45,10 +49,18 @@ def test_vaccine_tables_and_seed_types_are_created(tmp_path) -> None:
     assert settings["vaccine_general_system_keepalive_x"] == "1154"
     assert settings["vaccine_general_system_keepalive_y"] == "1968"
     assert settings["vaccine_influenza_system_resident_automation_id"] == "edtPtntRrn1"
+    assert (
+        settings["vaccine_influenza_system_launch_url"]
+        == "https://ois.kdca.go.kr/iroi/indexWSP.jsp"
+    )
     assert settings["vaccine_influenza_system_resident_x"] == "2924"
     assert settings["vaccine_influenza_system_resident_y"] == "1415"
     assert settings["vaccine_covid_system_window_title"] == "코로나19통합관리시스템"
     assert settings["vaccine_covid_system_window_class"] == "CyWindowClass"
+    assert (
+        settings["vaccine_covid_system_launch_url"]
+        == "https://ois.kdca.go.kr/covr/index_run.jsp"
+    )
     assert settings["vaccine_covid_system_keepalive_x"] == "2456"
     assert settings["vaccine_covid_system_keepalive_y"] == "1982"
     assert settings["vaccine_covid_system_resident_x"] == "1466"

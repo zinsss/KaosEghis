@@ -226,6 +226,10 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     targets = page.system_targets_editor
 
     assert page.tabs.tabText(2) == "System targets"
+    assert (
+        targets.general_launch_url_input.text()
+        == "https://ois.kdca.go.kr/iris/index_run.jsp"
+    )
     assert targets.general_window_title_input.text() == "예방접종통합관리시스템"
     assert targets.general_window_class_input.text() == "CyWindowClass"
     assert targets.general_resident_x_input.value() == 448
@@ -233,9 +237,17 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     assert targets.general_keepalive_x_input.value() == 1154
     assert targets.general_keepalive_y_input.value() == 1968
     assert targets.influenza_resident_automation_id_input.text() == "edtPtntRrn1"
+    assert (
+        targets.influenza_launch_url_input.text()
+        == "https://ois.kdca.go.kr/iroi/indexWSP.jsp"
+    )
     assert targets.influenza_resident_x_input.value() == 2924
     assert targets.influenza_resident_y_input.value() == 1415
     assert targets.covid_window_title_input.text() == "코로나19통합관리시스템"
+    assert (
+        targets.covid_launch_url_input.text()
+        == "https://ois.kdca.go.kr/covr/index_run.jsp"
+    )
     assert targets.covid_window_class_input.text() == "CyWindowClass"
     assert targets.covid_resident_x_input.value() == 1466
     assert targets.covid_resident_y_input.value() == 2107
@@ -257,27 +269,32 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
     page = VaccineSettingsPage(db_path)
     targets = page.system_targets_editor
     targets.general_window_title_input.setText("Updated general system")
+    targets.general_launch_url_input.setText("https://example.test/general")
     targets.general_resident_x_input.setValue(100)
     targets.general_resident_y_input.setValue(200)
     targets.general_keepalive_x_input.setValue(201)
     targets.general_keepalive_y_input.setValue(202)
     targets.influenza_window_title_input.setText("Influenza browser")
+    targets.influenza_launch_url_input.setText("https://example.test/flu")
     targets.influenza_resident_automation_id_input.setText("updatedResidentInput")
     targets.influenza_resident_x_input.setValue(300)
     targets.influenza_resident_y_input.setValue(400)
     targets.covid_keepalive_x_input.setValue(401)
     targets.covid_keepalive_y_input.setValue(402)
+    targets.covid_launch_url_input.setText("https://example.test/covid")
 
     assert page.save_settings()
 
     with connect(db_path) as connection:
         settings = get_settings(connection)
     assert settings["vaccine_general_system_window_title"] == "Updated general system"
+    assert settings["vaccine_general_system_launch_url"] == "https://example.test/general"
     assert settings["vaccine_general_system_resident_x"] == "100"
     assert settings["vaccine_general_system_resident_y"] == "200"
     assert settings["vaccine_general_system_keepalive_x"] == "201"
     assert settings["vaccine_general_system_keepalive_y"] == "202"
     assert settings["vaccine_influenza_system_window_title"] == "Influenza browser"
+    assert settings["vaccine_influenza_system_launch_url"] == "https://example.test/flu"
     assert (
         settings["vaccine_influenza_system_resident_automation_id"]
         == "updatedResidentInput"
@@ -286,6 +303,7 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
     assert settings["vaccine_influenza_system_resident_y"] == "400"
     assert settings["vaccine_covid_system_keepalive_x"] == "401"
     assert settings["vaccine_covid_system_keepalive_y"] == "402"
+    assert settings["vaccine_covid_system_launch_url"] == "https://example.test/covid"
     assert "1513248" not in settings.values()
 
 
