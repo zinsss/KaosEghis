@@ -334,12 +334,18 @@ links:
 | COVID | `https://ois.kdca.go.kr/covr/index_run.jsp` |
 | Influenza | `https://ois.kdca.go.kr/iroi/indexWSP.jsp` |
 
-The intended operator flow is to open the OIS service, complete its normal login, then
-open the relevant saved system-entry URL. The URLs contain no credentials, session IDs,
-patient values, or vaccination data. KaosEghis stores them for the upcoming explicit
-system-launch action. `Vaccine -> Main` provides explicit `Open General`, `Open
-Influenza`, and `Open COVID` actions which open only the corresponding configured URL.
-They do not log in, read or enter patient data, or automate any next step.
+The intended operator flow is to select the OIS service and then open the relevant saved
+system-entry URL. The URLs contain no credentials, session IDs, patient values, or
+vaccination data. Before it opens a selected service, KaosEghis opens the KDCA portal
+and checks the current browser page using the configured accessible controls:
+
+- visible `로그아웃` only: signed in; the system URL opens without accessing the vault;
+- visible `공동인증서 로그인` only: sign-in required; the guarded certificate flow runs;
+- both, neither, duplicate, or inaccessible controls: stop safely without accessing the
+  certificate password or opening a system URL.
+
+`Vaccine -> Main` provides explicit `Open General`, `Open Influenza`, and `Open COVID`
+actions. They never read or enter patient data, and never automate a vaccination step.
 
 ### Explicit KDCA Certificate Login
 
@@ -351,18 +357,20 @@ as a retry loop.
 The editable configuration under `Vaccine -> Settings -> System targets` contains only
 non-secret selectors: the portal URL, browser-title fragment, `공동인증서 로그인` control
 text, optional captured login-button X/Y fallback, certificate-picker/password-window
-title fragments, certificate label, optional password Automation ID, password control
+text, logged-in (`로그아웃`) control text, title fragments, certificate label, optional
+password Automation ID, password control
 type, confirmation-control text, and the
 KaosEghis-pw credential-entry reference. The initial certificate label is `이진성34`; the
 initial credential entry reference is `공인인증서 - 이진성`.
 
-On an explicit click, KaosEghis first requires the KaosEghis-pw vault to be unlocked.
-It opens the configured portal, then requires exactly one visible matching browser
-window, certificate picker, certificate label, password field, and confirmation control.
-It types the vault password as Windows Unicode keyboard input directly into that one
-verified control without using clipboard. Missing, stale, or ambiguous controls stop the
-sequence before the password is typed. The final status is only **login submitted**; the
-operator must still verify the portal completed authentication.
+On an explicit click, KaosEghis opens the configured portal and first establishes one
+unambiguous sign-in state. It requests the KaosEghis-pw vault password only when the
+configured login control is visible and the configured logged-in control is not. It then
+requires exactly one matching certificate picker, certificate label, password field, and
+confirmation control. It types the vault password as Windows Unicode keyboard input
+directly into that one verified control without using clipboard. It waits for the
+configured logged-in control before reporting success. Missing, stale, or ambiguous
+controls stop the sequence before the password is typed.
 
 Some Chrome installations do not expose portal controls through Windows UI Automation.
 For only the `공동인증서 로그인` portal button, the operator may save an Inspector-captured

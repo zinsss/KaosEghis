@@ -121,6 +121,11 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
         "open_vaccine_system",
         fake_launch,
     )
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "start_kdca_certificate_login",
+        lambda _settings: SimpleNamespace(success=True, message="KDCA signed in."),
+    )
     panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
 
     panel.open_general_system_button.click()
@@ -129,6 +134,34 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
 
     assert launched_systems == ["general", "influenza", "covid"]
     assert panel.status_label.text() == "covid opened."
+
+
+def test_vaccine_system_open_stops_when_kdca_authentication_is_not_confirmed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "start_kdca_certificate_login",
+        lambda _settings: SimpleNamespace(
+            success=False,
+            message="KDCA sign-in state could not be confirmed.",
+        ),
+    )
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "open_vaccine_system",
+        lambda _settings, system: calls.append(system),
+    )
+    panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+
+    assert panel.open_vaccine_system("influenza") is False
+    assert calls == []
+    assert "could not be confirmed" in panel.status_label.text()
 
 
 def test_vaccine_label_printer_reports_unavailable_printer_without_printing(

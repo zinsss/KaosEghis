@@ -54,6 +54,7 @@ def _settings() -> dict[str, str]:
         "vaccine_kdca_portal_url": "https://is.kdca.go.kr/",
         "vaccine_kdca_browser_window_title_contains": "질병관리청",
         "vaccine_kdca_login_control_name": "공동인증서 로그인",
+        "vaccine_kdca_logout_control_name": "로그아웃",
         "vaccine_kdca_certificate_window_title_contains": "인증서",
         "vaccine_kdca_certificate_name": "이진성34",
         "vaccine_kdca_password_window_title_contains": "인증서",
@@ -64,13 +65,16 @@ def _settings() -> dict[str, str]:
     }
 
 
-def test_kdca_login_requires_unlocked_vault_before_opening_portal(monkeypatch) -> None:
+def test_kdca_login_requests_vault_only_after_login_is_confirmed(monkeypatch) -> None:
     opened: list[str] = []
+    login = _Element(name="공동인증서 로그인", control_type="Button")
+    browser = _Element(name="질병관리청", handle=101, children=[login])
     monkeypatch.setattr(
         kdca_certificate_login,
         "_open_portal",
         lambda url: opened.append(url) or True,
     )
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser])
 
     result = kdca_certificate_login.start_kdca_certificate_login(
         _settings(),
@@ -79,7 +83,8 @@ def test_kdca_login_requires_unlocked_vault_before_opening_portal(monkeypatch) -
 
     assert result.success is False
     assert result.status == "credential_unavailable"
-    assert opened == []
+    assert opened == ["https://is.kdca.go.kr/"]
+    assert login.activated is False
 
 
 def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
@@ -94,10 +99,17 @@ def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
         control_type="ListItem",
         on_activate=lambda: phase.update(value="password"),
     )
+    logout = _Element(name="로그아웃", control_type="Button")
+    browser: _Element
+
+    def mark_authenticated() -> None:
+        confirmed.append(True)
+        browser._children = [logout]
+
     confirm = _Element(
         name="확인",
         control_type="Button",
-        on_activate=lambda: confirmed.append(True),
+        on_activate=mark_authenticated,
     )
     password = _Element(control_type="Edit")
     password_window = _Element(
@@ -147,13 +159,57 @@ def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
     )
 
     assert result.success is True
-    assert result.status == "submitted"
+    assert result.status == "authenticated"
     assert opened == ["https://is.kdca.go.kr/"]
     assert login.activated is True
     assert certificate.activated is True
     assert typed == [(password, "test-certificate-password")]
     assert confirmed == [True]
     assert "test-certificate-password" not in result.message
+
+
+def test_kdca_login_skips_vault_when_logout_control_confirms_session(monkeypatch) -> None:
+    logout = _Element(name="로그아웃", control_type="Button")
+    browser = _Element(name="질병관리청", handle=101, children=[logout])
+    opened: list[str] = []
+    password_requests: list[str] = []
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser])
+    monkeypatch.setattr(
+        kdca_certificate_login,
+        "_open_portal",
+        lambda url: opened.append(url) or True,
+    )
+
+    result = kdca_certificate_login.start_kdca_certificate_login(
+        _settings(),
+        password_provider=lambda reference: password_requests.append(reference) or "secret",
+    )
+
+    assert result.success is True
+    assert result.status == "already_authenticated"
+    assert opened == ["https://is.kdca.go.kr/"]
+    assert password_requests == []
+
+
+def test_kdca_login_never_guesses_session_state_when_controls_are_missing(monkeypatch) -> None:
+    browser = _Element(name="질병관리청", handle=101)
+    password_requests: list[str] = []
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser])
+    monkeypatch.setattr(kdca_certificate_login, "_open_portal", lambda _url: True)
+    monkeypatch.setattr(
+        kdca_certificate_login,
+        "_wait_for_session_state",
+        lambda *_args: "unknown",
+    )
+
+    result = kdca_certificate_login.start_kdca_certificate_login(
+        _settings(),
+        password_provider=lambda reference: password_requests.append(reference) or "secret",
+    )
+
+    assert result.success is False
+    assert result.status == "session_state_unknown"
+    assert password_requests == []
 
 
 def test_kdca_login_stops_when_certificate_is_not_uniquely_resolved(monkeypatch) -> None:
@@ -208,6 +264,7 @@ def test_default_kdca_settings_are_non_secret_selectors() -> None:
 
     assert config.portal_url == "https://is.kdca.go.kr/"
     assert config.certificate_name == "이진성34"
+    assert config.logout_control_name == "로그아웃"
     assert config.credential_reference == "공인인증서 - 이진성"
     assert (config.login_x, config.login_y) == (0, 0)
     assert "password" not in config.credential_reference.casefold()

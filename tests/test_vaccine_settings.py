@@ -253,6 +253,7 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     assert targets.covid_resident_y_input.value() == 2107
     assert targets.covid_keepalive_x_input.value() == 2456
     assert targets.covid_keepalive_y_input.value() == 1982
+    assert targets.kdca_logout_control_name_input.text() == "로그아웃"
     assert targets.session_keeper_enabled_check.isChecked() is False
 
 
@@ -281,6 +282,7 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
     targets.influenza_resident_y_input.setValue(400)
     targets.kdca_login_x_input.setValue(500)
     targets.kdca_login_y_input.setValue(600)
+    targets.kdca_logout_control_name_input.setText("Sign out")
     targets.covid_keepalive_x_input.setValue(401)
     targets.covid_keepalive_y_input.setValue(402)
     targets.covid_launch_url_input.setText("https://example.test/covid")
@@ -305,6 +307,7 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
     assert settings["vaccine_influenza_system_resident_y"] == "400"
     assert settings["vaccine_kdca_login_x"] == "500"
     assert settings["vaccine_kdca_login_y"] == "600"
+    assert settings["vaccine_kdca_logout_control_name"] == "Sign out"
     assert settings["vaccine_covid_system_keepalive_x"] == "401"
     assert settings["vaccine_covid_system_keepalive_y"] == "402"
     assert settings["vaccine_covid_system_launch_url"] == "https://example.test/covid"

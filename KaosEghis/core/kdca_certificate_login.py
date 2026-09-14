@@ -20,6 +20,7 @@ class KdcaCertificateLoginConfig:
     portal_url: str
     browser_window_title_contains: str
     login_control_name: str
+    logout_control_name: str
     login_x: int
     login_y: int
     certificate_window_title_contains: str
@@ -40,6 +41,9 @@ class KdcaCertificateLoginConfig:
             ).strip(),
             login_control_name=str(
                 settings.get("vaccine_kdca_login_control_name", "")
+            ).strip(),
+            logout_control_name=str(
+                settings.get("vaccine_kdca_logout_control_name", "")
             ).strip(),
             login_x=_coordinate(settings.get("vaccine_kdca_login_x")),
             login_y=_coordinate(settings.get("vaccine_kdca_login_y")),
@@ -71,6 +75,7 @@ class KdcaCertificateLoginConfig:
             "KDCA portal URL": self.portal_url,
             "KDCA browser title": self.browser_window_title_contains,
             "KDCA login control": self.login_control_name,
+            "KDCA logout control": self.logout_control_name,
             "certificate picker title": self.certificate_window_title_contains,
             "certificate label": self.certificate_name,
             "certificate password window title": self.password_window_title_contains,
@@ -109,14 +114,6 @@ def start_kdca_certificate_login(
     if configuration_error:
         return _result(False, "configuration_required", configuration_error)
 
-    password = password_provider(config.credential_reference)
-    if not password:
-        return _result(
-            False,
-            "credential_unavailable",
-            "KDCA certificate credential is unavailable. Unlock KaosEghis-pw first.",
-        )
-
     if not _open_portal(config.portal_url):
         return _result(False, "portal_unavailable", "KDCA portal could not be opened.")
 
@@ -129,6 +126,28 @@ def start_kdca_certificate_login(
             False,
             "browser_not_ready",
             "KDCA portal window was not ready. No certificate password was typed.",
+        )
+
+    session_state = _wait_for_session_state(browser_window, config, config.timeout_seconds)
+    if session_state == "authenticated":
+        return _result(
+            True,
+            "already_authenticated",
+            "KDCA is already signed in. No certificate password was requested.",
+        )
+    if session_state != "login_required":
+        return _result(
+            False,
+            "session_state_unknown",
+            "KDCA sign-in state could not be confirmed. No certificate password was typed.",
+        )
+
+    password = password_provider(config.credential_reference)
+    if not password:
+        return _result(
+            False,
+            "credential_unavailable",
+            "KDCA certificate credential is unavailable. Unlock KaosEghis-pw first.",
         )
 
     login_control = _find_single_descendant(
@@ -212,10 +231,17 @@ def start_kdca_certificate_login(
             "confirmation_failed",
             "Certificate confirmation control was not available.",
         )
+
+    if _wait_for_session_state(browser_window, config, config.timeout_seconds) != "authenticated":
+        return _result(
+            False,
+            "sign_in_not_confirmed",
+            "KDCA sign-in could not be confirmed. No vaccine system was opened.",
+        )
     return _result(
         True,
-        "submitted",
-        "KDCA certificate login was submitted. Verify the portal completed sign-in.",
+        "authenticated",
+        "KDCA sign-in was confirmed.",
     )
 
 
@@ -295,6 +321,38 @@ def _wait_for_single_window(
     return None
 
 
+def _wait_for_session_state(
+    browser_window: Any,
+    config: KdcaCertificateLoginConfig,
+    timeout_seconds: float,
+) -> str:
+    """Return only a positively identified KDCA sign-in state.
+
+    The two portal controls are intentionally configured independently.  A missing
+    login control is never treated as a logged-in session, because Chrome may hide
+    web content from UI Automation on some installations.
+    """
+
+    deadline = time.monotonic() + max(timeout_seconds, 0.1)
+    while time.monotonic() < deadline:
+        login_controls = _find_visible_named_descendants(
+            browser_window,
+            config.login_control_name,
+        )
+        logout_controls = _find_visible_named_descendants(
+            browser_window,
+            config.logout_control_name,
+        )
+        if len(logout_controls) == 1 and not login_controls:
+            return "authenticated"
+        if len(login_controls) == 1 and not logout_controls:
+            return "login_required"
+        if len(login_controls) > 1 or len(logout_controls) > 1:
+            return "unknown"
+        time.sleep(0.1)
+    return "unknown"
+
+
 def _desktop_windows() -> list[Any]:
     try:
         from pywinauto import Desktop
@@ -359,6 +417,22 @@ def _find_single_descendant(
         and (not control_type or _element_control_type(element) == control_type)
     ]
     return matches[0] if len(matches) == 1 else None
+
+
+def _find_visible_named_descendants(window: Any, name: str) -> list[Any]:
+    """Find visible, enabled controls with one exact accessible name."""
+
+    try:
+        elements = list(window.descendants())
+    except Exception:
+        return []
+    return [
+        element
+        for element in elements
+        if _is_visible(element)
+        and _is_enabled(element)
+        and _matches_text(_element_name(element), name)
+    ]
 
 
 def _find_single_password_descendant(

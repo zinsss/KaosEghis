@@ -435,11 +435,19 @@ class VaccineTab(QWidget):
         return result.success
 
     def open_vaccine_system(self, system: str) -> bool:
-        """Open one configured vaccine system without transferring patient context."""
+        """Confirm KDCA authentication, then open one configured system.
+
+        No patient context, resident number, or credential value is transferred to
+        the external site from this action.
+        """
 
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
+        authentication = start_kdca_certificate_login(settings)
+        if not authentication.success:
+            self.status_label.setText(authentication.message)
+            return False
         result = open_vaccine_system(settings, system)
         self.status_label.setText(result.message)
         return result.success

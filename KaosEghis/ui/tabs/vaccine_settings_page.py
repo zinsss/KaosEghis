@@ -319,6 +319,7 @@ class VaccineSystemTargetsEditor(QWidget):
         self.kdca_portal_url_input = QLineEdit()
         self.kdca_browser_title_input = QLineEdit()
         self.kdca_login_control_name_input = QLineEdit()
+        self.kdca_logout_control_name_input = QLineEdit()
         self.kdca_login_x_input = self._coordinate_input()
         self.kdca_login_y_input = self._coordinate_input()
         self.kdca_certificate_window_title_input = QLineEdit()
@@ -378,6 +379,7 @@ class VaccineSystemTargetsEditor(QWidget):
         kdca_form.addRow("Portal URL", self.kdca_portal_url_input)
         kdca_form.addRow("Browser title contains", self.kdca_browser_title_input)
         kdca_form.addRow("Login control text", self.kdca_login_control_name_input)
+        kdca_form.addRow("Logged-in control text", self.kdca_logout_control_name_input)
         kdca_form.addRow("Login fallback X", self.kdca_login_x_input)
         kdca_form.addRow("Login fallback Y", self.kdca_login_y_input)
         kdca_form.addRow(
@@ -515,6 +517,9 @@ class VaccineSystemTargetsEditor(QWidget):
         self.kdca_login_control_name_input.setText(
             settings.get("vaccine_kdca_login_control_name", "")
         )
+        self.kdca_logout_control_name_input.setText(
+            settings.get("vaccine_kdca_logout_control_name", "")
+        )
         self.kdca_login_x_input.setValue(
             _setting_coordinate(settings, "vaccine_kdca_login_x")
         )
@@ -617,6 +622,9 @@ class VaccineSystemTargetsEditor(QWidget):
             ),
             "vaccine_kdca_login_control_name": (
                 self.kdca_login_control_name_input.text().strip()
+            ),
+            "vaccine_kdca_logout_control_name": (
+                self.kdca_logout_control_name_input.text().strip()
             ),
             "vaccine_kdca_login_x": str(self.kdca_login_x_input.value()),
             "vaccine_kdca_login_y": str(self.kdca_login_y_input.value()),
