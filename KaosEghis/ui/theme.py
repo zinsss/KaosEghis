@@ -183,6 +183,15 @@ QLabel#appNotificationText[notificationTone="error"] {
     color: #bf616a;
 }
 
+QWidget#launcherKaosGddPanel {
+    background-color: #2b303b;
+    border: 1px solid #4c566a;
+}
+
+QWebEngineView#launcherKaosGddWebView {
+    border: none;
+}
+
 QLabel#influenzaProgramResult {
     background-color: #3b4252;
     border: 1px solid #4c566a;

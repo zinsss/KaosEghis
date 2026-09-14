@@ -380,11 +380,11 @@ class LauncherPage(QWidget):
         )
         self.kaosgdd_panel.setObjectName("launcherKaosGddPanel")
 
-        launcher_content = QHBoxLayout()
-        launcher_content.setContentsMargins(0, 0, 0, 0)
-        launcher_content.setSpacing(12)
-        launcher_content.addWidget(launcher_lists_panel, 1)
-        launcher_content.addWidget(self.kaosgdd_panel, 1)
+        self.launcher_content = QHBoxLayout()
+        self.launcher_content.setContentsMargins(0, 0, 0, 0)
+        self.launcher_content.setSpacing(12)
+        self.launcher_content.addWidget(launcher_lists_panel, 1)
+        self.launcher_content.addWidget(self.kaosgdd_panel)
 
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_view)
@@ -407,7 +407,7 @@ class LauncherPage(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(title)
         layout.addLayout(connection_row)
-        layout.addLayout(launcher_content, 1)
+        layout.addLayout(self.launcher_content, 1)
         layout.addLayout(controls)
         layout.addWidget(self.log)
 

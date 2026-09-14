@@ -45,6 +45,7 @@ class KaosGddWebPanel(QWidget):
         self.web_profile = QWebEngineProfile("KaosGdd", self)
         _configure_persistent_profile(self.web_profile)
         self.web_view = QWebEngineView()
+        self.web_view.setObjectName("launcherKaosGddWebView")
         self.web_page = QWebEnginePage(self.web_profile, self.web_view)
         self.web_view.setPage(self.web_page)
         if viewport_width is None:

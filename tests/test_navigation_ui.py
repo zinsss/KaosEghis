@@ -143,6 +143,8 @@ def test_launcher_page_places_kaosgdd_phone_view_on_the_right(monkeypatch) -> No
     assert page.LAUNCHER_COLUMN_STRETCH == 1
     assert page.KAOSGDD_PHONE_VIEWPORT_WIDTH == 430
     assert page.kaosgdd_panel.objectName() == "launcherKaosGddPanel"
+    assert page.launcher_content.stretch(0) == 1
+    assert page.launcher_content.stretch(1) == 0
     assert not hasattr(page, "socl_panel")
 
 
