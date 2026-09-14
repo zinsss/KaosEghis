@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -65,6 +66,69 @@ def test_vaccine_tables_and_seed_types_are_created(tmp_path) -> None:
     assert settings["vaccine_covid_system_keepalive_y"] == "1982"
     assert settings["vaccine_covid_system_resident_x"] == "1466"
     assert settings["vaccine_covid_system_resident_y"] == "2107"
+
+
+def test_vaccine_system_launch_opens_only_the_configured_saved_url() -> None:
+    from KaosEghis.core.vaccine_system_launch import open_vaccine_system
+
+    opened_urls: list[str] = []
+
+    def open_browser(url: str, **_kwargs) -> bool:
+        opened_urls.append(url)
+        return True
+
+    result = open_vaccine_system(
+        {"vaccine_influenza_system_launch_url": "https://example.test/flu"},
+        "influenza",
+        opener=open_browser,
+    )
+
+    assert result.success is True
+    assert opened_urls == ["https://example.test/flu"]
+    assert "Influenza vaccine system opened." in result.message
+
+
+def test_vaccine_system_launch_rejects_missing_or_unsafe_urls() -> None:
+    from KaosEghis.core.vaccine_system_launch import open_vaccine_system
+
+    missing = open_vaccine_system({}, "general")
+    unsafe = open_vaccine_system(
+        {"vaccine_general_system_launch_url": "file:///C:/not-a-vaccine-system"},
+        "general",
+    )
+
+    assert missing.success is False
+    assert unsafe.success is False
+    assert "launch URL" in missing.message
+    assert "launch URL" in unsafe.message
+
+
+def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    launched_systems: list[str] = []
+
+    def fake_launch(_settings, system):
+        launched_systems.append(system)
+        return SimpleNamespace(success=True, message=f"{system} opened.")
+
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "open_vaccine_system",
+        fake_launch,
+    )
+    panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+
+    panel.open_general_system_button.click()
+    panel.open_influenza_system_button.click()
+    panel.open_covid_system_button.click()
+
+    assert launched_systems == ["general", "influenza", "covid"]
+    assert panel.status_label.text() == "covid opened."
 
 
 def test_vaccine_label_printer_reports_unavailable_printer_without_printing(

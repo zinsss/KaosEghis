@@ -337,8 +337,9 @@ links:
 The intended operator flow is to open the OIS service, complete its normal login, then
 open the relevant saved system-entry URL. The URLs contain no credentials, session IDs,
 patient values, or vaccination data. KaosEghis stores them for the upcoming explicit
-system-launch action; this configuration change does not open a browser or automate a
-login.
+system-launch action. `Vaccine -> Main` provides explicit `Open General`, `Open
+Influenza`, and `Open COVID` actions which open only the corresponding configured URL.
+They do not log in, read or enter patient data, or automate any next step.
 
 ### Explicit KDCA Certificate Login
 

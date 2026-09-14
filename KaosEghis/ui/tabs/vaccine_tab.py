@@ -36,6 +36,7 @@ from KaosEghis.core.vaccine_patient_context import (
     fetch_vaccine_patient_context,
     resident_id_for_label,
 )
+from KaosEghis.core.vaccine_system_launch import open_vaccine_system
 from KaosEghis.core.kdca_certificate_login import start_kdca_certificate_login
 from KaosEghis.core.vaccine_session_keeper import (
     SESSION_KEEPER_INTERVAL_MS,
@@ -258,6 +259,18 @@ class VaccineTab(QWidget):
         self.fetch_button.clicked.connect(self.fetch_current_patient_from_emr)
         self.kdca_login_button = QPushButton("Log in to KDCA")
         self.kdca_login_button.clicked.connect(self.log_in_to_kdca)
+        self.open_general_system_button = QPushButton("Open General")
+        self.open_general_system_button.clicked.connect(
+            lambda: self.open_vaccine_system("general")
+        )
+        self.open_influenza_system_button = QPushButton("Open Influenza")
+        self.open_influenza_system_button.clicked.connect(
+            lambda: self.open_vaccine_system("influenza")
+        )
+        self.open_covid_system_button = QPushButton("Open COVID")
+        self.open_covid_system_button.clicked.connect(
+            lambda: self.open_vaccine_system("covid")
+        )
         self.save_button = QPushButton("Save record")
         self.save_button.clicked.connect(self.save_record)
         self.new_record_button = QPushButton("New vaccine record")
@@ -418,6 +431,16 @@ class VaccineTab(QWidget):
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
         result = start_kdca_certificate_login(settings)
+        self.status_label.setText(result.message)
+        return result.success
+
+    def open_vaccine_system(self, system: str) -> bool:
+        """Open one configured vaccine system without transferring patient context."""
+
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+        result = open_vaccine_system(settings, system)
         self.status_label.setText(result.message)
         return result.success
 
@@ -1262,7 +1285,6 @@ class VaccineTab(QWidget):
         page = QWidget()
         controls = QHBoxLayout()
         controls.addWidget(self.fetch_button)
-        controls.addWidget(self.kdca_login_button)
         controls.addWidget(self.influenza_check_button)
         controls.addWidget(self.covid_check_button)
         controls.addWidget(self.save_button)
@@ -1272,6 +1294,13 @@ class VaccineTab(QWidget):
         controls.addWidget(self.print_prepared_pair_button)
         controls.addWidget(self.clear_button)
         controls.addStretch()
+
+        system_controls = QHBoxLayout()
+        system_controls.addWidget(self.kdca_login_button)
+        system_controls.addWidget(self.open_general_system_button)
+        system_controls.addWidget(self.open_influenza_system_button)
+        system_controls.addWidget(self.open_covid_system_button)
+        system_controls.addStretch()
 
         counts_row = QHBoxLayout()
         counts_row.addWidget(self.today_influenza_count_label)
@@ -1303,6 +1332,7 @@ class VaccineTab(QWidget):
 
         layout = QVBoxLayout(page)
         layout.addLayout(controls)
+        layout.addLayout(system_controls)
         layout.addLayout(counts_row)
         layout.addWidget(self.rural_exception_check)
         layout.addWidget(self.prepared_pair_label)
