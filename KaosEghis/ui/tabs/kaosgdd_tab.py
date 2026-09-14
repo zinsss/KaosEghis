@@ -1,5 +1,7 @@
+from pathlib import Path
+
 from PySide6.QtCore import QUrl
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 try:
     from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
@@ -14,9 +16,18 @@ from KaosEghis.db.database import connect, get_data_dir, initialize_database
 from KaosEghis.db.repositories import get_settings
 
 
-class KaosGddTab(QWidget):
-    def __init__(self) -> None:
+class KaosGddWebPanel(QWidget):
+    """Reusable KaosGDD browser surface with persistent local browser storage."""
+
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        *,
+        viewport_width: int | None = None,
+    ) -> None:
         super().__init__()
+        self._db_path = db_path
+        self._loaded = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -36,13 +47,41 @@ class KaosGddTab(QWidget):
         self.web_view = QWebEngineView()
         self.web_page = QWebEnginePage(self.web_profile, self.web_view)
         self.web_view.setPage(self.web_page)
-        self.web_view.setUrl(QUrl(_kaosgdd_url()))
-        layout.addWidget(self.web_view)
+        if viewport_width is None:
+            layout.addWidget(self.web_view)
+            return
+
+        self.web_view.setFixedWidth(viewport_width)
+        centered_view = QHBoxLayout()
+        centered_view.setContentsMargins(0, 0, 0, 0)
+        centered_view.addStretch()
+        centered_view.addWidget(self.web_view)
+        centered_view.addStretch()
+        layout.addLayout(centered_view)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.load_page()
+
+    def load_page(self) -> None:
+        """Load only when the surface becomes visible, avoiding hidden startup traffic."""
+
+        if self._loaded or not hasattr(self, "web_view"):
+            return
+        self._loaded = True
+        self.web_view.setUrl(QUrl(_kaosgdd_url(self._db_path)))
 
 
-def _kaosgdd_url() -> str:
-    initialize_database()
-    with connect() as connection:
+class KaosGddTab(KaosGddWebPanel):
+    """Compatibility wrapper for the original full-page KaosGDD surface."""
+
+    def __init__(self, db_path: Path | None = None) -> None:
+        super().__init__(db_path)
+
+
+def _kaosgdd_url(db_path: Path | None = None) -> str:
+    initialize_database(db_path)
+    with connect(db_path) as connection:
         settings = get_settings(connection)
     return settings.get("kaosgdd_url", DEFAULT_CONFIG.kaosgdd_url)
 

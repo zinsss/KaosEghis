@@ -127,15 +127,22 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
     assert not hasattr(tab.launcher_page, "summary_label")
 
 
-def test_launcher_page_gives_three_lists_equal_width_without_embedded_socl() -> None:
+def test_launcher_page_places_kaosgdd_phone_view_on_the_right(monkeypatch) -> None:
     _app()
+
+    import KaosEghis.ui.tabs.kaosgdd_tab as kaosgdd_tab_module
+
+    monkeypatch.setattr(kaosgdd_tab_module, "QWebEngineView", None)
+    monkeypatch.setattr(kaosgdd_tab_module, "QWebEnginePage", None)
+    monkeypatch.setattr(kaosgdd_tab_module, "QWebEngineProfile", None)
 
     from KaosEghis.ui.tabs.kaoseghis_tab import LauncherPage
 
     page = LauncherPage()
 
     assert page.LAUNCHER_COLUMN_STRETCH == 1
-    assert not hasattr(page, "SOCL_COLUMN_STRETCH")
+    assert page.KAOSGDD_PHONE_VIEWPORT_WIDTH == 430
+    assert page.kaosgdd_panel.objectName() == "launcherKaosGddPanel"
     assert not hasattr(page, "socl_panel")
 
 

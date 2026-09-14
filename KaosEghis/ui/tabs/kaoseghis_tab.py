@@ -82,6 +82,7 @@ from KaosEghis.ui.tabs.eghis_assist_tab import MacroEditorDialog
 from KaosEghis.ui.tabs.date_formatter_page import DateFormatterPage
 from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
 from KaosEghis.ui.tabs.flu_report_tab import FluReportTab
+from KaosEghis.ui.tabs.kaosgdd_tab import KaosGddWebPanel
 from KaosEghis.ui.tabs.service_web_tab import ServiceWebTab
 from KaosEghis.ui.tabs.scan_tab import ScanTab
 from KaosEghis.ui.tabs.scheduler_tab import SchedulerTab
@@ -329,6 +330,7 @@ class LauncherPage(QWidget):
     ENTRY_KIND_ROLE = 258
     ITEM_TYPE_ROLE = LauncherListWidget.ITEM_TYPE_ROLE if "LauncherListWidget" in globals() else 257
     LAUNCHER_COLUMN_STRETCH = 1
+    KAOSGDD_PHONE_VIEWPORT_WIDTH = 430
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -369,6 +371,21 @@ class LauncherPage(QWidget):
             columns.addWidget(section_list, 1, index)
             columns.setColumnStretch(index, self.LAUNCHER_COLUMN_STRETCH)
 
+        launcher_lists_panel = QWidget()
+        launcher_lists_panel.setLayout(columns)
+
+        self.kaosgdd_panel = KaosGddWebPanel(
+            db_path,
+            viewport_width=self.KAOSGDD_PHONE_VIEWPORT_WIDTH,
+        )
+        self.kaosgdd_panel.setObjectName("launcherKaosGddPanel")
+
+        launcher_content = QHBoxLayout()
+        launcher_content.setContentsMargins(0, 0, 0, 0)
+        launcher_content.setSpacing(12)
+        launcher_content.addWidget(launcher_lists_panel, 1)
+        launcher_content.addWidget(self.kaosgdd_panel, 1)
+
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_view)
         self.dry_run_button = QPushButton("Dry run")
@@ -390,7 +407,7 @@ class LauncherPage(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(title)
         layout.addLayout(connection_row)
-        layout.addLayout(columns, 1)
+        layout.addLayout(launcher_content, 1)
         layout.addLayout(controls)
         layout.addWidget(self.log)
 
