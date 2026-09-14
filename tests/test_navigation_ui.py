@@ -878,6 +878,14 @@ def test_kaosgdd_profile_persists_cookies_and_cache(tmp_path, monkeypatch) -> No
     assert (tmp_path / "web" / "kaosgdd" / "cache").is_dir()
 
 
+def test_embedded_kaosgdd_menu_style_keeps_native_selectors_dark() -> None:
+    from KaosEghis.ui.tabs.kaosgdd_tab import _EMBEDDED_DARK_MENU_STYLE_SCRIPT
+
+    assert "color-scheme: dark" in _EMBEDDED_DARK_MENU_STYLE_SCRIPT
+    assert "select option" in _EMBEDDED_DARK_MENU_STYLE_SCRIPT
+    assert "#2e3440" in _EMBEDDED_DARK_MENU_STYLE_SCRIPT
+
+
 def test_memos_tab_falls_back_without_webengine(monkeypatch) -> None:
     _app()
 

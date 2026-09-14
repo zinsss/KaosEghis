@@ -16,6 +16,32 @@ from KaosEghis.db.database import connect, get_data_dir, initialize_database
 from KaosEghis.db.repositories import get_settings
 
 
+_EMBEDDED_DARK_MENU_STYLE_SCRIPT = """
+(() => {
+    const styleId = "kaoseghis-embedded-menu-theme";
+    if (document.getElementById(styleId)) return;
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+        html { color-scheme: dark !important; }
+        select, select option, select optgroup {
+            color-scheme: dark !important;
+            color: #eceff4 !important;
+            background-color: #2e3440 !important;
+        }
+        select {
+            border-color: #4c566a !important;
+        }
+        select option:checked {
+            background-color: #5e81ac !important;
+            color: #eceff4 !important;
+        }
+    `;
+    document.head.appendChild(style);
+})();
+"""
+
+
 class KaosGddWebPanel(QWidget):
     """Reusable KaosGDD browser surface with persistent local browser storage."""
 
@@ -48,6 +74,7 @@ class KaosGddWebPanel(QWidget):
         self.web_view.setObjectName("launcherKaosGddWebView")
         self.web_page = QWebEnginePage(self.web_profile, self.web_view)
         self.web_view.setPage(self.web_page)
+        self.web_view.loadFinished.connect(self._apply_embedded_menu_theme)
         if viewport_width is None:
             layout.addWidget(self.web_view)
             return
@@ -71,6 +98,10 @@ class KaosGddWebPanel(QWidget):
             return
         self._loaded = True
         self.web_view.setUrl(QUrl(_kaosgdd_url(self._db_path)))
+
+    def _apply_embedded_menu_theme(self, loaded: bool) -> None:
+        if loaded:
+            self.web_page.runJavaScript(_EMBEDDED_DARK_MENU_STYLE_SCRIPT)
 
 
 class KaosGddTab(KaosGddWebPanel):
