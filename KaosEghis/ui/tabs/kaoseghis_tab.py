@@ -331,6 +331,7 @@ class LauncherPage(QWidget):
     ITEM_TYPE_ROLE = LauncherListWidget.ITEM_TYPE_ROLE if "LauncherListWidget" in globals() else 257
     LAUNCHER_COLUMN_STRETCH = 1
     KAOSGDD_PHONE_VIEWPORT_WIDTH = 430
+    KAOSGDD_FRAME_WIDTH = KAOSGDD_PHONE_VIEWPORT_WIDTH + 2
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -379,12 +380,20 @@ class LauncherPage(QWidget):
             viewport_width=self.KAOSGDD_PHONE_VIEWPORT_WIDTH,
         )
         self.kaosgdd_panel.setObjectName("launcherKaosGddPanel")
+        self.kaosgdd_title = QLabel("KaosGDD")
+        self.kaosgdd_title.setObjectName("launcherSectionTitle")
+        self.kaosgdd_column = QWidget()
+        self.kaosgdd_column.setFixedWidth(self.KAOSGDD_FRAME_WIDTH)
+        kaosgdd_layout = QVBoxLayout(self.kaosgdd_column)
+        kaosgdd_layout.setContentsMargins(0, 0, 0, 0)
+        kaosgdd_layout.addWidget(self.kaosgdd_title)
+        kaosgdd_layout.addWidget(self.kaosgdd_panel, 1)
 
         self.launcher_content = QHBoxLayout()
         self.launcher_content.setContentsMargins(0, 0, 0, 0)
         self.launcher_content.setSpacing(12)
         self.launcher_content.addWidget(launcher_lists_panel, 1)
-        self.launcher_content.addWidget(self.kaosgdd_panel)
+        self.launcher_content.addWidget(self.kaosgdd_column)
 
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_view)
