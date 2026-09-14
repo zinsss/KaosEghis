@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -362,6 +363,11 @@ class LauncherPage(QWidget):
             section_label = QLabel(section)
             section_label.setObjectName("launcherSectionTitle")
             section_list = LauncherListWidget(section, self)
+            section_list.setMinimumWidth(0)
+            section_list.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Expanding,
+            )
             section_list.itemDoubleClicked.connect(
                 lambda item, list_widget=section_list: self.activate_launcher_item(
                     list_widget, item
@@ -373,6 +379,10 @@ class LauncherPage(QWidget):
             columns.setColumnStretch(index, self.LAUNCHER_COLUMN_STRETCH)
 
         launcher_lists_panel = QWidget()
+        launcher_lists_panel.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Expanding,
+        )
         launcher_lists_panel.setLayout(columns)
 
         self.kaosgdd_panel = KaosGddWebPanel(

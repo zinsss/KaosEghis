@@ -48,18 +48,23 @@ from KaosEghis.ui.tabs.settings_tab import SettingsTab
 
 class AppNotificationArea(QWidget):
     TONES = {"neutral", "info", "success", "warning", "error"}
+    DISPLAY_WIDTH = 220
 
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("appNotificationArea")
-        self.setMinimumWidth(280)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.setFixedWidth(self.DISPLAY_WIDTH)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         self.dot = QLabel("\u25cf")
         self.dot.setObjectName("appNotificationDot")
         self.text = QLabel("Ready")
         self.text.setObjectName("appNotificationText")
         self.text.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.text.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 0, 12, 0)

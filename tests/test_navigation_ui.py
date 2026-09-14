@@ -46,6 +46,20 @@ def test_button_proxy_applies_explicit_brackets_and_reserves_width() -> None:
     assert button.text() == "[ Reconnect EMR ]"
 
 
+def test_notification_area_has_a_bounded_width_and_clips_long_status_text() -> None:
+    _app()
+
+    from PySide6.QtWidgets import QSizePolicy
+
+    from KaosEghis.ui.main_window import AppNotificationArea
+
+    area = AppNotificationArea()
+    area.show_message("Credentials unlocked and ready for KaosEghis.")
+
+    assert area.width() == AppNotificationArea.DISPLAY_WIDTH
+    assert area.text.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
+
+
 def test_theme_flattens_spinbox_stepper_buttons() -> None:
     from KaosEghis.ui.theme import NORD_QSS
 
@@ -130,6 +144,8 @@ def test_kaoseghis_tab_has_compact_top_navigation_and_stacked_widget() -> None:
 def test_launcher_page_places_kaosgdd_phone_view_on_the_right(monkeypatch) -> None:
     _app()
 
+    from PySide6.QtWidgets import QSizePolicy
+
     import KaosEghis.ui.tabs.kaosgdd_tab as kaosgdd_tab_module
 
     monkeypatch.setattr(kaosgdd_tab_module, "QWebEngineView", None)
@@ -148,6 +164,15 @@ def test_launcher_page_places_kaosgdd_phone_view_on_the_right(monkeypatch) -> No
     assert page.kaosgdd_column.width() == page.KAOSGDD_FRAME_WIDTH
     assert page.launcher_content.stretch(0) == 1
     assert page.launcher_content.stretch(1) == 0
+    assert all(
+        list_widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
+        for list_widget in page.launcher_lists.values()
+    )
+    page.resize(1000, 800)
+    page.show()
+    _app().processEvents()
+    assert page.kaosgdd_column.geometry().right() <= page.contentsRect().right()
+    page.close()
     assert not hasattr(page, "socl_panel")
 
 
