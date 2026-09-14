@@ -891,6 +891,7 @@ def test_theme_draws_a_frame_around_the_embedded_kaosgdd_view() -> None:
 
     assert "QFrame#launcherKaosGddFrame" in NORD_QSS
     assert "border: 1px solid #4c566a;" in NORD_QSS
+    assert "border-radius: 4px;" in NORD_QSS
 
 
 def test_memos_tab_falls_back_without_webengine(monkeypatch) -> None:
