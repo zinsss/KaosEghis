@@ -183,7 +183,7 @@ QLabel#appNotificationText[notificationTone="error"] {
     color: #bf616a;
 }
 
-QWidget#launcherKaosGddPanel {
+QFrame#launcherKaosGddFrame {
     background-color: #2b303b;
     border: 1px solid #4c566a;
 }

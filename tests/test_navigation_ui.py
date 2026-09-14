@@ -886,6 +886,13 @@ def test_embedded_kaosgdd_menu_style_keeps_native_selectors_dark() -> None:
     assert "#2e3440" in _EMBEDDED_DARK_MENU_STYLE_SCRIPT
 
 
+def test_theme_draws_a_frame_around_the_embedded_kaosgdd_view() -> None:
+    from KaosEghis.ui.theme import NORD_QSS
+
+    assert "QFrame#launcherKaosGddFrame" in NORD_QSS
+    assert "border: 1px solid #4c566a;" in NORD_QSS
+
+
 def test_memos_tab_falls_back_without_webengine(monkeypatch) -> None:
     _app()
 

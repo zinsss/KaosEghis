@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QUrl
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 try:
     from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
@@ -80,10 +80,18 @@ class KaosGddWebPanel(QWidget):
             return
 
         self.web_view.setFixedWidth(viewport_width)
+        self.web_frame = QFrame()
+        self.web_frame.setObjectName("launcherKaosGddFrame")
+        self.web_frame.setFixedWidth(viewport_width + 2)
+        frame_layout = QVBoxLayout(self.web_frame)
+        frame_layout.setContentsMargins(1, 1, 1, 1)
+        frame_layout.setSpacing(0)
+        frame_layout.addWidget(self.web_view)
+
         centered_view = QHBoxLayout()
         centered_view.setContentsMargins(0, 0, 0, 0)
         centered_view.addStretch()
-        centered_view.addWidget(self.web_view)
+        centered_view.addWidget(self.web_frame)
         centered_view.addStretch()
         layout.addLayout(centered_view)
 
