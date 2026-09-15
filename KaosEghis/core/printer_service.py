@@ -84,8 +84,7 @@ def _paint_vaccine_label(
     pen.setWidthF(max(1.0, rect.width() / 450.0))
     painter.setPen(pen)
 
-    title_font = QFont("Malgun Gothic")
-    title_font.setPointSizeF(max(10.0, rect.height() / 10.0))
+    title_font = _label_font(rect.height() / 10.0)
     painter.setFont(title_font)
     painter.drawText(
         QRectF(inner.left(), inner.top(), inner.width() * 0.55, inner.height() * 0.15),
@@ -106,9 +105,7 @@ def _paint_vaccine_label(
     painter.drawLine(inner.left(), top_line, inner.right(), top_line)
     painter.drawLine(inner.left(), bottom_line, inner.right(), bottom_line)
 
-    vaccine_font = QFont("Malgun Gothic")
-    vaccine_font.setBold(True)
-    vaccine_font.setPointSizeF(max(16.0, rect.height() / 4.9))
+    vaccine_font = _label_font(rect.height() / 4.9, bold=True)
     painter.setFont(vaccine_font)
     painter.drawText(
         QRectF(inner.left(), top_line, inner.width(), bottom_line - top_line),
@@ -116,8 +113,7 @@ def _paint_vaccine_label(
         content.vaccine_name,
     )
 
-    detail_font = QFont("Malgun Gothic")
-    detail_font.setPointSizeF(max(9.0, rect.height() / 11.0))
+    detail_font = _label_font(rect.height() / 11.0)
     painter.setFont(detail_font)
     patient_text = " ".join(
         part for part in (content.patient_name, content.chart_no) if part
@@ -138,3 +134,12 @@ def _paint_vaccine_label(
         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         content.phone,
     )
+
+
+def _label_font(pixel_size: float, *, bold: bool = False) -> QFont:
+    """Use painter-coordinate pixels so high-DPI thermal drivers do not enlarge text."""
+
+    font = QFont("Malgun Gothic")
+    font.setPixelSize(max(1, round(pixel_size)))
+    font.setBold(bold)
+    return font

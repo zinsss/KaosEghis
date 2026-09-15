@@ -315,6 +315,18 @@ def test_vaccine_label_printer_renders_to_an_available_native_printer(monkeypatc
     assert rendered[0][1] == content
 
 
+def test_vaccine_label_fonts_use_painter_pixel_sizes() -> None:
+    from KaosEghis.core.printer_service import _label_font
+
+    title = _label_font(40.2)
+    vaccine_name = _label_font(81.6, bold=True)
+
+    assert title.pixelSize() == 40
+    assert title.pointSize() == -1
+    assert vaccine_name.pixelSize() == 82
+    assert vaccine_name.bold() is True
+
+
 def test_vaccine_label_layout_renders_korean_text() -> None:
     from datetime import datetime
 
