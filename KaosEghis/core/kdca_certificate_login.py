@@ -15,6 +15,11 @@ import webbrowser
 from KaosEghis.core.pw_runtime import get_unlocked_credential_password
 
 
+# KDCA renders its signed-out certificate action as this JavaScript anchor. Chrome
+# may expose the anchor's legacy URL while omitting its accessible text.
+_KDCA_CERTIFICATE_LOGIN_HREF = "javascript:fnpkicall('plo')"
+
+
 @dataclass(frozen=True)
 class KdcaCertificateLoginConfig:
     portal_url: str
@@ -150,10 +155,7 @@ def start_kdca_certificate_login(
             "KDCA certificate credential is unavailable. Unlock KaosEghis-pw first.",
         )
 
-    login_control = _find_single_descendant(
-        browser_window,
-        name=config.login_control_name,
-    )
+    login_control = _find_single_kdca_login_control(browser_window, config)
     if login_control is not None:
         if not _activate(login_control):
             return _result(
@@ -328,17 +330,17 @@ def _wait_for_session_state(
 ) -> str:
     """Return only a positively identified KDCA sign-in state.
 
-    The two portal controls are intentionally configured independently.  A missing
-    login control is never treated as a logged-in session, because Chrome may hide
-    web content from UI Automation on some installations.
+    The two portal controls are intentionally configured independently. The
+    known KDCA certificate-login anchor is also accepted when Chrome exposes its
+    legacy URL instead of its accessible text. A missing login control is never
+    treated as a logged-in session, because Chrome may hide web content from UI
+    Automation on some installations.
     """
 
+    _focus(browser_window)
     deadline = time.monotonic() + max(timeout_seconds, 0.1)
     while time.monotonic() < deadline:
-        login_controls = _find_visible_named_descendants(
-            browser_window,
-            config.login_control_name,
-        )
+        login_controls = _find_visible_kdca_login_controls(browser_window, config)
         logout_controls = _find_visible_named_descendants(
             browser_window,
             config.logout_control_name,
@@ -419,6 +421,43 @@ def _find_single_descendant(
     return matches[0] if len(matches) == 1 else None
 
 
+def _find_single_kdca_login_control(
+    window: Any,
+    config: KdcaCertificateLoginConfig,
+) -> Any | None:
+    matches = _find_visible_kdca_login_controls(window, config)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _find_visible_kdca_login_controls(
+    window: Any,
+    config: KdcaCertificateLoginConfig,
+) -> list[Any]:
+    """Find the configured login control or KDCA's known certificate anchor."""
+
+    try:
+        elements = list(window.descendants())
+    except Exception:
+        return []
+    return [
+        element
+        for element in elements
+        if _is_visible(element)
+        and _is_enabled(element)
+        and _is_kdca_certificate_login_control(element, config.login_control_name)
+    ]
+
+
+def _is_kdca_certificate_login_control(element: Any, login_control_name: str) -> bool:
+    if _matches_text(_element_name(element), login_control_name):
+        return True
+    return (
+        _element_control_type(element).casefold() == "hyperlink"
+        and _normalise_kdca_href(_element_legacy_value(element))
+        == _KDCA_CERTIFICATE_LOGIN_HREF
+    )
+
+
 def _find_visible_named_descendants(window: Any, name: str) -> list[Any]:
     """Find visible, enabled controls with one exact accessible name."""
 
@@ -462,10 +501,7 @@ def _find_single_password_descendant(
 
 
 def _activate(element: Any) -> bool:
-    try:
-        element.set_focus()
-    except Exception:
-        pass
+    _focus(element)
     for method_name in ("invoke", "click_input", "click"):
         method = getattr(element, method_name, None)
         if not callable(method):
@@ -476,6 +512,14 @@ def _activate(element: Any) -> bool:
         except Exception:
             continue
     return False
+
+
+def _focus(element: Any) -> bool:
+    try:
+        element.set_focus()
+        return True
+    except Exception:
+        return False
 
 
 def _type_secret(element: Any, password: str) -> bool:
@@ -579,6 +623,30 @@ def _element_automation_id(element: Any) -> str:
 def _element_control_type(element: Any) -> str:
     info = getattr(element, "element_info", None)
     return str(getattr(info, "control_type", "") or "")
+
+
+def _element_legacy_value(element: Any) -> str:
+    """Return a UIA legacy value when Chromium supplies the anchor URL there."""
+
+    for method_name in ("legacy_properties", "get_properties"):
+        method = getattr(element, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            properties = method()
+        except Exception:
+            continue
+        if not isinstance(properties, dict):
+            continue
+        for key in ("Value", "value", "HelpText", "help_text"):
+            value = properties.get(key)
+            if value:
+                return str(value)
+    return ""
+
+
+def _normalise_kdca_href(value: str) -> str:
+    return "".join(str(value or "").split()).casefold().rstrip(";")
 
 
 def _is_password_field(element: Any) -> bool:

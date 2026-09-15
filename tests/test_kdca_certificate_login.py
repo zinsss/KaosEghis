@@ -15,6 +15,7 @@ class _Element:
         control_type: str = "",
         handle: int | None = None,
         children: list["_Element"] | None = None,
+        legacy_value: str = "",
         on_activate=None,
     ) -> None:
         self.element_info = SimpleNamespace(
@@ -24,6 +25,7 @@ class _Element:
         )
         self.handle = handle
         self._children = children or []
+        self._legacy_value = legacy_value
         self._on_activate = on_activate
         self.focused = False
         self.activated = False
@@ -47,6 +49,9 @@ class _Element:
         self.activated = True
         if self._on_activate is not None:
             self._on_activate()
+
+    def legacy_properties(self) -> dict[str, str]:
+        return {"Value": self._legacy_value} if self._legacy_value else {}
 
 
 def _settings() -> dict[str, str]:
@@ -85,6 +90,27 @@ def test_kdca_login_requests_vault_only_after_login_is_confirmed(monkeypatch) ->
     assert result.status == "credential_unavailable"
     assert opened == ["https://is.kdca.go.kr/"]
     assert login.activated is False
+
+
+def test_kdca_certificate_login_anchor_confirms_signed_out_state(monkeypatch) -> None:
+    """Chrome may expose KDCA's fnPkiCall('pLo') anchor without link text."""
+
+    link = _Element(
+        control_type="Hyperlink",
+        legacy_value="javascript:fnPkiCall('pLo');",
+    )
+    browser = _Element(name="질병관리청", handle=101, children=[link])
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser])
+    monkeypatch.setattr(kdca_certificate_login, "_open_portal", lambda _url: True)
+
+    result = kdca_certificate_login.start_kdca_certificate_login(
+        _settings(),
+        password_provider=lambda _reference: None,
+    )
+
+    assert result.success is False
+    assert result.status == "credential_unavailable"
+    assert link.activated is False
 
 
 def test_kdca_login_uses_unique_verified_controls_without_exposing_password(

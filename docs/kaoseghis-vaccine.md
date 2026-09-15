@@ -346,7 +346,9 @@ vaccination data. Before it opens a selected service, KaosEghis opens the KDCA p
 and checks the current browser page using the configured accessible controls:
 
 - visible `로그아웃` only: signed in; the system URL opens without accessing the vault;
-- visible `공동인증서 로그인` only: sign-in required; the guarded certificate flow runs;
+- visible `공동인증서 로그인` only, or the KDCA certificate anchor
+  `javascript:fnPkiCall('pLo')` exposed by Chrome accessibility: sign-in required; the
+  guarded certificate flow runs;
 - both, neither, duplicate, or inaccessible controls: stop safely without accessing the
   certificate password or opening a system URL.
 
