@@ -84,7 +84,9 @@ class KaosGddWebPanel(QWidget):
         self.web_frame.setObjectName("launcherKaosGddFrame")
         self.web_frame.setFixedWidth(viewport_width + 2)
         frame_layout = QVBoxLayout(self.web_frame)
-        frame_layout.setContentsMargins(1, 1, 1, 1)
+        # The frame's contents rect already excludes its one-pixel border.
+        # Extra margins would let the fixed-width web view cover the right edge.
+        frame_layout.setContentsMargins(0, 0, 0, 0)
         frame_layout.setSpacing(0)
         frame_layout.addWidget(self.web_view)
 

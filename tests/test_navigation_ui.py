@@ -172,8 +172,51 @@ def test_launcher_page_places_kaosgdd_phone_view_on_the_right(monkeypatch) -> No
     page.show()
     _app().processEvents()
     assert page.kaosgdd_column.geometry().right() <= page.contentsRect().right()
-    page.close()
     assert not hasattr(page, "socl_panel")
+    page.close()
+
+
+def test_embedded_kaosgdd_frame_keeps_its_right_border_clear(monkeypatch) -> None:
+    _app()
+
+    from PySide6.QtCore import Signal
+    from PySide6.QtWidgets import QWidget
+
+    import KaosEghis.ui.tabs.kaosgdd_tab as kaosgdd_tab_module
+
+    class FakeWebView(QWidget):
+        loadFinished = Signal(bool)
+
+        def setPage(self, page) -> None:
+            self.page = page
+
+    class FakeWebPage:
+        def __init__(self, *_args) -> None:
+            pass
+
+        def runJavaScript(self, _script: str) -> None:
+            pass
+
+    class FakeWebProfile:
+        def __init__(self, *_args) -> None:
+            pass
+
+    monkeypatch.setattr(kaosgdd_tab_module, "QWebEngineView", FakeWebView)
+    monkeypatch.setattr(kaosgdd_tab_module, "QWebEnginePage", FakeWebPage)
+    monkeypatch.setattr(kaosgdd_tab_module, "QWebEngineProfile", FakeWebProfile)
+    monkeypatch.setattr(
+        kaosgdd_tab_module,
+        "_configure_persistent_profile",
+        lambda _profile: None,
+    )
+
+    panel = kaosgdd_tab_module.KaosGddWebPanel(viewport_width=430)
+    margins = panel.web_frame.layout().contentsMargins()
+
+    assert panel.web_frame.width() == 432
+    assert panel.web_view.width() == 430
+    assert margins.left() == 0
+    assert margins.right() == 0
 
 
 def test_kaoseghis_top_nav_pages_are_reachable() -> None:
