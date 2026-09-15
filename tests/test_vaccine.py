@@ -1187,6 +1187,47 @@ def test_session_keeper_is_opt_in_and_never_clicks_during_vaccine_tab_startup(
     )
 
 
+def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    from types import SimpleNamespace
+
+    from KaosEghis.core.vaccine_session_keeper import VaccineSessionResetTarget
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs import vaccine_tab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    targets = (
+        VaccineSessionResetTarget("general", "General", "General", "Class", 1, 2),
+        VaccineSessionResetTarget("covid", "COVID", "COVID", "Class", 3, 4),
+    )
+    reset_calls = []
+    monkeypatch.setattr(
+        vaccine_tab,
+        "configured_session_reset_targets",
+        lambda _settings: targets,
+    )
+    monkeypatch.setattr(
+        vaccine_tab,
+        "reset_vaccine_session",
+        lambda target: reset_calls.append(target.key)
+        or SimpleNamespace(message="Session reset sent.", clicked=True),
+    )
+
+    page = vaccine_tab.VaccineTab(db_path)
+    page.settings_page.system_targets_editor.session_reset_now_button.click()
+
+    assert reset_calls == ["general", "covid"]
+    assert "Reset now: General: Session reset sent.; COVID: Session reset sent." in (
+        page.settings_page.system_targets_editor.session_keeper_status_label.text()
+    )
+    assert page._session_keeper_timers == {}
+
+
 def test_kdca_login_is_explicit_and_uses_vaccine_settings(tmp_path, monkeypatch) -> None:
     _app()
 

@@ -290,6 +290,8 @@ class VaccineProgramEditor(QWidget):
 class VaccineSystemTargetsEditor(QWidget):
     """Editable stable selectors for external-system handoff and session reset."""
 
+    session_reset_requested = Signal()
+
     def __init__(self) -> None:
         super().__init__()
         self.general_launch_url_input = QLineEdit()
@@ -332,6 +334,11 @@ class VaccineSystemTargetsEditor(QWidget):
         self.session_keeper_enabled_check = QCheckBox(
             "Keep General and COVID sessions active every 90 minutes"
         )
+        self.session_reset_now_button = QPushButton("Reset Now")
+        self.session_reset_now_button.setToolTip(
+            "Safely reset the currently open General and COVID sessions once."
+        )
+        self.session_reset_now_button.clicked.connect(self.session_reset_requested.emit)
         self.session_keeper_status_label = QLabel("Session keeper: off.")
         self.session_keeper_status_label.setWordWrap(True)
 
@@ -432,7 +439,11 @@ class VaccineSystemTargetsEditor(QWidget):
         layout.addWidget(covid_group)
         layout.addWidget(kdca_group)
         layout.addWidget(kdca_note)
-        layout.addWidget(self.session_keeper_enabled_check)
+        session_controls = QHBoxLayout()
+        session_controls.addWidget(self.session_keeper_enabled_check)
+        session_controls.addWidget(self.session_reset_now_button)
+        session_controls.addStretch()
+        layout.addLayout(session_controls)
         layout.addWidget(session_note)
         layout.addWidget(self.session_keeper_status_label)
         layout.addWidget(note)

@@ -624,6 +624,11 @@ Provide an explicit `Keep vaccination sessions active` toggle after the operator
 completed authenticated session preparation and KaosEghis has verified the relevant
 applications.
 
+`Vaccine -> Settings -> System targets -> Reset Now` performs one immediate guarded
+reset for the configured General and COVID native windows, even when the recurring
+keeper is off. It uses the same exact-window and point-ownership checks as the timer,
+restarts the 90-minute delay when the keeper is enabled, and never touches Influenza.
+
 - Off by default until a successful manual session preparation.
 - Maintain independent timers for the general and COVID applications.
 - Default to a configurable refresh interval shorter than the two-hour timeout, with

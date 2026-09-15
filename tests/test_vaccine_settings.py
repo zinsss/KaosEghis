@@ -255,6 +255,7 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     assert targets.covid_keepalive_y_input.value() == 1982
     assert targets.kdca_logout_control_name_input.text() == "로그아웃"
     assert targets.session_keeper_enabled_check.isChecked() is False
+    assert targets.session_reset_now_button.text() == "Reset Now"
 
 
 def test_system_target_settings_save_editable_stable_values_without_handle(

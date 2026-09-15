@@ -304,6 +304,9 @@ class VaccineTab(QWidget):
         self.settings_page.settings_changed.connect(
             self._handle_vaccine_settings_changed
         )
+        self.settings_page.system_targets_editor.session_reset_requested.connect(
+            self.reset_vaccine_sessions_now
+        )
         for page in (self.main_page, self.db_page, self.settings_page):
             self.stacked_widget.addWidget(page)
 
@@ -929,6 +932,29 @@ class VaccineTab(QWidget):
         # A closed, moved, or covered system is skipped. The next independent check
         # remains delayed by the full interval rather than repeatedly probing it.
         timer.start(SESSION_KEEPER_INTERVAL_MS)
+
+    def reset_vaccine_sessions_now(self) -> None:
+        """Run one guarded native-session reset without requiring timer opt-in."""
+
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            settings = get_settings(connection)
+
+        results = [
+            (target.label, reset_vaccine_session(target))
+            for target in configured_session_reset_targets(settings)
+        ]
+        summary = "; ".join(f"{label}: {result.message}" for label, result in results)
+        sent_count = sum(1 for _label, result in results if result.clicked)
+
+        # A manual reset starts a fresh interval only when the opt-in keeper is armed.
+        self._configure_session_keeper(settings)
+        if sent_count:
+            message = f"Reset now: {summary}"
+        else:
+            message = f"Reset now: no session reset was sent. {summary}"
+        self.settings_page.system_targets_editor.set_session_keeper_status(message)
+        self.status_label.setText(message)
 
     def add_vaccine_type(self) -> None:
         dialog = VaccineTypeDialog(self)
