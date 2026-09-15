@@ -850,18 +850,25 @@ def _seed_default_vaccine_types(connection: sqlite3.Connection) -> None:
             1,
         ),
         (
+            "Influenza (general/private)",
+            "flu-general",
+            "인플루엔자 예방접종 시행함.",
+            "general_influenza",
+            2,
+        ),
+        (
             "COVID-19 (Pfizer)",
             "covid-pfizer",
             "코로나19 예방접종(화이자) 시행함.",
             "national_covid",
-            2,
+            3,
         ),
         (
             "COVID-19 (Moderna)",
             "covid-moderna",
             "코로나19 예방접종(모더나) 시행함.",
             "national_covid",
-            3,
+            4,
         ),
     )
     existing_codes = {

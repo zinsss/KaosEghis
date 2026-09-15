@@ -31,18 +31,21 @@ def test_vaccine_tables_and_seed_types_are_created(tmp_path) -> None:
     assert "vaccine_types" in tables
     assert "vaccine_records" in tables
     assert "vaccine_audit_events" in tables
-    assert [entry.name for entry in vaccine_types[:3]] == [
+    assert [entry.name for entry in vaccine_types[:4]] == [
         "Influenza",
+        "Influenza (general/private)",
         "COVID-19 (Pfizer)",
         "COVID-19 (Moderna)",
     ]
-    assert [entry.code for entry in vaccine_types[:3]] == [
+    assert [entry.code for entry in vaccine_types[:4]] == [
         "flu",
+        "flu-general",
         "covid-pfizer",
         "covid-moderna",
     ]
-    assert [entry.program_type for entry in vaccine_types[:3]] == [
+    assert [entry.program_type for entry in vaccine_types[:4]] == [
         "national_influenza",
+        "general_influenza",
         "national_covid",
         "national_covid",
     ]
@@ -648,7 +651,7 @@ def test_only_completed_counted_national_records_increment_daily_count(tmp_path)
             connection,
             name="Private Influenza",
             code="private-flu",
-            program_type="general",
+            program_type="general_influenza",
         )
         prepared_flu = create_vaccine_record(
             connection,
@@ -856,6 +859,88 @@ def test_successful_label_print_completes_record_once_and_reprint_does_not_count
     assert reprinted.status == "completed"
     assert counts_after_reprint == {"flu": 0, "covid": 0}
     assert len(printed) == 2
+
+
+def test_general_influenza_target_group_requires_operator_confirmation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from KaosEghis.core.printer_service import VaccineLabelPrintResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_today_vaccine_counts, get_vaccine_record, set_settings
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "vaccine_schedule_rules_json": (
+                    '{"influenza":{"season_name":"2026-2027",'
+                    '"program_enabled":true,"daily_cap":100,'
+                    '"elderly_75_plus_start":"1900-01-01",'
+                    '"elderly_program_end":"2999-12-31"}}'
+                ),
+                "vaccine_age_groups_json": (
+                    '[{"key":"elderly_75_plus","label":"Elderly 75+",'
+                    '"vaccine":"influenza","birth_date_from":"1900-01-01",'
+                    '"birth_date_to":"1951-12-31"}]'
+                ),
+            },
+        )
+
+    printed = []
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "print_vaccine_label",
+        lambda content, *, printer_name: (
+            printed.append((content, printer_name))
+            or VaccineLabelPrintResult(True, "Vaccine label printed.")
+        ),
+    )
+    prompts = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda _parent, title, detail, *_args: (
+            prompts.append((title, detail)) or QMessageBox.StandardButton.No
+        ),
+    )
+
+    page = vaccine_tab_module.VaccineTab(db_path)
+    page._select_vaccine_type(None, "Influenza (general/private)")
+    page.patient_name_input.setText("Test patient")
+    page.patient_chart_no_input.setText("2735")
+    page.patient_resident_id_input.setText("500101-1234567")
+    page.print_label()
+
+    assert len(prompts) == 1
+    assert prompts[0][0] == "Confirm general/private influenza"
+    assert "Elderly 75+" in prompts[0][1]
+    assert printed == []
+    assert "cancelled by operator" in page.status_label.text()
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args: QMessageBox.StandardButton.Yes,
+    )
+    page.print_label()
+
+    with connect(db_path) as connection:
+        record = get_vaccine_record(connection, page._current_record_id)
+        assert record is not None
+        counts = get_today_vaccine_counts(connection, record.completed_on)
+
+    assert record.status == "completed"
+    assert record.program_type == "general_influenza"
+    assert counts == {"flu": 0, "covid": 0}
+    assert len(printed) == 1
 
 
 def test_failed_label_print_does_not_complete_or_count_record(tmp_path, monkeypatch) -> None:

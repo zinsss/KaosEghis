@@ -494,6 +494,7 @@ ALLOWED_SCHEDULER_RUN_TRIGGERS = {"scheduled", "manual"}
 ALLOWED_SOCL_DOMAINS = {"subjective", "objective"}
 ALLOWED_VACCINE_PROGRAM_TYPES = {
     "general",
+    "general_influenza",
     "national_influenza",
     "national_covid",
 }

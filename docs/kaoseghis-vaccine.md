@@ -15,7 +15,8 @@ Current implemented pieces:
   - `vaccine_audit_events`
 - editable local vaccine type catalog
 - local vaccine preparation record save/load/delete
-- explicit general/private, national Influenza, and national COVID type classification
+- explicit general/private, general/private influenza, national Influenza, and national
+  COVID type classification
 - separate `COVID-19 (Pfizer)` and `COVID-19 (Moderna)` products, sharing one national
   COVID schedule and daily-count bucket
 - explicit prepared/printed/completed/cancelled/error record lifecycle
@@ -265,8 +266,10 @@ engine remains compatible.
 - The birthday boundaries, age-group schedules, exception behavior, and counter
   behavior must follow the legacy Labeler rule structure.
 - Seasonal values must be reviewed explicitly before a season is enabled.
-- Paid influenza and other private vaccines do not use the national influenza
-  eligibility gate.
+- General/private influenza never consumes the national influenza cap. When its patient
+  matches a configured national influenza target group, label printing requires an
+  explicit operator confirmation that the non-national product is intentional.
+- Other paid/private vaccines bypass national-program eligibility checking.
 
 ## Intended Operator Workflow
 
@@ -274,7 +277,8 @@ engine remains compatible.
 2. KaosEghis reads the minimum transient patient context needed for the workflow.
 3. The operator selects a vaccine from the editable vaccine catalog.
 4. National influenza or national COVID vaccination invokes the configured program
-   rules. Other vaccines bypass national-program eligibility checking.
+   rules. General/private influenza performs a target-group safety check but never
+   consumes a national count; other vaccines bypass national-program checking.
 5. KaosEghis shows the eligibility result, applicable age group, schedule state,
    counter state, and reason for any block or exception.
 6. The operator reviews or edits the prepared label and chart text.

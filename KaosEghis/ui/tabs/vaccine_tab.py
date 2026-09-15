@@ -89,6 +89,7 @@ VACCINE_TARGET_KEYS = {
 class VaccineTypeDialog(QDialog):
     PROGRAM_TYPES = (
         ("General / private", "general"),
+        ("General / private influenza", "general_influenza"),
         ("National influenza", "national_influenza"),
         ("National COVID-19", "national_covid"),
     )
@@ -1053,6 +1054,7 @@ class VaccineTab(QWidget):
                 QTableWidgetItem(
                     {
                         "general": "General/private",
+                        "general_influenza": "General/private influenza",
                         "national_influenza": "National influenza",
                         "national_covid": "National COVID-19",
                     }.get(record.program_type, record.program_type)
@@ -1224,6 +1226,8 @@ class VaccineTab(QWidget):
     ) -> tuple[bool, bool]:
         if record.program_type == "general":
             return True, False
+        if record.program_type == "general_influenza":
+            return self._confirm_general_influenza_printing(record, settings, counts)
         if record.program_type == "national_covid":
             result = evaluate_covid_program(
                 settings,
@@ -1257,6 +1261,57 @@ class VaccineTab(QWidget):
             self.status_label.setText("Influenza label printing blocked by the program check.")
             return False, False
         return self._confirm_rural_exception_printing("Influenza", result)
+
+    def _confirm_general_influenza_printing(
+        self,
+        record,
+        settings: dict[str, str],
+        counts: dict[str, int],
+    ) -> tuple[bool, bool]:
+        """Guard non-national influenza labels for configured national target groups."""
+
+        result = evaluate_influenza_program(
+            settings,
+            record.patient_resident_id or "",
+            on_date=datetime.now().date(),
+            counted_today=counts.get("flu", 0),
+            rural_exception_checked=self.rural_exception_check.isChecked(),
+        )
+        self._show_influenza_check(result)
+        if result.status == "private_or_unmatched":
+            return True, False
+
+        if result.group_label:
+            detail = (
+                "This patient matches the configured national influenza group: "
+                f"{result.group_label}.\n\n"
+                "This label is marked General/private influenza and will not count "
+                "toward the national daily cap. Continue only after confirming that "
+                "a non-national influenza vaccination is intended."
+            )
+        else:
+            detail = (
+                "KaosEghis could not verify whether this patient matches a national "
+                "influenza target group.\n\n"
+                "Continue only after confirming that a non-national influenza "
+                "vaccination is intended."
+            )
+        if (
+            QMessageBox.question(
+                self,
+                "Confirm general/private influenza",
+                detail,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            self.status_label.setText("General/private influenza printing cancelled by operator.")
+            return False, False
+        self.status_label.setText(
+            "General/private influenza confirmed. National daily cap will not change."
+        )
+        return True, False
 
     def _confirm_rural_exception_printing(self, program: str, result) -> tuple[bool, bool]:
         confirmation = (
@@ -1464,7 +1519,10 @@ class VaccineTab(QWidget):
 
     @staticmethod
     def _record_bucket(record) -> str:
-        if getattr(record, "program_type", "") == "national_influenza":
+        if getattr(record, "program_type", "") in {
+            "general_influenza",
+            "national_influenza",
+        }:
             return "flu"
         if getattr(record, "program_type", "") == "national_covid":
             return "covid"
