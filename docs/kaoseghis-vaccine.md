@@ -421,10 +421,10 @@ National influenza and COVID vaccination seasons commonly overlap. KaosEghis-vac
 must therefore support preparing both vaccinations in one guarded patient workflow.
 
 Current implementation: `Prepare Flu + COVID` reuses the loaded patient context to
-create two separate local preparation records. The operator must explicitly choose the
-COVID product (Pfizer or Moderna) before preparing the pair. `Print prepared pair` first
-requires one explicit operator confirmation, then runs each label's own eligibility gate
-and print checkpoint. It stops and reports the affected vaccine if either label cannot
+create two separate local preparation records. The operator selects the COVID product
+(Pfizer or Moderna) in the normal Vaccine list before preparing the pair. `Print prepared
+pair` first requires one explicit operator confirmation, then runs each label's own
+eligibility gate and print checkpoint. It stops and reports the affected vaccine if either label cannot
 be printed; it never treats a partial pair as fully completed.
 
 - Provide a quick `Influenza + COVID` selection in addition to individual vaccine

@@ -1080,6 +1080,8 @@ def test_new_vaccine_record_retains_patient_context_for_simultaneous_vaccination
 def test_prepare_flu_and_covid_creates_two_separate_records_from_one_context(tmp_path) -> None:
     _app()
 
+    from PySide6.QtCore import Qt
+
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import list_vaccine_records
     from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
@@ -1091,13 +1093,14 @@ def test_prepare_flu_and_covid_creates_two_separate_records_from_one_context(tmp
     page.patient_resident_id_input.setText("500101-1234567")
     page.patient_name_input.setText("Test Patient")
 
-    assert page.combined_covid_type_combo.currentIndex() == -1
     assert page.prepare_flu_and_covid() is None
-    assert "Choose an active COVID product" in page.status_label.text()
+    assert "Select an active COVID product" in page.status_label.text()
 
-    moderna_index = page.combined_covid_type_combo.findText("COVID-19 (Moderna)")
-    assert moderna_index >= 0
-    page.combined_covid_type_combo.setCurrentIndex(moderna_index)
+    moderna_items = page.vaccine_types_list.findItems(
+        "COVID-19 (Moderna)", Qt.MatchFlag.MatchExactly
+    )
+    assert len(moderna_items) == 1
+    page.vaccine_types_list.setCurrentItem(moderna_items[0])
 
     pair = page.prepare_flu_and_covid()
 
