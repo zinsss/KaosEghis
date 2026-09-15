@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -197,16 +199,6 @@ class VaccineTab(QWidget):
         self.prepared_pair_label = QLabel("Flu + COVID: Not prepared.")
         self.prepared_pair_label.setWordWrap(True)
 
-        patient_form = QFormLayout()
-        patient_form.addRow("Chart No", self.patient_chart_no_input)
-        patient_form.addRow("Resident ID", self.patient_resident_id_input)
-        patient_form.addRow("Name", self.patient_name_input)
-        patient_form.addRow("Sex", self.patient_sex_input)
-        patient_form.addRow("Age", self.patient_age_input)
-        patient_form.addRow("DOB", self.patient_birth_date_input)
-        patient_form.addRow("Phone", self.patient_phone_input)
-        patient_form.addRow("Address", self.patient_address_input)
-
         self.vaccine_types_list = QListWidget()
         self.vaccine_types_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.vaccine_types_list.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -303,7 +295,7 @@ class VaccineTab(QWidget):
         self.refresh_records_button = QPushButton("Refresh records")
         self.refresh_records_button.clicked.connect(self.refresh_view)
 
-        self.main_page = self._build_main_page(patient_form, vaccine_type_controls)
+        self.main_page = self._build_main_page(vaccine_type_controls)
         self.db_page = self._build_db_page()
         self.settings_page = VaccineSettingsPage(self._db_path)
         self.settings_page.settings_changed.connect(
@@ -1417,67 +1409,109 @@ class VaccineTab(QWidget):
 
     def _build_main_page(
         self,
-        patient_form: QFormLayout,
         vaccine_type_controls: QHBoxLayout,
     ) -> QWidget:
         page = QWidget()
-        controls = QHBoxLayout()
-        controls.addWidget(self.fetch_button)
-        controls.addWidget(self.influenza_check_button)
-        controls.addWidget(self.covid_check_button)
-        controls.addWidget(self.save_button)
-        controls.addWidget(self.new_record_button)
-        controls.addWidget(QLabel("COVID product"))
-        controls.addWidget(self.combined_covid_type_combo)
-        controls.addWidget(self.prepare_flu_covid_button)
-        controls.addWidget(self.print_button)
-        controls.addWidget(self.print_prepared_pair_button)
-        controls.addWidget(self.clear_button)
-        controls.addStretch()
+        patient_group = QGroupBox("Patient")
+        patient_layout = QVBoxLayout(patient_group)
+        patient_actions = QHBoxLayout()
+        patient_actions.addWidget(self.fetch_button)
+        patient_actions.addWidget(self.new_record_button)
+        patient_actions.addWidget(self.clear_button)
+        patient_actions.addStretch()
+        patient_layout.addLayout(patient_actions)
+        patient_fields = QGridLayout()
+        patient_fields.addWidget(QLabel("Name"), 0, 0)
+        patient_fields.addWidget(self.patient_name_input, 0, 1)
+        patient_fields.addWidget(QLabel("Chart No"), 0, 2)
+        patient_fields.addWidget(self.patient_chart_no_input, 0, 3)
+        patient_fields.addWidget(QLabel("Resident ID"), 1, 0)
+        patient_fields.addWidget(self.patient_resident_id_input, 1, 1)
+        patient_fields.addWidget(QLabel("DOB"), 1, 2)
+        patient_fields.addWidget(self.patient_birth_date_input, 1, 3)
+        patient_fields.addWidget(QLabel("Sex"), 2, 0)
+        patient_fields.addWidget(self.patient_sex_input, 2, 1)
+        patient_fields.addWidget(QLabel("Age"), 2, 2)
+        patient_fields.addWidget(self.patient_age_input, 2, 3)
+        patient_fields.addWidget(QLabel("Phone"), 3, 0)
+        patient_fields.addWidget(self.patient_phone_input, 3, 1, 1, 3)
+        patient_fields.addWidget(QLabel("Address"), 4, 0)
+        patient_fields.addWidget(self.patient_address_input, 4, 1, 1, 3)
+        patient_fields.setColumnStretch(1, 2)
+        patient_fields.setColumnStretch(3, 2)
+        patient_layout.addLayout(patient_fields)
 
-        system_controls = QHBoxLayout()
+        program_group = QGroupBox("Programme checks")
+        program_layout = QVBoxLayout(program_group)
+        counts_row = QHBoxLayout()
+        counts_row.addWidget(self.today_influenza_count_label)
+        counts_row.addSpacing(16)
+        counts_row.addWidget(self.today_covid_count_label)
+        counts_row.addStretch()
+        program_layout.addLayout(counts_row)
+        program_layout.addWidget(self.rural_exception_check)
+        check_actions = QHBoxLayout()
+        check_actions.addWidget(self.influenza_check_button)
+        check_actions.addWidget(self.covid_check_button)
+        check_actions.addStretch()
+        program_layout.addLayout(check_actions)
+        check_results = QGridLayout()
+        check_results.addWidget(self.influenza_check_result, 0, 0)
+        check_results.addWidget(self.covid_check_result, 0, 1)
+        check_results.setColumnStretch(0, 1)
+        check_results.setColumnStretch(1, 1)
+        program_layout.addLayout(check_results)
+
+        vaccine_group = QGroupBox("Vaccine")
+        vaccine_layout = QVBoxLayout(vaccine_group)
+        vaccine_layout.addWidget(self.vaccine_types_list, 1)
+        vaccine_layout.addLayout(vaccine_type_controls)
+
+        preparation_group = QGroupBox("Prepare and print")
+        preparation_layout = QVBoxLayout(preparation_group)
+        record_actions = QHBoxLayout()
+        record_actions.addWidget(self.save_button)
+        record_actions.addWidget(self.print_button)
+        record_actions.addStretch()
+        preparation_layout.addLayout(record_actions)
+        combined_actions = QHBoxLayout()
+        combined_actions.addWidget(QLabel("COVID product"))
+        combined_actions.addWidget(self.combined_covid_type_combo, 1)
+        combined_actions.addWidget(self.prepare_flu_covid_button)
+        combined_actions.addWidget(self.print_prepared_pair_button)
+        preparation_layout.addLayout(combined_actions)
+        preparation_layout.addWidget(self.prepared_pair_label)
+
+        self.vaccine_preview_tabs = QTabWidget()
+        self.vaccine_preview_tabs.setObjectName("vaccinePreviewTabs")
+        self.vaccine_preview_tabs.addTab(self.label_preview, "Label preview")
+        self.vaccine_preview_tabs.addTab(self.charting_text_preview, "Charting text")
+        self.vaccine_preview_tabs.addTab(self.chart_note_preview, "Type note")
+        preparation_layout.addWidget(self.vaccine_preview_tabs, 1)
+
+        systems = QGroupBox("KDCA systems")
+        system_controls = QHBoxLayout(systems)
         system_controls.addWidget(self.kdca_login_button)
         system_controls.addWidget(self.open_general_system_button)
         system_controls.addWidget(self.open_influenza_system_button)
         system_controls.addWidget(self.open_covid_system_button)
         system_controls.addStretch()
 
-        counts_row = QHBoxLayout()
-        counts_row.addWidget(self.today_influenza_count_label)
-        counts_row.addSpacing(16)
-        counts_row.addWidget(self.today_covid_count_label)
-        counts_row.addStretch()
-
-        left_column = QVBoxLayout()
-        left_column.addLayout(patient_form)
-        left_column.addWidget(QLabel("Vaccine list"))
-        left_column.addWidget(self.vaccine_types_list, 1)
-        left_column.addLayout(vaccine_type_controls)
-
-        right_column = QVBoxLayout()
-        right_column.addWidget(QLabel("Print preview"))
-        right_column.addWidget(self.label_preview, 1)
-        right_column.addWidget(QLabel("Charting text"))
-        right_column.addWidget(self.charting_text_preview, 1)
-        right_column.addWidget(QLabel("Selected chart note template"))
-        right_column.addWidget(self.chart_note_preview, 1)
-
         content = QGridLayout()
         content.setContentsMargins(0, 0, 0, 0)
-        content.setHorizontalSpacing(16)
-        content.addLayout(left_column, 0, 0)
-        content.addLayout(right_column, 0, 1)
-        content.setColumnStretch(0, 2)
-        content.setColumnStretch(1, 3)
+        content.setHorizontalSpacing(12)
+        content.setVerticalSpacing(12)
+        content.addWidget(patient_group, 0, 0)
+        content.addWidget(program_group, 0, 1)
+        content.addWidget(vaccine_group, 1, 0)
+        content.addWidget(preparation_group, 1, 1)
+        content.setColumnStretch(0, 1)
+        content.setColumnStretch(1, 1)
+        content.setRowStretch(1, 1)
 
         layout = QVBoxLayout(page)
-        layout.addLayout(controls)
-        layout.addLayout(system_controls)
-        layout.addLayout(counts_row)
-        layout.addWidget(self.rural_exception_check)
-        layout.addWidget(self.prepared_pair_label)
-        layout.addWidget(self.influenza_check_result)
-        layout.addWidget(self.covid_check_result)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(systems)
         layout.addLayout(content, 1)
         return page
 

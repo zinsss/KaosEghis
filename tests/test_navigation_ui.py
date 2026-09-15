@@ -1058,6 +1058,10 @@ def test_vaccine_tab_instantiates_real_page(tmp_path, monkeypatch) -> None:
     assert tab.complete_button.text() == "Mark completed"
     assert tab.cancel_record_button.text() == "Cancel record"
     assert tab.vaccine_types_list.count() >= 2
+    assert [
+        tab.vaccine_preview_tabs.tabText(index)
+        for index in range(tab.vaccine_preview_tabs.count())
+    ] == ["Label preview", "Charting text", "Type note"]
     assert tab.status_label.text() == "Ready."
 
 

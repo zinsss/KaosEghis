@@ -194,23 +194,27 @@ QWebEngineView#launcherKaosGddWebView {
     border-radius: 6px;
 }
 
-QLabel#influenzaProgramResult {
+QLabel#influenzaProgramResult,
+QLabel#covidProgramResult {
     background-color: #3b4252;
     border: 1px solid #4c566a;
     padding: 8px;
 }
 
-QLabel#influenzaProgramResult[resultState="success"] {
+QLabel#influenzaProgramResult[resultState="success"],
+QLabel#covidProgramResult[resultState="success"] {
     border-color: #a3be8c;
     color: #a3be8c;
 }
 
-QLabel#influenzaProgramResult[resultState="warning"] {
+QLabel#influenzaProgramResult[resultState="warning"],
+QLabel#covidProgramResult[resultState="warning"] {
     border-color: #ebcb8b;
     color: #ebcb8b;
 }
 
-QLabel#influenzaProgramResult[resultState="error"] {
+QLabel#influenzaProgramResult[resultState="error"],
+QLabel#covidProgramResult[resultState="error"] {
     border-color: #bf616a;
     color: #d8dee9;
 }
