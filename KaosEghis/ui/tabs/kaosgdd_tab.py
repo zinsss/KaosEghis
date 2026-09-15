@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QEvent, QObject, QRectF, QUrl
+from PySide6.QtGui import QPainterPath, QRegion
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 try:
@@ -42,6 +43,25 @@ _EMBEDDED_DARK_MENU_STYLE_SCRIPT = """
 """
 
 
+class _RoundedViewportMask(QObject):
+    """Clip a web viewport because a parent stylesheet cannot clip WebEngine content."""
+
+    def __init__(self, view: QWidget, radius: float = 6.0) -> None:
+        super().__init__(view)
+        self._view = view
+        self._radius = radius
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._view and event.type() == QEvent.Type.Resize:
+            self.apply()
+        return super().eventFilter(watched, event)
+
+    def apply(self) -> None:
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self._view.rect()), self._radius, self._radius)
+        self._view.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+
 class KaosGddWebPanel(QWidget):
     """Reusable KaosGDD browser surface with persistent local browser storage."""
 
@@ -80,6 +100,9 @@ class KaosGddWebPanel(QWidget):
             return
 
         self.web_view.setFixedWidth(viewport_width)
+        self._web_view_mask = _RoundedViewportMask(self.web_view)
+        self.web_view.installEventFilter(self._web_view_mask)
+        self._web_view_mask.apply()
         self.web_frame = QFrame()
         self.web_frame.setObjectName("launcherKaosGddFrame")
         self.web_frame.setFixedWidth(viewport_width + 2)

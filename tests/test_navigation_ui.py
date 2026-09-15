@@ -215,6 +215,7 @@ def test_embedded_kaosgdd_frame_keeps_its_right_border_clear(monkeypatch) -> Non
 
     assert panel.web_frame.width() == 432
     assert panel.web_view.width() == 430
+    assert panel.web_view.mask().isEmpty() is False
     assert margins.left() == 0
     assert margins.right() == 0
 
@@ -962,7 +963,7 @@ def test_theme_draws_a_frame_around_the_embedded_kaosgdd_view() -> None:
 
     assert "QFrame#launcherKaosGddFrame" in NORD_QSS
     assert "border: 1px solid #4c566a;" in NORD_QSS
-    assert "border-radius: 4px;" in NORD_QSS
+    assert "border-radius: 6px;" in NORD_QSS
 
 
 def test_memos_tab_falls_back_without_webengine(monkeypatch) -> None:
