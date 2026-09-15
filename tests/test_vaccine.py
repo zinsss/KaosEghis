@@ -31,9 +31,19 @@ def test_vaccine_tables_and_seed_types_are_created(tmp_path) -> None:
     assert "vaccine_types" in tables
     assert "vaccine_records" in tables
     assert "vaccine_audit_events" in tables
-    assert [entry.name for entry in vaccine_types[:2]] == ["Influenza", "COVID-19"]
-    assert [entry.program_type for entry in vaccine_types[:2]] == [
+    assert [entry.name for entry in vaccine_types[:3]] == [
+        "Influenza",
+        "COVID-19 (Pfizer)",
+        "COVID-19 (Moderna)",
+    ]
+    assert [entry.code for entry in vaccine_types[:3]] == [
+        "flu",
+        "covid-pfizer",
+        "covid-moderna",
+    ]
+    assert [entry.program_type for entry in vaccine_types[:3]] == [
         "national_influenza",
+        "national_covid",
         "national_covid",
     ]
     assert '"influenza"' in settings["vaccine_schedule_rules_json"]
@@ -586,7 +596,7 @@ def test_today_vaccine_counts_use_only_today_rows(tmp_path) -> None:
     with connect(db_path) as connection:
         vaccine_types = {entry.name: entry for entry in list_vaccine_types(connection)}
         flu_type = vaccine_types["Influenza"]
-        covid_type = vaccine_types["COVID-19"]
+        covid_type = vaccine_types["COVID-19 (Pfizer)"]
         flu_record = create_vaccine_record(
             connection,
             vaccine_type_id=flu_type.id,
@@ -632,7 +642,8 @@ def test_only_completed_counted_national_records_increment_daily_count(tmp_path)
     with connect(db_path) as connection:
         vaccine_types = {entry.name: entry for entry in list_vaccine_types(connection)}
         flu_type = vaccine_types["Influenza"]
-        covid_type = vaccine_types["COVID-19"]
+        covid_type = vaccine_types["COVID-19 (Pfizer)"]
+        moderna_type = vaccine_types["COVID-19 (Moderna)"]
         private_flu_type = create_vaccine_type(
             connection,
             name="Private Influenza",
@@ -663,6 +674,12 @@ def test_only_completed_counted_national_records_increment_daily_count(tmp_path)
             vaccine_type_name=covid_type.name,
             patient_name="COVID Patient",
         )
+        completed_moderna = create_vaccine_record(
+            connection,
+            vaccine_type_id=moderna_type.id,
+            vaccine_type_name=moderna_type.name,
+            patient_name="Moderna Patient",
+        )
 
         assert get_today_vaccine_counts(connection, "2026-09-08") == {
             "flu": 0,
@@ -689,6 +706,11 @@ def test_only_completed_counted_national_records_increment_daily_count(tmp_path)
             completed_covid.id,
             completed_at="2026-09-08T09:10:00+09:00",
         )
+        mark_vaccine_record_completed(
+            connection,
+            completed_moderna.id,
+            completed_at="2026-09-08T09:15:00+09:00",
+        )
         counts_after_completion = get_today_vaccine_counts(connection, "2026-09-08")
         mark_vaccine_record_cancelled(
             connection,
@@ -700,8 +722,8 @@ def test_only_completed_counted_national_records_increment_daily_count(tmp_path)
 
     assert first_completion is not None
     assert first_completion.completed_on == "2026-09-08"
-    assert counts_after_completion == {"flu": 1, "covid": 1}
-    assert counts_after_correction == {"flu": 0, "covid": 1}
+    assert counts_after_completion == {"flu": 1, "covid": 2}
+    assert counts_after_correction == {"flu": 0, "covid": 2}
     for patient_name in ("Prepared Patient", "Counted Patient", "Private Patient"):
         assert all(patient_name not in event.summary for event in audit_events)
     assert any(event.event_type == "completed" for event in audit_events)
@@ -945,7 +967,7 @@ def test_new_vaccine_record_retains_patient_context_for_simultaneous_vaccination
     assert page.patient_name_input.text() == "Test Patient"
     assert page.vaccine_types_list.currentItem() is None
 
-    page._select_vaccine_type(None, "COVID-19")
+    page._select_vaccine_type(None, "COVID-19 (Pfizer)")
     second = page.save_record()
 
     assert second is not None
@@ -953,7 +975,7 @@ def test_new_vaccine_record_retains_patient_context_for_simultaneous_vaccination
     with connect(db_path) as connection:
         records = list_vaccine_records(connection)
     assert [(record.vaccine_type_name, record.patient_chart_no) for record in records] == [
-        ("COVID-19", "2735"),
+        ("COVID-19 (Pfizer)", "2735"),
         ("Influenza", "2735"),
     ]
 
@@ -972,6 +994,14 @@ def test_prepare_flu_and_covid_creates_two_separate_records_from_one_context(tmp
     page.patient_resident_id_input.setText("500101-1234567")
     page.patient_name_input.setText("Test Patient")
 
+    assert page.combined_covid_type_combo.currentIndex() == -1
+    assert page.prepare_flu_and_covid() is None
+    assert "Choose an active COVID product" in page.status_label.text()
+
+    moderna_index = page.combined_covid_type_combo.findText("COVID-19 (Moderna)")
+    assert moderna_index >= 0
+    page.combined_covid_type_combo.setCurrentIndex(moderna_index)
+
     pair = page.prepare_flu_and_covid()
 
     assert pair is not None
@@ -986,7 +1016,10 @@ def test_prepare_flu_and_covid_creates_two_separate_records_from_one_context(tmp
     assert page.print_prepared_pair_button.text() == "Print prepared pair"
     with connect(db_path) as connection:
         records = list_vaccine_records(connection)
-    assert [record.vaccine_type_name for record in records] == ["COVID-19", "Influenza"]
+    assert [record.vaccine_type_name for record in records] == [
+        "COVID-19 (Moderna)",
+        "Influenza",
+    ]
 
 
 def test_vaccine_tab_db_buckets_split_records_by_type(tmp_path) -> None:

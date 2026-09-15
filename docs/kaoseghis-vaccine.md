@@ -16,6 +16,8 @@ Current implemented pieces:
 - editable local vaccine type catalog
 - local vaccine preparation record save/load/delete
 - explicit general/private, national Influenza, and national COVID type classification
+- separate `COVID-19 (Pfizer)` and `COVID-19 (Moderna)` products, sharing one national
+  COVID schedule and daily-count bucket
 - explicit prepared/printed/completed/cancelled/error record lifecycle
 - operator-confirmed completion and cancellation corrections
 - sanitized lifecycle audit without patient values
@@ -412,10 +414,11 @@ National influenza and COVID vaccination seasons commonly overlap. KaosEghis-vac
 must therefore support preparing both vaccinations in one guarded patient workflow.
 
 Current implementation: `Prepare Flu + COVID` reuses the loaded patient context to
-create two separate local preparation records. `Print prepared pair` first requires one
-explicit operator confirmation, then runs each label's own eligibility gate and print
-checkpoint. It stops and reports the affected vaccine if either label cannot be printed;
-it never treats a partial pair as fully completed.
+create two separate local preparation records. The operator must explicitly choose the
+COVID product (Pfizer or Moderna) before preparing the pair. `Print prepared pair` first
+requires one explicit operator confirmation, then runs each label's own eligibility gate
+and print checkpoint. It stops and reports the affected vaccine if either label cannot
+be printed; it never treats a partial pair as fully completed.
 
 - Provide a quick `Influenza + COVID` selection in addition to individual vaccine
   selection.
@@ -441,6 +444,10 @@ it never treats a partial pair as fully completed.
 
 The combined workflow coordinates two independent vaccine preparations; it does not
 merge their eligibility rules, counters, labels, or submission state.
+
+Both COVID products use the `national_covid` program type, so their completed records
+contribute to the same national COVID daily count. Existing legacy generic `COVID-19`
+catalog entries and historical records remain unchanged.
 
 ## Editable Vaccine Catalog
 

@@ -277,6 +277,9 @@ class VaccineTab(QWidget):
         self.new_record_button.clicked.connect(self.start_new_vaccine_record)
         self.prepare_flu_covid_button = QPushButton("Prepare Flu + COVID")
         self.prepare_flu_covid_button.clicked.connect(self.prepare_flu_and_covid)
+        self.combined_covid_type_combo = QComboBox()
+        self.combined_covid_type_combo.setPlaceholderText("Choose COVID product")
+        self.combined_covid_type_combo.setCurrentIndex(-1)
         self.print_button = QPushButton("Print label")
         self.print_button.clicked.connect(self.print_label)
         self.print_prepared_pair_button = QPushButton("Print prepared pair")
@@ -344,6 +347,7 @@ class VaccineTab(QWidget):
                 datetime.now().date().isoformat(),
             )
         self._populate_vaccine_types(vaccine_types)
+        self._populate_combined_covid_types(vaccine_types)
         self._populate_records(self.records_table, records)
         self._populate_records(self.general_records_table, self._filter_records(records, "general"))
         self._populate_records(self.flu_records_table, self._filter_records(records, "flu"))
@@ -553,13 +557,17 @@ class VaccineTab(QWidget):
                 for entry in vaccine_types
                 if entry.is_active and entry.program_type == "national_covid"
             ]
-            if len(flu_types) != 1 or len(covid_types) != 1:
+            covid_type_id = self.combined_covid_type_combo.currentData()
+            covid_type = next(
+                (entry for entry in covid_types if entry.id == covid_type_id),
+                None,
+            )
+            if len(flu_types) != 1 or covid_type is None:
                 self.status_label.setText(
-                    "Prepare Flu + COVID requires exactly one active national Flu and COVID type."
+                    "Choose an active COVID product before preparing Flu + COVID."
                 )
                 return None
             flu_type = flu_types[0]
-            covid_type = covid_types[0]
             flu_record = self._create_record_for_type(connection, flu_type)
             covid_record = self._create_record_for_type(connection, covid_type)
 
@@ -1019,6 +1027,21 @@ class VaccineTab(QWidget):
         if self.vaccine_types_list.currentItem() is None and self.vaccine_types_list.count():
             self.vaccine_types_list.setCurrentRow(0)
 
+    def _populate_combined_covid_types(self, vaccine_types: list) -> None:
+        selected_id = self.combined_covid_type_combo.currentData()
+        self.combined_covid_type_combo.blockSignals(True)
+        self.combined_covid_type_combo.clear()
+        for vaccine_type in vaccine_types:
+            if vaccine_type.is_active and vaccine_type.program_type == "national_covid":
+                self.combined_covid_type_combo.addItem(
+                    vaccine_type.name,
+                    vaccine_type.id,
+                )
+        self.combined_covid_type_combo.setCurrentIndex(
+            self.combined_covid_type_combo.findData(selected_id)
+        )
+        self.combined_covid_type_combo.blockSignals(False)
+
     def _populate_records(self, table: QTableWidget, records: list) -> None:
         table.setRowCount(len(records))
         for row, record in enumerate(records):
@@ -1297,6 +1320,8 @@ class VaccineTab(QWidget):
         controls.addWidget(self.covid_check_button)
         controls.addWidget(self.save_button)
         controls.addWidget(self.new_record_button)
+        controls.addWidget(QLabel("COVID product"))
+        controls.addWidget(self.combined_covid_type_combo)
         controls.addWidget(self.prepare_flu_covid_button)
         controls.addWidget(self.print_button)
         controls.addWidget(self.print_prepared_pair_button)

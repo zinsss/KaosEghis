@@ -839,37 +839,63 @@ def _migrate_vaccine_external_system_coordinates(connection: sqlite3.Connection)
 
 
 def _seed_default_vaccine_types(connection: sqlite3.Connection) -> None:
-    count_row = connection.execute(
-        "SELECT COUNT(*) FROM vaccine_types"
-    ).fetchone()
-    if count_row is not None and int(count_row[0] or 0) > 0:
-        return
-    connection.executemany(
-        """
-        INSERT INTO vaccine_types (
-            name, code, chart_note_template, program_type, is_active, sort_order
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
+    """Ensure the current product catalog without changing legacy type records."""
+
+    defaults = (
         (
-            (
-                "Influenza",
-                "flu",
-                "인플루엔자 예방접종 시행함.",
-                "national_influenza",
-                1,
-                1,
-            ),
-            (
-                "COVID-19",
-                "covid",
-                "코로나19 예방접종 시행함.",
-                "national_covid",
-                1,
-                2,
-            ),
+            "Influenza",
+            "flu",
+            "인플루엔자 예방접종 시행함.",
+            "national_influenza",
+            1,
+        ),
+        (
+            "COVID-19 (Pfizer)",
+            "covid-pfizer",
+            "코로나19 예방접종(화이자) 시행함.",
+            "national_covid",
+            2,
+        ),
+        (
+            "COVID-19 (Moderna)",
+            "covid-moderna",
+            "코로나19 예방접종(모더나) 시행함.",
+            "national_covid",
+            3,
         ),
     )
+    existing_codes = {
+        str(row[0]).strip().casefold()
+        for row in connection.execute(
+            "SELECT code FROM vaccine_types WHERE COALESCE(code, '') <> ''"
+        ).fetchall()
+    }
+    next_sort_order = int(
+        connection.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM vaccine_types"
+        ).fetchone()[0]
+        or 0
+    )
+
+    for name, code, chart_note, program_type, default_sort_order in defaults:
+        if code.casefold() in existing_codes:
+            continue
+        sort_order = (
+            default_sort_order
+            if next_sort_order == 0
+            else next_sort_order + 1
+        )
+        connection.execute(
+            """
+            INSERT INTO vaccine_types (
+                name, code, chart_note_template, program_type, is_active, sort_order
+            )
+            VALUES (?, ?, ?, ?, 1, ?)
+            """,
+            (name, code, chart_note, program_type, sort_order),
+        )
+        existing_codes.add(code.casefold())
+        next_sort_order = max(next_sort_order, sort_order)
 
 
 def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:
