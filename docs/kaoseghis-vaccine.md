@@ -628,6 +628,8 @@ applications.
 reset for the configured General and COVID native windows, even when the recurring
 keeper is off. It uses the same exact-window and point-ownership checks as the timer,
 restarts the 90-minute delay when the keeper is enabled, and never touches Influenza.
+The small countdown bar shows time remaining until the next automatic reset; it is off
+when the recurring keeper is disabled.
 
 - Off by default until a successful manual session preparation.
 - Maintain independent timers for the general and COVID applications.

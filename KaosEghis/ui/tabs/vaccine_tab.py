@@ -151,6 +151,11 @@ class VaccineTab(QWidget):
         self._prepared_pair_ids: tuple[int, int] | None = None
         self._session_keeper_targets: dict[str, VaccineSessionResetTarget] = {}
         self._session_keeper_timers: dict[str, QTimer] = {}
+        self._session_keeper_progress_timer = QTimer(self)
+        self._session_keeper_progress_timer.setInterval(1000)
+        self._session_keeper_progress_timer.timeout.connect(
+            self._update_session_keeper_progress
+        )
         self.nav_buttons: dict[str, QPushButton] = {}
         self.top_nav_row = QHBoxLayout()
         self.stacked_widget = QStackedWidget()
@@ -885,12 +890,14 @@ class VaccineTab(QWidget):
         for timer in self._session_keeper_timers.values():
             timer.stop()
         self._session_keeper_targets.clear()
+        self._session_keeper_progress_timer.stop()
 
         enabled = str(settings.get("vaccine_session_keeper_enabled", "false")).strip().lower()
         if enabled not in {"1", "true", "yes", "on"}:
             self.settings_page.system_targets_editor.set_session_keeper_status(
                 "Session keeper: off."
             )
+            self.settings_page.system_targets_editor.set_session_keeper_progress(None)
             return
 
         missing = []
@@ -909,6 +916,10 @@ class VaccineTab(QWidget):
                 self._session_keeper_timers[target.key] = timer
             # First action is delayed: construction/configuration never clicks a system.
             timer.start(SESSION_KEEPER_INTERVAL_MS)
+
+        self._update_session_keeper_progress()
+        if any(timer.isActive() for timer in self._session_keeper_timers.values()):
+            self._session_keeper_progress_timer.start()
 
         if missing:
             self.settings_page.system_targets_editor.set_session_keeper_status(
@@ -932,6 +943,21 @@ class VaccineTab(QWidget):
         # A closed, moved, or covered system is skipped. The next independent check
         # remains delayed by the full interval rather than repeatedly probing it.
         timer.start(SESSION_KEEPER_INTERVAL_MS)
+        self._update_session_keeper_progress()
+
+    def _update_session_keeper_progress(self) -> None:
+        remaining_times = [
+            timer.remainingTime()
+            for timer in self._session_keeper_timers.values()
+            if timer.isActive() and timer.remainingTime() >= 0
+        ]
+        if not remaining_times:
+            self._session_keeper_progress_timer.stop()
+            self.settings_page.system_targets_editor.set_session_keeper_progress(None)
+            return
+        self.settings_page.system_targets_editor.set_session_keeper_progress(
+            min(remaining_times)
+        )
 
     def reset_vaccine_sessions_now(self) -> None:
         """Run one guarded native-session reset without requiring timer opt-in."""

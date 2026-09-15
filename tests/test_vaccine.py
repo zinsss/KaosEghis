@@ -1185,6 +1185,9 @@ def test_session_keeper_is_opt_in_and_never_clicks_during_vaccine_tab_startup(
     assert "first check in 90 minutes" in (
         page.settings_page.system_targets_editor.session_keeper_status_label.text()
     )
+    assert "Next reset in" in (
+        page.settings_page.system_targets_editor.session_keeper_progress_bar.format()
+    )
 
 
 def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
@@ -1226,6 +1229,10 @@ def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
         page.settings_page.system_targets_editor.session_keeper_status_label.text()
     )
     assert page._session_keeper_timers == {}
+    assert (
+        page.settings_page.system_targets_editor.session_keeper_progress_bar.format()
+        == "Next reset: off"
+    )
 
 
 def test_kdca_login_is_explicit_and_uses_vaccine_settings(tmp_path, monkeypatch) -> None:

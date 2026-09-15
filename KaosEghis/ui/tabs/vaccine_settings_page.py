@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QProgressBar,
     QScrollArea,
     QSpinBox,
     QTabWidget,
@@ -339,6 +340,14 @@ class VaccineSystemTargetsEditor(QWidget):
             "Safely reset the currently open General and COVID sessions once."
         )
         self.session_reset_now_button.clicked.connect(self.session_reset_requested.emit)
+        self.session_keeper_progress_bar = QProgressBar()
+        self.session_keeper_progress_bar.setRange(0, 100)
+        self.session_keeper_progress_bar.setValue(0)
+        self.session_keeper_progress_bar.setMaximumHeight(18)
+        self.session_keeper_progress_bar.setFormat("Next reset: off")
+        self.session_keeper_progress_bar.setToolTip(
+            "Time remaining before the next automatic General/COVID session reset."
+        )
         self.session_keeper_status_label = QLabel("Session keeper: off.")
         self.session_keeper_status_label.setWordWrap(True)
 
@@ -444,6 +453,7 @@ class VaccineSystemTargetsEditor(QWidget):
         session_controls.addWidget(self.session_reset_now_button)
         session_controls.addStretch()
         layout.addLayout(session_controls)
+        layout.addWidget(self.session_keeper_progress_bar)
         layout.addWidget(session_note)
         layout.addWidget(self.session_keeper_status_label)
         layout.addWidget(note)
@@ -667,6 +677,22 @@ class VaccineSystemTargetsEditor(QWidget):
 
     def set_session_keeper_status(self, message: str) -> None:
         self.session_keeper_status_label.setText(message)
+
+    def set_session_keeper_progress(self, remaining_ms: int | None) -> None:
+        if remaining_ms is None:
+            self.session_keeper_progress_bar.setValue(0)
+            self.session_keeper_progress_bar.setFormat("Next reset: off")
+            return
+
+        total_ms = 90 * 60 * 1000
+        remaining_ms = max(0, min(int(remaining_ms), total_ms))
+        remaining_seconds = (remaining_ms + 999) // 1000
+        minutes, seconds = divmod(remaining_seconds, 60)
+        percent = round(remaining_ms * 100 / total_ms)
+        self.session_keeper_progress_bar.setValue(percent)
+        self.session_keeper_progress_bar.setFormat(
+            f"Next reset in {minutes}:{seconds:02d}"
+        )
 
 
 class VaccineSettingsPage(QWidget):
