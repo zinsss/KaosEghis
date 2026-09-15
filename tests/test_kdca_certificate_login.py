@@ -113,6 +113,25 @@ def test_kdca_certificate_login_anchor_confirms_signed_out_state(monkeypatch) ->
     assert link.activated is False
 
 
+def test_kdca_logout_anchor_confirms_authenticated_state(monkeypatch) -> None:
+    """Chrome may expose KDCA's logout anchor without link text."""
+
+    logout = _Element(control_type="Hyperlink", legacy_value="/isc/logout.do")
+    browser = _Element(name="질병관리청", handle=101, children=[logout])
+    password_requests: list[str] = []
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser])
+    monkeypatch.setattr(kdca_certificate_login, "_open_portal", lambda _url: True)
+
+    result = kdca_certificate_login.start_kdca_certificate_login(
+        _settings(),
+        password_provider=lambda reference: password_requests.append(reference) or "secret",
+    )
+
+    assert result.success is True
+    assert result.status == "already_authenticated"
+    assert password_requests == []
+
+
 def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
     monkeypatch,
 ) -> None:

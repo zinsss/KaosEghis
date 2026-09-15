@@ -345,7 +345,8 @@ system-entry URL. The URLs contain no credentials, session IDs, patient values, 
 vaccination data. Before it opens a selected service, KaosEghis opens the KDCA portal
 and checks the current browser page using the configured accessible controls:
 
-- visible `로그아웃` only: signed in; the system URL opens without accessing the vault;
+- visible `로그아웃` only, or the KDCA session anchor `/isc/logout.do` exposed by Chrome
+  accessibility: signed in; the system URL opens without accessing the vault;
 - visible `공동인증서 로그인` only, or the KDCA certificate anchor
   `javascript:fnPkiCall('pLo')` exposed by Chrome accessibility: sign-in required; the
   guarded certificate flow runs;

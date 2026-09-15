@@ -18,6 +18,7 @@ from KaosEghis.core.pw_runtime import get_unlocked_credential_password
 # KDCA renders its signed-out certificate action as this JavaScript anchor. Chrome
 # may expose the anchor's legacy URL while omitting its accessible text.
 _KDCA_CERTIFICATE_LOGIN_HREF = "javascript:fnpkicall('plo')"
+_KDCA_LOGOUT_HREF = "/isc/logout.do"
 
 
 @dataclass(frozen=True)
@@ -341,10 +342,7 @@ def _wait_for_session_state(
     deadline = time.monotonic() + max(timeout_seconds, 0.1)
     while time.monotonic() < deadline:
         login_controls = _find_visible_kdca_login_controls(browser_window, config)
-        logout_controls = _find_visible_named_descendants(
-            browser_window,
-            config.logout_control_name,
-        )
+        logout_controls = _find_visible_kdca_logout_controls(browser_window, config)
         if len(logout_controls) == 1 and not login_controls:
             return "authenticated"
         if len(login_controls) == 1 and not logout_controls:
@@ -455,6 +453,34 @@ def _is_kdca_certificate_login_control(element: Any, login_control_name: str) ->
         _element_control_type(element).casefold() == "hyperlink"
         and _normalise_kdca_href(_element_legacy_value(element))
         == _KDCA_CERTIFICATE_LOGIN_HREF
+    )
+
+
+def _find_visible_kdca_logout_controls(
+    window: Any,
+    config: KdcaCertificateLoginConfig,
+) -> list[Any]:
+    """Find the configured logout control or KDCA's known session anchor."""
+
+    try:
+        elements = list(window.descendants())
+    except Exception:
+        return []
+    return [
+        element
+        for element in elements
+        if _is_visible(element)
+        and _is_enabled(element)
+        and _is_kdca_logout_control(element, config.logout_control_name)
+    ]
+
+
+def _is_kdca_logout_control(element: Any, logout_control_name: str) -> bool:
+    if _matches_text(_element_name(element), logout_control_name):
+        return True
+    return (
+        _element_control_type(element).casefold() == "hyperlink"
+        and _normalise_kdca_href(_element_legacy_value(element)) == _KDCA_LOGOUT_HREF
     )
 
 
