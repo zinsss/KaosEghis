@@ -61,6 +61,7 @@ from KaosEghis.db.repositories import (
     delete_vaccine_record,
     delete_vaccine_type,
     get_today_national_influenza_total,
+    get_today_national_covid_totals,
     get_today_vaccine_counts,
     get_active_emr_target_profile,
     get_emr_ui_target_by_key,
@@ -695,6 +696,7 @@ class VaccineTab(QWidget):
             today = datetime.now().date().isoformat()
             counts = get_today_vaccine_counts(connection, today)
             influenza_total = get_today_national_influenza_total(connection, today)
+            covid_totals = get_today_national_covid_totals(connection, today)
 
         if record.status == "completed":
             permitted, counts_toward_cap = True, bool(record.counts_toward_cap)
@@ -711,6 +713,7 @@ class VaccineTab(QWidget):
             self._label_content(
                 record, settings, counts, counts_toward_cap,
                 influenza_total_today=influenza_total,
+                covid_totals_today=covid_totals,
             ),
             printer_name=settings.get("vaccine_label_printer_name", ""),
         )
@@ -1422,6 +1425,7 @@ class VaccineTab(QWidget):
         counts_toward_cap: bool,
         *,
         influenza_total_today: int | None = None,
+        covid_totals_today: dict[str, int] | None = None,
     ) -> VaccineLabelContent:
         count_summary = ""
         vaccine_name = record.vaccine_type_name
@@ -1447,26 +1451,31 @@ class VaccineTab(QWidget):
             if counts_toward_cap and record.status != "completed":
                 printed_count += 1
             count_summary = f"{printed_count}/{cap}"
+            if influenza_total_today is not None:
+                total = influenza_total_today + (record.status != "completed")
+                count_summary += f"  오늘 총 독감:{total}"
         elif record.program_type == "national_covid":
-            vaccine_name = {
-                "covid-19 (pfizer)": "코로나.화이자",
-                "covid-19 (moderna)": "코로나.모더나",
-            }.get(vaccine_name.casefold(), vaccine_name)
-            title_style = {
-                "코로나.화이자": "covid_pfizer",
-                "코로나.모더나": "covid_moderna",
-            }.get(vaccine_name, "plain")
+            covid_labels = {
+                "covid-19 (pfizer)": ("코로나.화이자", "covid_pfizer"),
+                "코로나.화이자": ("코로나.화이자", "covid_pfizer"),
+                "covid-19 (moderna)": ("코로나.모더나", "covid_moderna"),
+                "코로나.모더나": ("코로나.모더나", "covid_moderna"),
+            }
+            vaccine_name, title_style = covid_labels.get(
+                vaccine_name.strip().casefold(), (vaccine_name, "plain")
+            )
             cap = settings.get("vaccine_covid_daily_cap", "100").strip() or "100"
             printed_count = counts.get("covid", 0)
             if counts_toward_cap and record.status != "completed":
                 printed_count += 1
             count_summary = f"{printed_count}/{cap}"
-        label_influenza_total = None
-        if (
-            record.program_type == "national_influenza"
-            and influenza_total_today is not None
-        ):
-            label_influenza_total = influenza_total_today + (record.status != "completed")
+            if title_style != "plain" and covid_totals_today is not None:
+                total = sum(
+                    count for name, count in covid_totals_today.items()
+                    if covid_labels.get(name.strip().casefold(), ("", ""))[1] == title_style
+                ) + (record.status != "completed")
+                manufacturer = "화이자" if title_style == "covid_pfizer" else "모더나"
+                count_summary += f"  오늘 {manufacturer}:{total}"
         return VaccineLabelContent(
             vaccine_name=vaccine_name,
             patient_name=record.patient_name or "",
@@ -1475,7 +1484,6 @@ class VaccineTab(QWidget):
             phone=record.patient_phone or "",
             printed_at=printed_at,
             count_summary=count_summary,
-            influenza_total_today=label_influenza_total,
             title_style=title_style,
         )
 

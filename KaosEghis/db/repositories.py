@@ -3192,6 +3192,26 @@ def get_today_national_influenza_total(
     return int(row[0])
 
 
+def get_today_national_covid_totals(
+    connection: sqlite3.Connection,
+    target_date: str,
+) -> dict[str, int]:
+    """Return completed national COVID totals by saved product name, including exceptions."""
+
+    rows = connection.execute(
+        """
+        SELECT vaccine_type_name, COUNT(*)
+        FROM vaccine_records
+        WHERE status = 'completed'
+          AND completed_on = ?
+          AND program_type = 'national_covid'
+        GROUP BY vaccine_type_name
+        """,
+        (target_date,),
+    ).fetchall()
+    return {name: int(count) for name, count in rows}
+
+
 def list_vaccine_audit_events(
     connection: sqlite3.Connection,
     *,

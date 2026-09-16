@@ -73,6 +73,7 @@ def test_print_title_uses_program_without_changing_record(
     counts = {"flu": 7, "covid": 3}
     label = module.VaccineTab._label_content(
         None, record, _settings(), counts, counted, influenza_total_today=12,
+        covid_totals_today={"COVID-19 (Pfizer)": 21, "코로나.화이자": 1, "COVID-19 (Moderna)": 5},
     )
 
     assert label.vaccine_name == title
@@ -81,13 +82,14 @@ def test_print_title_uses_program_without_changing_record(
     assert counts == {"flu": 7, "covid": 3}
     expected_count = ""
     if program == "national_influenza":
-        expected_count = "8/100" if counted else "7/100"
+        expected_count = ("8/100" if counted else "7/100") + "  오늘 총 독감:13"
     elif program == "national_covid":
         expected_count = "4/100"
+        if title == "코로나.화이자":
+            expected_count += "  오늘 화이자:23"
+        elif title == "코로나.모더나":
+            expected_count += "  오늘 모더나:6"
     assert label.count_summary == expected_count
-    assert label.influenza_total_today == (
-        13 if program == "national_influenza" else None
-    )
     styles = {
         "노인독감": "flu_elderly", "소아독감": "flu_child", "노인독감.예외": "flu_exception",
         "코로나.화이자": "covid_pfizer", "코로나.모더나": "covid_moderna",
@@ -105,8 +107,7 @@ def test_exception_reprint_uses_completion_date_and_does_not_increment_count():
         None, record, _settings(), {"flu": 7}, False, influenza_total_today=12,
     )
     assert label.vaccine_name == "노인독감.예외"
-    assert label.count_summary == "7/100"
-    assert label.influenza_total_today == 12
+    assert label.count_summary == "7/100  오늘 총 독감:12"
     assert label.title_style == "flu_exception"
 
 
@@ -120,7 +121,7 @@ def test_unmatched_influenza_label_keeps_saved_name():
 
 
 @pytest.mark.parametrize("dpi", [203, 300, 600])
-@pytest.mark.parametrize("influenza_total", [None, 123, 123456])
+@pytest.mark.parametrize("daily_summary", ["", "오늘 총 독감:123", "오늘 화이자:123456", "오늘 모더나:123"])
 @pytest.mark.parametrize("title,style", [
     ("노인독감", "flu_elderly"), ("소아독감", "flu_child"),
     ("노인독감.예외", "flu_exception"), ("코로나.화이자", "covid_pfizer"),
@@ -130,7 +131,7 @@ def test_unmatched_influenza_label_keeps_saved_name():
     ("노인독감", "plain"), ("소아독감", "plain"), ("노인독감.예외", "plain"),
     ("코로나.화이자", "plain"), ("코로나.모더나", "plain"),
 ])
-def test_every_label_field_fits_its_print_area(dpi, title, style, influenza_total):
+def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary):
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QFont, QFontMetricsF, QImage, QPen
     from PySide6.QtWidgets import QApplication
@@ -145,6 +146,8 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, influenza_tota
     text_rects = []
     text_colors = {}
     pills = []
+    fonts = {}
+    lines = []
 
     class RecordingPainter:
         def device(self):
@@ -165,8 +168,8 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, influenza_tota
         def drawRoundedRect(self, rect, *_args):
             pills.append((rect, self.brush))
 
-        def drawLine(self, *_args):
-            pass
+        def drawLine(self, *args):
+            lines.append(args)
 
         def setFont(self, font):
             self.font = QFont(font)
@@ -181,14 +184,14 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, influenza_tota
             drawn.append(text)
             text_rects.append(rect)
             text_colors[text] = self.pen.color()
+            fonts[text] = self.font.pixelSize()
 
     _paint_vaccine_label(
         RecordingPainter(), QRectF(0, 0, image.width(), image.height()),
         VaccineLabelContent(
             vaccine_name=title, patient_name="홍길동", chart_no="0000000000",
             resident_id="000101-0000000", phone="010-0000-0000",
-            printed_at=datetime(2026, 12, 31), count_summary="100/100",
-            influenza_total_today=influenza_total,
+            printed_at=datetime(2026, 12, 31), count_summary=f"100/100  {daily_summary}".strip(),
             title_style=style,
         ),
     )
@@ -197,7 +200,7 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, influenza_tota
         "flu_exception": ["노인", "독감", "예외"],
         "covid_pfizer": ["코로나", "화이자"], "covid_moderna": ["코로나", "모더나"],
     }.get(style)
-    assert len(drawn) == 5 + len(pill_parts or [title]) + (influenza_total is not None)
+    assert len(drawn) == 5 + len(pill_parts or [title])
     if pill_parts:
         assert all(part in drawn for part in pill_parts)
         pill_text = pill_parts[1]
@@ -211,14 +214,21 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, influenza_tota
         assert text_colors[pill_parts[0]] == Qt.GlobalColor.black
         if len(pill_parts) == 3:
             assert text_colors["예외"] == Qt.GlobalColor.black
+        pill_rect = pills[0][0]
+        pill_text_rect = text_rects[drawn.index(pill_text)]
+        prefix_rect = text_rects[drawn.index(pill_parts[0])]
+        assert pill_rect.width() - pill_text_rect.width() <= fonts[pill_text] * 0.4
+        assert pill_rect.left() - prefix_rect.right() <= fonts[pill_text] * 0.15
+        assert pill_rect.height() < image.height() * 0.26
     else:
         assert title in drawn
         assert pills == []
     assert text_colors["010-0000-0000"] == Qt.GlobalColor.black
     for i, rect in enumerate(text_rects):
         assert all(not rect.intersects(other) for other in text_rects[i + 1:])
-    if influenza_total is not None:
-        assert f"오늘 총 독감: {influenza_total}" in drawn
+    assert "2026.12.31" in drawn
+    assert f"100/100  {daily_summary}".strip() in drawn
+    assert len(lines) == 2
     assert app is not None
 
 
@@ -269,6 +279,63 @@ def test_national_influenza_total_includes_exception_but_excludes_private(tmp_pa
         assert get_today_national_influenza_total(connection, "2026-10-12") == 1
 
 
+def test_covid_manufacturer_totals_include_exceptions_not_private_or_other_days(tmp_path):
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_record, get_today_national_covid_totals, get_today_vaccine_counts,
+        mark_vaccine_record_cancelled, mark_vaccine_record_completed, mark_vaccine_record_printed,
+    )
+
+    path = tmp_path / "covid-labels.sqlite"
+    initialize_database(path)
+    with connect(path) as connection:
+        assert get_today_national_covid_totals(connection, "2026-10-12") == {}
+        records = []
+        for name, program, counted, day in [
+            ("COVID-19 (Pfizer)", "national_covid", True, "2026-10-12"),
+            ("코로나.화이자", "national_covid", False, "2026-10-12"),
+            ("COVID-19 (Moderna)", "national_covid", True, "2026-10-12"),
+            ("COVID-19 (Pfizer)", "general", False, "2026-10-12"),
+            ("COVID-19 (Moderna)", "national_covid", True, "2026-10-11"),
+            ("COVID-19 (Pfizer)", "national_covid", True, None),
+        ]:
+            record = create_vaccine_record(
+                connection, vaccine_type_id=None, vaccine_type_name=name, program_type=program,
+            )
+            records.append(record)
+            if day:
+                mark_vaccine_record_completed(
+                    connection, record.id, counts_toward_cap=counted,
+                    completed_at=f"{day}T10:00:00+09:00",
+                )
+        mark_vaccine_record_printed(connection, records[-1].id)
+        before = connection.total_changes
+        assert get_today_national_covid_totals(connection, "2026-10-12") == {
+            "COVID-19 (Pfizer)": 1, "코로나.화이자": 1, "COVID-19 (Moderna)": 1,
+        }
+        assert get_today_vaccine_counts(connection, "2026-10-12") == {"flu": 0, "covid": 2}
+        assert connection.total_changes == before
+        mark_vaccine_record_cancelled(connection, records[2].id)
+        assert get_today_national_covid_totals(connection, "2026-10-12") == {
+            "COVID-19 (Pfizer)": 1, "코로나.화이자": 1,
+        }
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("COVID-19 (Pfizer)", "오늘 화이자:22"), ("COVID-19 (Moderna)", "오늘 모더나:5"),
+])
+def test_covid_reprint_keeps_current_manufacturer_total(name, expected):
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    record = _record(name, "national_covid", "500101-1000000", completed=True)
+    totals = {"COVID-19 (Pfizer)": 21, "코로나.화이자": 1, "COVID-19 (Moderna)": 5}
+    label = VaccineTab._label_content(
+        None, record, _settings(), {"covid": 25}, True, covid_totals_today=totals,
+    )
+    assert label.count_summary == f"25/100  {expected}"
+    assert sum(totals.values()) == 27
+
+
 def test_manufacturer_pills_have_distinct_rendered_ink_coverage():
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QImage, QPainter
@@ -284,10 +351,7 @@ def test_manufacturer_pills_have_distinct_rendered_ink_coverage():
         painter = QPainter(image)
         _draw_vaccine_title(painter, QRectF(0, 10, 800, 140), name, 90, style=style)
         painter.end()
-        pixels = [
-            image.pixelColor(x, y).lightness()
-            for x in range(390, 775, 2) for y in range(25, 135, 2)
-        ]
+        pixels = [image.pixelColor(x, y).lightness() for x in range(410, 615, 2) for y in range(45, 115, 2)]
         ratios.append(sum(value < 128 for value in pixels) / len(pixels))
     assert 0.02 < ratios[0] < 0.4
     assert 0.5 < ratios[1] < 0.95

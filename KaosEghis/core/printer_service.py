@@ -19,7 +19,6 @@ class VaccineLabelContent:
     phone: str
     printed_at: datetime
     count_summary: str = ""
-    influenza_total_today: int | None = None
     title_style: str = "plain"
 
 
@@ -88,17 +87,14 @@ def _paint_vaccine_label(
 
     _draw_label_text(
         painter,
-        QRectF(inner.left(), inner.top(), inner.width() * 0.55, inner.height() * 0.15),
-        (
-            f"{content.printed_at.year}년{content.printed_at.month}월"
-            f"{content.printed_at.day}일"
-        ),
+        QRectF(inner.left(), inner.top(), inner.width() * 0.4, inner.height() * 0.15),
+        content.printed_at.strftime("%Y.%m.%d"),
         rect.height() / 10.0,
         alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
     )
     _draw_label_text(
         painter,
-        QRectF(inner.left() + inner.width() * 0.55, inner.top(), inner.width() * 0.45, inner.height() * 0.15),
+        QRectF(inner.left() + inner.width() * 0.42, inner.top(), inner.width() * 0.58, inner.height() * 0.15),
         content.count_summary,
         rect.height() / 10.0,
         alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
@@ -137,14 +133,6 @@ def _paint_vaccine_label(
         alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
     )
     footer_top = bottom_line + lower_height * 0.5
-    if content.influenza_total_today is not None:
-        _draw_label_text(
-            painter,
-            QRectF(inner.left(), footer_top, inner.width() * 0.49, lower_height * 0.5),
-            f"오늘 총 독감: {content.influenza_total_today}",
-            rect.height() / 14.0,
-            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-        )
     _draw_label_text(
         painter,
         QRectF(inner.left() + inner.width() * 0.51, footer_top, inner.width() * 0.49, lower_height * 0.5),
@@ -170,19 +158,34 @@ def _draw_vaccine_title(
         return
 
     prefix, pill_text, suffix, filled = parts
-    title_size = min(pixel_size, rect.height() * 0.64)
-    prefix_width = 0.28 if suffix else 0.43
-    pill_width = 0.38 if suffix else 0.54
+    title_size = max(1, round(min(pixel_size, rect.height() * 0.54)))
+    # Keep the whole title together; pill and gaps follow glyph dimensions, not page width.
+    while True:
+        metrics = QFontMetricsF(_label_font(title_size, bold=True), painter.device())
+        widths = [
+            max(metrics.horizontalAdvance(part), metrics.boundingRect(part).width()) if part else 0
+            for part in (prefix, pill_text, suffix)
+        ]
+        text_height = metrics.height()
+        pad_x, pad_y, gap = title_size * 0.18, title_size * 0.06, title_size * 0.12
+        pill_width = widths[1] + 2 * pad_x
+        pill_height = text_height + 2 * pad_y
+        total_width = widths[0] + gap + pill_width + (gap + widths[2] if suffix else 0)
+        if (total_width <= rect.width() and pill_height <= rect.height()) or title_size == 1:
+            break
+        title_size -= 1
+    left = rect.center().x() - total_width / 2
+    text_top = rect.center().y() - text_height / 2
     _draw_label_text(
         painter,
-        QRectF(rect.left(), rect.top(), rect.width() * prefix_width, rect.height()),
+        QRectF(left, text_top, widths[0], text_height),
         prefix,
         title_size,
         bold=True,
     )
     pill = QRectF(
-        rect.left() + rect.width() * (prefix_width + 0.03), rect.top(),
-        rect.width() * pill_width, rect.height(),
+        left + widths[0] + gap, rect.center().y() - pill_height / 2,
+        pill_width, pill_height,
     )
     painter.save()
     try:
@@ -192,9 +195,8 @@ def _draw_vaccine_title(
         painter.setBrush(Qt.GlobalColor.black if filled else Qt.GlobalColor.white)
         painter.drawRoundedRect(pill, pill.height() / 2, pill.height() / 2)
         painter.setPen(Qt.GlobalColor.white if filled else Qt.GlobalColor.black)
-        inset = rect.height() * 0.14
         _draw_label_text(
-            painter, pill.adjusted(inset, inset, -inset, -inset), pill_text,
+            painter, pill.adjusted(pad_x, pad_y, -pad_x, -pad_y), pill_text,
             title_size, bold=True,
         )
     finally:
@@ -202,7 +204,7 @@ def _draw_vaccine_title(
     if suffix:
         _draw_label_text(
             painter,
-            QRectF(rect.left() + rect.width() * 0.72, rect.top(), rect.width() * 0.28, rect.height()),
+            QRectF(pill.right() + gap, text_top, widths[2], text_height),
             suffix, title_size, bold=True,
         )
 

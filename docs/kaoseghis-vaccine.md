@@ -610,12 +610,16 @@ punctuation. `노인`, `소아`, and `예외` stay outside the pill as black tex
 The COVID manufacturer is visually separated from `코로나`: `화이자` is
 inside a white outlined pill and `모더나` is white text inside a black pill. The
 manufacturer name remains explicit, so recognition does not depend on shading alone.
+Pills fit the measured text plus small padding, with a reduced height. Prefix, pill,
+and optional exception suffix form one compact centered group rather than filling
+separate columns. Both horizontal divider lines remain.
 Pill styles are explicitly selected from the national program result, not inferred by
 the renderer from product names. All other products, including general/private
 influenza, print their saved list name as plain text, even if that name resembles a
 national label title.
 
-National influenza labels also show `오늘 총 독감: <count>` at the lower left. This is
+Dates print as `yyyy.MM.dd`. The right-hand header contains both the cap counter and
+the daily total: `xx/100  오늘 총 독감:xxx` on national influenza labels. This is
 today's total completed national influenza records (elderly, children and non-counted
 national exceptions), not the `x/100` cap counter. Private influenza is excluded and
 private labels do not show this total. The pending first print includes its own record
@@ -624,6 +628,14 @@ deleted, prepared-only and printed-only records do not contribute. Only records 
 the `national_influenza` program classification are counted; vaccine names do not change
 that classification. This read-only total does not change the existing completion or
 cap-accounting rules.
+
+National Pfizer/Moderna labels instead show `xx/100  오늘 화이자:xxx` or
+`xx/100  오늘 모더나:xxx`. Their cap counter is still shared across both manufacturers;
+the adjacent total is specific to that manufacturer and includes national exceptions.
+Totals use completed national COVID records' saved product names, recognizing the
+standard English names and Korean print-title equivalents. Unknown custom names are
+not guessed into a manufacturer. Private, cancelled, prepared-only, printed-only and
+other-day records are excluded; reprints do not add to these totals.
 
 An explicit successful print does the following in order:
 
