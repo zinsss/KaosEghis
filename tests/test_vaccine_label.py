@@ -55,6 +55,8 @@ def _record(name, program, resident_id, *, completed=False):
      "Influenza (general/private)"),
     ("Custom product", "national_covid", "500101-1000000", True, "Custom product"),
     ("Tdap", "general", "500101-1000000", False, "Tdap"),
+    ("노인독감", "general_influenza", "500101-1000000", False, "노인독감"),
+    ("코로나.모더나", "general", "500101-1000000", False, "코로나.모더나"),
 ])
 def test_print_title_uses_program_without_changing_record(
     monkeypatch, name, program, resident_id, counted, title,
@@ -86,6 +88,13 @@ def test_print_title_uses_program_without_changing_record(
     assert label.influenza_total_today == (
         13 if program == "national_influenza" else None
     )
+    styles = {
+        "노인독감": "flu_elderly", "소아독감": "flu_child", "노인독감.예외": "flu_exception",
+        "코로나.화이자": "covid_pfizer", "코로나.모더나": "covid_moderna",
+    }
+    assert label.title_style == (
+        styles.get(title, "plain") if program.startswith("national_") else "plain"
+    )
 
 
 def test_exception_reprint_uses_completion_date_and_does_not_increment_count():
@@ -98,6 +107,7 @@ def test_exception_reprint_uses_completion_date_and_does_not_increment_count():
     assert label.vaccine_name == "노인독감.예외"
     assert label.count_summary == "7/100"
     assert label.influenza_total_today == 12
+    assert label.title_style == "flu_exception"
 
 
 def test_unmatched_influenza_label_keeps_saved_name():
@@ -106,16 +116,21 @@ def test_unmatched_influenza_label_keeps_saved_name():
     record = _record("Influenza", "national_influenza", "000101-0000000")
     label = VaccineTab._label_content(None, record, _settings(), {}, True)
     assert label.vaccine_name == "Influenza"
+    assert label.title_style == "plain"
 
 
 @pytest.mark.parametrize("dpi", [203, 300, 600])
 @pytest.mark.parametrize("influenza_total", [None, 123, 123456])
-@pytest.mark.parametrize("title", [
-    "노인독감", "소아독감", "노인독감.예외", "코로나.화이자", "코로나.모더나",
-    "Influenza - 무료접종", "COVID-19 (Moderna)",
-    "A long custom vaccine product name that must not wrap or clip",
+@pytest.mark.parametrize("title,style", [
+    ("노인독감", "flu_elderly"), ("소아독감", "flu_child"),
+    ("노인독감.예외", "flu_exception"), ("코로나.화이자", "covid_pfizer"),
+    ("코로나.모더나", "covid_moderna"),
+    ("Influenza - 무료접종", "plain"), ("COVID-19 (Moderna)", "plain"),
+    ("A long custom vaccine product name that must not wrap or clip", "plain"),
+    ("노인독감", "plain"), ("소아독감", "plain"), ("노인독감.예외", "plain"),
+    ("코로나.화이자", "plain"), ("코로나.모더나", "plain"),
 ])
-def test_every_label_field_fits_its_print_area(dpi, title, influenza_total):
+def test_every_label_field_fits_its_print_area(dpi, title, style, influenza_total):
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QFont, QFontMetricsF, QImage, QPen
     from PySide6.QtWidgets import QApplication
@@ -174,21 +189,28 @@ def test_every_label_field_fits_its_print_area(dpi, title, influenza_total):
             resident_id="000101-0000000", phone="010-0000-0000",
             printed_at=datetime(2026, 12, 31), count_summary="100/100",
             influenza_total_today=influenza_total,
+            title_style=style,
         ),
     )
-    is_covid_pill = title in {"코로나.화이자", "코로나.모더나"}
-    assert len(drawn) == 6 + is_covid_pill + (influenza_total is not None)
-    if is_covid_pill:
-        assert "코로나" in drawn
-        manufacturer = title.split(".")[1]
-        assert manufacturer in drawn
+    pill_parts = {
+        "flu_elderly": ["노인", "독감"], "flu_child": ["소아", "독감"],
+        "flu_exception": ["노인", "독감", "예외"],
+        "covid_pfizer": ["코로나", "화이자"], "covid_moderna": ["코로나", "모더나"],
+    }.get(style)
+    assert len(drawn) == 5 + len(pill_parts or [title]) + (influenza_total is not None)
+    if pill_parts:
+        assert all(part in drawn for part in pill_parts)
+        pill_text = pill_parts[1]
         assert len(pills) == 1
         assert pills[0][1] == (
-            Qt.GlobalColor.black if manufacturer == "모더나" else Qt.GlobalColor.white
+            Qt.GlobalColor.white if style == "covid_pfizer" else Qt.GlobalColor.black
         )
-        assert text_colors[manufacturer] == (
-            Qt.GlobalColor.white if manufacturer == "모더나" else Qt.GlobalColor.black
+        assert text_colors[pill_text] == (
+            Qt.GlobalColor.black if style == "covid_pfizer" else Qt.GlobalColor.white
         )
+        assert text_colors[pill_parts[0]] == Qt.GlobalColor.black
+        if len(pill_parts) == 3:
+            assert text_colors["예외"] == Qt.GlobalColor.black
     else:
         assert title in drawn
         assert pills == []
@@ -256,11 +278,11 @@ def test_manufacturer_pills_have_distinct_rendered_ink_coverage():
 
     app = QApplication.instance() or QApplication([])
     ratios = []
-    for name in ["코로나.화이자", "코로나.모더나"]:
+    for name, style in [("코로나.화이자", "covid_pfizer"), ("코로나.모더나", "covid_moderna")]:
         image = QImage(800, 160, QImage.Format.Format_RGB32)
         image.fill(Qt.GlobalColor.white)
         painter = QPainter(image)
-        _draw_vaccine_title(painter, QRectF(0, 10, 800, 140), name, 90)
+        _draw_vaccine_title(painter, QRectF(0, 10, 800, 140), name, 90, style=style)
         painter.end()
         pixels = [
             image.pixelColor(x, y).lightness()

@@ -20,6 +20,7 @@ class VaccineLabelContent:
     printed_at: datetime
     count_summary: str = ""
     influenza_total_today: int | None = None
+    title_style: str = "plain"
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,7 @@ def _paint_vaccine_label(
         QRectF(inner.left(), top_line + padding, inner.width(), bottom_line - top_line - 2 * padding),
         content.vaccine_name,
         rect.height() / 4.9,
+        style=content.title_style,
     )
 
     patient_text = " ".join(
@@ -152,25 +154,36 @@ def _paint_vaccine_label(
     )
 
 
-def _draw_vaccine_title(painter: QPainter, rect: QRectF, text: str, pixel_size: float) -> None:
-    manufacturers = {"코로나.화이자": "화이자", "코로나.모더나": "모더나"}
-    manufacturer = manufacturers.get(text)
-    if manufacturer is None:
+def _draw_vaccine_title(
+    painter: QPainter, rect: QRectF, text: str, pixel_size: float, *, style: str = "plain",
+) -> None:
+    styles = {
+        "flu_elderly": ("노인", "독감", "", True),
+        "flu_child": ("소아", "독감", "", True),
+        "flu_exception": ("노인", "독감", "예외", True),
+        "covid_pfizer": ("코로나", "화이자", "", False),
+        "covid_moderna": ("코로나", "모더나", "", True),
+    }
+    parts = styles.get(style)
+    if parts is None:
         _draw_label_text(painter, rect, text, pixel_size, bold=True)
         return
 
+    prefix, pill_text, suffix, filled = parts
     title_size = min(pixel_size, rect.height() * 0.64)
+    prefix_width = 0.28 if suffix else 0.43
+    pill_width = 0.38 if suffix else 0.54
     _draw_label_text(
         painter,
-        QRectF(rect.left(), rect.top(), rect.width() * 0.43, rect.height()),
-        "코로나",
+        QRectF(rect.left(), rect.top(), rect.width() * prefix_width, rect.height()),
+        prefix,
         title_size,
         bold=True,
     )
     pill = QRectF(
-        rect.left() + rect.width() * 0.46, rect.top(), rect.width() * 0.54, rect.height()
+        rect.left() + rect.width() * (prefix_width + 0.03), rect.top(),
+        rect.width() * pill_width, rect.height(),
     )
-    filled = manufacturer == "모더나"
     painter.save()
     try:
         pen = QPen(Qt.GlobalColor.black)
@@ -181,11 +194,17 @@ def _draw_vaccine_title(painter: QPainter, rect: QRectF, text: str, pixel_size: 
         painter.setPen(Qt.GlobalColor.white if filled else Qt.GlobalColor.black)
         inset = rect.height() * 0.14
         _draw_label_text(
-            painter, pill.adjusted(inset, inset, -inset, -inset), manufacturer,
+            painter, pill.adjusted(inset, inset, -inset, -inset), pill_text,
             title_size, bold=True,
         )
     finally:
         painter.restore()
+    if suffix:
+        _draw_label_text(
+            painter,
+            QRectF(rect.left() + rect.width() * 0.72, rect.top(), rect.width() * 0.28, rect.height()),
+            suffix, title_size, bold=True,
+        )
 
 
 def _draw_label_text(

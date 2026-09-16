@@ -604,9 +604,16 @@ products retain their configured names. Reprints use the record's completion dat
 saved counted/non-counted decision; if the current configuration cannot identify its
 influenza group, the original saved vaccine name is retained rather than guessing.
 
-On paper, the COVID manufacturer is visually separated from `코로나`: `화이자` is
+On paper, national influenza uses `노인 (독감)`, `소아 (독감)`, or `노인 (독감) 예외`:
+parentheses here represent a black pill containing white `독감` text, not printed
+punctuation. `노인`, `소아`, and `예외` stay outside the pill as black text.
+The COVID manufacturer is visually separated from `코로나`: `화이자` is
 inside a white outlined pill and `모더나` is white text inside a black pill. The
 manufacturer name remains explicit, so recognition does not depend on shading alone.
+Pill styles are explicitly selected from the national program result, not inferred by
+the renderer from product names. All other products, including general/private
+influenza, print their saved list name as plain text, even if that name resembles a
+national label title.
 
 National influenza labels also show `오늘 총 독감: <count>` at the lower left. This is
 today's total completed national influenza records (elderly, children and non-counted

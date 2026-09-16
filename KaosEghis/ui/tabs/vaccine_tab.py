@@ -1425,6 +1425,7 @@ class VaccineTab(QWidget):
     ) -> VaccineLabelContent:
         count_summary = ""
         vaccine_name = record.vaccine_type_name
+        title_style = "plain"
         printed_at = datetime.now()
         if record.program_type == "national_influenza":
             eligibility_date = printed_at.date()
@@ -1437,8 +1438,10 @@ class VaccineTab(QWidget):
             ).group_key
             if group_key in INFLUENZA_ELDERLY_GROUPS:
                 vaccine_name = "노인독감" if counts_toward_cap else "노인독감.예외"
+                title_style = "flu_elderly" if counts_toward_cap else "flu_exception"
             elif group_key in INFLUENZA_CHILD_GROUPS:
                 vaccine_name = "소아독감"
+                title_style = "flu_child"
             cap = settings.get("vaccine_influenza_daily_cap", "100").strip() or "100"
             printed_count = counts.get("flu", 0)
             if counts_toward_cap and record.status != "completed":
@@ -1449,6 +1452,10 @@ class VaccineTab(QWidget):
                 "covid-19 (pfizer)": "코로나.화이자",
                 "covid-19 (moderna)": "코로나.모더나",
             }.get(vaccine_name.casefold(), vaccine_name)
+            title_style = {
+                "코로나.화이자": "covid_pfizer",
+                "코로나.모더나": "covid_moderna",
+            }.get(vaccine_name, "plain")
             cap = settings.get("vaccine_covid_daily_cap", "100").strip() or "100"
             printed_count = counts.get("covid", 0)
             if counts_toward_cap and record.status != "completed":
@@ -1469,6 +1476,7 @@ class VaccineTab(QWidget):
             printed_at=printed_at,
             count_summary=count_summary,
             influenza_total_today=label_influenza_total,
+            title_style=title_style,
         )
 
     def _build_main_page(
