@@ -152,13 +152,13 @@ def _draw_vaccine_title(
         "covid_pfizer": ("코로나", "화이자", "", False),
         "covid_moderna": ("코로나", "모더나", "", True),
     }
+    title_size = max(1, round(min(pixel_size, rect.height() * 0.54)))
     parts = styles.get(style)
     if parts is None:
-        _draw_label_text(painter, rect, text, pixel_size, bold=True)
+        _draw_label_text(painter, rect, text, title_size, bold=True)
         return
 
     prefix, pill_text, suffix, filled = parts
-    title_size = max(1, round(min(pixel_size, rect.height() * 0.54)))
     # Keep the whole title together; pill and gaps follow glyph dimensions, not page width.
     while True:
         metrics = QFontMetricsF(_label_font(title_size, bold=True), painter.device())

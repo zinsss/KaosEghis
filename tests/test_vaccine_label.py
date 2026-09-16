@@ -127,6 +127,7 @@ def test_unmatched_influenza_label_keeps_saved_name():
     ("노인독감.예외", "flu_exception"), ("코로나.화이자", "covid_pfizer"),
     ("코로나.모더나", "covid_moderna"),
     ("Influenza - 무료접종", "plain"), ("COVID-19 (Moderna)", "plain"),
+    ("Influenza - 일반", "plain"), ("Tdap", "plain"),
     ("A long custom vaccine product name that must not wrap or clip", "plain"),
     ("노인독감", "plain"), ("소아독감", "plain"), ("노인독감.예외", "plain"),
     ("코로나.화이자", "plain"), ("코로나.모더나", "plain"),
@@ -229,6 +230,38 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary)
     assert "2026.12.31" in drawn
     assert f"100/100  {daily_summary}".strip() in drawn
     assert len(lines) == 2
+    assert app is not None
+
+
+@pytest.mark.parametrize("dpi", [203, 300, 600])
+def test_plain_titles_use_the_pill_title_font_standard(dpi):
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QApplication
+
+    from KaosEghis.core.printer_service import _draw_vaccine_title
+
+    app = QApplication.instance() or QApplication([])
+    image = QImage(round(80 / 25.4 * dpi), round(40 / 25.4 * dpi), QImage.Format.Format_RGB32)
+    image.setDotsPerMeterX(round(dpi / 0.0254))
+    image.setDotsPerMeterY(round(dpi / 0.0254))
+    rect = QRectF(0, 0, image.width() * 0.86, image.height() * 0.2956)
+    drawn_sizes = []
+
+    class RecordingPainter(QPainter):
+        def drawText(self, *_args):
+            drawn_sizes.append(self.font().pixelSize())
+
+    painter = RecordingPainter(image)
+    try:
+        for title, style in [
+            ("노인독감", "flu_elderly"), ("코로나.모더나", "covid_moderna"),
+            ("Influenza - 일반", "plain"), ("Tdap", "plain"),
+        ]:
+            _draw_vaccine_title(painter, rect, title, image.height() / 4.9, style=style)
+    finally:
+        painter.end()
+    assert len(set(drawn_sizes)) == 1
     assert app is not None
 
 

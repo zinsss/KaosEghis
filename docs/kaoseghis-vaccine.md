@@ -594,6 +594,9 @@ does not hardcode a printer. It uses `QPrinter` in Windows native-spooler mode w
 Label fields use device-pixel fonts fitted to their individual print rectangles. The
 vaccine title stays on one line, with space above/below the divider lines; long custom
 names shrink instead of wrapping into clipped lines.
+All vaccine titles use the compact pill-title font size as their standard, including
+plain-text general/private products. Long names may shrink further to fit; short plain
+titles are not enlarged beyond that standard.
 
 National influenza titles follow the configured birth-date group: `노인독감` for
 elderly groups, `소아독감` for child groups, and `노인독감.예외` for an approved
