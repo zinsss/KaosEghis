@@ -345,13 +345,19 @@ system-entry URL. The URLs contain no credentials, session IDs, patient values, 
 vaccination data. Before it opens a selected service, KaosEghis opens the KDCA portal
 and checks the current browser page using the configured accessible controls:
 
-- visible `로그아웃` only, or the KDCA session anchor `/isc/logout.do` exposed by Chrome
+- visible `로그아웃` link/button only, or the KDCA session anchor `/isc/logout.do`
+  (including its absolute `https://is.kdca.go.kr/isc/logout.do` form) exposed by Chrome
   accessibility: signed in; the system URL opens without accessing the vault;
-- visible `공동인증서 로그인` only, or the KDCA certificate anchor
+- visible `공동인증서 로그인` link/button only, or the KDCA certificate anchor
   `javascript:fnPkiCall('pLo')` exposed by Chrome accessibility: sign-in required; the
   guarded certificate flow runs;
-- both, neither, duplicate, or inaccessible controls: stop safely without accessing the
-  certificate password or opening a system URL.
+- both, neither, duplicate actionable links/buttons, or inaccessible controls:
+  stop safely without accessing the certificate password or opening a system URL.
+
+Chrome can expose a text heading/child and the actual login link with the same name.
+Only the clickable link/button counts toward sign-in detection; a matching `Text`
+element is not another login action and cannot establish an authenticated session.
+Each check reads login and logout controls from one UIA tree snapshot.
 
 `Vaccine -> Main` provides explicit `Open General`, `Open Influenza`, and `Open COVID`
 actions. They never read or enter patient data, and never automate a vaccination step.
@@ -380,6 +386,10 @@ confirmation control. It types the vault password as Windows Unicode keyboard in
 directly into that one verified control without using clipboard. It waits for the
 configured logged-in control before reporting success. Missing, stale, or ambiguous
 controls stop the sequence before the password is typed.
+
+Password input uses the full Windows `INPUT` union layout (40 bytes on Win64,
+28 bytes on Win32); a keyboard-only union has the wrong size and is rejected by
+Windows. Input is considered successful only if all requested key events are sent.
 
 Some Chrome installations do not expose portal controls through Windows UI Automation.
 For only the `공동인증서 로그인` portal button, the operator may save an Inspector-captured

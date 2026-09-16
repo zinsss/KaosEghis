@@ -149,6 +149,35 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
     assert panel.status_label.text() == "covid opened."
 
 
+def test_open_general_waits_for_signed_out_login_before_launch(tmp_path, monkeypatch) -> None:
+    _app()
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+    from KaosEghis.core import kdca_certificate_login as kdca
+
+    events = []
+    authenticated = {"value": False}
+
+    def authenticate(settings):
+        events.append("sign_in")
+        assert settings["vaccine_kdca_portal_url"] == "https://is.kdca.go.kr/"
+        authenticated["value"] = True
+        return kdca.KdcaCertificateLoginResult(True, "authenticated", "KDCA sign-in confirmed.")
+
+    def launch(settings, system):
+        assert authenticated["value"] is True
+        assert system == "general"
+        events.append(settings["vaccine_general_system_launch_url"])
+        return SimpleNamespace(success=True, message="General vaccine system opened.")
+
+    monkeypatch.setattr(vaccine_tab_module, "start_kdca_certificate_login", authenticate)
+    monkeypatch.setattr(vaccine_tab_module, "open_vaccine_system", launch)
+    panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    panel.open_general_system_button.click()
+
+    assert events == ["sign_in", "https://ois.kdca.go.kr/iris/index_run.jsp"]
+    assert panel.status_label.text() == "General vaccine system opened."
+
+
 def test_vaccine_system_open_stops_when_kdca_authentication_is_not_confirmed(
     tmp_path,
     monkeypatch,

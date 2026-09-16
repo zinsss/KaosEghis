@@ -341,8 +341,7 @@ def _wait_for_session_state(
     _focus(browser_window)
     deadline = time.monotonic() + max(timeout_seconds, 0.1)
     while time.monotonic() < deadline:
-        login_controls = _find_visible_kdca_login_controls(browser_window, config)
-        logout_controls = _find_visible_kdca_logout_controls(browser_window, config)
+        login_controls, logout_controls = _find_kdca_session_controls(browser_window, config)
         if len(logout_controls) == 1 and not login_controls:
             return "authenticated"
         if len(login_controls) == 1 and not logout_controls:
@@ -433,20 +432,12 @@ def _find_visible_kdca_login_controls(
 ) -> list[Any]:
     """Find the configured login control or KDCA's known certificate anchor."""
 
-    try:
-        elements = list(window.descendants())
-    except Exception:
-        return []
-    return [
-        element
-        for element in elements
-        if _is_visible(element)
-        and _is_enabled(element)
-        and _is_kdca_certificate_login_control(element, config.login_control_name)
-    ]
+    return _find_kdca_session_controls(window, config)[0]
 
 
 def _is_kdca_certificate_login_control(element: Any, login_control_name: str) -> bool:
+    if _element_control_type(element).casefold() not in {"hyperlink", "button"}:
+        return False
     if _matches_text(_element_name(element), login_control_name):
         return True
     return (
@@ -462,25 +453,40 @@ def _find_visible_kdca_logout_controls(
 ) -> list[Any]:
     """Find the configured logout control or KDCA's known session anchor."""
 
+    return _find_kdca_session_controls(window, config)[1]
+
+
+def _find_kdca_session_controls(
+    window: Any,
+    config: KdcaCertificateLoginConfig,
+) -> tuple[list[Any], list[Any]]:
+    # Chromium exposes an anchor and a Text heading/child with the same name. Only
+    # actionable controls count, and both states must use the same tree snapshot.
     try:
         elements = list(window.descendants())
     except Exception:
-        return []
-    return [
-        element
-        for element in elements
-        if _is_visible(element)
-        and _is_enabled(element)
-        and _is_kdca_logout_control(element, config.logout_control_name)
-    ]
+        return [], []
+    login_controls = []
+    logout_controls = []
+    for element in elements:
+        if not _is_visible(element) or not _is_enabled(element):
+            continue
+        if _is_kdca_certificate_login_control(element, config.login_control_name):
+            login_controls.append(element)
+        if _is_kdca_logout_control(element, config.logout_control_name):
+            logout_controls.append(element)
+    return login_controls, logout_controls
 
 
 def _is_kdca_logout_control(element: Any, logout_control_name: str) -> bool:
+    if _element_control_type(element).casefold() not in {"hyperlink", "button"}:
+        return False
     if _matches_text(_element_name(element), logout_control_name):
         return True
     return (
         _element_control_type(element).casefold() == "hyperlink"
-        and _normalise_kdca_href(_element_legacy_value(element)) == _KDCA_LOGOUT_HREF
+        and _normalise_kdca_href(_element_legacy_value(element))
+        in {_KDCA_LOGOUT_HREF, f"https://is.kdca.go.kr{_KDCA_LOGOUT_HREF}"}
     )
 
 
@@ -566,23 +572,40 @@ def _send_unicode_text(value: str) -> bool:
     try:
         import ctypes
 
-        wintypes = ctypes.wintypes
-
         class KEYBDINPUT(ctypes.Structure):
             _fields_ = [
-                ("wVk", wintypes.WORD),
-                ("wScan", wintypes.WORD),
-                ("dwFlags", wintypes.DWORD),
-                ("time", wintypes.DWORD),
+                ("wVk", ctypes.c_uint16),
+                ("wScan", ctypes.c_uint16),
+                ("dwFlags", ctypes.c_uint32),
+                ("time", ctypes.c_uint32),
                 ("dwExtraInfo", ctypes.c_void_p),
             ]
 
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [
+                ("dx", ctypes.c_int32),
+                ("dy", ctypes.c_int32),
+                ("mouseData", ctypes.c_uint32),
+                ("dwFlags", ctypes.c_uint32),
+                ("time", ctypes.c_uint32),
+                ("dwExtraInfo", ctypes.c_void_p),
+            ]
+
+        class HARDWAREINPUT(ctypes.Structure):
+            _fields_ = [
+                ("uMsg", ctypes.c_uint32),
+                ("wParamL", ctypes.c_uint16),
+                ("wParamH", ctypes.c_uint16),
+            ]
+
+        # SendInput requires the full native union size, even for keyboard-only
+        # input: 40 bytes on Win64, 28 on Win32. A keyboard-only union is too small.
         class INPUT_UNION(ctypes.Union):
-            _fields_ = [("ki", KEYBDINPUT)]
+            _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
 
         class INPUT(ctypes.Structure):
             _anonymous_ = ("union",)
-            _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
+            _fields_ = [("type", ctypes.c_uint32), ("union", INPUT_UNION)]
 
         input_keyboard = 1
         keyeventf_unicode = 0x0004

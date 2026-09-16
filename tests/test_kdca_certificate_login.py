@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from KaosEghis.core import kdca_certificate_login
 
 
@@ -132,6 +134,70 @@ def test_kdca_logout_anchor_confirms_authenticated_state(monkeypatch) -> None:
     assert password_requests == []
 
 
+@pytest.mark.parametrize(
+    ("control_name", "expected_state"),
+    [("공동인증서 로그인", "login_required"), ("로그아웃", "authenticated")],
+)
+def test_kdca_session_ignores_text_child_of_action_link(control_name, expected_state) -> None:
+    link = _Element(name=control_name, control_type="Hyperlink")
+    label = _Element(name=control_name, control_type="Text")
+    browser = _Element(name="질병관리청", children=[link, label])
+    config = kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(_settings())
+
+    assert kdca_certificate_login._wait_for_session_state(browser, config, 0.1) == expected_state
+    if expected_state == "login_required":
+        assert kdca_certificate_login._find_single_kdca_login_control(browser, config) is link
+
+
+def test_kdca_session_does_not_trust_unrelated_text_or_duplicate_links() -> None:
+    config = kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(_settings())
+    label_only = _Element(children=[_Element(name="로그아웃", control_type="Text")])
+    duplicate_links = _Element(children=[
+        _Element(name="공동인증서 로그인", control_type="Hyperlink"),
+        _Element(name="공동인증서 로그인", control_type="Hyperlink"),
+    ])
+    assert kdca_certificate_login._wait_for_session_state(label_only, config, 0.1) == "unknown"
+    assert kdca_certificate_login._wait_for_session_state(duplicate_links, config, 0.1) == "unknown"
+
+
+def test_kdca_logout_accepts_absolute_kdca_url_but_not_other_origin() -> None:
+    valid = _Element(control_type="Hyperlink", legacy_value="https://is.kdca.go.kr/isc/logout.do")
+    invalid = _Element(control_type="Hyperlink", legacy_value="https://example.test/isc/logout.do")
+    assert kdca_certificate_login._is_kdca_logout_control(valid, "로그아웃") is True
+    assert kdca_certificate_login._is_kdca_logout_control(invalid, "로그아웃") is False
+
+
+def test_kdca_unicode_input_uses_full_windows_input_structure(monkeypatch) -> None:
+    import ctypes
+
+    calls = []
+
+    def send_input(count, events, size):
+        calls.append((count, size, [(item.type, item.ki.wScan, item.ki.dwFlags) for item in events]))
+        return count
+
+    monkeypatch.setattr(
+        ctypes, "windll", SimpleNamespace(user32=SimpleNamespace(SendInput=send_input)), raising=False
+    )
+    assert kdca_certificate_login._send_unicode_text("A한") is True
+    expected_size = 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28
+    assert calls == [(4, expected_size, [
+        (1, ord("A"), 0x0004), (1, ord("A"), 0x0006),
+        (1, ord("한"), 0x0004), (1, ord("한"), 0x0006),
+    ])]
+
+
+@pytest.mark.parametrize("sent", [0, 1])
+def test_kdca_unicode_input_rejects_failed_or_partial_send(monkeypatch, sent) -> None:
+    import ctypes
+
+    monkeypatch.setattr(
+        ctypes, "windll",
+        SimpleNamespace(user32=SimpleNamespace(SendInput=lambda *_args: sent)), raising=False,
+    )
+    assert kdca_certificate_login._send_unicode_text("A") is False
+
+
 def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
     monkeypatch,
 ) -> None:
@@ -169,13 +235,13 @@ def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
     )
     login = _Element(
         name="공동인증서 로그인",
-        control_type="Button",
+        control_type="Hyperlink",
         on_activate=lambda: phase.update(value="certificate"),
     )
     browser = _Element(
         name="질병관리청 질병보건통합관리시스템 - Browser",
         handle=101,
-        children=[login],
+        children=[login, _Element(name="공동인증서 로그인", control_type="Text")],
     )
 
     def windows() -> list[_Element]:
