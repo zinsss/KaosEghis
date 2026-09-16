@@ -19,6 +19,7 @@ class VaccineLabelContent:
     phone: str
     printed_at: datetime
     count_summary: str = ""
+    influenza_total_today: int | None = None
 
 
 @dataclass(frozen=True)
@@ -108,12 +109,11 @@ def _paint_vaccine_label(
     painter.drawLine(inner.left(), bottom_line, inner.right(), bottom_line)
 
     padding = rect.height() * 0.025
-    _draw_label_text(
+    _draw_vaccine_title(
         painter,
         QRectF(inner.left(), top_line + padding, inner.width(), bottom_line - top_line - 2 * padding),
         content.vaccine_name,
         rect.height() / 4.9,
-        bold=True,
     )
 
     patient_text = " ".join(
@@ -134,13 +134,58 @@ def _paint_vaccine_label(
         rect.height() / 11.0,
         alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
     )
+    footer_top = bottom_line + lower_height * 0.5
+    if content.influenza_total_today is not None:
+        _draw_label_text(
+            painter,
+            QRectF(inner.left(), footer_top, inner.width() * 0.49, lower_height * 0.5),
+            f"오늘 총 독감: {content.influenza_total_today}",
+            rect.height() / 14.0,
+            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
     _draw_label_text(
         painter,
-        QRectF(inner.left(), bottom_line + lower_height * 0.48, inner.width(), lower_height * 0.52),
+        QRectF(inner.left() + inner.width() * 0.51, footer_top, inner.width() * 0.49, lower_height * 0.5),
         content.phone,
         rect.height() / 11.0,
         alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
     )
+
+
+def _draw_vaccine_title(painter: QPainter, rect: QRectF, text: str, pixel_size: float) -> None:
+    manufacturers = {"코로나.화이자": "화이자", "코로나.모더나": "모더나"}
+    manufacturer = manufacturers.get(text)
+    if manufacturer is None:
+        _draw_label_text(painter, rect, text, pixel_size, bold=True)
+        return
+
+    title_size = min(pixel_size, rect.height() * 0.64)
+    _draw_label_text(
+        painter,
+        QRectF(rect.left(), rect.top(), rect.width() * 0.43, rect.height()),
+        "코로나",
+        title_size,
+        bold=True,
+    )
+    pill = QRectF(
+        rect.left() + rect.width() * 0.46, rect.top(), rect.width() * 0.54, rect.height()
+    )
+    filled = manufacturer == "모더나"
+    painter.save()
+    try:
+        pen = QPen(Qt.GlobalColor.black)
+        pen.setWidthF(max(1.0, rect.height() * 0.018))
+        painter.setPen(pen)
+        painter.setBrush(Qt.GlobalColor.black if filled else Qt.GlobalColor.white)
+        painter.drawRoundedRect(pill, pill.height() / 2, pill.height() / 2)
+        painter.setPen(Qt.GlobalColor.white if filled else Qt.GlobalColor.black)
+        inset = rect.height() * 0.14
+        _draw_label_text(
+            painter, pill.adjusted(inset, inset, -inset, -inset), manufacturer,
+            title_size, bold=True,
+        )
+    finally:
+        painter.restore()
 
 
 def _draw_label_text(

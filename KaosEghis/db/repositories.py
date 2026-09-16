@@ -3173,6 +3173,25 @@ def get_today_vaccine_counts(
     return counts
 
 
+def get_today_national_influenza_total(
+    connection: sqlite3.Connection,
+    target_date: str,
+) -> int:
+    """Count completed national influenza records, including uncounted exceptions."""
+
+    row = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM vaccine_records
+        WHERE status = 'completed'
+          AND completed_on = ?
+          AND program_type = 'national_influenza'
+        """,
+        (target_date,),
+    ).fetchone()
+    return int(row[0])
+
+
 def list_vaccine_audit_events(
     connection: sqlite3.Connection,
     *,

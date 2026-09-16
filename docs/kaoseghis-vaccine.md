@@ -604,6 +604,20 @@ products retain their configured names. Reprints use the record's completion dat
 saved counted/non-counted decision; if the current configuration cannot identify its
 influenza group, the original saved vaccine name is retained rather than guessing.
 
+On paper, the COVID manufacturer is visually separated from `코로나`: `화이자` is
+inside a white outlined pill and `모더나` is white text inside a black pill. The
+manufacturer name remains explicit, so recognition does not depend on shading alone.
+
+National influenza labels also show `오늘 총 독감: <count>` at the lower left. This is
+today's total completed national influenza records (elderly, children and non-counted
+national exceptions), not the `x/100` cap counter. Private influenza is excluded and
+private labels do not show this total. The pending first print includes its own record
+in the displayed total; a completed-record reprint does not add another. Cancelled,
+deleted, prepared-only and printed-only records do not contribute. Only records with
+the `national_influenza` program classification are counted; vaccine names do not change
+that classification. This read-only total does not change the existing completion or
+cap-accounting rules.
+
 An explicit successful print does the following in order:
 
 1. saves a new preparation record when necessary;

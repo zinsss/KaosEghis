@@ -60,6 +60,7 @@ from KaosEghis.db.repositories import (
     create_vaccine_type,
     delete_vaccine_record,
     delete_vaccine_type,
+    get_today_national_influenza_total,
     get_today_vaccine_counts,
     get_active_emr_target_profile,
     get_emr_ui_target_by_key,
@@ -691,7 +692,9 @@ class VaccineTab(QWidget):
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
-            counts = get_today_vaccine_counts(connection, datetime.now().date().isoformat())
+            today = datetime.now().date().isoformat()
+            counts = get_today_vaccine_counts(connection, today)
+            influenza_total = get_today_national_influenza_total(connection, today)
 
         if record.status == "completed":
             permitted, counts_toward_cap = True, bool(record.counts_toward_cap)
@@ -705,7 +708,10 @@ class VaccineTab(QWidget):
             return
 
         print_result = print_vaccine_label(
-            self._label_content(record, settings, counts, counts_toward_cap),
+            self._label_content(
+                record, settings, counts, counts_toward_cap,
+                influenza_total_today=influenza_total,
+            ),
             printer_name=settings.get("vaccine_label_printer_name", ""),
         )
         if not print_result.success:
@@ -1414,6 +1420,8 @@ class VaccineTab(QWidget):
         settings: dict[str, str],
         counts: dict[str, int],
         counts_toward_cap: bool,
+        *,
+        influenza_total_today: int | None = None,
     ) -> VaccineLabelContent:
         count_summary = ""
         vaccine_name = record.vaccine_type_name
@@ -1446,6 +1454,12 @@ class VaccineTab(QWidget):
             if counts_toward_cap and record.status != "completed":
                 printed_count += 1
             count_summary = f"{printed_count}/{cap}"
+        label_influenza_total = None
+        if (
+            record.program_type == "national_influenza"
+            and influenza_total_today is not None
+        ):
+            label_influenza_total = influenza_total_today + (record.status != "completed")
         return VaccineLabelContent(
             vaccine_name=vaccine_name,
             patient_name=record.patient_name or "",
@@ -1454,6 +1468,7 @@ class VaccineTab(QWidget):
             phone=record.patient_phone or "",
             printed_at=printed_at,
             count_summary=count_summary,
+            influenza_total_today=label_influenza_total,
         )
 
     def _build_main_page(
