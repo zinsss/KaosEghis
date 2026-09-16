@@ -362,6 +362,32 @@ Each check reads login and logout controls from one UIA tree snapshot.
 `Vaccine -> Main` provides explicit `Open General`, `Open Influenza`, and `Open COVID`
 actions. They never read or enter patient data, and never automate a vaccination step.
 
+### Native Window Positioning
+
+After a successful **Open General** or **Open COVID** launch request, KaosEghis
+waits up to 30 seconds for one visible native window matching that system's exact
+configured title and class. Once found, it waits one second, focuses that window,
+and sends the operator's workflow/FancyZones shortcuts:
+
+| System | Sequence |
+| --- | --- |
+| General | `Win+Left` three times, then `Win+Down` |
+| COVID | `Win+Left` three times, then `Win+Down`, then `Win+Right` |
+
+The wait uses a Qt timer rather than a blocking launch delay. Each combination is
+released separately, with a short pause between combinations. A missing, ambiguous,
+closed, or unfocusable window stops positioning. Focus is checked before every
+combination; if focus changes partway through, no more keys are sent and KaosEghis
+does not steal focus back. Other system-launch buttons are disabled until positioning
+finishes or times out. Automatic reset clicks are deferred while positioning is pending;
+Reset Now also waits rather than clicking an intermediate window position.
+
+Influenza remains a browser launch and has no positioning sequence. This feature
+uses the existing FancyZones configuration; it does not configure zones or verify
+the final zone. Status reports that shortcuts were sent, not that a zone was confirmed.
+Resident-number and session-reset coordinates are unchanged. Verify them with the
+systems in their final workflow positions; opening a system does not click either point.
+
 ### Explicit KDCA Certificate Login
 
 `Vaccine -> Main -> Log in to KDCA` is an explicit, one-at-a-time certificate-login

@@ -38,7 +38,7 @@ from KaosEghis.core.vaccine_patient_context import (
     fetch_vaccine_patient_context,
     resident_id_for_label,
 )
-from KaosEghis.core.vaccine_system_launch import open_vaccine_system
+from KaosEghis.core.vaccine_system_launch import VaccineSystemPositioner, open_vaccine_system
 from KaosEghis.core.kdca_certificate_login import start_kdca_certificate_login
 from KaosEghis.core.vaccine_session_keeper import (
     SESSION_KEEPER_INTERVAL_MS,
@@ -151,6 +151,10 @@ class VaccineTab(QWidget):
         self._db_path = db_path
         self._current_record_id: int | None = None
         self._prepared_pair_ids: tuple[int, int] | None = None
+        self._system_positioner: VaccineSystemPositioner | None = None
+        self._system_position_timer = QTimer(self)
+        self._system_position_timer.setInterval(100)
+        self._system_position_timer.timeout.connect(self._advance_system_positioning)
         self._session_keeper_targets: dict[str, VaccineSessionResetTarget] = {}
         self._session_keeper_timers: dict[str, QTimer] = {}
         self._session_keeper_progress_timer = QTimer(self)
@@ -428,6 +432,9 @@ class VaccineTab(QWidget):
     def log_in_to_kdca(self) -> bool:
         """Run one explicit certificate-login attempt using the unlocked vault only."""
 
+        if self._system_positioner is not None:
+            self.status_label.setText("Vaccine system positioning is still in progress.")
+            return False
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
@@ -442,6 +449,9 @@ class VaccineTab(QWidget):
         the external site from this action.
         """
 
+        if self._system_positioner is not None:
+            self.status_label.setText("Vaccine system positioning is still in progress.")
+            return False
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
@@ -451,7 +461,36 @@ class VaccineTab(QWidget):
             return False
         result = open_vaccine_system(settings, system)
         self.status_label.setText(result.message)
+        if result.success and system in {"general", "covid"}:
+            self._start_system_positioning(settings, system)
         return result.success
+
+    def _start_system_positioning(self, settings: dict[str, str], system: str) -> None:
+        self._system_positioner = VaccineSystemPositioner(settings, system)
+        self._set_system_launch_buttons_enabled(False)
+        self.status_label.setText("Waiting for the vaccine system window to position...")
+        self._system_position_timer.start()
+
+    def _advance_system_positioning(self) -> None:
+        if self._system_positioner is None:
+            self._system_position_timer.stop()
+            return
+        result = self._system_positioner.advance()
+        if result is None:
+            return
+        self._system_position_timer.stop()
+        self._system_positioner = None
+        self._set_system_launch_buttons_enabled(True)
+        self.status_label.setText(result.message)
+
+    def _set_system_launch_buttons_enabled(self, enabled: bool) -> None:
+        for button in (
+            self.kdca_login_button,
+            self.open_general_system_button,
+            self.open_influenza_system_button,
+            self.open_covid_system_button,
+        ):
+            button.setEnabled(enabled)
 
     def check_influenza_program(self) -> InfluenzaEligibilityResult:
         initialize_database(self._db_path)
@@ -926,6 +965,9 @@ class VaccineTab(QWidget):
         timer = self._session_keeper_timers.get(target_key)
         if target is None or timer is None:
             return
+        if self._system_positioner is not None:
+            timer.start(1000)
+            return
 
         result = reset_vaccine_session(target)
         self.settings_page.system_targets_editor.set_session_keeper_status(
@@ -953,6 +995,9 @@ class VaccineTab(QWidget):
     def reset_vaccine_sessions_now(self) -> None:
         """Run one guarded native-session reset without requiring timer opt-in."""
 
+        if self._system_positioner is not None:
+            self.status_label.setText("Wait for vaccine window positioning before resetting sessions.")
+            return
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)

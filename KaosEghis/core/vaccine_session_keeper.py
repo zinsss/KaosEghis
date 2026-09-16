@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from KaosEghis.core.vaccine_system_launch import find_native_vaccine_windows
+
 
 SESSION_KEEPER_INTERVAL_MS = 90 * 60 * 1000
 
@@ -114,28 +116,7 @@ def _coordinate(value: object) -> int:
 
 
 def _matching_window_handles(win32gui, target: VaccineSessionResetTarget) -> list[int]:
-    handles: list[int] = []
-
-    def inspect(window_handle: int, _unused: object) -> bool:
-        try:
-            is_visible = bool(win32gui.IsWindowVisible(window_handle))
-            title = str(win32gui.GetWindowText(window_handle) or "").strip()
-            class_name = str(win32gui.GetClassName(window_handle) or "").strip()
-        except Exception:
-            return True
-        if (
-            is_visible
-            and title == target.window_title
-            and class_name == target.window_class
-        ):
-            handles.append(int(window_handle))
-        return True
-
-    try:
-        win32gui.EnumWindows(inspect, None)
-    except Exception:
-        return []
-    return handles
+    return find_native_vaccine_windows(win32gui, target.window_title, target.window_class)
 
 
 def _reset_point_is_ready(
