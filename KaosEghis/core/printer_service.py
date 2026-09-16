@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from PySide6.QtCore import QMarginsF, QRectF, QSizeF, Qt
-from PySide6.QtGui import QFont, QPainter, QPageLayout, QPageSize, QPen
+from PySide6.QtGui import QFont, QFontMetricsF, QPainter, QPageLayout, QPageSize, QPen
 from PySide6.QtPrintSupport import QPrinter
 
 
@@ -84,20 +84,22 @@ def _paint_vaccine_label(
     pen.setWidthF(max(1.0, rect.width() / 450.0))
     painter.setPen(pen)
 
-    title_font = _label_font(rect.height() / 10.0)
-    painter.setFont(title_font)
-    painter.drawText(
+    _draw_label_text(
+        painter,
         QRectF(inner.left(), inner.top(), inner.width() * 0.55, inner.height() * 0.15),
-        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         (
             f"{content.printed_at.year}년{content.printed_at.month}월"
             f"{content.printed_at.day}일"
         ),
+        rect.height() / 10.0,
+        alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
     )
-    painter.drawText(
+    _draw_label_text(
+        painter,
         QRectF(inner.left() + inner.width() * 0.55, inner.top(), inner.width() * 0.45, inner.height() * 0.15),
-        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         content.count_summary,
+        rect.height() / 10.0,
+        alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
     )
 
     top_line = inner.top() + inner.height() * 0.18
@@ -105,35 +107,70 @@ def _paint_vaccine_label(
     painter.drawLine(inner.left(), top_line, inner.right(), top_line)
     painter.drawLine(inner.left(), bottom_line, inner.right(), bottom_line)
 
-    vaccine_font = _label_font(rect.height() / 4.9, bold=True)
-    painter.setFont(vaccine_font)
-    painter.drawText(
-        QRectF(inner.left(), top_line, inner.width(), bottom_line - top_line),
-        Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+    padding = rect.height() * 0.025
+    _draw_label_text(
+        painter,
+        QRectF(inner.left(), top_line + padding, inner.width(), bottom_line - top_line - 2 * padding),
         content.vaccine_name,
+        rect.height() / 4.9,
+        bold=True,
     )
 
-    detail_font = _label_font(rect.height() / 11.0)
-    painter.setFont(detail_font)
     patient_text = " ".join(
         part for part in (content.patient_name, content.chart_no) if part
     )
     lower_height = inner.bottom() - bottom_line
-    painter.drawText(
+    _draw_label_text(
+        painter,
         QRectF(inner.left(), bottom_line, inner.width() * 0.45, lower_height * 0.5),
-        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         patient_text,
+        rect.height() / 11.0,
+        alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
     )
-    painter.drawText(
+    _draw_label_text(
+        painter,
         QRectF(inner.left() + inner.width() * 0.5, bottom_line, inner.width() * 0.5, lower_height * 0.5),
-        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         content.resident_id,
+        rect.height() / 11.0,
+        alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
     )
-    painter.drawText(
+    _draw_label_text(
+        painter,
         QRectF(inner.left(), bottom_line + lower_height * 0.48, inner.width(), lower_height * 0.52),
-        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         content.phone,
+        rect.height() / 11.0,
+        alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
     )
+
+
+def _draw_label_text(
+    painter: QPainter,
+    rect: QRectF,
+    text: str,
+    pixel_size: float,
+    *,
+    bold: bool = False,
+    alignment=Qt.AlignmentFlag.AlignCenter,
+) -> None:
+    if not text:
+        return
+    flags = alignment | Qt.TextFlag.TextSingleLine
+    font = _label_font(pixel_size, bold=bold)
+    # Measure on the same device as the print job, including its DPI/font metrics.
+    lower, upper = 1, font.pixelSize()
+    fitted_size = 1
+    while lower <= upper:
+        size = (lower + upper) // 2
+        font.setPixelSize(size)
+        bounds = QFontMetricsF(font, painter.device()).boundingRect(rect, int(flags), text)
+        if bounds.width() <= rect.width() and bounds.height() <= rect.height():
+            fitted_size = size
+            lower = size + 1
+        else:
+            upper = size - 1
+    font.setPixelSize(fitted_size)
+    painter.setFont(font)
+    painter.drawText(rect, flags, text)
 
 
 def _label_font(pixel_size: float, *, bold: bool = False) -> QFont:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -48,6 +48,8 @@ from KaosEghis.core.vaccine_session_keeper import (
 )
 from KaosEghis.core.vaccine_eligibility import (
     CovidEligibilityResult,
+    INFLUENZA_CHILD_GROUPS,
+    INFLUENZA_ELDERLY_GROUPS,
     InfluenzaEligibilityResult,
     evaluate_covid_program,
     evaluate_influenza_program,
@@ -1414,25 +1416,43 @@ class VaccineTab(QWidget):
         counts_toward_cap: bool,
     ) -> VaccineLabelContent:
         count_summary = ""
+        vaccine_name = record.vaccine_type_name
+        printed_at = datetime.now()
         if record.program_type == "national_influenza":
+            eligibility_date = printed_at.date()
+            if record.completed_on:
+                eligibility_date = date.fromisoformat(record.completed_on)
+            group_key = evaluate_influenza_program(
+                settings,
+                record.patient_resident_id or "",
+                on_date=eligibility_date,
+            ).group_key
+            if group_key in INFLUENZA_ELDERLY_GROUPS:
+                vaccine_name = "노인독감" if counts_toward_cap else "노인독감.예외"
+            elif group_key in INFLUENZA_CHILD_GROUPS:
+                vaccine_name = "소아독감"
             cap = settings.get("vaccine_influenza_daily_cap", "100").strip() or "100"
             printed_count = counts.get("flu", 0)
             if counts_toward_cap and record.status != "completed":
                 printed_count += 1
             count_summary = f"{printed_count}/{cap}"
         elif record.program_type == "national_covid":
+            vaccine_name = {
+                "covid-19 (pfizer)": "코로나.화이자",
+                "covid-19 (moderna)": "코로나.모더나",
+            }.get(vaccine_name.casefold(), vaccine_name)
             cap = settings.get("vaccine_covid_daily_cap", "100").strip() or "100"
             printed_count = counts.get("covid", 0)
             if counts_toward_cap and record.status != "completed":
                 printed_count += 1
             count_summary = f"{printed_count}/{cap}"
         return VaccineLabelContent(
-            vaccine_name=record.vaccine_type_name,
+            vaccine_name=vaccine_name,
             patient_name=record.patient_name or "",
             chart_no=record.patient_chart_no or "",
             resident_id=resident_id_for_label(record.patient_resident_id or ""),
             phone=record.patient_phone or "",
-            printed_at=datetime.now(),
+            printed_at=printed_at,
             count_summary=count_summary,
         )
 

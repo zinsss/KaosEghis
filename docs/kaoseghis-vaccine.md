@@ -591,6 +591,19 @@ name `4BARCODE 4B-2054L` and is editable under `Vaccine -> Settings`. The print 
 does not hardcode a printer. It uses `QPrinter` in Windows native-spooler mode with an
 `80 mm x 40 mm` page and zero margins. It does not log label fields or raw print errors.
 
+Label fields use device-pixel fonts fitted to their individual print rectangles. The
+vaccine title stays on one line, with space above/below the divider lines; long custom
+names shrink instead of wrapping into clipped lines.
+
+National influenza titles follow the configured birth-date group: `노인독감` for
+elderly groups, `소아독감` for child groups, and `노인독감.예외` for an approved
+non-counted elderly exception. The standard Pfizer/Moderna entries print as
+`코로나.화이자` / `코로나.모더나`. These are print titles only: saved vaccine product
+names, eligibility gates and shared daily counters are unchanged. General/private
+products retain their configured names. Reprints use the record's completion date and
+saved counted/non-counted decision; if the current configuration cannot identify its
+influenza group, the original saved vaccine name is retained rather than guessing.
+
 An explicit successful print does the following in order:
 
 1. saves a new preparation record when necessary;
