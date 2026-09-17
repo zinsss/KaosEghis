@@ -208,12 +208,18 @@ def test_kdca_unicode_input_rejects_failed_or_partial_send(monkeypatch, sent) ->
     assert kdca_certificate_login._send_unicode_text("A") is False
 
 
+@pytest.mark.parametrize("post_confirmation_states", [
+    ("authenticated",),
+    ("login_required", "login_required", "authenticated"),
+    ("login_required", "empty", "mixed", "authenticated"),
+])
 def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
-    monkeypatch,
+    monkeypatch, post_confirmation_states,
 ) -> None:
     phase = {"value": "browser"}
     confirmed: list[bool] = []
     typed: list[tuple[object, str]] = []
+    pending_states = list(post_confirmation_states)
 
     certificate = _Element(
         name="이진성34",
@@ -223,14 +229,13 @@ def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
     logout = _Element(name="로그아웃", control_type="Button")
     browser: _Element
 
-    def mark_authenticated() -> None:
+    def mark_submitted() -> None:
         confirmed.append(True)
-        browser._children = [logout]
 
     confirm = _Element(
         name="확인",
         control_type="Button",
-        on_activate=mark_authenticated,
+        on_activate=mark_submitted,
     )
     password = _Element(control_type="Edit")
     password_window = _Element(
@@ -273,6 +278,20 @@ def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
         "_type_secret",
         lambda target, value: typed.append((target, value)) or True,
     )
+    original_find = kdca_certificate_login._find_kdca_session_controls
+
+    def session_controls(window, config):
+        if confirmed:
+            state = pending_states.pop(0)
+            return {
+                "authenticated": ([], [logout]),
+                "login_required": ([login], []),
+                "empty": ([], []),
+                "mixed": ([login], [logout]),
+            }[state]
+        return original_find(window, config)
+
+    monkeypatch.setattr(kdca_certificate_login, "_find_kdca_session_controls", session_controls)
 
     result = kdca_certificate_login.start_kdca_certificate_login(
         _settings(),
@@ -286,7 +305,33 @@ def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
     assert certificate.activated is True
     assert typed == [(password, "test-certificate-password")]
     assert confirmed == [True]
+    assert pending_states == []
     assert "test-certificate-password" not in result.message
+
+
+@pytest.mark.parametrize("state", ["login_required", "empty", "mixed", "ambiguous"])
+def test_post_certificate_wait_times_out_without_positive_logout(monkeypatch, state):
+    config = kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(_settings())
+    login = _Element(name="공동인증서 로그인", control_type="Hyperlink")
+    logout = _Element(name="로그아웃", control_type="Hyperlink")
+    browser = _Element(name="질병관리청", handle=101)
+    controls = {
+        "login_required": ([login], []), "empty": ([], []),
+        "mixed": ([login], [logout]), "ambiguous": ([], [logout, logout]),
+    }[state]
+    clock = [0.0]
+    monkeypatch.setattr(kdca_certificate_login.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(kdca_certificate_login.time, "sleep", lambda duration: clock.__setitem__(0, clock[0] + duration))
+    monkeypatch.setattr(kdca_certificate_login, "_find_kdca_session_controls", lambda *_args: controls)
+
+    assert kdca_certificate_login._wait_for_session_state(
+        browser, config, 0.3, wait_for_authenticated=True,
+    ) == "unknown"
+    if state == "ambiguous":
+        assert clock[0] == 0
+    else:
+        assert clock[0] >= 0.3
+    assert not login.activated and not logout.activated
 
 
 def test_kdca_login_skips_vault_when_logout_control_confirms_session(monkeypatch) -> None:

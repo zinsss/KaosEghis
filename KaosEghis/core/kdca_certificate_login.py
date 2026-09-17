@@ -243,11 +243,14 @@ def start_kdca_certificate_login(
             "Certificate confirmation control was not available.",
         )
 
-    if _wait_for_session_state(browser_window, config, config.timeout_seconds) != "authenticated":
+    if _wait_for_session_state(
+        browser_window, config, config.timeout_seconds, wait_for_authenticated=True,
+    ) != "authenticated":
         return _result(
             False,
             "sign_in_not_confirmed",
-            "KDCA sign-in could not be confirmed. No vaccine system was opened.",
+            "KDCA sign-in could not be confirmed. If a portal notice is open, close it and retry. "
+            "No vaccine system was opened.",
         )
     return _result(
         True,
@@ -370,6 +373,8 @@ def _wait_for_session_state(
     browser_window: Any,
     config: KdcaCertificateLoginConfig,
     timeout_seconds: float,
+    *,
+    wait_for_authenticated: bool = False,
 ) -> str:
     """Return only a positively identified KDCA sign-in state.
 
@@ -377,7 +382,9 @@ def _wait_for_session_state(
     known KDCA certificate-login anchor is also accepted when Chrome exposes its
     legacy URL instead of its accessible text. A missing login control is never
     treated as a logged-in session, because Chrome may hide web content from UI
-    Automation on some installations.
+    Automation on some installations. After certificate submission, keep waiting
+    through the old login page/redirect until logout is positively identified;
+    do not treat the pre-redirect login control as an immediate failure.
     """
 
     _focus(browser_window)
@@ -386,7 +393,7 @@ def _wait_for_session_state(
         login_controls, logout_controls = _find_kdca_session_controls(browser_window, config)
         if len(logout_controls) == 1 and not login_controls:
             return "authenticated"
-        if len(login_controls) == 1 and not logout_controls:
+        if len(login_controls) == 1 and not logout_controls and not wait_for_authenticated:
             return "login_required"
         if len(login_controls) > 1 or len(logout_controls) > 1:
             return "unknown"

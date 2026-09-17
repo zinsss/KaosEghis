@@ -413,6 +413,14 @@ directly into that one verified control without using clipboard. It waits for th
 configured logged-in control before reporting success. Missing, stale, or ambiguous
 controls stop the sequence before the password is typed.
 
+After certificate confirmation, the portal may briefly retain its login button or
+expose no session controls while redirecting. KaosEghis waits for a unique visible
+logout control for the bounded sign-in timeout instead of stopping at the old login
+page. It does not type the certificate password twice or dismiss portal notices.
+If a notice prevents confirmation, close it manually and retry Open General/COVID/
+Influenza; an already authenticated session skips password entry. The selected
+system link opens only after positive authentication confirmation.
+
 The certificate picker can be a separate desktop window or KDCA's web dialog inside
 the identified browser. The web dialog has an unnamed UIA `Window` with class token
 `xwup_cert_pop`; its visible `인증서 입력 (전자서명)` heading supplies the configured
