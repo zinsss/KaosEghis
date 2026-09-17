@@ -620,7 +620,8 @@ inside a white outlined pill and `모더나` is white text inside a black pill. 
 manufacturer name remains explicit, so recognition does not depend on shading alone.
 Pills fit the measured text plus small padding, with a reduced height. Prefix, pill,
 and optional exception suffix form one compact centered group rather than filling
-separate columns. Both horizontal divider lines remain.
+separate columns. Both horizontal divider lines remain. The title band has extra
+vertical space above and below the centered title without enlarging the text or pill.
 Pill styles are explicitly selected from the national program result, not inferred by
 the renderer from product names. All other products, including general/private
 influenza, print their saved list name as plain text, even if that name resembles a

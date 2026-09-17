@@ -157,14 +157,16 @@ def _paint_vaccine_label(
     )
 
     top_line = inner.top() + inner.height() * 0.18
-    bottom_line = inner.top() + inner.height() * 0.66
+    bottom_line = inner.top() + inner.height() * 0.76
     painter.drawLine(inner.left(), top_line, inner.right(), top_line)
     painter.drawLine(inner.left(), bottom_line, inner.right(), bottom_line)
 
     padding = rect.height() * 0.025
+    # Add space around the title without enlarging its text or pill.
+    title_height = inner.height() * 0.48 - 2 * padding
     _draw_vaccine_title(
         painter,
-        QRectF(inner.left(), top_line + padding, inner.width(), bottom_line - top_line - 2 * padding),
+        QRectF(inner.left(), (top_line + bottom_line - title_height) / 2, inner.width(), title_height),
         content.vaccine_name,
         rect.height() / 4.9,
         style=content.title_style,

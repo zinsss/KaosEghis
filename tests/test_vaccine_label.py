@@ -228,6 +228,12 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary)
         assert pill_rect.width() - pill_text_rect.width() <= fonts[pill_text] * 0.4
         assert pill_rect.left() - prefix_rect.right() <= fonts[pill_text] * 0.15
         assert pill_rect.height() < image.height() * 0.26
+        inner_height = image.height() - image.width() * 0.14
+        previous_title_height = inner_height * 0.48 - image.height() * 0.05
+        assert fonts[pill_text] == max(1, round(min(image.height() / 4.9, previous_title_height * 0.54)))
+        assert pill_rect.center().y() == pytest.approx((lines[0][1] + lines[1][1]) / 2)
+        assert pill_rect.top() - lines[0][1] > image.height() * 0.075
+        assert lines[1][1] - pill_rect.bottom() > image.height() * 0.075
     else:
         assert title in drawn
         assert pills == []
@@ -254,6 +260,7 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary)
         assert daily_summary in drawn
         assert alignments[daily_summary] & Qt.AlignmentFlag.AlignRight
     assert len(lines) == 2
+    assert lines[1][1] - lines[0][1] == pytest.approx((image.height() - image.width() * 0.14) * 0.58)
     assert app is not None
 
 
@@ -446,7 +453,7 @@ def test_print_raster_contains_header_dividers_and_patient_details(dpi, style):
 
     margin = width * 0.07
     inner_width, inner_height = width - 2 * margin, height - 2 * margin
-    bottom_line = margin + inner_height * 0.66
+    bottom_line = margin + inner_height * 0.76
     lower_height = height - margin - bottom_line
     fields = {
         "patient heading": (margin, margin, inner_width * 0.36, inner_height * 0.15),
