@@ -327,6 +327,7 @@ def test_vaccine_label_printer_renders_to_an_available_native_printer(monkeypatc
     from datetime import datetime
 
     from PySide6.QtCore import QRect
+    from PySide6.QtGui import QImage
 
     import KaosEghis.core.printer_service as printer_service
 
@@ -366,24 +367,38 @@ def test_vaccine_label_printer_renders_to_an_available_native_printer(monkeypatc
         def pageRect(self, _unit):
             return QRect(0, 0, 800, 400)
 
+        def logicalDpiX(self):
+            return 254
+
+        def logicalDpiY(self):
+            return 254
+
     class _FakePainter:
         began = False
         ended = False
+        images = []
 
         def begin(self, _printer) -> bool:
             type(self).began = True
             return True
 
-        def end(self) -> None:
+        def drawImage(self, target, image, source):
+            type(self).images.append((target, image, source))
+
+        def end(self) -> bool:
             type(self).ended = True
+            return True
 
     rendered = []
     monkeypatch.setattr(printer_service, "QPrinter", _FakePrinter)
     monkeypatch.setattr(printer_service, "QPainter", _FakePainter)
     monkeypatch.setattr(
         printer_service,
-        "_paint_vaccine_label",
-        lambda _painter, rect, content: rendered.append((rect, content)),
+        "render_vaccine_label_image",
+        lambda content, *, width, height, dpi_x, dpi_y: (
+            rendered.append((QRect(0, 0, width, height), content, dpi_x, dpi_y))
+            or QImage(width, height, QImage.Format.Format_RGB32)
+        ),
     )
     content = printer_service.VaccineLabelContent(
         vaccine_name="Influenza",
@@ -405,6 +420,11 @@ def test_vaccine_label_printer_renders_to_an_available_native_printer(monkeypatc
     assert rendered[0][0].width() == 800
     assert rendered[0][0].height() == 400
     assert rendered[0][1] == content
+    assert rendered[0][2:] == (254, 254)
+    assert len(_FakePainter.images) == 1
+    target, image, source = _FakePainter.images[0]
+    assert target.width() == image.width() == source.width() == 800
+    assert target.height() == image.height() == source.height() == 400
 
 
 def test_vaccine_label_fonts_use_painter_pixel_sizes() -> None:

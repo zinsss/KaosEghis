@@ -590,6 +590,11 @@ The printer setting `vaccine_label_printer_name` defaults to the legacy Windows 
 name `4BARCODE 4B-2054L` and is editable under `Vaccine -> Settings`. The print service
 does not hardcode a printer. It uses `QPrinter` in Windows native-spooler mode with an
 `80 mm x 40 mm` page and zero margins. It does not log label fields or raw print errors.
+The complete label is first rasterized at the printer's reported device-pixel dimensions
+and DPI, then submitted as one opaque black-and-white image. This avoids sending the
+date, counters, fine dividers and patient fields as separate native text/vector commands
+that the thermal driver may omit. The raster exists only in memory; no patient-image
+file is saved. A successful submission still requires physical output verification.
 
 Label fields use device-pixel fonts fitted to their individual print rectangles. The
 vaccine title stays on one line, with space above/below the divider lines; long custom

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from PySide6.QtCore import QMarginsF, QRectF, QSizeF, Qt
-from PySide6.QtGui import QFont, QFontMetricsF, QPainter, QPageLayout, QPageSize, QPen
+from PySide6.QtGui import QFont, QFontMetricsF, QImage, QPainter, QPageLayout, QPageSize, QPen
 from PySide6.QtPrintSupport import QPrinter
 
 
@@ -56,20 +56,64 @@ def print_vaccine_label(
     if not printer.isValid():
         return VaccineLabelPrintResult(False, "Vaccine label printer is unavailable.")
 
+    try:
+        page_rect = QRectF(printer.pageRect(QPrinter.Unit.DevicePixel))
+        label_image = render_vaccine_label_image(
+            content,
+            width=round(page_rect.width()),
+            height=round(page_rect.height()),
+            dpi_x=printer.logicalDpiX(),
+            dpi_y=printer.logicalDpiY(),
+        )
+    except Exception:
+        return VaccineLabelPrintResult(False, "Vaccine label rendering failed.")
+
     painter = QPainter()
     if not painter.begin(printer):
         return VaccineLabelPrintResult(False, "Vaccine label printing failed.")
     try:
-        _paint_vaccine_label(
-            painter,
-            QRectF(printer.pageRect(QPrinter.Unit.DevicePixel)),
-            content,
-        )
+        # Native thermal text/vector output can omit thin elements. Submit one opaque raster.
+        painter.drawImage(page_rect, label_image, QRectF(label_image.rect()))
     except Exception:
         return VaccineLabelPrintResult(False, "Vaccine label printing failed.")
     finally:
-        painter.end()
+        finished = painter.end()
+    if not finished:
+        return VaccineLabelPrintResult(False, "Vaccine label printing failed.")
     return VaccineLabelPrintResult(True, "Vaccine label printed.")
+
+
+def render_vaccine_label_image(
+    content: VaccineLabelContent,
+    *,
+    width: int,
+    height: int,
+    dpi_x: int,
+    dpi_y: int,
+) -> QImage:
+    """Build the complete label at printer-dot resolution, without storing patient data."""
+
+    if min(width, height, dpi_x, dpi_y) <= 0:
+        raise ValueError("Invalid vaccine label raster dimensions.")
+    image = QImage(width, height, QImage.Format.Format_RGB32)
+    if image.isNull():
+        raise ValueError("Vaccine label raster could not be allocated.")
+    image.setDotsPerMeterX(round(dpi_x / 0.0254))
+    image.setDotsPerMeterY(round(dpi_y / 0.0254))
+    image.fill(Qt.GlobalColor.white)
+    painter = QPainter(image)
+    if not painter.isActive():
+        raise ValueError("Vaccine label raster could not be painted.")
+    try:
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        _paint_vaccine_label(painter, QRectF(image.rect()), content)
+    finally:
+        painter.end()
+    # Eliminate grey/alpha interpretation by the thermal driver while retaining solid strokes.
+    return image.convertToFormat(
+        QImage.Format.Format_Mono,
+        Qt.ImageConversionFlag.MonoOnly | Qt.ImageConversionFlag.ThresholdDither,
+    ).convertToFormat(QImage.Format.Format_RGB32)
 
 
 def _paint_vaccine_label(

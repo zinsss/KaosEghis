@@ -390,3 +390,93 @@ def test_manufacturer_pills_have_distinct_rendered_ink_coverage():
     assert 0.5 < ratios[1] < 0.95
     assert ratios[1] > 2 * ratios[0]
     assert app is not None
+
+
+@pytest.mark.parametrize("dpi", [203, 300, 600])
+@pytest.mark.parametrize("style", [
+    "flu_elderly", "flu_child", "flu_exception", "covid_pfizer", "covid_moderna", "plain",
+])
+def test_print_raster_contains_header_dividers_and_patient_details(dpi, style):
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication
+
+    from KaosEghis.core.printer_service import VaccineLabelContent, render_vaccine_label_image
+
+    app = QApplication.instance() or QApplication([])
+    width, height = round(80 / 25.4 * dpi), round(40 / 25.4 * dpi)
+    image = render_vaccine_label_image(
+        VaccineLabelContent(
+            vaccine_name="Influenza - 일반", title_style=style, patient_name="인쇄테스트",
+            chart_no="0000", resident_id="000101-0000000", phone="010-0000-0000",
+            printed_at=datetime(2026, 9, 17), count_summary="7/100  오늘 총 독감:12",
+        ), width=width, height=height, dpi_x=dpi, dpi_y=dpi,
+    )
+    assert image.format() == QImage.Format.Format_RGB32
+    assert image.width() == width and image.height() == height
+    assert image.dotsPerMeterX() == image.dotsPerMeterY() == round(dpi / 0.0254)
+    sampled_colors = {
+        image.pixel(x, y) for x in range(0, width, 4) for y in range(0, height, 4)
+    }
+    assert sampled_colors == {0xFF000000, 0xFFFFFFFF}
+
+    margin = width * 0.07
+    inner_width, inner_height = width - 2 * margin, height - 2 * margin
+    bottom_line = margin + inner_height * 0.66
+    lower_height = height - margin - bottom_line
+    fields = {
+        "date": (margin, margin, inner_width * 0.4, inner_height * 0.15),
+        "counter": (margin + inner_width * 0.42, margin, inner_width * 0.58, inner_height * 0.15),
+        "patient": (margin, bottom_line + 3, inner_width * 0.45, lower_height * 0.5 - 3),
+        "resident": (margin + inner_width * 0.5, bottom_line + 3, inner_width * 0.5, lower_height * 0.5 - 3),
+        "phone": (margin + inner_width * 0.51, bottom_line + lower_height * 0.5, inner_width * 0.49, lower_height * 0.5),
+    }
+    for name, (x, y, w, h) in fields.items():
+        black = sum(
+            image.pixel(px, py) == 0xFF000000
+            for px in range(round(x), round(x + w), max(1, dpi // 150))
+            for py in range(round(y), round(y + h), max(1, dpi // 150))
+        )
+        assert black > 15, name
+    for line in [margin + inner_height * 0.18, bottom_line]:
+        coverage = max(
+            sum(image.pixel(x, y) == 0xFF000000 for x in range(round(margin), round(width - margin)))
+            for y in range(round(line) - 2, round(line) + 3)
+        )
+        assert coverage > inner_width * 0.95
+    assert app is not None
+
+
+@pytest.mark.parametrize("failure", ["render", "begin", "draw", "end"])
+def test_print_raster_failures_do_not_report_success(monkeypatch, failure):
+    from unittest.mock import Mock
+
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage
+    import KaosEghis.core.printer_service as module
+
+    printer = Mock()
+    printer.isValid.return_value = True
+    printer.pageRect.return_value = QRectF(0, 0, 640, 318)
+    printer.logicalDpiX.return_value = printer.logicalDpiY.return_value = 203
+    painter = Mock()
+    painter.begin.return_value = failure != "begin"
+    painter.end.return_value = failure != "end"
+    render = Mock(return_value=QImage(640, 318, QImage.Format.Format_RGB32))
+    if failure == "render":
+        render.side_effect = ValueError("private detail must not escape")
+    if failure == "draw":
+        painter.drawImage.side_effect = RuntimeError("private detail must not escape")
+    monkeypatch.setattr(module, "QPrinter", Mock(return_value=printer))
+    monkeypatch.setattr(module, "QPainter", Mock(return_value=painter))
+    monkeypatch.setattr(module, "render_vaccine_label_image", render)
+    result = module.print_vaccine_label(
+        module.VaccineLabelContent("Test", "Test", "0000", "", "", datetime(2026, 9, 17)),
+        printer_name="Fake printer",
+    )
+    assert result.success is False
+    assert "private detail" not in result.message
+    if failure == "render":
+        painter.begin.assert_not_called()
+    elif failure != "begin":
+        painter.end.assert_called_once()
+    assert painter.drawImage.call_count <= 1
