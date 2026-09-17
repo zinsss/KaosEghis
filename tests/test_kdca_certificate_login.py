@@ -15,34 +15,44 @@ class _Element:
         name: str = "",
         automation_id: str = "",
         control_type: str = "",
+        class_name: str = "",
         handle: int | None = None,
         children: list["_Element"] | None = None,
         legacy_value: str = "",
         on_activate=None,
+        visible: bool = True,
+        enabled: bool = True,
     ) -> None:
         self.element_info = SimpleNamespace(
             name=name,
             automation_id=automation_id,
             control_type=control_type,
+            class_name=class_name,
         )
         self.handle = handle
         self._children = children or []
         self._legacy_value = legacy_value
         self._on_activate = on_activate
+        self._visible = visible
+        self._enabled = enabled
         self.focused = False
         self.activated = False
 
-    def descendants(self) -> list["_Element"]:
-        return list(self._children)
+    def descendants(self, *, control_type: str = "") -> list["_Element"]:
+        elements = []
+        for child in self._children:
+            elements.append(child)
+            elements.extend(child.descendants())
+        return [item for item in elements if not control_type or item.element_info.control_type == control_type]
 
     def window_text(self) -> str:
         return self.element_info.name
 
     def is_visible(self) -> bool:
-        return True
+        return self._visible
 
     def is_enabled(self) -> bool:
-        return True
+        return self._enabled
 
     def set_focus(self) -> None:
         self.focused = True
@@ -379,6 +389,122 @@ def test_default_kdca_settings_are_non_secret_selectors() -> None:
     assert config.credential_reference == "공인인증서 - 이진성"
     assert (config.login_x, config.login_y) == (0, 0)
     assert "password" not in config.credential_reference.casefold()
+
+
+def _web_picker(*, children=None, heading="인증서 입력 (전자서명)", **kwargs):
+    return _Element(
+        control_type="Window",
+        class_name="xwup_common xwup_cert_pop",
+        children=[_Element(control_type="Window", children=[
+            _Element(name=heading, control_type="Text"), *(children or []),
+        ])],
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("failure,expected_status", [
+    ("", "authenticated"),
+    ("certificate_duplicate", "certificate_not_found"),
+    ("password_duplicate", "password_window_not_ready"),
+    ("confirm_missing", "confirmation_failed"),
+    ("confirm_duplicate", "confirmation_failed"),
+])
+def test_web_picker_login_is_scoped_to_unnamed_browser_dialog(monkeypatch, failure, expected_status):
+    from dataclasses import replace
+
+    config = replace(kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(_settings()), timeout_seconds=0.1)
+    monkeypatch.setattr(kdca_certificate_login.KdcaCertificateLoginConfig, "from_settings", lambda _settings: config)
+    certificate = _Element(name="이진성34", control_type="DataItem")
+    password = _Element(control_type="Edit", automation_id="xwup_certselect_tek_input1")
+    logout = _Element(name="로그아웃", control_type="Hyperlink")
+    confirm = _Element(
+        name="확인", control_type="Button", automation_id="xwup_OkButton",
+        on_activate=lambda: setattr(browser, "_children", [logout]),
+    )
+    controls = [
+        _Element(control_type="Pane", automation_id="xwup_cert_table", children=[
+            _Element(name="certificate row with issuer and expiry", control_type="DataItem", children=[certificate]),
+        ]),
+        password,
+    ]
+    if failure != "confirm_missing":
+        controls.append(confirm)
+    if failure == "certificate_duplicate":
+        controls.append(_Element(name="이진성34", control_type="DataItem"))
+    if failure == "password_duplicate":
+        controls.append(_Element(control_type="Edit"))
+    if failure == "confirm_duplicate":
+        controls.append(_Element(name="확인", control_type="Button"))
+    picker = _web_picker(children=controls)
+    login = _Element(
+        name="공동인증서 로그인", control_type="Hyperlink",
+        on_activate=lambda: browser._children.append(picker),
+    )
+    browser = _Element(name="질병관리청 - Chrome", handle=101, children=[
+        login,
+        _Element(control_type="Edit", automation_id="address_bar"),
+        _Element(name="이진성34", control_type="Text"),
+        _Element(name="확인", control_type="Button"),
+    ])
+    typed = []
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser])
+    monkeypatch.setattr(kdca_certificate_login, "_open_portal", lambda _url: True)
+    monkeypatch.setattr(kdca_certificate_login, "_type_secret", lambda target, value: typed.append((target, value)) or True)
+
+    result = kdca_certificate_login.start_kdca_certificate_login(
+        _settings(), password_provider=lambda _reference: "fake-password",
+    )
+
+    assert result.status == expected_status
+    assert result.success is (not failure)
+    assert typed == ([(password, "fake-password")] if not failure else [])
+    assert confirm.activated is (not failure)
+    assert "fake-password" not in result.message
+    assert certificate.activated is (failure != "certificate_duplicate")
+
+
+@pytest.mark.parametrize("failure", ["hidden", "disabled", "wrong_heading", "unknown_class", "other_browser"])
+def test_web_picker_does_not_accept_unverified_dialogs(monkeypatch, failure):
+    picker = _web_picker(
+        visible=failure != "hidden", enabled=failure != "disabled",
+        heading="Other dialog" if failure == "wrong_heading" else "인증서 입력 (전자서명)",
+    )
+    if failure == "unknown_class":
+        picker.element_info.class_name = "unrelated"
+    browser = _Element(name="질병관리청", handle=101, children=[] if failure == "other_browser" else [picker])
+    other_browser = _Element(name="Other browser", handle=102, children=[picker])
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser, other_browser])
+    assert kdca_certificate_login._wait_for_single_window(
+        "인증서", 0.1, exclude_handles={101}, browser_window=browser,
+    ) is None
+
+
+def test_web_picker_rejects_multiple_visible_dialogs(monkeypatch):
+    browser = _Element(name="질병관리청", handle=101, children=[_web_picker(), _web_picker()])
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser])
+    assert kdca_certificate_login._wait_for_single_window(
+        "인증서", 0.1, exclude_handles={101}, browser_window=browser,
+    ) is None
+
+
+def test_web_picker_password_respects_configured_automation_id(monkeypatch):
+    from dataclasses import replace
+
+    config = replace(
+        kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(_settings()),
+        password_automation_id="configured-password",
+    )
+    password = _Element(control_type="Edit", automation_id="xwup_certselect_tek_input1")
+    picker = _web_picker(children=[password])
+    browser = _Element(name="질병관리청", handle=101, children=[picker])
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser])
+    assert kdca_certificate_login._wait_for_password_target(
+        config, "인증서", 0.1, exclude_handles={101}, browser_window=browser,
+    ) == (None, None)
+    password.element_info.automation_id = "configured-password"
+    assert kdca_certificate_login._wait_for_password_target(
+        config, "인증서", 0.1, exclude_handles={101}, browser_window=browser,
+    ) == (picker, password)
 
 
 def test_kdca_login_coordinate_fallback_requires_the_trusted_browser_point(

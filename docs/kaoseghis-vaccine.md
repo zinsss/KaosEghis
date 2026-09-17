@@ -413,6 +413,15 @@ directly into that one verified control without using clipboard. It waits for th
 configured logged-in control before reporting success. Missing, stale, or ambiguous
 controls stop the sequence before the password is typed.
 
+The certificate picker can be a separate desktop window or KDCA's web dialog inside
+the identified browser. The web dialog has an unnamed UIA `Window` with class token
+`xwup_cert_pop`; its visible `인증서 입력 (전자서명)` heading supplies the configured
+title match. Certificate, password, and confirmation searches stay inside that dialog,
+not the whole browser. Hidden, disabled, or duplicate pickers are rejected. The observed
+password Automation ID is `xwup_certselect_tek_input1`, editable in System targets;
+leaving it blank still requires one unambiguous input within the verified dialog.
+The confirmation control is verified before any password input.
+
 Password input uses the full Windows `INPUT` union layout (40 bytes on Win64,
 28 bytes on Win32); a keyboard-only union has the wrong size and is rejected by
 Windows. Input is considered successful only if all requested key events are sent.

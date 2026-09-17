@@ -175,6 +175,7 @@ def start_kdca_certificate_login(
     certificate_window = _wait_for_single_window(
         config.certificate_window_title_contains,
         config.timeout_seconds,
+        browser_window=browser_window,
         exclude_handles={
             handle
             for handle in (_window_handle(browser_window),)
@@ -209,6 +210,7 @@ def start_kdca_certificate_login(
         config,
         config.password_window_title_contains,
         config.timeout_seconds,
+        browser_window=browser_window,
         exclude_handles={handle for handle in (_window_handle(browser_window),) if handle is not None},
     )
     if password_window is None or password_control is None:
@@ -217,6 +219,16 @@ def start_kdca_certificate_login(
             "password_window_not_ready",
             "Certificate password window was not ready. No certificate password was typed.",
         )
+    confirm_control = _find_single_descendant(
+        password_window,
+        name=config.confirm_control_name,
+    )
+    if confirm_control is None:
+        return _result(
+            False,
+            "confirmation_failed",
+            "Certificate confirmation control was not available. No certificate password was typed.",
+        )
     if not _type_secret(password_control, password):
         return _result(
             False,
@@ -224,11 +236,7 @@ def start_kdca_certificate_login(
             "Certificate password could not be entered.",
         )
 
-    confirm_control = _find_single_descendant(
-        password_window,
-        name=config.confirm_control_name,
-    )
-    if confirm_control is None or not _activate(confirm_control):
+    if not _activate(confirm_control):
         return _result(
             False,
             "confirmation_failed",
@@ -306,22 +314,56 @@ def _wait_for_single_window(
     timeout_seconds: float,
     *,
     exclude_handles: set[int] | None = None,
+    browser_window: Any | None = None,
 ) -> Any | None:
     deadline = time.monotonic() + max(timeout_seconds, 0.1)
     while time.monotonic() < deadline:
-        matches = [
-            window
-            for window in _desktop_windows()
-            if _is_visible(window)
-            and _title_contains(_window_title(window), title_contains)
-            and _window_handle(window) not in (exclude_handles or set())
-        ]
+        matches = _matching_windows(
+            title_contains, exclude_handles=exclude_handles, browser_window=browser_window,
+        )
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
             return None
         time.sleep(0.1)
     return None
+
+
+def _matching_windows(
+    title_contains: str,
+    *,
+    exclude_handles: set[int] | None = None,
+    browser_window: Any | None = None,
+) -> list[Any]:
+    matches = [
+        window for window in _desktop_windows()
+        if _is_visible(window)
+        and _title_contains(_window_title(window), title_contains)
+        and _window_handle(window) not in (exclude_handles or set())
+    ]
+    if browser_window is None or not _is_visible(browser_window):
+        return matches
+    try:
+        dialogs = browser_window.descendants(control_type="Window")
+    except Exception:
+        return matches
+    for dialog in dialogs:
+        info = getattr(dialog, "element_info", None)
+        classes = str(getattr(info, "class_name", "") or "").split()
+        if not _is_visible(dialog) or not _is_enabled(dialog) or "xwup_cert_pop" not in classes:
+            continue
+        # KDCA's web picker has no window title/HWND. Its heading is a Text child;
+        # only this known dialog inside the already identified browser is eligible.
+        try:
+            headings = dialog.descendants(control_type="Text")
+        except Exception:
+            continue
+        if any(
+            _is_visible(heading) and _title_contains(_element_name(heading), title_contains)
+            for heading in headings
+        ):
+            matches.append(dialog)
+    return matches
 
 
 def _wait_for_session_state(
@@ -367,19 +409,16 @@ def _wait_for_password_target(
     timeout_seconds: float,
     *,
     exclude_handles: set[int] | None = None,
+    browser_window: Any | None = None,
 ) -> tuple[Any | None, Any | None]:
     """Find one verified password input, whether it shares the picker or is a new dialog."""
 
     deadline = time.monotonic() + max(timeout_seconds, 0.1)
     while time.monotonic() < deadline:
         matches: list[tuple[Any, Any]] = []
-        for window in _desktop_windows():
-            if (
-                not _is_visible(window)
-                or not _title_contains(_window_title(window), title_contains)
-                or _window_handle(window) in (exclude_handles or set())
-            ):
-                continue
+        for window in _matching_windows(
+            title_contains, exclude_handles=exclude_handles, browser_window=browser_window,
+        ):
             control = _find_single_password_descendant(
                 window,
                 automation_id=config.password_automation_id,
