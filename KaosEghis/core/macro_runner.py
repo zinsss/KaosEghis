@@ -24,6 +24,8 @@ from KaosEghis.core.eghis_connector import (
 from KaosEghis.core.eghis_shutdown import (
     BACKUP_CONFIRM_TARGET_KEY,
     CLOSE_CONFIRM_TARGET_KEY,
+    END_OF_DAY_CREDENTIAL_REFERENCE,
+    END_OF_DAY_MACRO_NAME,
     LOCK_PASSWORD_TARGET_KEY,
     POWER_OFF_CHECKBOX_TARGET_KEY,
     POWER_OFF_WINDOW_TITLE,
@@ -39,9 +41,14 @@ from KaosEghis.core.uia_inspector import (
 )
 from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 from KaosEghis.core.wait_engine import WaitCondition, wait_for_target_condition
+from KaosEghis.core.windows_desktop import (
+    DESKTOP_UNAVAILABLE_MESSAGE,
+    interactive_desktop_error,
+)
 from KaosEghis.db.database import connect, get_database_path
 from KaosEghis.db.repositories import (
     EmrUiTargetRecord,
+    get_default_emr_target_profile,
     get_emr_target_profile,
     UiTargetRecord,
     get_emr_ui_target_by_key,
@@ -49,6 +56,7 @@ from KaosEghis.db.repositories import (
     get_settings,
     get_ui_target,
     list_macro_steps,
+    list_items,
     resolve_macro_emr_target_profile,
 )
 
@@ -78,6 +86,7 @@ class MacroRunner:
         self._connection_ready_confirmed = False
         self._use_cached_focus = False
         self._window_focus_applied = False
+        self._requires_interactive_desktop = False
         self._resolved_target_cache: dict[tuple[int | None, str, str | None], object] = {}
         self._resolved_target_aliases: dict[str, tuple[int | None, str, str | None]] = {}
         self._run_metrics = _RunMetrics()
@@ -140,6 +149,48 @@ class MacroRunner:
             if lock_acquired:
                 _MACRO_EXECUTION_LOCK.release()
 
+    def execute_unlock_test(self) -> MacroRunResult:
+        """Run only the lock action, never any saved close/backup/shutdown steps."""
+
+        if not _MACRO_EXECUTION_LOCK.acquire(blocking=False):
+            return MacroRunResult(
+                False, "Macro execution blocked: another macro is running.", 0, None
+            )
+        try:
+            with connect(self._db_path or get_database_path()) as connection:
+                macro = next(
+                    (
+                        item for item in list_items(connection, "macro")
+                        if item.name == END_OF_DAY_MACRO_NAME
+                    ),
+                    None,
+                )
+                profile = (
+                    resolve_macro_emr_target_profile(connection, macro)
+                    if macro is not None
+                    else get_default_emr_target_profile(connection)
+                )
+                settings = self._build_execution_settings(get_settings(connection), profile)
+            self._current_profile_name = profile.name if profile is not None else None
+            self._current_profile_id = profile.id if profile is not None else None
+            result = self.run(
+                [
+                    MacroStep(
+                        action="unlock_eghis",
+                        target_id=LOCK_PASSWORD_TARGET_KEY,
+                        value=END_OF_DAY_CREDENTIAL_REFERENCE,
+                        timeout_seconds=10.0,
+                    )
+                ],
+                dry_run=False,
+                settings=settings,
+            )
+            if result.success:
+                return MacroRunResult(True, "EMR focus/unlock verified.", 1, None)
+            return result
+        finally:
+            _MACRO_EXECUTION_LOCK.release()
+
     def run(
         self,
         steps: Sequence[MacroStep],
@@ -151,6 +202,16 @@ class MacroRunner:
 
         if dry_run:
             return self._build_dry_run_result(steps)
+        self._requires_interactive_desktop = any(
+            self._action_name(step) in {
+                "unlock_eghis", "confirm_eghis_backup", "check_eghis_shutdown_after_backup"
+            }
+            for step in steps
+        )
+        if self._requires_interactive_desktop:
+            desktop_error = interactive_desktop_error()
+            if desktop_error:
+                return MacroRunResult(False, desktop_error, 0, None)
         if settings is None:
             self._clear_resolved_target_cache()
             return MacroRunResult(
@@ -271,6 +332,10 @@ class MacroRunner:
         )
 
     def _execute_step(self, step: MacroStep) -> MacroRunResult:
+        if self._requires_interactive_desktop:
+            desktop_error = interactive_desktop_error()
+            if desktop_error:
+                return MacroRunResult(False, desktop_error, 0, None)
         action = self._action_name(step)
         if action in {"delay_ms", "wait"}:
             return self._run_delay(step)
@@ -321,6 +386,9 @@ class MacroRunner:
         step: MacroStep,
         settings: dict[str, str],
     ) -> MacroRunResult:
+        desktop_error = interactive_desktop_error()
+        if desktop_error:
+            return MacroRunResult(False, desktop_error, 0, None)
         if not step.target_id:
             return MacroRunResult(False, "target not found", 0, None)
         credential_reference = str(step.value or "").strip()
@@ -348,6 +416,11 @@ class MacroRunner:
         focused = False
         if window_focused:
             focused, _focus_message = self._focus_target_element(target)
+        desktop_error = interactive_desktop_error()
+        if desktop_error:
+            return MacroRunResult(False, desktop_error, 0, None)
+        if self._cancel_requested:
+            return MacroRunResult(False, "Macro execution canceled.", 0, None)
         if not window_focused or not focused:
             if not self._supports_direct_lock_input(target):
                 return MacroRunResult(False, "lock dialog focus failed", 0, None)
@@ -373,6 +446,9 @@ class MacroRunner:
         while time.monotonic() < deadline:
             if self._cancel_requested:
                 return MacroRunResult(False, "Macro execution canceled.", 0, None)
+            desktop_error = interactive_desktop_error()
+            if desktop_error:
+                return MacroRunResult(False, desktop_error, 0, None)
             remaining_target, _message = self._resolve_process_target(step.target_id)
             if remaining_target is None:
                 ready = ensure_cached_connection_ready(settings)
@@ -1949,6 +2025,7 @@ class MacroRunner:
 
     def _start_run_state(self) -> None:
         self._clear_resolved_target_cache()
+        self._requires_interactive_desktop = False
         self._connection_ready_confirmed = False
         self._use_cached_focus = False
         self._window_focus_applied = False
@@ -2088,6 +2165,8 @@ class MacroRunner:
 
     @staticmethod
     def _sanitize_failure_message(action: str, message: str) -> str:
+        if message == DESKTOP_UNAVAILABLE_MESSAGE:
+            return message
         lowered = (message or "").strip().casefold()
         if lowered in {
             "target not found",

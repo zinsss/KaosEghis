@@ -521,6 +521,7 @@ def test_scheduler_tab_instantiates_without_running_macro(tmp_path) -> None:
     assert tab.new_button.text() == "New schedule"
     assert tab.create_shutdown_macro_button.text() == "Create end-of-day macro"
     assert tab.check_shutdown_button.text() == "Check shutdown setup"
+    assert tab.test_unlock_button.text() == "Test EMR Unlock"
     assert tab.dry_run_button.text() == "Dry run"
     assert tab.run_now_button.text() == "Run now"
     assert runtime.is_busy is False
@@ -575,3 +576,81 @@ def test_real_macro_execution_blocks_when_another_macro_holds_lock(
     assert result.success is False
     assert result.executed_steps == 0
     assert result.message == "Macro execution blocked: another macro is running."
+
+
+def test_scheduler_preserves_windows_lock_reason():
+    from KaosEghis.core.macro_models import MacroRunResult
+    from KaosEghis.core.scheduler import _safe_scheduler_summary, _scheduler_status_from_result
+    from KaosEghis.core.windows_desktop import DESKTOP_UNAVAILABLE_MESSAGE
+
+    result = MacroRunResult(False, DESKTOP_UNAVAILABLE_MESSAGE)
+    status = _scheduler_status_from_result(result)
+    assert status == "blocked"
+    assert _safe_scheduler_summary(result, status) == (
+        "Blocked before macro steps: Windows desktop locked or unavailable; "
+        "unlock Windows and retry manually."
+    )
+
+
+def test_scheduler_unlock_test_uses_worker_without_running_saved_macro(tmp_path, monkeypatch):
+    import threading
+    from PySide6.QtWidgets import QMessageBox
+    from KaosEghis.core.macro_models import MacroRunResult
+    from KaosEghis.ui.tabs import scheduler_tab
+
+    app = _app()
+    calls = []
+    finished = threading.Event()
+
+    class UnlockRunner:
+        def __init__(self, _path):
+            pass
+
+        def execute_unlock_test(self):
+            calls.append(threading.current_thread().name)
+            finished.wait(2)
+            return MacroRunResult(True, "EMR focus/unlock verified.", 1)
+
+        def execute_macro(self, *_a, **_k):
+            raise AssertionError("Test must not run any saved macro")
+
+    monkeypatch.setattr(scheduler_tab, "MacroRunner", UnlockRunner)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.StandardButton.Yes)
+    tab = scheduler_tab.SchedulerTab(tmp_path / "unlock.sqlite")
+    tab.test_emr_unlock()
+    worker = tab._unlock_test_thread
+    assert worker is not None
+    assert not tab.test_unlock_button.isEnabled()
+    finished.set()
+    worker.join(timeout=3)
+    assert not worker.is_alive()
+    app.processEvents()
+    assert calls == ["KaosEghis unlock test"]
+    assert tab.test_unlock_button.isEnabled()
+    assert "Succeeded: EMR focus/unlock verified." in tab.log.toPlainText()
+    assert "No close, backup, or shutdown steps were run." in tab.log.toPlainText()
+
+
+def test_scheduler_unlock_test_requires_confirmation(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from KaosEghis.ui.tabs import scheduler_tab
+
+    _app()
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.StandardButton.No)
+    tab = scheduler_tab.SchedulerTab(tmp_path / "unlock.sqlite")
+    tab.test_emr_unlock()
+    assert tab._unlock_test_runner is None
+    assert tab._unlock_test_thread is None
+
+
+def test_scheduler_cancel_also_cancels_unlock_test(tmp_path):
+    from unittest.mock import Mock
+    from KaosEghis.ui.tabs.scheduler_tab import SchedulerTab
+
+    _app()
+    tab = SchedulerTab(tmp_path / "unlock.sqlite")
+    runner = Mock()
+    tab._unlock_test_runner = runner
+    tab.cancel_active()
+    runner.cancel.assert_called_once()
+    assert "cancellation requested" in tab.log.toPlainText()

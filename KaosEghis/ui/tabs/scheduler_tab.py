@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from KaosEghis.core.macro_runner import MacroRunner
+from KaosEghis.core.macro_models import MacroRunResult
 from KaosEghis.core.eghis_shutdown import (
     create_eghis_end_of_day_macro,
     format_eghis_shutdown_preflight,
@@ -53,6 +54,7 @@ from KaosEghis.db.repositories import (
 
 class SchedulerTab(QWidget):
     shutdown_preflight_finished = Signal(object)
+    unlock_test_finished = Signal(object)
 
     def __init__(
         self,
@@ -103,6 +105,8 @@ class SchedulerTab(QWidget):
         )
         self.check_shutdown_button = QPushButton("Check shutdown setup")
         self.check_shutdown_button.clicked.connect(self.check_shutdown_setup)
+        self.test_unlock_button = QPushButton("Test EMR Unlock")
+        self.test_unlock_button.clicked.connect(self.test_emr_unlock)
         self.edit_button = QPushButton("Edit")
         self.edit_button.clicked.connect(self.edit_job)
         self.delete_button = QPushButton("Delete")
@@ -121,8 +125,6 @@ class SchedulerTab(QWidget):
         controls = QHBoxLayout()
         for button in (
             self.new_button,
-            self.create_shutdown_macro_button,
-            self.check_shutdown_button,
             self.edit_button,
             self.delete_button,
             self.toggle_button,
@@ -133,6 +135,14 @@ class SchedulerTab(QWidget):
         ):
             controls.addWidget(button)
         controls.addStretch()
+        shutdown_controls = QHBoxLayout()
+        for button in (
+            self.create_shutdown_macro_button,
+            self.check_shutdown_button,
+            self.test_unlock_button,
+        ):
+            shutdown_controls.addWidget(button)
+        shutdown_controls.addStretch()
 
         history_title = QLabel("Run history")
         self.history_table = QTableWidget(0, 6)
@@ -160,6 +170,7 @@ class SchedulerTab(QWidget):
         layout.addWidget(self.status_label)
         layout.addWidget(self.jobs_table, 2)
         layout.addLayout(controls)
+        layout.addLayout(shutdown_controls)
         layout.addWidget(history_title)
         layout.addWidget(self.history_table, 1)
         layout.addWidget(self.log)
@@ -167,6 +178,9 @@ class SchedulerTab(QWidget):
         self.runtime.state_changed.connect(self.refresh_view)
         self.shutdown_preflight_finished.connect(self._finish_shutdown_preflight)
         self._shutdown_preflight_thread: threading.Thread | None = None
+        self.unlock_test_finished.connect(self._finish_unlock_test)
+        self._unlock_test_runner: MacroRunner | None = None
+        self._unlock_test_thread: threading.Thread | None = None
         self.refresh_view()
 
     def activate_page(self) -> None:
@@ -312,6 +326,45 @@ class SchedulerTab(QWidget):
         self.refresh_view()
         self.log.setPlainText("Schedule updated. No macro was run.")
 
+    def test_emr_unlock(self) -> None:
+        if self._unlock_test_runner is not None or self.runtime.is_busy:
+            self.log.setPlainText("Unlock test blocked: another run is active.")
+            return
+        if QMessageBox.question(
+            self,
+            "Test EMR unlock only",
+            "Focus eGHIS and unlock its inactivity lock using the saved eGhis EMR "
+            "password? No close, backup, or shutdown steps will run.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        runner = MacroRunner(self._db_path)
+        self._unlock_test_runner = runner
+        self.test_unlock_button.setEnabled(False)
+        self.log.setPlainText("Testing EMR focus/unlock only...")
+
+        def worker() -> None:
+            try:
+                result = runner.execute_unlock_test()
+            except Exception:
+                result = MacroRunResult(False, "Unlock test failed: unknown error.")
+            self.unlock_test_finished.emit(result)
+
+        self._unlock_test_thread = threading.Thread(
+            target=worker, name="KaosEghis unlock test", daemon=True
+        )
+        self._unlock_test_thread.start()
+
+    def _finish_unlock_test(self, result: MacroRunResult) -> None:
+        self._unlock_test_runner = None
+        self._unlock_test_thread = None
+        self.test_unlock_button.setEnabled(True)
+        self.log.setPlainText(
+            f"{'Succeeded' if result.success else 'Stopped'}: {result.message}\n"
+            "No close, backup, or shutdown steps were run."
+        )
+
     def delete_job(self) -> None:
         job = self._selected_job()
         if job is None:
@@ -394,6 +447,10 @@ class SchedulerTab(QWidget):
             self.log.setPlainText("Countdown started. Use Cancel active to stop it.")
 
     def cancel_active(self) -> None:
+        if self._unlock_test_runner is not None:
+            self._unlock_test_runner.cancel()
+            self.log.setPlainText("Unlock test cancellation requested.")
+            return
         if not self.runtime.cancel_active_run():
             self.log.setPlainText("No scheduled macro is active.")
 

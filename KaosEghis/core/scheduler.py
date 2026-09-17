@@ -505,6 +505,8 @@ def _safe_scheduler_action(action: str | None) -> str | None:
 
 def _safe_scheduler_failure_reason(message: str | None) -> str:
     lowered = str(message or "").strip().casefold()
+    if "windows desktop is locked or unavailable" in lowered:
+        return "Windows desktop locked or unavailable; unlock Windows and retry manually"
     if "another macro" in lowered:
         return "Another macro is running"
     if "does not match preset" in lowered or "preset mismatch" in lowered:

@@ -1,19 +1,19 @@
 # KaosEghis-scheduler
 
-Last updated: 2026-09-09
+Last updated: 2026-09-17
 
 ## Status
 
-**Scheduler foundation implemented. Backup workflow not implemented.**
+**Scheduler and guarded eGHIS end-of-day macro implemented. Backup-file copying is not implemented.**
 
 KaosEghis now has an in-process Scheduler tab that binds a saved macro to a local
 time and selected weekdays. The scheduler does not contain a separate backup engine.
-The future backup process will be implemented as an ordinary, reviewed macro and then
-selected by a schedule.
+The end-of-day workflow uses an ordinary, reviewed macro selected by a schedule;
+eGHIS itself performs the database backup.
 
 Current implementation:
 
-- top-level `Scheduler` tab
+- `Macros > Scheduler` page
 - local schedule and run-history persistence
 - saved macro selector
 - local time and weekday schedule
@@ -29,7 +29,6 @@ Current implementation:
 Not implemented yet:
 
 - the backup-copy macro/action itself
-- eGHIS close and backup-dialog macro
 - claim-day preparation macro
 - one-shot dates, monthly calendars, holidays, or claim-day recurrence
 - Windows service or Windows Task Scheduler integration
@@ -42,6 +41,17 @@ The scheduler runs inside the visible KaosEghis desktop process.
 
 - KaosEghis must remain open.
 - The logged-in desktop must remain available for interactive macros.
+- A locked or uninspectable Windows input desktop blocks unlock/shutdown macros
+  before EMR lookup/input. It is checked again before each step in those workflows
+  and before password entry. Ordinary clinical macros keep their existing checks.
+  History reports `Windows desktop locked or unavailable; unlock Windows and retry
+  manually`, instead of treating it as an EMR focus timeout.
+- No Windows unlock, auto-login, security-policy change, or automatic replay on
+  unlock is performed. Administrator privileges do not bypass Windows lock.
+  See Microsoft's [desktop isolation](https://learn.microsoft.com/en-us/windows/win32/winstation/desktops)
+  and [input-desktop API](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-openinputdesktop)
+  documentation. An unavailable desktop is a blocking condition, not proof of the
+  exact Windows lock event; ordinary EMR foreground checks still apply.
 - Startup initializes SQLite, recalculates every enabled job's next future time, and
   starts a lightweight due-time timer.
 - Startup never replays a time missed while the application was closed.
@@ -169,6 +179,8 @@ The Scheduler page contains:
 - Run now
 - Cancel active
 - Refresh
+- Check shutdown setup (read-only)
+- Test EMR Unlock (confirmed focus/password-only test)
 - run-history table
 - compact dry-run/result log
 
@@ -210,6 +222,28 @@ files. Initial implementation should copy to a temporary destination, verify it,
 rename it into place. Source deletion is out of scope for the first backup milestone.
 
 ## End-of-Day eGHIS Backup Macro
+
+### Test Focus and Unlock Safely
+
+Restart KaosEghis after updating. Run it at the same elevation as eGHIS, connect EMR,
+and unlock the KaosEghis-pw vault. While Windows is signed in and eGHIS shows its own
+inactivity lock, open `Macros > Scheduler > Test EMR Unlock` and confirm.
+
+This background test executes one fixed `unlock_eghis` action using the shutdown
+macro's EMR profile (or the default profile when no shutdown macro exists), its
+editable `shutdown.lock_password` target, and the `eGhis EMR` vault credential.
+It never loads the saved macro steps, sends Alt+F4, starts backup, or powers off.
+It neither enables nor creates schedules/macros and does not log the password.
+The shutdown schedule can stay disabled throughout testing. `Cancel active` also
+cancels this test. It shares the real-macro execution lock with Launcher and Scheduler.
+
+Success means the EMR is unlocked and its foreground/readiness check passed, not
+that backup or shutdown has been tested. If Windows is locked at the scheduled time,
+this GUI workflow cannot complete. Run it while the desktop is available or use a
+separately verified, vendor-supported noninteractive backup workflow; do not replace
+it with a forced power-off that could interrupt a database backup.
+
+### Saved Sequence
 
 The guarded end-of-day sequence is implemented as the saved macro
 `eGHIS End-of-Day Backup and Power Off`. Scheduler exposes `Create end-of-day macro`,
