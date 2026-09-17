@@ -7,10 +7,11 @@ or retain certificate passwords outside the unlocked KaosEghis-pw session.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 from typing import Any, Callable
 import webbrowser
+from urllib.parse import urlsplit
 
 from KaosEghis.core.pw_runtime import get_unlocked_credential_password
 
@@ -102,6 +103,7 @@ class KdcaCertificateLoginResult:
     success: bool
     status: str
     message: str
+    browser_window: Any | None = field(default=None, repr=False, compare=False)
 
 
 def start_kdca_certificate_login(
@@ -140,6 +142,7 @@ def start_kdca_certificate_login(
             True,
             "already_authenticated",
             "KDCA is already signed in. No certificate password was requested.",
+            browser_window=browser_window,
         )
     if session_state != "login_required":
         return _result(
@@ -256,7 +259,74 @@ def start_kdca_certificate_login(
         True,
         "authenticated",
         "KDCA sign-in was confirmed.",
+        browser_window=browser_window,
     )
+
+
+def open_in_authenticated_browser(browser_window: Any, url: str) -> bool:
+    """Open a system link in the verified browser's profile, without the OS URL handler."""
+
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or any(ord(c) < 32 for c in url):
+            return False
+        if browser_window is None or not _focus(browser_window) or not _browser_is_foreground(browser_window):
+            return False
+        import pyautogui
+
+        pyautogui.hotkey("ctrl", "t", _pause=False)
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if not _browser_is_foreground(browser_window):
+                return False
+            address_bar = _find_browser_address_bar(browser_window)
+            if address_bar is not None and address_bar.has_keyboard_focus():
+                break
+            time.sleep(0.05)
+        else:
+            return False
+        # Set the native address bar directly; no clipboard or URL-bearing action log.
+        address_bar.iface_value.SetValue(url)
+        if (
+            address_bar.get_value() != url
+            or not _browser_is_foreground(browser_window)
+            or not address_bar.has_keyboard_focus()
+        ):
+            return False
+        pyautogui.press("enter", _pause=False)
+        return True
+    except Exception:
+        return False
+
+
+def _browser_is_foreground(browser_window: Any) -> bool:
+    try:
+        import win32gui
+
+        handle = _window_handle(browser_window)
+        return handle is not None and win32gui.GetForegroundWindow() == handle
+    except Exception:
+        return False
+
+
+def _find_browser_address_bar(browser_window: Any) -> Any | None:
+    matches = []
+    for element in browser_window.descendants(control_type="Edit"):
+        info = getattr(element, "element_info", None)
+        if (
+            not _is_visible(element) or not _is_enabled(element)
+            or getattr(info, "class_name", "") != "OmniboxViewViews"
+        ):
+            continue
+        parent = element
+        for _ in range(20):
+            parent = parent.parent()
+            if parent is None or _element_control_type(parent) == "Document":
+                break
+            if _window_handle(parent) == _window_handle(browser_window):
+                matches.append(element)
+                break
+    return matches[0] if len(matches) == 1 else None
 
 
 def _open_portal(url: str) -> bool:
@@ -801,5 +871,7 @@ def _title_contains(actual: str, expected: str) -> bool:
     return expected.strip().casefold() in actual.strip().casefold()
 
 
-def _result(success: bool, status: str, message: str) -> KdcaCertificateLoginResult:
-    return KdcaCertificateLoginResult(success, status, message)
+def _result(
+    success: bool, status: str, message: str, *, browser_window: Any | None = None,
+) -> KdcaCertificateLoginResult:
+    return KdcaCertificateLoginResult(success, status, message, browser_window)

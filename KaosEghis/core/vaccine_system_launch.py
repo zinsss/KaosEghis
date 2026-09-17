@@ -8,6 +8,8 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 import webbrowser
 
+from KaosEghis.core.kdca_certificate_login import open_in_authenticated_browser
+
 
 @dataclass(frozen=True)
 class VaccineSystemLaunchResult:
@@ -159,6 +161,7 @@ def open_vaccine_system(
     system: str,
     *,
     opener: Callable[..., bool] = webbrowser.open,
+    browser_window: Any | None = None,
 ) -> VaccineSystemLaunchResult:
     """Open one configured external system without passing patient data or credentials."""
 
@@ -174,12 +177,20 @@ def open_vaccine_system(
             f"{label} launch URL is not configured.",
         )
     try:
-        opened = bool(opener(url, new=2, autoraise=True))
+        opened = (
+            open_in_authenticated_browser(browser_window, url)
+            if browser_window is not None else bool(opener(url, new=2, autoraise=True))
+        )
     except Exception:
         opened = False
     if not opened:
-        return VaccineSystemLaunchResult(False, f"Could not open {label}.")
+        message = f"Could not open {label}."
+        if browser_window is not None:
+            message += " The signed-in browser could not navigate. Close any blocking popup and retry."
+        return VaccineSystemLaunchResult(False, message)
     return VaccineSystemLaunchResult(
         True,
+        f"{label} launch link sent to the signed-in browser."
+        if browser_window is not None else
         f"{label} opened. Complete sign-in and the remaining workflow manually.",
     )

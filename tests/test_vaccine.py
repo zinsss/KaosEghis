@@ -1,6 +1,8 @@
 import os
 from types import SimpleNamespace
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
@@ -131,7 +133,10 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
         lambda _self, _settings, system: positioned_systems.append(system),
     )
 
-    def fake_launch(_settings, system):
+    authenticated_browser = object()
+
+    def fake_launch(_settings, system, *, browser_window):
+        assert browser_window is authenticated_browser
         launched_systems.append(system)
         return SimpleNamespace(success=True, message=f"{system} opened.")
 
@@ -143,7 +148,7 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
     monkeypatch.setattr(
         vaccine_tab_module,
         "start_kdca_certificate_login",
-        lambda _settings: SimpleNamespace(success=True, message="KDCA signed in."),
+        lambda _settings: SimpleNamespace(success=True, message="KDCA signed in.", browser_window=authenticated_browser),
     )
     panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
 
@@ -163,14 +168,18 @@ def test_open_general_waits_for_signed_out_login_before_launch(tmp_path, monkeyp
 
     events = []
     authenticated = {"value": False}
+    authenticated_browser = object()
 
     def authenticate(settings):
         events.append("sign_in")
         assert settings["vaccine_kdca_portal_url"] == "https://is.kdca.go.kr/"
         authenticated["value"] = True
-        return kdca.KdcaCertificateLoginResult(True, "authenticated", "KDCA sign-in confirmed.")
+        return kdca.KdcaCertificateLoginResult(
+            True, "authenticated", "KDCA sign-in confirmed.", browser_window=authenticated_browser,
+        )
 
-    def launch(settings, system):
+    def launch(settings, system, *, browser_window):
+        assert browser_window is authenticated_browser
         assert authenticated["value"] is True
         assert system == "general"
         events.append(settings["vaccine_general_system_launch_url"])
@@ -187,6 +196,42 @@ def test_open_general_waits_for_signed_out_login_before_launch(tmp_path, monkeyp
 
     assert events == ["sign_in", "https://ois.kdca.go.kr/iris/index_run.jsp", "position_general"]
     assert panel.status_label.text() == "General vaccine system opened."
+
+
+def test_vaccine_launch_never_falls_back_to_default_browser_after_authentication(tmp_path, monkeypatch):
+    _app()
+    import KaosEghis.ui.tabs.vaccine_tab as module
+    from KaosEghis.core.kdca_certificate_login import KdcaCertificateLoginResult
+
+    calls = []
+    monkeypatch.setattr(module, "start_kdca_certificate_login", lambda _settings: KdcaCertificateLoginResult(
+        True, "authenticated", "Signed in.",
+    ))
+    monkeypatch.setattr(module, "open_vaccine_system", lambda *_args, **_kwargs: calls.append(True))
+    panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    assert panel.open_vaccine_system("general") is False
+    assert calls == []
+    assert "No vaccine system link was opened" in panel.status_label.text()
+
+
+@pytest.mark.parametrize("system,part", [("general", "iris"), ("influenza", "iroi"), ("covid", "covr")])
+@pytest.mark.parametrize("navigated", [True, False])
+def test_system_deep_link_uses_authenticated_browser_only(monkeypatch, system, part, navigated):
+    from KaosEghis.core import vaccine_system_launch as module
+    from KaosEghis.db.repositories import DEFAULT_SETTINGS
+
+    browser = object()
+    navigation = []
+    default_browser = []
+    monkeypatch.setattr(module, "open_in_authenticated_browser", lambda target, url: navigation.append((target, url)) or navigated)
+    result = module.open_vaccine_system(
+        DEFAULT_SETTINGS, system, browser_window=browser,
+        opener=lambda *args, **_kwargs: default_browser.append(args) or True,
+    )
+    assert result.success is navigated
+    assert navigation == [(browser, DEFAULT_SETTINGS[f"vaccine_{system}_system_launch_url"])]
+    assert f"/{part}/" in navigation[0][1]
+    assert default_browser == []
 
 
 def test_vaccine_positioning_timer_prevents_overlapping_launches(tmp_path, monkeypatch):

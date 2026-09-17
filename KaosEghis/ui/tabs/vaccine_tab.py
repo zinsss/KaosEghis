@@ -463,7 +463,10 @@ class VaccineTab(QWidget):
         if not authentication.success:
             self.status_label.setText(authentication.message)
             return False
-        result = open_vaccine_system(settings, system)
+        if authentication.browser_window is None:
+            self.status_label.setText("The signed-in KDCA browser is unavailable. No vaccine system link was opened.")
+            return False
+        result = open_vaccine_system(settings, system, browser_window=authentication.browser_window)
         self.status_label.setText(result.message)
         if result.success and system in {"general", "covid"}:
             self._start_system_positioning(settings, system)
@@ -472,7 +475,7 @@ class VaccineTab(QWidget):
     def _start_system_positioning(self, settings: dict[str, str], system: str) -> None:
         self._system_positioner = VaccineSystemPositioner(settings, system)
         self._set_system_launch_buttons_enabled(False)
-        self.status_label.setText("Waiting for the vaccine system window to position...")
+        self.status_label.setText(f"{system.title()} launch link sent; waiting for its application window to position...")
         self._system_position_timer.start()
 
     def _advance_system_positioning(self) -> None:
