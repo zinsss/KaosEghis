@@ -267,6 +267,20 @@ The stored actions are `unlock_eghis`, `delay_ms`, `hotkey`, two ordered
 `confirm_eghis_backup` steps, and `check_eghis_shutdown_after_backup`. They stop on the
 first failure. The macro is hidden from Launcher and disabled by default.
 
+For the captured close/backup confirmations, native Windows captions may be
+`예(&Y)` even though Inspector reports `예(Y)`. The shutdown-only native resolver
+ignores mnemonic ampersands and finds a unique visible, enabled, focusable button
+inside the exact configured modal title and connected eGHIS PID. This also avoids
+relying on UIA top-level enumeration for owned dialogs. Multiple matching dialogs
+or buttons block execution; no blind Y/Enter or cross-process confirmation is used.
+Explicit Automation IDs, parent scopes, and detailed ancestor paths continue using
+the normal resolver. Both confirmation targets remain editable in EMR settings.
+
+When validating step by step, leave the backup question open for target inspection
+after accepting close. Accepting backup starts eGHIS backup immediately. Inspect
+`chkShutDown` read-only before deliberately enabling it: a completed backup may
+then power off the workstation. Do not run the complete macro just to inspect a target.
+
 The password must not be stored in a macro step, scheduler row, setting, result, or log.
 The workflow must block when the KaosEghis-pw vault is locked or the configured
 credential entry is unavailable.

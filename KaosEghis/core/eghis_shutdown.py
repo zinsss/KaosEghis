@@ -44,6 +44,84 @@ SHUTDOWN_TARGET_KEYS = (
 )
 
 
+def resolve_native_confirmation_target(
+    target: UiTargetRecord,
+    window_title: str,
+    process_id: int,
+) -> tuple[object | None, str]:
+    """Read a unique, focusable WinForms confirmation button without activating it."""
+
+    if (
+        target.target_id not in {CLOSE_CONFIRM_TARGET_KEY, BACKUP_CONFIRM_TARGET_KEY}
+        or target.control_type != "Button"
+        or target.automation_id or target.parent_automation_id or target.parent_target_id
+        or not target.name or not window_title or process_id <= 0
+        or target.name.casefold().startswith(("re:", "regex:", "contains:", "prefix:"))
+        or "*" in target.name
+    ):
+        return None, "target not found"
+    # This fallback supports the captured single-modal scope only. More detailed
+    # configured ancestors/Automation IDs must still be resolved by UIA.
+    try:
+        nodes = json.loads(target.ancestor_path or "[]")
+    except (TypeError, ValueError):
+        return None, "target not found"
+    if nodes != [{"name": window_title, "control_type": "Window"}]:
+        return None, "target not found"
+    try:
+        import win32con
+        import win32gui
+        import win32process
+        from pywinauto import Desktop
+
+        windows: list[int] = []
+
+        def collect_window(handle, _extra):
+            if (
+                win32gui.IsWindowVisible(handle)
+                and win32gui.IsWindowEnabled(handle)
+                and win32gui.GetWindowText(handle).strip() == window_title
+                and win32process.GetWindowThreadProcessId(handle)[1] == process_id
+            ):
+                windows.append(handle)
+
+        win32gui.EnumWindows(collect_window, None)
+        if len(windows) > 1:
+            return None, "confirmation target ambiguous"
+        if not windows:
+            return None, "target not found"
+        matches: list[int] = []
+
+        def caption(text: str) -> str:
+            return text.replace("&&", "\0").replace("&", "").replace("\0", "&").strip().casefold()
+
+        def collect_button(handle, _extra):
+            native_class = win32gui.GetClassName(handle)
+            if (
+                win32gui.IsWindowVisible(handle)
+                and win32gui.IsWindowEnabled(handle)
+                and win32process.GetWindowThreadProcessId(handle)[1] == process_id
+                and caption(win32gui.GetWindowText(handle)) == caption(target.name)
+                and (not target.class_name or native_class == target.class_name)
+                and (
+                    native_class == "Button"
+                    or native_class.startswith(("WindowsForms10.BUTTON.", "WindowsForms10.Window."))
+                )
+                and win32gui.GetWindowLong(handle, win32con.GWL_STYLE) & win32con.WS_TABSTOP
+            ):
+                matches.append(handle)
+
+        win32gui.EnumChildWindows(windows[0], collect_button, None)
+        if len(matches) > 1:
+            return None, "confirmation target ambiguous"
+        if len(matches) == 1:
+            element = Desktop(backend="win32").window(handle=matches[0]).wrapper_object()
+            return element, "Confirmation button found in connected eGHIS dialog."
+    except Exception:
+        pass
+    return None, "target not found"
+
+
 @dataclass(frozen=True)
 class ShutdownTargetDiagnostic:
     target_key: str

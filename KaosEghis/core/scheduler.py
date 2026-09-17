@@ -525,6 +525,8 @@ def _safe_scheduler_failure_reason(message: str | None) -> str:
         return "Main EMR focus failed"
     if "lock target ambiguous" in lowered:
         return "EMR lock target is ambiguous"
+    if "confirmation target ambiguous" in lowered:
+        return "EMR confirmation target is ambiguous"
     if (
         "not focusable" in lowered
         or "foreground mismatch" in lowered

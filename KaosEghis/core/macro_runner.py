@@ -29,6 +29,7 @@ from KaosEghis.core.eghis_shutdown import (
     LOCK_PASSWORD_TARGET_KEY,
     POWER_OFF_CHECKBOX_TARGET_KEY,
     POWER_OFF_WINDOW_TITLE,
+    resolve_native_confirmation_target,
 )
 from KaosEghis.core.pw_runtime import get_unlocked_credential_password
 from KaosEghis.core.macro_models import MacroRunResult, MacroStep
@@ -1264,6 +1265,8 @@ class MacroRunner:
         if target_id == LOCK_PASSWORD_TARGET_KEY and target_record.automation_id:
             return self._resolve_lock_password_target(target_record)
         element, message = self._resolve_confirmation_modal_target(target_id, target_record)
+        if message == "confirmation target ambiguous":
+            return None, message
         if element is None:
             element, message = resolve_target_element_in_cached_process(target_record)
         if element is None and target_id == POWER_OFF_CHECKBOX_TARGET_KEY:
@@ -1295,6 +1298,11 @@ class MacroRunner:
         pid = getattr(state, "pid", None)
         if not window_title or pid is None:
             return None, "target not found"
+        native, message = resolve_native_confirmation_target(
+            target_record, window_title, int(pid)
+        )
+        if native is not None or message == "confirmation target ambiguous":
+            return native, message
         return resolve_target_element_in_named_top_level_window(
             target_record,
             window_title,
@@ -1459,6 +1467,8 @@ class MacroRunner:
             target, message = self._resolve_process_target(step.target_id)
             if target is not None:
                 return target, message
+            if message == "confirmation target ambiguous":
+                return None, message
             if time.monotonic() >= deadline:
                 return None, "timeout" if message == "target not found" else message
             time.sleep(0.1)
@@ -2178,6 +2188,7 @@ class MacroRunner:
             "lock dialog focus failed",
             "main emr focus failed",
             "lock target ambiguous",
+            "confirmation target ambiguous",
             "timeout",
             "unsupported action",
             "unknown error",

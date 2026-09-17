@@ -637,6 +637,11 @@ def test_shutdown_confirmations_resolve_only_in_cached_eghis_modal(
 
     monkeypatch.setattr(
         macro_runner,
+        "resolve_native_confirmation_target",
+        lambda *_args: (None, "target not found"),
+    )
+    monkeypatch.setattr(
+        macro_runner,
         "resolve_target_element_in_named_top_level_window",
         resolve_named,
     )
