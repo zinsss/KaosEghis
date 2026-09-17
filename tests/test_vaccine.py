@@ -1,8 +1,6 @@
 import os
 from types import SimpleNamespace
 
-import pytest
-
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
@@ -133,10 +131,7 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
         lambda _self, _settings, system: positioned_systems.append(system),
     )
 
-    authenticated_browser = object()
-
-    def fake_launch(_settings, system, *, browser_window):
-        assert browser_window is authenticated_browser
+    def fake_launch(_settings, system):
         launched_systems.append(system)
         return SimpleNamespace(success=True, message=f"{system} opened.")
 
@@ -148,7 +143,7 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
     monkeypatch.setattr(
         vaccine_tab_module,
         "start_kdca_certificate_login",
-        lambda _settings: SimpleNamespace(success=True, message="KDCA signed in.", browser_window=authenticated_browser),
+        lambda _settings: SimpleNamespace(success=True, message="KDCA signed in."),
     )
     panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
 
@@ -168,18 +163,14 @@ def test_open_general_waits_for_signed_out_login_before_launch(tmp_path, monkeyp
 
     events = []
     authenticated = {"value": False}
-    authenticated_browser = object()
 
     def authenticate(settings):
         events.append("sign_in")
         assert settings["vaccine_kdca_portal_url"] == "https://is.kdca.go.kr/"
         authenticated["value"] = True
-        return kdca.KdcaCertificateLoginResult(
-            True, "authenticated", "KDCA sign-in confirmed.", browser_window=authenticated_browser,
-        )
+        return kdca.KdcaCertificateLoginResult(True, "authenticated", "KDCA sign-in confirmed.")
 
-    def launch(settings, system, *, browser_window):
-        assert browser_window is authenticated_browser
+    def launch(settings, system):
         assert authenticated["value"] is True
         assert system == "general"
         events.append(settings["vaccine_general_system_launch_url"])
@@ -198,40 +189,42 @@ def test_open_general_waits_for_signed_out_login_before_launch(tmp_path, monkeyp
     assert panel.status_label.text() == "General vaccine system opened."
 
 
-def test_vaccine_launch_never_falls_back_to_default_browser_after_authentication(tmp_path, monkeypatch):
+def test_authenticated_system_buttons_send_exact_deep_links_to_browser(tmp_path, monkeypatch):
+    from functools import partial
+
     _app()
     import KaosEghis.ui.tabs.vaccine_tab as module
     from KaosEghis.core.kdca_certificate_login import KdcaCertificateLoginResult
+    from KaosEghis.core.vaccine_system_launch import open_vaccine_system
 
-    calls = []
-    monkeypatch.setattr(module, "start_kdca_certificate_login", lambda _settings: KdcaCertificateLoginResult(
-        True, "authenticated", "Signed in.",
-    ))
-    monkeypatch.setattr(module, "open_vaccine_system", lambda *_args, **_kwargs: calls.append(True))
-    panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
-    assert panel.open_vaccine_system("general") is False
-    assert calls == []
-    assert "No vaccine system link was opened" in panel.status_label.text()
+    events = []
 
+    def authenticate(_settings):
+        events.append("authenticated")
+        return KdcaCertificateLoginResult(True, "already_authenticated", "KDCA signed in.")
 
-@pytest.mark.parametrize("system,part", [("general", "iris"), ("influenza", "iroi"), ("covid", "covr")])
-@pytest.mark.parametrize("navigated", [True, False])
-def test_system_deep_link_uses_authenticated_browser_only(monkeypatch, system, part, navigated):
-    from KaosEghis.core import vaccine_system_launch as module
-    from KaosEghis.db.repositories import DEFAULT_SETTINGS
+    def launch_url(url, *, new, autoraise):
+        assert events[-1] == "authenticated"
+        assert new == 2 and autoraise is True
+        events.append(url)
+        return True
 
-    browser = object()
-    navigation = []
-    default_browser = []
-    monkeypatch.setattr(module, "open_in_authenticated_browser", lambda target, url: navigation.append((target, url)) or navigated)
-    result = module.open_vaccine_system(
-        DEFAULT_SETTINGS, system, browser_window=browser,
-        opener=lambda *args, **_kwargs: default_browser.append(args) or True,
+    monkeypatch.setattr(module, "start_kdca_certificate_login", authenticate)
+    monkeypatch.setattr(module, "open_vaccine_system", partial(open_vaccine_system, opener=launch_url))
+    monkeypatch.setattr(
+        module.VaccineTab, "_start_system_positioning",
+        lambda _self, _settings, system: events.append(f"position_{system}"),
     )
-    assert result.success is navigated
-    assert navigation == [(browser, DEFAULT_SETTINGS[f"vaccine_{system}_system_launch_url"])]
-    assert f"/{part}/" in navigation[0][1]
-    assert default_browser == []
+    panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    panel.open_general_system_button.click()
+    panel.open_influenza_system_button.click()
+    panel.open_covid_system_button.click()
+
+    assert events == [
+        "authenticated", "https://ois.kdca.go.kr/iris/index_run.jsp", "position_general",
+        "authenticated", "https://ois.kdca.go.kr/iroi/indexWSP.jsp",
+        "authenticated", "https://ois.kdca.go.kr/covr/index_run.jsp", "position_covid",
+    ]
 
 
 def test_vaccine_positioning_timer_prevents_overlapping_launches(tmp_path, monkeypatch):

@@ -421,16 +421,6 @@ If a notice prevents confirmation, close it manually and retry Open General/COVI
 Influenza; an already authenticated session skips password entry. The selected
 system link opens only after positive authentication confirmation.
 
-The successful login check carries its verified browser window into system launch.
-Open General/COVID/Influenza opens a new tab in that same browser/profile, writes the
-configured deep link to the native address bar, verifies the address and keyboard
-focus, then submits it. It never uses the Windows default URL handler for this
-authenticated handoff, which could otherwise open another browser without the KDCA
-session. A web-page Edit cannot qualify as the address bar; focus loss, blocking
-popups, ambiguous controls, or failed address verification stop navigation. The
-positioning status means the system link was sent, not that the native system has
-already appeared. Chrome may still require manual permission to launch the native app.
-
 The certificate picker can be a separate desktop window or KDCA's web dialog inside
 the identified browser. The web dialog has an unnamed UIA `Window` with class token
 `xwup_cert_pop`; its visible `인증서 입력 (전자서명)` heading supplies the configured

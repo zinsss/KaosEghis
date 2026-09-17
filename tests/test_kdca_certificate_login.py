@@ -31,9 +31,6 @@ class _Element:
         )
         self.handle = handle
         self._children = children or []
-        self._parent = None
-        for child in self._children:
-            child._parent = self
         self._legacy_value = legacy_value
         self._on_activate = on_activate
         self._visible = visible
@@ -44,16 +41,9 @@ class _Element:
     def descendants(self, *, control_type: str = "") -> list["_Element"]:
         elements = []
         for child in self._children:
-            child._parent = self
             elements.append(child)
             elements.extend(child.descendants())
         return [item for item in elements if not control_type or item.element_info.control_type == control_type]
-
-    def parent(self):
-        return self._parent
-
-    def has_keyboard_focus(self):
-        return self.focused
 
     def window_text(self) -> str:
         return self.element_info.name
@@ -151,7 +141,6 @@ def test_kdca_logout_anchor_confirms_authenticated_state(monkeypatch) -> None:
 
     assert result.success is True
     assert result.status == "already_authenticated"
-    assert result.browser_window is browser
     assert password_requests == []
 
 
@@ -311,7 +300,6 @@ def test_kdca_login_uses_unique_verified_controls_without_exposing_password(
 
     assert result.success is True
     assert result.status == "authenticated"
-    assert result.browser_window is browser
     assert opened == ["https://is.kdca.go.kr/"]
     assert login.activated is True
     assert certificate.activated is True
@@ -365,7 +353,6 @@ def test_kdca_login_skips_vault_when_logout_control_confirms_session(monkeypatch
 
     assert result.success is True
     assert result.status == "already_authenticated"
-    assert result.browser_window is browser
     assert opened == ["https://is.kdca.go.kr/"]
     assert password_requests == []
 
@@ -601,58 +588,3 @@ def test_kdca_login_coordinate_fallback_never_clicks_outside_browser(monkeypatch
     )
 
     assert kdca_certificate_login._click_configured_login_point(browser, config) is False
-
-
-@pytest.mark.parametrize("failure", ["", "initial_focus", "focus_lost", "wrong_value", "bar_not_focused"])
-def test_system_navigation_verifies_browser_and_native_address_bar(monkeypatch, failure):
-    url = "https://ois.kdca.go.kr/iris/index_run.jsp"
-    address = _Element(control_type="Edit", class_name="OmniboxViewViews")
-    browser = _Element(handle=101, children=[_Element(control_type="ToolBar", children=[address])])
-    keys = []
-    values = []
-    address.iface_value = SimpleNamespace(SetValue=values.append)
-    address.get_value = lambda: "incorrect" if failure == "wrong_value" else values[-1]
-    foreground = [failure != "initial_focus"]
-    clock = [0.0]
-
-    def new_tab(*args, **_kwargs):
-        keys.append(args)
-        address.focused = failure != "bar_not_focused"
-        foreground[0] = failure != "focus_lost"
-
-    monkeypatch.setattr(kdca_certificate_login, "_browser_is_foreground", lambda _window: foreground[0])
-    monkeypatch.setattr(kdca_certificate_login.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(kdca_certificate_login.time, "sleep", lambda duration: clock.__setitem__(0, clock[0] + duration))
-    monkeypatch.setitem(sys.modules, "pyautogui", SimpleNamespace(
-        hotkey=new_tab, press=lambda key, **_kwargs: keys.append((key,)),
-    ))
-
-    assert kdca_certificate_login.open_in_authenticated_browser(browser, url) is (not failure)
-    assert keys == (
-        [] if failure == "initial_focus" else
-        [("ctrl", "t"), ("enter",)] if not failure else [("ctrl", "t")]
-    )
-    assert values == ([url] if failure in {"", "wrong_value"} else [])
-
-
-@pytest.mark.parametrize("failure", ["web_field", "duplicate", "hidden", "disabled", "unrelated_window"])
-def test_address_bar_lookup_rejects_untrusted_or_ambiguous_edits(failure):
-    field = _Element(
-        control_type="Edit", class_name="OmniboxViewViews",
-        visible=failure != "hidden", enabled=failure != "disabled",
-    )
-    container = _Element(control_type="Document" if failure == "web_field" else "ToolBar", children=[field])
-    browser = _Element(handle=101, children=[container])
-    if failure == "duplicate":
-        container._children.append(_Element(control_type="Edit", class_name="OmniboxViewViews"))
-    if failure == "unrelated_window":
-        browser._children = []
-    assert kdca_certificate_login._find_browser_address_bar(browser) is None
-
-
-@pytest.mark.parametrize("url", ["javascript:alert(1)", "file:///C:/example", "https://example.test/\n", "https://"])
-def test_browser_navigation_rejects_invalid_urls_before_focusing(monkeypatch, url):
-    focus_calls = []
-    monkeypatch.setattr(kdca_certificate_login, "_focus", lambda window: focus_calls.append(window) or True)
-    assert kdca_certificate_login.open_in_authenticated_browser(_Element(handle=101), url) is False
-    assert focus_calls == []
