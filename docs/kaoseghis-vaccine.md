@@ -626,8 +626,10 @@ the renderer from product names. All other products, including general/private
 influenza, print their saved list name as plain text, even if that name resembles a
 national label title.
 
-Dates print as `yyyy.MM.dd`. The right-hand header contains both the cap counter and
-the daily total: `xx/100  오늘 총 독감:xxx` on national influenza labels. This is
+All printed text is bold. Dates print as `yyyy.MM.dd` at the left of the header,
+`xx/100` is centered on the label, and the daily total is right aligned. These are
+separate fields, so changing the total does not move the cap counter.
+National influenza shows `오늘 총 독감: xxx` at the right. This is
 today's total completed national influenza records (elderly, children and non-counted
 national exceptions), not the `x/100` cap counter. Private influenza is excluded and
 private labels do not show this total. The pending first print includes its own record
@@ -644,6 +646,11 @@ Totals use completed national COVID records' saved product names, recognizing th
 standard English names and Korean print-title equivalents. Unknown custom names are
 not guessed into a manufacturer. Private, cancelled, prepared-only, printed-only and
 other-day records are excluded; reprints do not add to these totals.
+
+Patient name, chart number, resident number and phone print together on one line below
+the lower divider, in that order with spacing between fields. The line fits to the
+available width without dropping or truncating fields; unusually long details may use
+smaller text. General/private products keep the same bold one-line patient layout.
 
 An explicit successful print does the following in order:
 

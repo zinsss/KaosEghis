@@ -81,15 +81,18 @@ def test_print_title_uses_program_without_changing_record(
     assert record.vaccine_type_name == name
     assert counts == {"flu": 7, "covid": 3}
     expected_count = ""
+    expected_daily = ""
     if program == "national_influenza":
-        expected_count = ("8/100" if counted else "7/100") + "  오늘 총 독감:13"
+        expected_count = "8/100" if counted else "7/100"
+        expected_daily = "오늘 총 독감: 13"
     elif program == "national_covid":
         expected_count = "4/100"
         if title == "코로나.화이자":
-            expected_count += "  오늘 화이자:23"
+            expected_daily = "오늘 화이자: 23"
         elif title == "코로나.모더나":
-            expected_count += "  오늘 모더나:6"
+            expected_daily = "오늘 모더나: 6"
     assert label.count_summary == expected_count
+    assert label.daily_total_summary == expected_daily
     styles = {
         "노인독감": "flu_elderly", "소아독감": "flu_child", "노인독감.예외": "flu_exception",
         "코로나.화이자": "covid_pfizer", "코로나.모더나": "covid_moderna",
@@ -107,7 +110,8 @@ def test_exception_reprint_uses_completion_date_and_does_not_increment_count():
         None, record, _settings(), {"flu": 7}, False, influenza_total_today=12,
     )
     assert label.vaccine_name == "노인독감.예외"
-    assert label.count_summary == "7/100  오늘 총 독감:12"
+    assert label.count_summary == "7/100"
+    assert label.daily_total_summary == "오늘 총 독감: 12"
     assert label.title_style == "flu_exception"
 
 
@@ -148,6 +152,7 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary)
     text_colors = {}
     pills = []
     fonts = {}
+    alignments = {}
     lines = []
 
     class RecordingPainter:
@@ -182,17 +187,19 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary)
             assert flags & Qt.TextFlag.TextSingleLine
             assert not flags & Qt.TextFlag.TextWordWrap
             assert self.font.pointSize() == -1
+            assert self.font.bold()
             drawn.append(text)
             text_rects.append(rect)
             text_colors[text] = self.pen.color()
             fonts[text] = self.font.pixelSize()
+            alignments[text] = flags
 
     _paint_vaccine_label(
         RecordingPainter(), QRectF(0, 0, image.width(), image.height()),
         VaccineLabelContent(
             vaccine_name=title, patient_name="홍길동", chart_no="0000000000",
             resident_id="000101-0000000", phone="010-0000-0000",
-            printed_at=datetime(2026, 12, 31), count_summary=f"100/100  {daily_summary}".strip(),
+            printed_at=datetime(2026, 12, 31), count_summary="100/100", daily_total_summary=daily_summary,
             title_style=style,
         ),
     )
@@ -201,7 +208,7 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary)
         "flu_exception": ["노인", "독감", "예외"],
         "covid_pfizer": ["코로나", "화이자"], "covid_moderna": ["코로나", "모더나"],
     }.get(style)
-    assert len(drawn) == 5 + len(pill_parts or [title])
+    assert len(drawn) == 3 + len(pill_parts or [title]) + bool(daily_summary)
     if pill_parts:
         assert all(part in drawn for part in pill_parts)
         pill_text = pill_parts[1]
@@ -224,11 +231,19 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary)
     else:
         assert title in drawn
         assert pills == []
-    assert text_colors["010-0000-0000"] == Qt.GlobalColor.black
+    patient_line = "홍길동  0000000000  000101-0000000  010-0000-0000"
+    assert patient_line in drawn
+    assert text_colors[patient_line] == Qt.GlobalColor.black
     for i, rect in enumerate(text_rects):
         assert all(not rect.intersects(other) for other in text_rects[i + 1:])
     assert "2026.12.31" in drawn
-    assert f"100/100  {daily_summary}".strip() in drawn
+    assert "100/100" in drawn
+    assert alignments["2026.12.31"] & Qt.AlignmentFlag.AlignLeft
+    assert alignments["100/100"] & Qt.AlignmentFlag.AlignHCenter
+    assert text_rects[drawn.index("100/100")].center().x() == pytest.approx(image.width() / 2)
+    if daily_summary:
+        assert daily_summary in drawn
+        assert alignments[daily_summary] & Qt.AlignmentFlag.AlignRight
     assert len(lines) == 2
     assert app is not None
 
@@ -355,7 +370,7 @@ def test_covid_manufacturer_totals_include_exceptions_not_private_or_other_days(
 
 
 @pytest.mark.parametrize("name,expected", [
-    ("COVID-19 (Pfizer)", "오늘 화이자:22"), ("COVID-19 (Moderna)", "오늘 모더나:5"),
+    ("COVID-19 (Pfizer)", "오늘 화이자: 22"), ("COVID-19 (Moderna)", "오늘 모더나: 5"),
 ])
 def test_covid_reprint_keeps_current_manufacturer_total(name, expected):
     from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
@@ -365,7 +380,8 @@ def test_covid_reprint_keeps_current_manufacturer_total(name, expected):
     label = VaccineTab._label_content(
         None, record, _settings(), {"covid": 25}, True, covid_totals_today=totals,
     )
-    assert label.count_summary == f"25/100  {expected}"
+    assert label.count_summary == "25/100"
+    assert label.daily_total_summary == expected
     assert sum(totals.values()) == 27
 
 
@@ -408,7 +424,7 @@ def test_print_raster_contains_header_dividers_and_patient_details(dpi, style):
         VaccineLabelContent(
             vaccine_name="Influenza - 일반", title_style=style, patient_name="인쇄테스트",
             chart_no="0000", resident_id="000101-0000000", phone="010-0000-0000",
-            printed_at=datetime(2026, 9, 17), count_summary="7/100  오늘 총 독감:12",
+            printed_at=datetime(2026, 9, 17), count_summary="7/100", daily_total_summary="오늘 총 독감: 12",
         ), width=width, height=height, dpi_x=dpi, dpi_y=dpi,
     )
     assert image.format() == QImage.Format.Format_RGB32
@@ -424,11 +440,10 @@ def test_print_raster_contains_header_dividers_and_patient_details(dpi, style):
     bottom_line = margin + inner_height * 0.66
     lower_height = height - margin - bottom_line
     fields = {
-        "date": (margin, margin, inner_width * 0.4, inner_height * 0.15),
-        "counter": (margin + inner_width * 0.42, margin, inner_width * 0.58, inner_height * 0.15),
-        "patient": (margin, bottom_line + 3, inner_width * 0.45, lower_height * 0.5 - 3),
-        "resident": (margin + inner_width * 0.5, bottom_line + 3, inner_width * 0.5, lower_height * 0.5 - 3),
-        "phone": (margin + inner_width * 0.51, bottom_line + lower_height * 0.5, inner_width * 0.49, lower_height * 0.5),
+        "date": (margin, margin, inner_width * 0.36, inner_height * 0.15),
+        "counter": (margin + inner_width * 0.39, margin, inner_width * 0.22, inner_height * 0.15),
+        "daily total": (margin + inner_width * 0.64, margin, inner_width * 0.36, inner_height * 0.15),
+        "patient row": (margin, bottom_line + lower_height * 0.1, inner_width, lower_height * 0.8),
     }
     for name, (x, y, w, h) in fields.items():
         black = sum(

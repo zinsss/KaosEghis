@@ -1428,6 +1428,7 @@ class VaccineTab(QWidget):
         covid_totals_today: dict[str, int] | None = None,
     ) -> VaccineLabelContent:
         count_summary = ""
+        daily_total_summary = ""
         vaccine_name = record.vaccine_type_name
         title_style = "plain"
         printed_at = datetime.now()
@@ -1453,7 +1454,7 @@ class VaccineTab(QWidget):
             count_summary = f"{printed_count}/{cap}"
             if influenza_total_today is not None:
                 total = influenza_total_today + (record.status != "completed")
-                count_summary += f"  오늘 총 독감:{total}"
+                daily_total_summary = f"오늘 총 독감: {total}"
         elif record.program_type == "national_covid":
             covid_labels = {
                 "covid-19 (pfizer)": ("코로나.화이자", "covid_pfizer"),
@@ -1475,7 +1476,7 @@ class VaccineTab(QWidget):
                     if covid_labels.get(name.strip().casefold(), ("", ""))[1] == title_style
                 ) + (record.status != "completed")
                 manufacturer = "화이자" if title_style == "covid_pfizer" else "모더나"
-                count_summary += f"  오늘 {manufacturer}:{total}"
+                daily_total_summary = f"오늘 {manufacturer}: {total}"
         return VaccineLabelContent(
             vaccine_name=vaccine_name,
             patient_name=record.patient_name or "",
@@ -1484,6 +1485,7 @@ class VaccineTab(QWidget):
             phone=record.patient_phone or "",
             printed_at=printed_at,
             count_summary=count_summary,
+            daily_total_summary=daily_total_summary,
             title_style=title_style,
         )
 
