@@ -241,11 +241,13 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary)
     assert "26.12.31" in drawn
     assert "2026.12.31" not in drawn
     assert "100/100" in drawn
-    assert alignments["26.12.31"] & Qt.AlignmentFlag.AlignLeft
-    footer_rects = [text_rects[drawn.index(value)] for value in ["26.12.31", "000101-0000000", "010-0000-0000"]]
+    assert alignments["26.12.31"] & Qt.AlignmentFlag.AlignRight
+    footer_rects = [text_rects[drawn.index(value)] for value in ["000101-0000000", "010-0000-0000", "26.12.31"]]
     assert all(rect.top() > lines[1][1] for rect in footer_rects)
     assert len({rect.center().y() for rect in footer_rects}) == 1
-    assert alignments["010-0000-0000"] & Qt.AlignmentFlag.AlignRight
+    assert all(left.right() < right.left() for left, right in zip(footer_rects, footer_rects[1:]))
+    assert alignments["000101-0000000"] & Qt.AlignmentFlag.AlignLeft
+    assert alignments["010-0000-0000"] & Qt.AlignmentFlag.AlignHCenter
     assert alignments["100/100"] & Qt.AlignmentFlag.AlignHCenter
     assert text_rects[drawn.index("100/100")].center().x() == pytest.approx(image.width() / 2)
     if daily_summary:
@@ -450,9 +452,9 @@ def test_print_raster_contains_header_dividers_and_patient_details(dpi, style):
         "patient heading": (margin, margin, inner_width * 0.36, inner_height * 0.15),
         "counter": (margin + inner_width * 0.39, margin, inner_width * 0.22, inner_height * 0.15),
         "daily total": (margin + inner_width * 0.64, margin, inner_width * 0.36, inner_height * 0.15),
-        "date": (margin, bottom_line + lower_height * 0.1, inner_width * 0.22, lower_height * 0.8),
-        "resident": (margin + inner_width * 0.25, bottom_line + lower_height * 0.1, inner_width * 0.38, lower_height * 0.8),
-        "phone": (margin + inner_width * 0.66, bottom_line + lower_height * 0.1, inner_width * 0.34, lower_height * 0.8),
+        "resident": (margin, bottom_line + lower_height * 0.1, inner_width * 0.38, lower_height * 0.8),
+        "phone": (margin + inner_width * 0.41, bottom_line + lower_height * 0.1, inner_width * 0.34, lower_height * 0.8),
+        "date": (margin + inner_width * 0.78, bottom_line + lower_height * 0.1, inner_width * 0.22, lower_height * 0.8),
     }
     for name, (x, y, w, h) in fields.items():
         black = sum(

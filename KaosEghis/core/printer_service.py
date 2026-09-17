@@ -175,24 +175,24 @@ def _paint_vaccine_label(
     footer_height = lower_height * 0.8
     _draw_label_text(
         painter,
-        QRectF(inner.left(), footer_top, inner.width() * 0.22, footer_height),
-        content.printed_at.strftime("%y.%m.%d"),
+        QRectF(inner.left(), footer_top, inner.width() * 0.38, footer_height),
+        content.resident_id,
         rect.height() / 13.0,
         alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         bold=True,
     )
     _draw_label_text(
         painter,
-        QRectF(inner.left() + inner.width() * 0.25, footer_top, inner.width() * 0.38, footer_height),
-        content.resident_id,
+        QRectF(inner.left() + inner.width() * 0.41, footer_top, inner.width() * 0.34, footer_height),
+        content.phone,
         rect.height() / 13.0,
         alignment=Qt.AlignmentFlag.AlignCenter,
         bold=True,
     )
     _draw_label_text(
         painter,
-        QRectF(inner.left() + inner.width() * 0.66, footer_top, inner.width() * 0.34, footer_height),
-        content.phone,
+        QRectF(inner.left() + inner.width() * 0.78, footer_top, inner.width() * 0.22, footer_height),
+        content.printed_at.strftime("%y.%m.%d"),
         rect.height() / 13.0,
         alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         bold=True,

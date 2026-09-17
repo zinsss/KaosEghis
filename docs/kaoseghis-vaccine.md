@@ -647,8 +647,8 @@ standard English names and Korean print-title equivalents. Unknown custom names 
 not guessed into a manufacturer. Private, cancelled, prepared-only, printed-only and
 other-day records are excluded; reprints do not add to these totals.
 
-Below the lower divider, the date prints as `yy.MM.dd` at the left, resident number in
-the middle, and phone at the right. Patient identity stays at the top so it is easier
+Below the lower divider, resident number prints at the left, phone in the middle,
+and the date as `yy.MM.dd` at the right. Patient identity stays at the top so it is easier
 to notice. All fields fit their own print areas without dropping or truncating values;
 unusually long details may use smaller text. General/private products use the same
 bold patient-first layout.
