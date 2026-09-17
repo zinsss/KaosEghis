@@ -208,7 +208,7 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary)
         "flu_exception": ["노인", "독감", "예외"],
         "covid_pfizer": ["코로나", "화이자"], "covid_moderna": ["코로나", "모더나"],
     }.get(style)
-    assert len(drawn) == 3 + len(pill_parts or [title]) + bool(daily_summary)
+    assert len(drawn) == 5 + len(pill_parts or [title]) + bool(daily_summary)
     if pill_parts:
         assert all(part in drawn for part in pill_parts)
         pill_text = pill_parts[1]
@@ -231,14 +231,21 @@ def test_every_label_field_fits_its_print_area(dpi, title, style, daily_summary)
     else:
         assert title in drawn
         assert pills == []
-    patient_line = "홍길동  0000000000  000101-0000000  010-0000-0000"
-    assert patient_line in drawn
-    assert text_colors[patient_line] == Qt.GlobalColor.black
+    patient_heading = "홍길동  0000000000"
+    assert patient_heading in drawn
+    assert text_colors[patient_heading] == Qt.GlobalColor.black
+    assert text_rects[drawn.index(patient_heading)].top() < lines[0][1]
+    assert alignments[patient_heading] & Qt.AlignmentFlag.AlignLeft
     for i, rect in enumerate(text_rects):
         assert all(not rect.intersects(other) for other in text_rects[i + 1:])
-    assert "2026.12.31" in drawn
+    assert "26.12.31" in drawn
+    assert "2026.12.31" not in drawn
     assert "100/100" in drawn
-    assert alignments["2026.12.31"] & Qt.AlignmentFlag.AlignLeft
+    assert alignments["26.12.31"] & Qt.AlignmentFlag.AlignLeft
+    footer_rects = [text_rects[drawn.index(value)] for value in ["26.12.31", "000101-0000000", "010-0000-0000"]]
+    assert all(rect.top() > lines[1][1] for rect in footer_rects)
+    assert len({rect.center().y() for rect in footer_rects}) == 1
+    assert alignments["010-0000-0000"] & Qt.AlignmentFlag.AlignRight
     assert alignments["100/100"] & Qt.AlignmentFlag.AlignHCenter
     assert text_rects[drawn.index("100/100")].center().x() == pytest.approx(image.width() / 2)
     if daily_summary:
@@ -440,10 +447,12 @@ def test_print_raster_contains_header_dividers_and_patient_details(dpi, style):
     bottom_line = margin + inner_height * 0.66
     lower_height = height - margin - bottom_line
     fields = {
-        "date": (margin, margin, inner_width * 0.36, inner_height * 0.15),
+        "patient heading": (margin, margin, inner_width * 0.36, inner_height * 0.15),
         "counter": (margin + inner_width * 0.39, margin, inner_width * 0.22, inner_height * 0.15),
         "daily total": (margin + inner_width * 0.64, margin, inner_width * 0.36, inner_height * 0.15),
-        "patient row": (margin, bottom_line + lower_height * 0.1, inner_width, lower_height * 0.8),
+        "date": (margin, bottom_line + lower_height * 0.1, inner_width * 0.22, lower_height * 0.8),
+        "resident": (margin + inner_width * 0.25, bottom_line + lower_height * 0.1, inner_width * 0.38, lower_height * 0.8),
+        "phone": (margin + inner_width * 0.66, bottom_line + lower_height * 0.1, inner_width * 0.34, lower_height * 0.8),
     }
     for name, (x, y, w, h) in fields.items():
         black = sum(

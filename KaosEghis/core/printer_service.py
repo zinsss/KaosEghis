@@ -130,10 +130,11 @@ def _paint_vaccine_label(
     pen.setWidthF(max(1.0, rect.width() / 450.0))
     painter.setPen(pen)
 
+    patient_heading = "  ".join(part for part in (content.patient_name, content.chart_no) if part)
     _draw_label_text(
         painter,
         QRectF(inner.left(), inner.top(), inner.width() * 0.36, inner.height() * 0.15),
-        content.printed_at.strftime("%Y.%m.%d"),
+        patient_heading,
         rect.height() / 10.0,
         alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         bold=True,
@@ -169,16 +170,31 @@ def _paint_vaccine_label(
         style=content.title_style,
     )
 
-    patient_text = "  ".join(
-        part for part in (content.patient_name, content.chart_no, content.resident_id, content.phone) if part
-    )
     lower_height = inner.bottom() - bottom_line
+    footer_top = bottom_line + lower_height * 0.1
+    footer_height = lower_height * 0.8
     _draw_label_text(
         painter,
-        QRectF(inner.left(), bottom_line + lower_height * 0.1, inner.width(), lower_height * 0.8),
-        patient_text,
-        rect.height() / 11.0,
+        QRectF(inner.left(), footer_top, inner.width() * 0.22, footer_height),
+        content.printed_at.strftime("%y.%m.%d"),
+        rect.height() / 13.0,
         alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        bold=True,
+    )
+    _draw_label_text(
+        painter,
+        QRectF(inner.left() + inner.width() * 0.25, footer_top, inner.width() * 0.38, footer_height),
+        content.resident_id,
+        rect.height() / 13.0,
+        alignment=Qt.AlignmentFlag.AlignCenter,
+        bold=True,
+    )
+    _draw_label_text(
+        painter,
+        QRectF(inner.left() + inner.width() * 0.66, footer_top, inner.width() * 0.34, footer_height),
+        content.phone,
+        rect.height() / 13.0,
+        alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         bold=True,
     )
 

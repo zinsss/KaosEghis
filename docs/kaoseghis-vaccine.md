@@ -626,7 +626,7 @@ the renderer from product names. All other products, including general/private
 influenza, print their saved list name as plain text, even if that name resembles a
 national label title.
 
-All printed text is bold. Dates print as `yyyy.MM.dd` at the left of the header,
+All printed text is bold. Patient name and chart number are left aligned at the top,
 `xx/100` is centered on the label, and the daily total is right aligned. These are
 separate fields, so changing the total does not move the cap counter.
 National influenza shows `오늘 총 독감: xxx` at the right. This is
@@ -647,10 +647,11 @@ standard English names and Korean print-title equivalents. Unknown custom names 
 not guessed into a manufacturer. Private, cancelled, prepared-only, printed-only and
 other-day records are excluded; reprints do not add to these totals.
 
-Patient name, chart number, resident number and phone print together on one line below
-the lower divider, in that order with spacing between fields. The line fits to the
-available width without dropping or truncating fields; unusually long details may use
-smaller text. General/private products keep the same bold one-line patient layout.
+Below the lower divider, the date prints as `yy.MM.dd` at the left, resident number in
+the middle, and phone at the right. Patient identity stays at the top so it is easier
+to notice. All fields fit their own print areas without dropping or truncating values;
+unusually long details may use smaller text. General/private products use the same
+bold patient-first layout.
 
 An explicit successful print does the following in order:
 
