@@ -449,12 +449,29 @@ the following are true:
 - Windows is unlocked and the system window is enabled and not minimized;
 - no keyboard/mouse button is held and at least five seconds have passed since
   the last input event (automatic resets only);
+- **virtual Desktop 1** (the first desktop in Windows Task View, not monitor 1)
+  has been selected and verified;
 - the saved reset point is inside that window; and
 - the window at that point belongs to the verified system rather than an overlapping
   application.
 
-Input activity, a locked desktop, an unavailable/covered reset point, or a failed
-click defers only that system. It retries every 30 seconds for at most 10 minutes
+Once input is idle and a unique matching system window exists, the keeper switches
+to virtual Desktop 1 before testing the reset point. Both automatic resets and
+**Reset Now** use this rule. It uses the Windows-only
+[pyvda desktop API](https://github.com/mirober/pyvda), not repeated Ctrl+Win+Arrow
+shortcuts. The dependency is declared in both project dependency files. No desktop
+is created, renamed, or deleted, and individual windows are not moved to another
+desktop or monitor by a session reset. The operator remains on Desktop 1 afterward.
+
+After switching, window identity, input activity, Desktop 1, and point ownership
+are checked again. If the operator resumes input or leaves Desktop 1, that attempt
+sends no click. If a desktop switch has not completed or cannot be verified, the
+existing bounded retry handles it without clicking during the transition. Missing
+desktop support blocks resets instead of falling back to blind keyboard input.
+
+Input activity, a locked desktop, an unconfirmed desktop switch, an unavailable or
+covered reset point, or a failed click defers only that system. It retries every
+30 seconds for at most 10 minutes
 from the first failure, checking the guards again each time. The retry deadline
 does not move on repeated failures. After that deadline, automatic attempts stop
 for that system and **Reset required** appears in Main and System targets. Make
@@ -465,8 +482,9 @@ native checks stop with **Reset required** rather than repeated input attempts.
 A sent reset starts a new 90-minute timer only for that system. General and COVID
 results remain separate, so one success cannot hide or postpone the other's retry.
 The countdown distinguishes the next retry from the next normal reset. Disabling
-the keeper clears pending retries. No retry brings a covered window forward,
-changes desktops, blocks operator input, or sends a blind coordinate click.
+the keeper clears pending retries. A retry may switch to Desktop 1 after the idle
+check, but never brings a covered window forward, blocks operator input, or sends
+a blind coordinate click.
 
 The activity check reads only timing and whether keys/buttons are held; it does
 not capture typed content. It uses Windows

@@ -36,7 +36,9 @@ def install_outcomes(monkeypatch, outcomes):
     return calls
 
 
-@pytest.mark.parametrize("status", ["input_busy", "point_not_ready", "input_failed", "desktop_unavailable"])
+@pytest.mark.parametrize("status", [
+    "input_busy", "point_not_ready", "input_failed", "desktop_unavailable", "desktop_switch_failed",
+])
 def test_transient_failure_retries_only_failed_system(keeper, monkeypatch, status):
     page, now = keeper
     calls = install_outcomes(monkeypatch, {"general": status})

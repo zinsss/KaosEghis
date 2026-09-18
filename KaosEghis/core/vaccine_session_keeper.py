@@ -11,6 +11,10 @@ from dataclasses import dataclass
 
 from KaosEghis.core.vaccine_system_launch import find_native_vaccine_windows
 from KaosEghis.core.windows_desktop import interactive_desktop_error
+from KaosEghis.core.windows_virtual_desktop import (
+    ensure_first_virtual_desktop,
+    first_virtual_desktop_is_active,
+)
 
 
 SESSION_KEEPER_INTERVAL_MS = 90 * 60 * 1000
@@ -18,7 +22,8 @@ SESSION_KEEPER_IDLE_MS = 5000
 SESSION_KEEPER_RETRY_MS = 30 * 1000
 SESSION_KEEPER_RETRY_WINDOW_SECONDS = 10 * 60
 SESSION_KEEPER_RETRY_STATUSES = frozenset({
-    "input_busy", "desktop_unavailable", "point_not_ready", "input_failed",
+    "input_busy", "desktop_unavailable", "desktop_switch_failed",
+    "point_not_ready", "input_failed",
 })
 
 
@@ -92,20 +97,27 @@ def reset_vaccine_session(
     if len(window_handles) > 1:
         return _result(target, "ambiguous", "More than one matching system window is open.")
 
-    window_handle = window_handles[0]
-    if not _reset_point_is_ready(win32gui, window_handle, target):
-        return _result(
-            target,
-            "point_not_ready",
-            "Session reset point is not available in the configured system window.",
-        )
-
     idle = _input_is_idle(SESSION_KEEPER_IDLE_MS if require_idle else 0)
     if idle is None:
         return _result(target, "unavailable", "Input activity could not be checked; no reset was sent.")
     if not idle:
         return _result(target, "input_busy", "Keyboard or mouse is in use; reset deferred.")
-    # Recheck point ownership immediately before input, after the activity check.
+
+    desktop = ensure_first_virtual_desktop()
+    if not desktop.success:
+        return _result(target, desktop.status, desktop.message)
+    # Desktop switching may reveal different windows; do not reuse the old view.
+    if _matching_window_handles(win32gui, target) != window_handles:
+        return _result(target, "point_not_ready", "System window changed; no reset was sent.")
+    window_handle = window_handles[0]
+    if not _reset_point_is_ready(win32gui, window_handle, target):
+        return _result(target, "point_not_ready", "Session reset point is unavailable on Desktop 1.")
+    idle = _input_is_idle(SESSION_KEEPER_IDLE_MS if require_idle else 0)
+    if idle is not True:
+        return _result(target, "input_busy", "Input activity changed; reset deferred.")
+    if not first_virtual_desktop_is_active():
+        return _result(target, "desktop_switch_failed", "Desktop 1 is no longer active; no reset was sent.")
+    # Recheck point ownership immediately before input, after all other guards.
     if not _reset_point_is_ready(win32gui, window_handle, target):
         return _result(target, "point_not_ready", "Session reset point changed; no reset was sent.")
     if not _click_screen_coordinate(target.reset_x, target.reset_y):

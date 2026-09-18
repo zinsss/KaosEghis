@@ -59,6 +59,9 @@ def _install_windows(monkeypatch, fake_windows: FakeWindowApi) -> None:
 def simulated_input(monkeypatch):
     monkeypatch.setattr(vaccine_session_keeper, "interactive_desktop_error", lambda: None)
     monkeypatch.setattr(vaccine_session_keeper, "_input_is_idle", lambda _minimum: True)
+    monkeypatch.setattr(vaccine_session_keeper, "ensure_first_virtual_desktop",
+                        lambda: SimpleNamespace(success=True))
+    monkeypatch.setattr(vaccine_session_keeper, "first_virtual_desktop_is_active", lambda: True)
 
 
 @pytest.fixture
@@ -186,7 +189,7 @@ def test_manual_reset_does_not_require_five_seconds_since_button_click(monkeypat
     monkeypatch.setattr(vaccine_session_keeper, "_input_is_idle",
                         lambda minimum: thresholds.append(minimum) or True)
     assert vaccine_session_keeper.reset_vaccine_session(_target()).clicked
-    assert thresholds == [0]
+    assert thresholds == [0, 0]
     assert len(clicks) == 1
 
 
@@ -214,4 +217,89 @@ def test_reset_blocks_disabled_system(verified_window):
     api, clicks = verified_window
     api.windows[101]["enabled"] = False
     assert vaccine_session_keeper.reset_vaccine_session(_target()).status == "point_not_ready"
+    assert clicks == []
+
+
+def test_reset_switches_before_testing_coordinate_on_other_desktop(monkeypatch, verified_window):
+    api, clicks = verified_window
+    api.point_handle = 0
+    events = []
+
+    def switch():
+        events.append("switch")
+        api.point_handle = 101
+        return SimpleNamespace(success=True)
+
+    original = api.WindowFromPoint
+
+    def point(coords):
+        events.append("point")
+        return original(coords)
+
+    monkeypatch.setattr(api, "WindowFromPoint", point)
+    monkeypatch.setattr(vaccine_session_keeper, "ensure_first_virtual_desktop", switch)
+    assert vaccine_session_keeper.reset_vaccine_session(_target(), require_idle=True).clicked
+    assert events == ["switch", "point", "point"]
+    assert len(clicks) == 1
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_busy_input_blocks_desktop_switch(monkeypatch, verified_window, automatic):
+    _api, clicks = verified_window
+    monkeypatch.setattr(vaccine_session_keeper, "_input_is_idle", lambda _minimum: False)
+
+    def forbidden():
+        raise AssertionError("Must not switch while operator is using input")
+
+    monkeypatch.setattr(vaccine_session_keeper, "ensure_first_virtual_desktop", forbidden)
+    assert vaccine_session_keeper.reset_vaccine_session(_target(), require_idle=automatic).status == "input_busy"
+    assert clicks == []
+
+
+def test_failed_desktop_switch_never_clicks(monkeypatch, verified_window):
+    _api, clicks = verified_window
+    monkeypatch.setattr(vaccine_session_keeper, "ensure_first_virtual_desktop", lambda: SimpleNamespace(
+        success=False, status="desktop_switch_failed", message="Switch failed.",
+    ))
+    assert vaccine_session_keeper.reset_vaccine_session(_target()).status == "desktop_switch_failed"
+    assert clicks == []
+
+
+def test_operator_leaving_desktop_one_prevents_click(monkeypatch, verified_window):
+    _api, clicks = verified_window
+    monkeypatch.setattr(vaccine_session_keeper, "first_virtual_desktop_is_active", lambda: False)
+    assert vaccine_session_keeper.reset_vaccine_session(_target()).status == "desktop_switch_failed"
+    assert clicks == []
+
+
+def test_input_resuming_after_switch_prevents_click(monkeypatch, verified_window):
+    _api, clicks = verified_window
+    idle = iter([True, False])
+    monkeypatch.setattr(vaccine_session_keeper, "_input_is_idle", lambda _minimum: next(idle))
+    assert vaccine_session_keeper.reset_vaccine_session(_target()).status == "input_busy"
+    assert clicks == []
+
+
+def test_changed_window_after_switch_prevents_click(monkeypatch, verified_window):
+    api, clicks = verified_window
+
+    def switch():
+        api.windows[202] = api.windows.pop(101)
+        api.point_handle = 202
+        return SimpleNamespace(success=True)
+
+    monkeypatch.setattr(vaccine_session_keeper, "ensure_first_virtual_desktop", switch)
+    assert vaccine_session_keeper.reset_vaccine_session(_target()).status == "point_not_ready"
+    assert clicks == []
+
+
+def test_closed_system_does_not_switch_desktops(monkeypatch, verified_window):
+    api, clicks = verified_window
+    api.windows.clear()
+
+    def forbidden():
+        raise AssertionError("Must not switch for a closed system")
+
+    monkeypatch.setattr(vaccine_session_keeper, "ensure_first_virtual_desktop", forbidden)
+    assert vaccine_session_keeper.reset_vaccine_session(_target()).status == "not_open"
     assert clicks == []
