@@ -10,9 +10,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from KaosEghis.core.vaccine_system_launch import find_native_vaccine_windows
+from KaosEghis.core.windows_desktop import interactive_desktop_error
 
 
 SESSION_KEEPER_INTERVAL_MS = 90 * 60 * 1000
+SESSION_KEEPER_IDLE_MS = 5000
+SESSION_KEEPER_RETRY_MS = 30 * 1000
+SESSION_KEEPER_RETRY_WINDOW_SECONDS = 10 * 60
+SESSION_KEEPER_RETRY_STATUSES = frozenset({
+    "input_busy", "desktop_unavailable", "point_not_ready", "input_failed",
+})
 
 
 @dataclass(frozen=True)
@@ -59,7 +66,9 @@ def configured_session_reset_targets(
     )
 
 
-def reset_vaccine_session(target: VaccineSessionResetTarget) -> VaccineSessionResetResult:
+def reset_vaccine_session(
+    target: VaccineSessionResetTarget, *, require_idle: bool = False,
+) -> VaccineSessionResetResult:
     """Click a reset point only after exact native-window verification.
 
     The reset is skipped when the app is closed, ambiguous, minimized, moved,
@@ -69,6 +78,8 @@ def reset_vaccine_session(target: VaccineSessionResetTarget) -> VaccineSessionRe
 
     if not target.is_configured:
         return _result(target, "configuration_required", "Session reset is not configured.")
+    if interactive_desktop_error() is not None:
+        return _result(target, "desktop_unavailable", "Unlock Windows before resetting sessions.")
 
     try:
         import win32gui
@@ -89,9 +100,32 @@ def reset_vaccine_session(target: VaccineSessionResetTarget) -> VaccineSessionRe
             "Session reset point is not available in the configured system window.",
         )
 
+    idle = _input_is_idle(SESSION_KEEPER_IDLE_MS if require_idle else 0)
+    if idle is None:
+        return _result(target, "unavailable", "Input activity could not be checked; no reset was sent.")
+    if not idle:
+        return _result(target, "input_busy", "Keyboard or mouse is in use; reset deferred.")
+    # Recheck point ownership immediately before input, after the activity check.
+    if not _reset_point_is_ready(win32gui, window_handle, target):
+        return _result(target, "point_not_ready", "Session reset point changed; no reset was sent.")
     if not _click_screen_coordinate(target.reset_x, target.reset_y):
         return _result(target, "input_failed", "Session reset click could not be sent.")
     return _result(target, "reset_sent", "Session reset sent.", clicked=True)
+
+
+def _input_is_idle(minimum_idle_ms: int) -> bool | None:
+    """Read input timing/key-down state only; never capture text or suppress input."""
+
+    try:
+        import win32api
+
+        if any(win32api.GetAsyncKeyState(key) & 0x8000 for key in range(1, 256)):
+            return False
+        elapsed = (win32api.GetTickCount() - win32api.GetLastInputInfo()) & 0xFFFFFFFF
+        # An input timestamp can be ahead of the sampled tick count. Fail closed.
+        return minimum_idle_ms <= elapsed < 0x80000000
+    except Exception:
+        return None
 
 
 def _target_from_settings(
@@ -123,13 +157,15 @@ def _reset_point_is_ready(
     win32gui, window_handle: int, target: VaccineSessionResetTarget
 ) -> bool:
     try:
-        if bool(win32gui.IsIconic(window_handle)):
+        if bool(win32gui.IsIconic(window_handle)) or not win32gui.IsWindowEnabled(window_handle):
             return False
         left, top, right, bottom = win32gui.GetWindowRect(window_handle)
         if not (left <= target.reset_x < right and top <= target.reset_y < bottom):
             return False
         point_handle = win32gui.WindowFromPoint((target.reset_x, target.reset_y))
         if not point_handle:
+            return False
+        if not win32gui.IsWindowEnabled(point_handle):
             return False
         return _root_window_handle(win32gui, int(point_handle)) == window_handle
     except Exception:

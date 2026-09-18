@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from KaosEghis.core import vaccine_session_keeper
 
 
@@ -27,6 +29,9 @@ class FakeWindowApi:
     def IsIconic(self, handle: int) -> bool:
         return bool(self.windows[handle].get("minimized", False))
 
+    def IsWindowEnabled(self, handle: int) -> bool:
+        return bool(self.windows[handle].get("enabled", True))
+
     def GetWindowRect(self, handle: int) -> tuple[int, int, int, int]:
         return self.windows[handle].get("rect", (0, 0, 3000, 3000))
 
@@ -48,6 +53,24 @@ def _target() -> vaccine_session_keeper.VaccineSessionResetTarget:
 def _install_windows(monkeypatch, fake_windows: FakeWindowApi) -> None:
     monkeypatch.setitem(sys.modules, "win32gui", fake_windows)
     monkeypatch.delitem(sys.modules, "win32con", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def simulated_input(monkeypatch):
+    monkeypatch.setattr(vaccine_session_keeper, "interactive_desktop_error", lambda: None)
+    monkeypatch.setattr(vaccine_session_keeper, "_input_is_idle", lambda _minimum: True)
+
+
+@pytest.fixture
+def verified_window(monkeypatch):
+    api = FakeWindowApi({101: {
+        "title": "General vaccine", "class_name": "CyWindowClass",
+    }}, point_handle=101)
+    _install_windows(monkeypatch, api)
+    clicks = []
+    monkeypatch.setattr(vaccine_session_keeper, "_click_screen_coordinate",
+                        lambda x, y: clicks.append((x, y)) or True)
+    return api, clicks
 
 
 def test_configured_session_targets_include_general_and_covid_only() -> None:
@@ -142,3 +165,53 @@ def test_session_reset_requires_complete_configuration(monkeypatch) -> None:
 
     assert result.status == "configuration_required"
     assert result.clicked is False
+
+
+@pytest.mark.parametrize("idle,expected", [(False, "input_busy"), (None, "unavailable")])
+def test_automatic_reset_defers_active_or_unreadable_input(monkeypatch, verified_window, idle, expected):
+    _api, clicks = verified_window
+    thresholds = []
+    monkeypatch.setattr(vaccine_session_keeper, "_input_is_idle",
+                        lambda minimum: thresholds.append(minimum) or idle)
+    result = vaccine_session_keeper.reset_vaccine_session(_target(), require_idle=True)
+    assert result.status == expected
+    assert thresholds == [5000]
+    assert not result.clicked
+    assert clicks == []
+
+
+def test_manual_reset_does_not_require_five_seconds_since_button_click(monkeypatch, verified_window):
+    _api, clicks = verified_window
+    thresholds = []
+    monkeypatch.setattr(vaccine_session_keeper, "_input_is_idle",
+                        lambda minimum: thresholds.append(minimum) or True)
+    assert vaccine_session_keeper.reset_vaccine_session(_target()).clicked
+    assert thresholds == [0]
+    assert len(clicks) == 1
+
+
+def test_reset_rechecks_point_after_input_check(monkeypatch, verified_window):
+    api, clicks = verified_window
+
+    def idle(_minimum):
+        api.point_handle = 0
+        return True
+
+    monkeypatch.setattr(vaccine_session_keeper, "_input_is_idle", idle)
+    result = vaccine_session_keeper.reset_vaccine_session(_target(), require_idle=True)
+    assert result.status == "point_not_ready"
+    assert clicks == []
+
+
+def test_reset_blocks_locked_desktop(monkeypatch, verified_window):
+    _api, clicks = verified_window
+    monkeypatch.setattr(vaccine_session_keeper, "interactive_desktop_error", lambda: "locked")
+    assert vaccine_session_keeper.reset_vaccine_session(_target()).status == "desktop_unavailable"
+    assert clicks == []
+
+
+def test_reset_blocks_disabled_system(verified_window):
+    api, clicks = verified_window
+    api.windows[101]["enabled"] = False
+    assert vaccine_session_keeper.reset_vaccine_session(_target()).status == "point_not_ready"
+    assert clicks == []

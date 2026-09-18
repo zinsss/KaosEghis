@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
+from time import monotonic
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -42,6 +43,10 @@ from KaosEghis.core.vaccine_system_launch import open_vaccine_system
 from KaosEghis.core.kdca_certificate_login import start_kdca_certificate_login
 from KaosEghis.core.vaccine_session_keeper import (
     SESSION_KEEPER_INTERVAL_MS,
+    SESSION_KEEPER_RETRY_MS,
+    SESSION_KEEPER_RETRY_STATUSES,
+    SESSION_KEEPER_RETRY_WINDOW_SECONDS,
+    VaccineSessionResetResult,
     VaccineSessionResetTarget,
     configured_session_reset_targets,
     reset_vaccine_session,
@@ -157,6 +162,8 @@ class VaccineTab(QWidget):
         self._prepared_pair_ids: tuple[int, int] | None = None
         self._session_keeper_targets: dict[str, VaccineSessionResetTarget] = {}
         self._session_keeper_timers: dict[str, QTimer] = {}
+        self._session_keeper_retry_deadlines: dict[str, float] = {}
+        self._session_keeper_messages: dict[str, str] = {}
         self._session_keeper_progress_timer = QTimer(self)
         self._session_keeper_progress_timer.setInterval(1000)
         self._session_keeper_progress_timer.timeout.connect(
@@ -892,6 +899,8 @@ class VaccineTab(QWidget):
         for timer in self._session_keeper_timers.values():
             timer.stop()
         self._session_keeper_targets.clear()
+        self._session_keeper_retry_deadlines.clear()
+        self._session_keeper_messages.clear()
         self._session_keeper_progress_timer.stop()
 
         enabled = str(settings.get("vaccine_session_keeper_enabled", "false")).strip().lower()
@@ -937,27 +946,67 @@ class VaccineTab(QWidget):
         timer = self._session_keeper_timers.get(target_key)
         if target is None or timer is None:
             return
-        result = reset_vaccine_session(target)
-        self.settings_page.system_targets_editor.set_session_keeper_status(
-            f"{target.label}: {result.message}"
-        )
-        # A closed, moved, or covered system is skipped. The next independent check
-        # remains delayed by the full interval rather than repeatedly probing it.
-        timer.start(SESSION_KEEPER_INTERVAL_MS)
+        deadline = self._session_keeper_retry_deadlines.get(target_key)
+        if deadline is not None and monotonic() >= deadline:
+            self._stop_session_keeper_retry(target)
+        else:
+            result = reset_vaccine_session(target, require_idle=True)
+            self._schedule_session_keeper_result(target, result)
+        self._show_session_keeper_messages()
         self._update_session_keeper_progress()
+
+    def _schedule_session_keeper_result(
+        self, target: VaccineSessionResetTarget, result: VaccineSessionResetResult,
+    ) -> None:
+        timer = self._session_keeper_timers.get(target.key)
+        if timer is None or target.key not in self._session_keeper_targets:
+            return
+        self._session_keeper_messages[target.key] = f"{target.label}: {result.message}"
+        if result.clicked or result.status == "not_open":
+            self._session_keeper_retry_deadlines.pop(target.key, None)
+            timer.start(SESSION_KEEPER_INTERVAL_MS)
+        elif result.status in SESSION_KEEPER_RETRY_STATUSES:
+            now = monotonic()
+            deadline = self._session_keeper_retry_deadlines.setdefault(
+                target.key, now + SESSION_KEEPER_RETRY_WINDOW_SECONDS,
+            )
+            if now >= deadline:
+                self._stop_session_keeper_retry(target)
+            else:
+                timer.start(min(SESSION_KEEPER_RETRY_MS, max(1, int((deadline - now) * 1000))))
+                self._session_keeper_messages[target.key] += " Retry pending (up to 10 minutes)."
+        else:
+            self._stop_session_keeper_retry(target)
+        if timer.isActive():
+            self._session_keeper_progress_timer.start()
+
+    def _stop_session_keeper_retry(self, target: VaccineSessionResetTarget) -> None:
+        self._session_keeper_timers[target.key].stop()
+        self._session_keeper_retry_deadlines.pop(target.key, None)
+        self._session_keeper_messages[target.key] = (
+            f"{target.label}: Reset required. Check the system and use Reset Now; "
+            "no further automatic attempts for this system."
+        )
+        self.status_label.setText(self._session_keeper_messages[target.key])
+
+    def _show_session_keeper_messages(self) -> None:
+        self.settings_page.system_targets_editor.set_session_keeper_status(
+            "; ".join(self._session_keeper_messages.values())
+        )
 
     def _update_session_keeper_progress(self) -> None:
         remaining_times = [
-            timer.remainingTime()
-            for timer in self._session_keeper_timers.values()
+            (timer.remainingTime(), key)
+            for key, timer in self._session_keeper_timers.items()
             if timer.isActive() and timer.remainingTime() >= 0
         ]
         if not remaining_times:
             self._session_keeper_progress_timer.stop()
             self.settings_page.system_targets_editor.set_session_keeper_progress(None)
             return
+        remaining_ms, key = min(remaining_times)
         self.settings_page.system_targets_editor.set_session_keeper_progress(
-            min(remaining_times)
+            remaining_ms, retry=key in self._session_keeper_retry_deadlines,
         )
 
     def reset_vaccine_sessions_now(self) -> None:
@@ -968,19 +1017,23 @@ class VaccineTab(QWidget):
             settings = get_settings(connection)
 
         results = [
-            (target.label, reset_vaccine_session(target))
+            (target, reset_vaccine_session(target))
             for target in configured_session_reset_targets(settings)
         ]
-        summary = "; ".join(f"{label}: {result.message}" for label, result in results)
-        sent_count = sum(1 for _label, result in results if result.clicked)
+        summary = "; ".join(f"{target.label}: {result.message}" for target, result in results)
+        sent_count = sum(1 for _target, result in results if result.clicked)
 
-        # A manual reset starts a fresh interval only when the opt-in keeper is armed.
-        self._configure_session_keeper(settings)
+        # Do not give a failed system a fresh 90 minutes because its peer succeeded.
+        for target, result in results:
+            self._schedule_session_keeper_result(target, result)
+        self._update_session_keeper_progress()
         if sent_count:
             message = f"Reset now: {summary}"
         else:
             message = f"Reset now: no session reset was sent. {summary}"
         self.settings_page.system_targets_editor.set_session_keeper_status(message)
+        if self._session_keeper_messages:
+            self._show_session_keeper_messages()
         self.status_label.setText(message)
 
     def add_vaccine_type(self) -> None:

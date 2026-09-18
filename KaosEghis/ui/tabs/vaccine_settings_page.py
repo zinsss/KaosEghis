@@ -678,20 +678,20 @@ class VaccineSystemTargetsEditor(QWidget):
     def set_session_keeper_status(self, message: str) -> None:
         self.session_keeper_status_label.setText(message)
 
-    def set_session_keeper_progress(self, remaining_ms: int | None) -> None:
+    def set_session_keeper_progress(self, remaining_ms: int | None, *, retry: bool = False) -> None:
         if remaining_ms is None:
             self.session_keeper_progress_bar.setValue(0)
             self.session_keeper_progress_bar.setFormat("Next reset: off")
             return
 
-        total_ms = 90 * 60 * 1000
+        total_ms = 30 * 1000 if retry else 90 * 60 * 1000
         remaining_ms = max(0, min(int(remaining_ms), total_ms))
         remaining_seconds = (remaining_ms + 999) // 1000
         minutes, seconds = divmod(remaining_seconds, 60)
         percent = round(remaining_ms * 100 / total_ms)
         self.session_keeper_progress_bar.setValue(percent)
         self.session_keeper_progress_bar.setFormat(
-            f"Next reset in {minutes}:{seconds:02d}"
+            f"Next {'retry' if retry else 'reset'} in {minutes}:{seconds:02d}"
         )
 
 

@@ -446,13 +446,39 @@ after the full interval. At a due time, KaosEghis clicks a reset point only afte
 the following are true:
 
 - exactly one visible native window has the configured exact title and class;
-- the window is not minimized;
+- Windows is unlocked and the system window is enabled and not minimized;
+- no keyboard/mouse button is held and at least five seconds have passed since
+  the last input event (automatic resets only);
 - the saved reset point is inside that window; and
 - the window at that point belongs to the verified system rather than an overlapping
   application.
 
-If any check fails, KaosEghis sends no input and tries again only at that system's next
-90-minute interval. The status is shown in System targets. The keeper never interacts
+Input activity, a locked desktop, an unavailable/covered reset point, or a failed
+click defers only that system. It retries every 30 seconds for at most 10 minutes
+from the first failure, checking the guards again each time. The retry deadline
+does not move on repeated failures. After that deadline, automatic attempts stop
+for that system and **Reset required** appears in Main and System targets. Make
+the system available and use **Reset Now**. A missing/closed system retains the
+normal 90-minute interval; ambiguous windows, invalid settings, or unavailable
+native checks stop with **Reset required** rather than repeated input attempts.
+
+A sent reset starts a new 90-minute timer only for that system. General and COVID
+results remain separate, so one success cannot hide or postpone the other's retry.
+The countdown distinguishes the next retry from the next normal reset. Disabling
+the keeper clears pending retries. No retry brings a covered window forward,
+changes desktops, blocks operator input, or sends a blind coordinate click.
+
+The activity check reads only timing and whether keys/buttons are held; it does
+not capture typed content. It uses Windows
+[GetLastInputInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getlastinputinfo)
+and the current-down bit from
+[GetAsyncKeyState](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getasynckeystate).
+Point ownership is checked again immediately before sending the click. This reduces
+input races but cannot guarantee that the operator will not resume moving the mouse
+at that instant. **Reset sent** means the click was sent, not that the external
+application's new session expiry was read or confirmed.
+
+The status is shown in System targets. The keeper never interacts
 with the Influenza browser, enters credentials, searches for patients, reads patient
 data, or changes/submits vaccination records. It is only a non-clinical idle-session
 reset convenience and remains disabled by default.
@@ -731,8 +757,11 @@ applications.
 
 `Vaccine -> Settings -> System targets -> Reset Now` performs one immediate guarded
 reset for the configured General and COVID native windows, even when the recurring
-keeper is off. It uses the same exact-window and point-ownership checks as the timer,
-restarts the 90-minute delay when the keeper is enabled, and never touches Influenza.
+keeper is off. It uses the same desktop, held-button, exact-window and point-ownership
+checks as the timer, but does not require five seconds of idle time after the operator
+clicks Reset Now. When the keeper is enabled, only a successfully sent reset restarts
+that system's 90-minute delay; a transient failure enters the bounded retry instead.
+When the keeper is off, Reset Now does not arm automatic retries. It never touches Influenza.
 The small countdown bar shows time remaining until the next automatic reset; it is off
 when the recurring keeper is disabled.
 
