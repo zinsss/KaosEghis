@@ -395,9 +395,12 @@ verified eGHIS backup checkbox.
 
 ## Claim-Day Direction
 
-Claim-day statistical preparation remains planning-only. Scheduling does not authorize
-claim submission, billing changes, credential entry, or final approval. The manual
-workflow and operator review boundary must be documented first.
+`Claim preparation preview` opens a read-only, manual month-history preview.
+It proposes the next week from observed history and splits a cross-month workweek
+into two periods. It does not create a scheduler job or execute aggregation.
+See [Claim preparation preview](kaoseghis-claim-preparation.md) for captured UIA
+targets, the 2026-10-02 example, and read-safety constraints. Scheduling does not
+authorize claim submission, billing changes, credential entry, or final approval.
 
 ## Privacy and Logging
 

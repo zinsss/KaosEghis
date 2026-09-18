@@ -241,7 +241,9 @@ therefore cannot bypass connector, target-resolution, supported-action, or
 single-execution safety. The guarded `eGHIS End-of-Day Backup and Power Off` macro is
 implemented but is created only by an explicit Scheduler control, disabled by default,
 hidden from Launcher, and never assigned a schedule automatically. Backup-file copying
-is still not implemented, and claim-day work remains planning-only.
+is still not implemented. Claim-day work has a manual read-only
+[preparation preview](kaoseghis-claim-preparation.md); aggregation execution and
+claim submission are not implemented.
 
 The end-of-day macro uses four editable EMR target keys:
 `shutdown.lock_password`, `shutdown.close_yes`, `shutdown.backup_yes`, and

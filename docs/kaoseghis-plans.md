@@ -167,8 +167,8 @@ The project has moved beyond scaffold-only status and now contains real guarded 
   disabled, hidden saved definition with separate close and backup Yes targets; target
   selectors remain editable under Macros > EMR
 - Scheduler never creates its time/weekdays or enables/runs it automatically
-- claim-day statistical preparation remains early planning and dry-run/manual-review
-  only
+- claim-day statistical preparation has a
+  [read-only manual preview](kaoseghis-claim-preparation.md), without aggregation execution
 - scheduled jobs are disabled by default and use explicit missed-run policies
 - interactive jobs require a visible logged-in desktop, connector identity, known UI
   targets, countdown, cancellation, and strict stop-on-failure behavior

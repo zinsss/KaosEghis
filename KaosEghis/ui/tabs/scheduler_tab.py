@@ -107,6 +107,9 @@ class SchedulerTab(QWidget):
         self.check_shutdown_button.clicked.connect(self.check_shutdown_setup)
         self.test_unlock_button = QPushButton("Test EMR Unlock")
         self.test_unlock_button.clicked.connect(self.test_emr_unlock)
+        self.claim_preview_button = QPushButton("Claim preparation preview")
+        self.claim_preview_button.clicked.connect(self.open_claim_preview)
+        self._claim_preview_dialog = None
         self.edit_button = QPushButton("Edit")
         self.edit_button.clicked.connect(self.edit_job)
         self.delete_button = QPushButton("Delete")
@@ -140,6 +143,7 @@ class SchedulerTab(QWidget):
             self.create_shutdown_macro_button,
             self.check_shutdown_button,
             self.test_unlock_button,
+            self.claim_preview_button,
         ):
             shutdown_controls.addWidget(button)
         shutdown_controls.addStretch()
@@ -185,6 +189,15 @@ class SchedulerTab(QWidget):
 
     def activate_page(self) -> None:
         self.refresh_view()
+
+    def open_claim_preview(self) -> None:
+        from KaosEghis.ui.claim_preview_dialog import ClaimPreviewDialog
+
+        if self._claim_preview_dialog is None:
+            self._claim_preview_dialog = ClaimPreviewDialog(self)
+        self._claim_preview_dialog.show()
+        self._claim_preview_dialog.raise_()
+        self._claim_preview_dialog.activateWindow()
 
     def refresh_view(self) -> None:
         effective_path = self._db_path or get_database_path()
