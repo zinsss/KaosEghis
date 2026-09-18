@@ -124,12 +124,6 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
     import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
 
     launched_systems: list[str] = []
-    positioned_systems: list[str] = []
-    monkeypatch.setattr(
-        vaccine_tab_module.VaccineTab,
-        "_start_system_positioning",
-        lambda _self, _settings, system: positioned_systems.append(system),
-    )
 
     def fake_launch(_settings, system):
         launched_systems.append(system)
@@ -152,7 +146,6 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
     panel.open_covid_system_button.click()
 
     assert launched_systems == ["general", "influenza", "covid"]
-    assert positioned_systems == ["general", "covid"]
     assert panel.status_label.text() == "covid opened."
 
 
@@ -178,19 +171,17 @@ def test_open_general_waits_for_signed_out_login_before_launch(tmp_path, monkeyp
 
     monkeypatch.setattr(vaccine_tab_module, "start_kdca_certificate_login", authenticate)
     monkeypatch.setattr(vaccine_tab_module, "open_vaccine_system", launch)
-    monkeypatch.setattr(
-        vaccine_tab_module.VaccineTab, "_start_system_positioning",
-        lambda _self, _settings, system: events.append(f"position_{system}"),
-    )
     panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
     panel.open_general_system_button.click()
 
-    assert events == ["sign_in", "https://ois.kdca.go.kr/iris/index_run.jsp", "position_general"]
+    assert events == ["sign_in", "https://ois.kdca.go.kr/iris/index_run.jsp"]
     assert panel.status_label.text() == "General vaccine system opened."
 
 
 def test_authenticated_system_buttons_send_exact_deep_links_to_browser(tmp_path, monkeypatch):
     from functools import partial
+    from unittest.mock import Mock
+    import pyautogui
 
     _app()
     import KaosEghis.ui.tabs.vaccine_tab as module
@@ -211,72 +202,25 @@ def test_authenticated_system_buttons_send_exact_deep_links_to_browser(tmp_path,
 
     monkeypatch.setattr(module, "start_kdca_certificate_login", authenticate)
     monkeypatch.setattr(module, "open_vaccine_system", partial(open_vaccine_system, opener=launch_url))
-    monkeypatch.setattr(
-        module.VaccineTab, "_start_system_positioning",
-        lambda _self, _settings, system: events.append(f"position_{system}"),
-    )
+    hotkey = Mock(side_effect=AssertionError("Launch must not send positioning shortcuts"))
+    monkeypatch.setattr(pyautogui, "hotkey", hotkey)
     panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
     panel.open_general_system_button.click()
     panel.open_influenza_system_button.click()
     panel.open_covid_system_button.click()
 
     assert events == [
-        "authenticated", "https://ois.kdca.go.kr/iris/index_run.jsp", "position_general",
+        "authenticated", "https://ois.kdca.go.kr/iris/index_run.jsp",
         "authenticated", "https://ois.kdca.go.kr/iroi/indexWSP.jsp",
-        "authenticated", "https://ois.kdca.go.kr/covr/index_run.jsp", "position_covid",
+        "authenticated", "https://ois.kdca.go.kr/covr/index_run.jsp",
     ]
-
-
-def test_vaccine_positioning_timer_prevents_overlapping_launches(tmp_path, monkeypatch):
-    _app()
-    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
-
-    outcomes = [None, SimpleNamespace(success=True, message="Positioning sent.")]
-    monkeypatch.setattr(
-        vaccine_tab_module, "VaccineSystemPositioner",
-        lambda _settings, _system: SimpleNamespace(advance=lambda: outcomes.pop(0)),
-    )
-    page = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
-    page._start_system_positioning({}, "general")
-    assert page._system_position_timer.isActive()
-    assert not page.open_general_system_button.isEnabled()
-    assert not page.open_covid_system_button.isEnabled()
-    assert not page.open_influenza_system_button.isEnabled()
-    assert not page.kdca_login_button.isEnabled()
-    assert page.open_vaccine_system("covid") is False
-    assert page.log_in_to_kdca() is False
-    page._advance_system_positioning()
-    assert page._system_positioner is not None
-    page._advance_system_positioning()
-    assert page._system_positioner is None
-    assert not page._system_position_timer.isActive()
-    assert page.open_general_system_button.isEnabled()
-    assert page.open_covid_system_button.isEnabled()
-    assert page.open_influenza_system_button.isEnabled()
-    assert page.kdca_login_button.isEnabled()
-    assert page.status_label.text() == "Positioning sent."
-
-
-def test_vaccine_reset_clicks_wait_until_positioning_finishes(tmp_path, monkeypatch):
-    _app()
-    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
-    from KaosEghis.db.repositories import DEFAULT_SETTINGS
-
-    page = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
-    page._configure_session_keeper(DEFAULT_SETTINGS | {"vaccine_session_keeper_enabled": "true"})
-    page._system_positioner = SimpleNamespace()
-    resets = []
-    monkeypatch.setattr(vaccine_tab_module, "reset_vaccine_session", lambda target: resets.append(target))
-    page._run_session_keeper("general")
-    assert page._session_keeper_timers["general"].interval() == 1000
-    assert page._session_keeper_timers["general"].isActive()
-    page.reset_vaccine_sessions_now()
-    assert resets == []
-    assert "Wait for vaccine window positioning" in page.status_label.text()
-    for timer in page._session_keeper_timers.values():
-        timer.stop()
-    page._session_keeper_progress_timer.stop()
-    page._system_positioner = None
+    hotkey.assert_not_called()
+    assert not hasattr(panel, "_system_position_timer")
+    assert panel.open_general_system_button.isEnabled()
+    assert panel.open_influenza_system_button.isEnabled()
+    assert panel.open_covid_system_button.isEnabled()
+    assert panel.kdca_login_button.isEnabled()
+    assert "COVID vaccine system opened." in panel.status_label.text()
 
 
 def test_vaccine_system_open_stops_when_kdca_authentication_is_not_confirmed(

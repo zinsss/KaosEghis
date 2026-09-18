@@ -364,27 +364,16 @@ actions. They never read or enter patient data, and never automate a vaccination
 
 ### Native Window Positioning
 
-After a successful **Open General** or **Open COVID** launch request, KaosEghis
-waits up to 30 seconds for one visible native window matching that system's exact
-configured title and class. Once found, it waits one second, focuses that window,
-and sends the operator's workflow/FancyZones shortcuts:
+System launch no longer sends `Win+Left`, `Win+Right`, or `Win+Down`. The previous
+relative shortcut sequence could wrap between zones and depend on the window's
+starting position, so it could not reliably restore a workflow layout. Its
+positioning timer and launch-button wait have been removed. KDCA authentication
+and the configured system deep links are unchanged.
 
-| System | Sequence |
-| --- | --- |
-| General | `Win+Left` three times, then `Win+Down` |
-| COVID | `Win+Left` three times, then `Win+Down`, then `Win+Right` |
+Position General and COVID manually for now. A future replacement should save and
+restore an explicit window rectangle rather than count directional shortcuts;
+that replacement is not implemented yet.
 
-The wait uses a Qt timer rather than a blocking launch delay. Each combination is
-released separately, with a short pause between combinations. A missing, ambiguous,
-closed, or unfocusable window stops positioning. Focus is checked before every
-combination; if focus changes partway through, no more keys are sent and KaosEghis
-does not steal focus back. Other system-launch buttons are disabled until positioning
-finishes or times out. Automatic reset clicks are deferred while positioning is pending;
-Reset Now also waits rather than clicking an intermediate window position.
-
-Influenza remains a browser launch and has no positioning sequence. This feature
-uses the existing FancyZones configuration; it does not configure zones or verify
-the final zone. Status reports that shortcuts were sent, not that a zone was confirmed.
 Resident-number and session-reset coordinates are unchanged. Verify them with the
 systems in their final workflow positions; opening a system does not click either point.
 
