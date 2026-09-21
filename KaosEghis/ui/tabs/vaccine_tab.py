@@ -444,6 +444,9 @@ class VaccineTab(QWidget):
             return False
 
         context = result.context
+        self._current_record_id = None
+        self._prepared_pair_ids = None
+        self.prepared_pair_label.setText("Flu + COVID: Not prepared.")
         self.patient_chart_no_input.setText(context.chart_no)
         self.patient_resident_id_input.setText(context.resident_id)
         self.patient_name_input.setText(context.patient_name)
@@ -452,7 +455,9 @@ class VaccineTab(QWidget):
         self.patient_birth_date_input.setText(context.patient_birth_date)
         self.patient_phone_input.setText(context.patient_phone)
         self.patient_address_input.setText(context.patient_address)
-        self.status_label.setText(result.message)
+        self._reset_program_checks()
+        self._refresh_previews()
+        self.status_label.setText(f"{result.message} New vaccine record ready.")
         return True
 
     def log_in_to_kdca(self) -> bool:

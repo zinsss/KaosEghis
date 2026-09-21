@@ -89,6 +89,13 @@ UIA Automation IDs. The fetch never runs on startup or in the background.
 After the configured fields are read, KaosEghis sends one `{ESC}` to close the Patient
 Information view. Escape is never sent when that view could not be resolved.
 
+Each successful `Fetch from EMR` starts a new unsaved vaccine record, even when
+fetching the same patient again. It detaches any previously loaded/saved record and
+prepared Flu + COVID pair, and resets both program checks. The selected vaccine type
+is retained. Existing records are unchanged; a new database record is created only
+by Save, Print, or explicit pair preparation. A failed fetch preserves the current
+form and record references.
+
 For simultaneous vaccinations, fetch this patient context once. Save and, where
 appropriate, print the first vaccine record, then use `New vaccine record` before
 selecting the next vaccine type. That action clears only the current record reference
