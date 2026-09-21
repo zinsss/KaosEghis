@@ -36,6 +36,7 @@ class UiaInspectionResult:
 class _GridRowProxy:
     scope_element: Any
     row_index: int
+    click_y_offset: int = 0
 
     def rectangle(self):
         return self.scope_element.rectangle()
@@ -64,6 +65,8 @@ class _GridRowProxy:
         x = left + min(max(int(width * 0.08), 24), 120)
         y = int(body_top + ((self.row_index - 0.5) * row_height))
         y = max(body_top + 1, min(y, body_bottom - 1))
+        if self.click_y_offset:
+            y = max(top + 1, min(y + self.click_y_offset, bottom - 1))
         coords = (x, y)
         if double:
             mouse.double_click(button="left", coords=coords)
@@ -1146,8 +1149,10 @@ def _resolve_grid_row_target_in_scope(
     row_index = _grid_row_index(target, ancestor_path)
     if row_index is None:
         return None, parent_found, ""
+    # This clinic target's first row moved upward; leave other grid geometry alone.
+    click_y_offset = -15 if target.target_id == "환자명row1" and row_index == 1 else 0
     return (
-        _GridRowProxy(scope, row_index),
+        _GridRowProxy(scope, row_index, click_y_offset=click_y_offset),
         parent_found,
         f"Grid row target '{target.target_id}' resolved to row {row_index}.",
     )

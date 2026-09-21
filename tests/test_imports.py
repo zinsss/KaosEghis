@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_core_modules_import() -> None:
     import KaosEghis.config
     import KaosEghis.core.clipboard_service
@@ -3866,6 +3869,40 @@ def test_cached_grid_row_click_does_not_enumerate_grid_children(monkeypatch) -> 
     _GridRowProxy(GridScope(), 1).double_click_input()
 
     assert clicks == [("double", (132, 140))]
+
+
+@pytest.mark.parametrize("top,height", [(100, 600), (250, 300), (-700, 1000)])
+def test_noncovered_visit_patient_row_click_moves_up_15_pixels(monkeypatch, top, height):
+    import sys
+    from types import SimpleNamespace
+
+    from KaosEghis.core.uia_inspector import _resolve_grid_row_target_in_scope
+    from KaosEghis.db.repositories import UiTargetRecord
+
+    class GridScope:
+        @staticmethod
+        def rectangle():
+            return SimpleNamespace(left=100, top=top, right=500, bottom=top + height)
+
+        @staticmethod
+        def descendants(*_args, **_kwargs):
+            raise AssertionError("coordinate correction must not scan the grid")
+
+    clicks = []
+    monkeypatch.setitem(sys.modules, "pywinauto", SimpleNamespace(mouse=SimpleNamespace(
+        double_click=lambda **kwargs: clicks.append(kwargs["coords"]),
+    )))
+    for key, name in (("other_target", "환자명 row 1"), ("환자명row1", "환자명 row 1"), ("환자명row1", "환자명 row 2")):
+        target = UiTargetRecord(1, key, None, "grdOpdList", None, name, "DataItem", None, "now")
+        proxy, found, _message = _resolve_grid_row_target_in_scope(
+            GridScope(), target, None, parent_found=True,
+        )
+        assert found
+        assert proxy.click_y_offset == (-15 if key == "환자명row1" and name.endswith("1") else 0)
+        proxy.double_click_input()
+    assert clicks[1] == (clicks[0][0], clicks[0][1] - 15)
+    assert top < clicks[1][1] < top + height
+    assert clicks[2][1] > clicks[0][1]
 
 
 def test_parent_scoped_name_pattern_prefers_immediate_children(monkeypatch) -> None:
