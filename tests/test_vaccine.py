@@ -1026,6 +1026,7 @@ def test_successful_label_print_completes_record_once_and_reprint_does_not_count
         ),
     )
     page = vaccine_tab_module.VaccineTab(db_path)
+    monkeypatch.setattr(page, "_begin_post_print_handoff", lambda _records: None)
     page._select_vaccine_type(None, "Tdap")
     page.patient_name_input.setText("Test patient")
     page.patient_chart_no_input.setText("2735")
@@ -1106,6 +1107,7 @@ def test_general_influenza_target_group_requires_operator_confirmation(
     )
 
     page = vaccine_tab_module.VaccineTab(db_path)
+    monkeypatch.setattr(page, "_begin_post_print_handoff", lambda _records: None)
     page._select_vaccine_type(None, "Influenza (general/private)")
     page.patient_name_input.setText("Test patient")
     page.patient_chart_no_input.setText("2735")

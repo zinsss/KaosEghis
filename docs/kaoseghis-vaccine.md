@@ -1,6 +1,6 @@
 # KaosEghis-vaccine
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 
 ## Status
 
@@ -34,12 +34,14 @@ Current implemented pieces:
 - native Windows thermal-label printing through the configured printer
 - successful first print checkpoints the record as `printed`, then `completed`
 - completed-record reprints that never alter daily counts
+- post-print consent, guarded resident-number lookup in the selected system, and
+  retry/skip/form clearing without additional printing or count changes
 
 Still not implemented in this stage:
 
-- vaccination program automation
+- final vaccination registration automation (patient lookup is implemented)
 - EMR writeback/charting
-- national COVID eligibility evaluation
+- automatic eligibility confirmation inside the national systems
 
 ## EMR Patient Targets
 
@@ -106,11 +108,11 @@ completion date when available, otherwise the creation date in local time. Other
 dates remain accessible through the DB page. Editing does not change completion
 status or increment daily counts.
 
-For simultaneous vaccinations, fetch this patient context once. Save and, where
-appropriate, print the first vaccine record, then use `New vaccine record` before
-selecting the next vaccine type. That action clears only the current record reference
-and vaccine selection; it retains the displayed patient context so influenza and COVID
-records are separate local records without a second eGHIS read.
+For simultaneous influenza and COVID vaccinations, fetch once and prepare the pair
+before printing. `New vaccine record` can also reuse the displayed patient context
+while preparing/saving separate records before printing; it clears the record
+reference and vaccine selection. Once post-print system entry succeeds or is skipped,
+the form is cleared and another fetch is needed for a separate preparation.
 
 After a successful fetch, KaosEghis keeps only the transient Patient Information scope
 handle in memory for the connected eGHIS PID. The next explicit fetch tries that handle
@@ -144,8 +146,8 @@ Resident-number formatting has an explicit output boundary. The captured hyphena
 value, such as `700101-1234567`, is preserved for operator display and thermal-label
 output. Only the value handed to a verified external vaccination-system resident-number
 field is normalized to `7001011234567`. Capture, preview, and saved form values are not
-silently rewritten. The external vaccination-system typing workflow is not implemented
-yet; its future adapter must apply this normalization immediately before input.
+silently rewritten. The post-print system-input adapter applies this normalization
+immediately before input and requires 13 ASCII digits.
 
 This specification preserves the proven workflow and rule structure from the former
 `eGhis_Assistant` Labeler module. The vaccine catalog and seasonal rule values must be
@@ -301,20 +303,22 @@ engine remains compatible.
 5. KaosEghis shows the eligibility result, applicable age group, schedule state,
    counter state, and reason for any block or exception.
 6. The operator reviews or edits the prepared label and chart text.
-7. An explicit action prints the thermal label.
-8. An explicit action focuses the system configured for the selected vaccine, enters
-   the patient's normalized resident number into its verified input field, and sends
-   one `Enter` to start that system's patient lookup.
-9. KaosEghis returns focus to eGHIS and prepares the configured vaccination chart text.
-10. The operator confirms or edits the entry in both eGHIS and the vaccination program.
+7. An explicit action prints the thermal label and checkpoints the local record.
+8. After successful printing and checkpointing, a Yes/No prompt offers patient
+   lookup in the corresponding vaccine system. No is the default.
+9. Yes focuses that system, enters the printed record's resident number without
+   its hyphen, and sends one `Enter`. No skips system entry.
+10. Successful input or an explicit skip clears patient fields, record/pair
+    references, previews of patient information, and program-check results. The
+    selected vaccine type and saved records remain. The operator reviews the
+    external lookup result and performs vaccination registration manually.
 
 KaosEghis must never submit the final vaccination record without an explicit operator
 action.
 
 ### External System Handoff
 
-The future `Prepare selected system` action is limited to the selected vaccine's
-configured external system:
+The post-print handoff is limited to the printed vaccine's configured external system:
 
 1. Verify and focus the expected system window.
 2. Resolve or click its configured resident-number input.
@@ -323,21 +327,63 @@ configured external system:
 5. Stop. All subsequent search-result review, eligibility confirmation, entry, and
    final registration remain manual operator actions.
 
+Routing uses the record's program type: national influenza goes to the influenza
+browser system; national COVID (both Pfizer and Moderna) goes to COVID; general
+and private influenza go to General. Unknown mappings stop without typing.
+
+`Print prepared pair` waits for both actual print results and local checkpoints
+before asking once about both systems. A prior completed status is not proof that
+the current reprint succeeded. On partial printing failure, no handoff starts and
+the form remains for operator review. Existing successful print checkpoints remain.
+
+Printing success here means the printer service accepted the output, not physical
+verification that a label emerged. Print/checkpoint failure never clears the form.
+Reprints retain existing record IDs and do not add to daily counts.
+
+System-entry failure keeps the form and shows `Retry entry` and `Skip and clear`.
+Retry does not print, save, or update counts. In a two-system handoff, successful
+systems are removed from the pending queue, so retry only visits unfinished systems.
+If input was interrupted or submission is uncertain, inspect the system before
+retrying. There are no automatic input retries. `Stop` cancels further input after
+the current external call returns; already-sent input cannot be undone.
+
+The handoff runs on a COM-initialized worker, using transient snapshots of the
+printed records rather than live form text. Patient editing, Fetch, Print, and
+record-changing buttons are disabled while a handoff is pending. Login/launch can
+be used after a failed handoff, before Retry. Automatic and manual session resets
+are deferred during printing, the handoff prompt, and pending/active handoffs.
+
+Before input, the worker verifies an unlocked Windows desktop, no held input keys,
+Virtual Desktop 1, and an unambiguous target. Each typing stage rechecks focus and
+the desktop, with a 15-second cooperative deadline per system. Provider calls
+cannot be forcibly interrupted, but they do not run on the Qt GUI thread. No
+resident number is sent via the clipboard, logs, status messages, or Qt signals.
+
 It must never open an unrelated system, select a vaccine program implicitly, submit a
 vaccination record, or continue after an unexpected window/target failure.
 
-Current captured target directions are configuration, not active automation:
+The captured targets are used only after explicit post-print consent:
 
 - General vaccine system: top-level window name `예방접종통합관리시스템`, class
   `CyWindowClass`, with resident-number input coordinate `(448, 2074)` because the
   input does not expose a distinct UIA control. Its configured non-clinical
   session-reset coordinate is `(1154, 1968)`.
 - Influenza browser system: the resident-number field exposes Automation ID
-  `edtPtntRrn1` (`Edit`, `w2input`). It still requires a configured browser-window/tab
-  scope before the field may be resolved.
+  `edtPtntRrn1` (`Edit`, `w2input`). Resolution is scoped to the visible document at
+  the configured OIS origin and application directory. Focus and URL scope are
+  rechecked, and the entered value
+  must read back correctly before Enter.
 - COVID system: top-level window name `코로나19통합관리시스템`, class
   `CyWindowClass`. Its configured non-clinical session-reset coordinate is
   `(2456, 1982)` and its resident-number input coordinate is `(1466, 2107)`.
+
+For the two native systems, the configured point must still be inside and owned
+by the exact foreground title/class window, and native keyboard focus must remain
+unchanged after the click. These applications do not expose the field separately,
+so field contents cannot be independently verified. Keep their saved layout/input
+coordinates calibrated; an internal layout change can move a field even if the
+point is still inside the correct window. Missing, moved-outside, covered, or
+ambiguous targets stop; the handoff does not automatically open/login to systems.
 
 Resident numbers remain available only to the selected workflow's transient input path;
 they must not appear in automation logs or status messages.
