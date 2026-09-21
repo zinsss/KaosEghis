@@ -1,6 +1,6 @@
 # KaosEghis-vaccine
 
-Last updated: 2026-09-11
+Last updated: 2026-09-21
 
 ## Status
 
@@ -188,9 +188,11 @@ Possible results are eligible, blocked, cap reached, operator review required,
 private/unmatched, patient context required, and configuration error. The displayed
 result contains no resident ID or patient name.
 
-`program_enabled` defaults to `false`. Existing or seeded dates are configuration
-placeholders, not a claim about the current national program. The operator must enter
-and review the official season dates and birth ranges before changing it to `true`.
+`program_enabled` defaults to `false`. The seeded 2026-2027 opening dates now reflect
+the September 2026 KDCA amendment. Known old saved dates are amended once and affected
+schedules disabled for review; custom dates and other seasons are preserved. The
+operator must review every date and configured birth range before changing it to
+`true`. See the [revised schedule and migration details](national-vaccination-schedules-and-rules.md).
 For national Influenza label printing, the same evaluation is mandatory. A blocked
 result stops printing. A child-dose or rural-exception review result requires explicit
 operator confirmation, and the result's count treatment is snapshotted at completion.

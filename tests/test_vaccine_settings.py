@@ -143,8 +143,8 @@ def test_covid_editor_has_the_published_staged_age_group_schedule(tmp_path) -> N
     covid = page.covid_editor
     assert covid.program_enabled_check.isChecked() is False
     assert covid.date_inputs["elderly_75_plus_start"].value() == "2026-10-12"
-    assert covid.date_inputs["elderly_70_74_start"].value() == "2026-10-15"
-    assert covid.date_inputs["elderly_65_69_start"].value() == "2026-10-19"
+    assert covid.date_inputs["elderly_70_74_start"].value() == "2026-10-12"
+    assert covid.date_inputs["elderly_65_69_start"].value() == "2026-10-15"
     assert covid.date_inputs["elderly_program_end"].value() == "2027-06-30"
     assert set(covid.birth_inputs) == {
         "covid_elderly_75_plus",

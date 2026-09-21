@@ -149,6 +149,7 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_vaccine_tables(connection)
         _migrate_unconfigured_covid_schedule(connection)
         _migrate_rural_exception_defaults(connection)
+        _migrate_vaccine_september_2026_schedule_revision(connection)
         _migrate_vaccine_external_system_coordinates(connection)
         _seed_default_emr_target_profile(connection)
         _seed_vaccine_emr_targets(connection)
@@ -710,10 +711,11 @@ def _migrate_unconfigured_covid_schedule(connection: sqlite3.Connection) -> None
     updated_covid.update(
         {
             "season_name": "2026-2027",
+            "schedule_notice_revision": "2026-09-17",
             "program_enabled": False,
             "elderly_75_plus_start": "2026-10-12",
-            "elderly_70_74_start": "2026-10-15",
-            "elderly_65_69_start": "2026-10-19",
+            "elderly_70_74_start": "2026-10-12",
+            "elderly_65_69_start": "2026-10-15",
             "elderly_program_end": "2027-06-30",
         }
     )
@@ -759,6 +761,62 @@ def _migrate_unconfigured_covid_schedule(connection: sqlite3.Connection) -> None
         "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
         (json.dumps(age_groups, ensure_ascii=False, indent=2), "vaccine_age_groups_json"),
     )
+
+
+def _migrate_vaccine_september_2026_schedule_revision(connection: sqlite3.Connection) -> None:
+    """Amend known old dates once, preserving custom settings and requiring review."""
+    row = connection.execute(
+        "SELECT value FROM app_settings WHERE key = 'vaccine_schedule_rules_json'"
+    ).fetchone()
+    if row is None:
+        return
+    try:
+        schedules = json.loads(row[0])
+    except (TypeError, json.JSONDecodeError):
+        return
+    if not isinstance(schedules, dict):
+        return
+    revisions = {
+        "influenza": ("2026-09-16", {
+            "elderly_75_plus_start": ("2026-10-12", "2026-10-06"),
+            "elderly_70_74_start": ("2026-10-15", "2026-10-12"),
+            "elderly_65_69_start": ("2026-10-19", "2026-10-15"),
+            "child_one_dose_start": ("2026-09-28", "2026-09-21"),
+        }),
+        "covid": ("2026-09-17", {
+            "elderly_70_74_start": ("2026-10-15", "2026-10-12"),
+            "elderly_65_69_start": ("2026-10-19", "2026-10-15"),
+        }),
+    }
+    changed = False
+    for program, (revision, dates) in revisions.items():
+        schedule = schedules.get(program)
+        if not isinstance(schedule, dict):
+            continue
+        if str(schedule.get("season_name", "")).strip() != "2026-2027":
+            continue
+        if schedule.get("schedule_notice_revision"):
+            continue
+        updates = {
+            key: new for key, (old, new) in dates.items()
+            if str(schedule.get(key, "")).strip() in {old, old.replace("-", "")}
+        }
+        if not updates:
+            continue
+        if "allow_rural_exception" not in schedule:
+            # Disabling an active schedule must not opt it into the draft-only default.
+            schedule["allow_rural_exception"] = str(
+                schedule.get("allow_elderly_exception", False)
+            ).strip().lower() in {"1", "true", "yes", "on"}
+        schedule.update(updates)
+        schedule["schedule_notice_revision"] = revision
+        schedule["program_enabled"] = False
+        changed = True
+    if changed:
+        connection.execute(
+            "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+            (json.dumps(schedules, ensure_ascii=False, indent=2), "vaccine_schedule_rules_json"),
+        )
 
 
 def _migrate_rural_exception_defaults(connection: sqlite3.Connection) -> None:

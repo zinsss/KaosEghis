@@ -1,6 +1,6 @@
 # National Vaccination Schedules and Rules
 
-Last reviewed: 2026-09-09
+Last reviewed: 2026-09-21
 
 ## Purpose
 
@@ -41,10 +41,23 @@ the EMR address or any free-text field.
 
 ## Current Publication Status
 
-The KDCA has published the 2026-2027 COVID schedule for the age-based 65+ programme.
-KaosEghis seeds those dates into the editable COVID schedule below, but leaves the
-programme disabled until the operator reviews and enables it in `Vaccine -> Settings`.
-This protects against a seasonal notice being amended locally or nationally.
+The September 2026 amendment supersedes the earlier 2026-2027 opening dates.
+The operator supplied a Gyeongsangbuk-do notice referencing KDCA vaccination-management
+letter 3694 (2026-09-15). Its standard dates match the KDCA September 16 Influenza
+announcement and September 17 COVID announcement listed below.
+
+KaosEghis seeds the revised dates into the editable schedules, disabled until reviewed
+and enabled in `Vaccine -> Settings`. Existing saved 2026-2027 schedules are amended
+once where an individual date still equals the known old notice date. Custom dates,
+other seasons, birth ranges, end dates, caps, exception options, product choices, and
+vaccination records are preserved. A changed schedule is disabled for renewed review.
+The Settings page shows the source notice date. Further operator edits are not
+overwritten on each restart.
+
+No new age-group eligibility or exception category is inferred from this amendment.
+The local 100-dose counters, shared Pfizer/Moderna COVID counter, private-influenza
+exclusion, and manually confirmed rural-area exception logic are unchanged. Their
+existing rules still require independent review against applicable programme guidance.
 
 The published notice does not make KaosEghis able to infer immunocompromise or
 facility-residence eligibility from eGHIS. The application therefore blocks patients
@@ -78,7 +91,32 @@ vaccination:
 
 Eligibility and count consumption must not be represented by one boolean.
 
-## Influenza Reference Schedule
+## Revised 2026-2027 Influenza Schedule
+
+| Group | Opening | Closing |
+| --- | --- | --- |
+| Child, two-dose target | 2026-09-21 (unchanged) | 2027-04-30 |
+| Child, one-dose target | 2026-09-21 (was 2026-09-28) | 2027-04-30 |
+| Elderly, 75+ | 2026-10-06 (was 2026-10-12) | 2027-04-30 |
+| Elderly, 70-74 | 2026-10-12 (was 2026-10-15) | 2027-04-30 |
+| Elderly, 65-69 | 2026-10-15 (was 2026-10-19) | 2027-04-30 |
+
+Both child windows now begin together, so there is no early two-dose-only warning
+period in this season's revised configuration. This does **not** determine whether
+an individual child needs one or two doses; vaccination history remains a manual
+check in the national system. Future editable seasons can still have separate starts.
+
+The supplied notice also lists pregnancy from September 21, physician-assessed
+immunocompromise among those 65+ from October 6, and institutional supply-dependent
+arrangements. These are not new automatic eligibility paths in KaosEghis. In
+particular, the institutional vaccine-availability wording must not become an
+unrestricted early-opening date for this clinic. Confirm special cases in the
+national system and the complete applicable public-health notice.
+
+Sources: [KDCA September 16 schedule amendment](https://kdca.go.kr/kdca/2848/subview.do%3Bjsessionid%3D1HJdmBxzW7BdCfXQ2ltYVIA8Ea7rSxnf-m6u9hiy.kdca_20?enc=Zm5jdDF8QEB8JTJGYmJzJTJGa2RjYSUyRjQyJTJGMzEyNjQyJTJGYXJ0Y2xWaWV3LmRvJTNG)
+and [revised KDCA Influenza leaflet](https://www.kdca.go.kr/bbs/kdca/42/309764/download.do).
+
+## Historical Influenza Reference Schedule
 
 The following table is the official 2025-2026 reference, not the next season's active
 configuration:
@@ -149,20 +187,24 @@ but normal age, date, count, and contraindication review still applies.
 
 ## COVID Schedule
 
-### Published 2026-2027 age-based 65+ schedule
+### Revised 2026-2027 age-based 65+ schedule
 
 | Group | Birth boundary | Opening | Closing |
 | --- | --- | --- | --- |
 | 75+ | Born on or before 1951-12-31 | 2026-10-12 | 2027-06-30 |
-| 70-74 | 1952-01-01 through 1956-12-31 | 2026-10-15 | 2027-06-30 |
-| 65-69 | 1957-01-01 through 1961-12-31 | 2026-10-19 | 2027-06-30 |
+| 70-74 | 1952-01-01 through 1956-12-31 | 2026-10-12 | 2027-06-30 |
+| 65-69 | 1957-01-01 through 1961-12-31 | 2026-10-15 | 2027-06-30 |
 
 These fields are seeded as an editable draft, disabled by default. The COVID evaluator
 uses the three staged windows and the independent configured COVID daily cap only after
 the schedule is explicitly enabled. It never derives high-risk eligibility from a
-resident ID, diagnosis, address, or free text.
+resident ID, diagnosis, address, or free text. The 75+ and 70-74 fields are retained
+separately for future-year editing, but they now share the October 12 start. A 70-74
+patient on October 12 therefore follows the normal counted path, not an early-period
+exception. Pfizer and Moderna continue to share the same COVID daily total.
 
-Sources: [KDCA 2026-2027 influenza/COVID vaccination notice](https://www.kdca.go.kr/kdca/2854/subview.do?enc=Zm5jdDF8QEB8JTJGYmJzJTJGa2RjYSUyRjQ2JTJGMzEyMzE1JTJGYXJ0Y2xWaWV3LmRvJTNGcGFzc3dvcmQlM0QlMjZyZ3NCZ25kZVN0ciUzRCUyNmZpbmRPcG53cmQlM0QlMjZmaW5kV29yZCUzRCUyNnJnc0VuZGRlU3RyJTNEJTI2ZmluZFR5cGUlM0QlMjZmaW5kQ2xTZXElM0QlMjZwYWdlJTNEMSUyNg%3D%3D) and [KDCA 2026-2027 COVID vaccine procurement notice](https://www.kdca.go.kr/bbs/kdca/42/311771/artclView.do).
+Source: [KDCA September 17 COVID implementation announcement](https://www.kdca.go.kr/kdca/2848/subview.do%3Bjsessionid%3Djpk7bXS0U8QNxAxwJL2EL1d8s5p3Mfz9v1n_mKdA.kdca_10?enc=Zm5jdDF8QEB8JTJGYmJzJTJGa2RjYSUyRjQyJTJGMzEyNjQ0JTJGYXJ0Y2xWaWV3LmRvJTNG).
+The earlier October 15/19 start dates for ages 70-74/65-69 are superseded.
 
 ### Historical 2025-2026 reference
 

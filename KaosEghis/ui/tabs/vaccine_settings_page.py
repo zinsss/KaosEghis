@@ -81,9 +81,13 @@ class VaccineProgramEditor(QWidget):
         self.date_inputs: dict[str, OptionalDateInput] = {}
         self.birth_inputs: dict[str, tuple[OptionalDateInput, OptionalDateInput]] = {}
         self.allow_exception_check: QCheckBox | None = None
+        self.schedule_notice_label = QLabel()
+        self.schedule_notice_label.setWordWrap(True)
+        self.schedule_notice_label.hide()
 
         editor = QWidget()
         editor_layout = QVBoxLayout(editor)
+        editor_layout.addWidget(self.schedule_notice_label)
         common = QFormLayout()
         common.addRow("Program year", self.season_name_input)
         common.addRow("State", self.program_enabled_check)
@@ -192,6 +196,20 @@ class VaccineProgramEditor(QWidget):
         self.program_enabled_check.setChecked(
             _as_bool(schedule.get("program_enabled", False))
         )
+        revision = str(schedule.get("schedule_notice_revision", ""))
+        show_notice = (
+            self.season_name_input.text().strip() == "2026-2027"
+            and revision in {"2026-09-16", "2026-09-17"}
+        )
+        self.schedule_notice_label.setText(
+            f"KDCA schedule notice: {revision}. "
+            + (
+                "Schedule enabled."
+                if self.program_enabled_check.isChecked()
+                else "Review dates and birth ranges before enabling."
+            )
+        )
+        self.schedule_notice_label.setVisible(show_notice)
         try:
             daily_cap = int(schedule.get("daily_cap", 100))
         except (TypeError, ValueError):
@@ -813,6 +831,12 @@ class VaccineSettingsPage(QWidget):
             )
         self._schedule_data = schedule_data
         self._age_groups = age_groups
+        groups = {
+            str(group.get("key", "")): group
+            for group in age_groups if isinstance(group, dict)
+        }
+        for editor in (self.influenza_editor, self.covid_editor):
+            editor.load_values(schedule_data[editor.program], groups)
         self.status_label.setText("Vaccine settings saved.")
         self.settings_changed.emit()
         return True

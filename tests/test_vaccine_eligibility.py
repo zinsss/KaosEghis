@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def _schedule(*, enabled=True, cap=100, allow_exception=False):
+    # Deliberately custom dates exercise editable schedules independently of defaults.
     return {
         "program_enabled": enabled,
         "allow_elderly_exception": allow_exception,
@@ -66,8 +67,8 @@ def _covid_schedule(*, enabled=True, cap=100):
     return {
         "program_enabled": enabled,
         "elderly_75_plus_start": "2026-10-12",
-        "elderly_70_74_start": "2026-10-15",
-        "elderly_65_69_start": "2026-10-19",
+        "elderly_70_74_start": "2026-10-12",
+        "elderly_65_69_start": "2026-10-15",
         "elderly_program_end": "2027-06-30",
         "daily_cap": cap,
     }
@@ -223,10 +224,10 @@ def test_covid_65_plus_groups_open_on_published_2026_dates() -> None:
         schedule, _covid_groups(), date(1951, 12, 31), on_date=date(2026, 10, 12)
     )
     before_70_start = evaluate_covid_program_for_birth_date(
-        schedule, _covid_groups(), date(1952, 1, 1), on_date=date(2026, 10, 14)
+        schedule, _covid_groups(), date(1952, 1, 1), on_date=date(2026, 10, 11)
     )
     at_65_start = evaluate_covid_program_for_birth_date(
-        schedule, _covid_groups(), date(1961, 12, 31), on_date=date(2026, 10, 19)
+        schedule, _covid_groups(), date(1961, 12, 31), on_date=date(2026, 10, 15)
     )
 
     assert at_75_start.allowed is True
@@ -291,14 +292,14 @@ def test_rural_exception_requires_checked_confirmation_for_flu_and_covid() -> No
     covid_checked = evaluate_covid_program_for_birth_date(
         covid_schedule,
         _covid_groups(),
-        date(1953, 1, 1),
+        date(1958, 1, 1),
         on_date=date(2026, 10, 12),
         rural_exception_checked=True,
     )
     covid_unchecked = evaluate_covid_program_for_birth_date(
         covid_schedule,
         _covid_groups(),
-        date(1953, 1, 1),
+        date(1958, 1, 1),
         on_date=date(2026, 10, 12),
         rural_exception_checked=False,
     )
