@@ -12,6 +12,11 @@ from KaosEghis.core.vaccine_patient_context import (
 )
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
+    create_vaccine_record,
+    delete_vaccine_record,
+    get_today_vaccine_counts,
+    get_vaccine_record,
+    list_patient_vaccine_records_for_date,
     list_vaccine_records,
     mark_vaccine_record_completed,
 )
@@ -165,3 +170,167 @@ def test_failed_fetch_preserves_form_record_and_pair(fetched_page, monkeypatch, 
     assert page.covid_check_result.text() == "Previous COVID check"
     with connect(page._db_path) as connection:
         assert list_vaccine_records(connection) == before
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_today_record_menu_explicitly_edits_existing_record(fetched_page, completed):
+    page, _context = fetched_page
+    first = page.save_record()
+    with connect(page._db_path) as connection:
+        if completed:
+            first = mark_vaccine_record_completed(connection, first.id)
+        counts = get_today_vaccine_counts(connection, first.completed_on or "")
+
+    assert page.fetch_current_patient_from_emr()
+    assert page._current_record_id is None
+    assert page.record_state_label.text() == "New vaccine record"
+    assert not page.edit_today_record_button.isHidden()
+    actions = page.edit_today_record_menu.actions()
+    assert len(actions) == 1
+    assert actions[0].data() == first.id
+    assert first.vaccine_type_name in actions[0].text()
+    assert first.status in actions[0].text()
+
+    actions[0].trigger()
+
+    assert page._current_record_id == first.id
+    assert page.record_state_label.text() == f"Vaccine record #{first.id}"
+    page.patient_phone_input.setText("010-0000-9999")
+    saved = page.save_record()
+    assert saved.id == first.id
+    assert saved.patient_phone == "010-0000-9999"
+    assert saved.status == first.status
+    assert saved.completed_on == first.completed_on
+    with connect(page._db_path) as connection:
+        assert list_vaccine_records(connection) == [saved]
+        assert get_today_vaccine_counts(connection, first.completed_on or "") == counts
+
+    page.start_new_vaccine_record()
+    assert page._current_record_id is None
+    assert page.record_state_label.text() == "New vaccine record"
+    assert not page.edit_today_record_button.isHidden()
+
+
+def test_today_record_menu_lists_both_vaccinations_and_loads_chosen_one(fetched_page):
+    page, _context = fetched_page
+    page._select_vaccine_type(None, "COVID-19 (Moderna)")
+    flu, covid = page.prepare_flu_and_covid()
+
+    assert page.fetch_current_patient_from_emr()
+    actions = page.edit_today_record_menu.actions()
+    assert [action.data() for action in actions] == [covid.id, flu.id]
+    actions[0].trigger()
+
+    assert page._current_record_id == covid.id
+    assert page._prepared_pair_ids is None
+    assert page.vaccine_types_list.currentItem().text() == covid.vaccine_type_name
+    page.patient_phone_input.setText("010-0000-9999")
+    page.save_record()
+    with connect(page._db_path) as connection:
+        assert len(list_vaccine_records(connection)) == 2
+        assert get_vaccine_record(connection, flu.id) == flu
+
+
+@pytest.mark.parametrize("change", ["patient", "date", "deleted"])
+def test_today_record_menu_revalidates_before_loading(fetched_page, change):
+    page, _context = fetched_page
+    record = page.save_record()
+    assert page.fetch_current_patient_from_emr()
+    if change == "patient":
+        page.patient_chart_no_input.setText("0001")
+        assert page.edit_today_record_button.isHidden()
+    else:
+        with connect(page._db_path) as connection:
+            if change == "deleted":
+                delete_vaccine_record(connection, record.id)
+            else:
+                connection.execute(
+                    "UPDATE vaccine_records SET created_at = '2000-01-01 12:00:00' WHERE id = ?",
+                    (record.id,),
+                )
+                connection.commit()
+
+    page._edit_today_record(record.id)
+
+    assert page._current_record_id is None
+    assert page.edit_today_record_button.isHidden()
+    assert "no longer matches" in page.status_label.text()
+
+
+def test_today_record_menu_hidden_without_matches_and_after_clear(fetched_page):
+    page, _context = fetched_page
+    assert page.edit_today_record_button.isHidden()
+    page.save_record()
+    assert not page.edit_today_record_button.isHidden()
+    page.clear_form()
+    assert page.edit_today_record_button.isHidden()
+    assert page.edit_today_record_menu.actions() == []
+
+
+def test_today_record_button_refreshes_and_opens_menu(fetched_page, monkeypatch):
+    page, _context = fetched_page
+    popups = []
+    monkeypatch.setattr(page.edit_today_record_menu, "popup", popups.append)
+    page.edit_today_record_button.click()
+    assert popups == []
+    saved = page.save_record()
+    page.edit_today_record_button.click()
+    assert len(popups) == 1
+    assert [action.data() for action in page.edit_today_record_menu.actions()] == [saved.id]
+
+
+def test_patient_date_lookup_is_exact_readonly_and_uses_local_creation_date(tmp_path):
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        records = []
+        for chart, local_time in (
+            ("0000", "2026-09-21 00:05:00"),
+            ("0000", "2026-09-20 23:55:00"),
+            ("0000", "2026-09-22 00:05:00"),
+            ("00001", "2026-09-21 00:05:00"),
+            ("0", "2026-09-21 00:05:00"),
+            (None, "2026-09-21 00:05:00"),
+        ):
+            record = create_vaccine_record(
+                connection,
+                vaccine_type_id=None,
+                vaccine_type_name="Test Vaccine",
+                patient_chart_no=chart,
+                patient_name="Same Name",
+            )
+            connection.execute(
+                "UPDATE vaccine_records SET created_at = datetime(?, 'utc') WHERE id = ?",
+                (local_time, record.id),
+            )
+            records.append(record)
+        connection.commit()
+        changes = connection.total_changes
+
+        matches = list_patient_vaccine_records_for_date(connection, " 0000 ", "2026-09-21")
+
+        assert [record.id for record in matches] == [records[0].id]
+        assert list_patient_vaccine_records_for_date(connection, "", "2026-09-21") == []
+        assert connection.total_changes == changes
+
+
+def test_patient_date_lookup_uses_completion_date_over_creation_date(tmp_path):
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        record = create_vaccine_record(
+            connection,
+            vaccine_type_id=None,
+            vaccine_type_name="Test Vaccine",
+            patient_chart_no="0000",
+        )
+        connection.execute(
+            "UPDATE vaccine_records SET created_at = datetime(?, 'utc') WHERE id = ?",
+            ("2026-09-20 12:00:00", record.id),
+        )
+        mark_vaccine_record_completed(connection, record.id, completed_at="2026-09-21T12:00:00")
+
+        assert [r.id for r in list_patient_vaccine_records_for_date(
+            connection, "0000", "2026-09-21"
+        )] == [record.id]
+        assert list_patient_vaccine_records_for_date(connection, "0000", "2026-09-20") == []

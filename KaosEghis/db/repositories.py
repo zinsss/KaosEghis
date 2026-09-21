@@ -2841,6 +2841,29 @@ def list_vaccine_records(connection: sqlite3.Connection) -> list[VaccineRecord]:
     return [_vaccine_record_from_row(row) for row in rows]
 
 
+def list_patient_vaccine_records_for_date(
+    connection: sqlite3.Connection, patient_chart_no: str, on_date: str
+) -> list[VaccineRecord]:
+    chart_no = patient_chart_no.strip()
+    if not chart_no:
+        return []
+    rows = connection.execute(
+        """
+        SELECT id, vaccine_type_id, vaccine_type_name, program_type,
+               patient_chart_no, patient_resident_id, patient_name, patient_sex,
+               patient_age, patient_phone, patient_address, status,
+               counts_toward_cap, counted_bucket, completed_on, completed_at,
+               cancelled_at, created_at, updated_at
+        FROM vaccine_records
+        WHERE patient_chart_no = ?
+          AND COALESCE(completed_on, date(created_at, 'localtime')) = ?
+        ORDER BY id DESC
+        """,
+        (chart_no, on_date),
+    )
+    return [_vaccine_record_from_row(row) for row in rows]
+
+
 def get_vaccine_record(
     connection: sqlite3.Connection, record_id: int
 ) -> VaccineRecord | None:

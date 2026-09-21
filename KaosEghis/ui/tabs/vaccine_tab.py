@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -65,6 +66,7 @@ from KaosEghis.core.vaccine_eligibility import (
 )
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
+    VaccineRecord,
     create_vaccine_record,
     create_vaccine_type,
     delete_vaccine_record,
@@ -78,6 +80,7 @@ from KaosEghis.db.repositories import (
     get_vaccine_record,
     get_vaccine_type,
     list_vaccine_records,
+    list_patient_vaccine_records_for_date,
     list_vaccine_types,
     mark_vaccine_record_cancelled,
     mark_vaccine_record_completed,
@@ -223,6 +226,7 @@ class VaccineTab(QWidget):
         )
         self.prepared_pair_label = QLabel("Flu + COVID: Not prepared.")
         self.prepared_pair_label.setWordWrap(True)
+        self.record_state_label = QLabel("New vaccine record")
 
         self.vaccine_types_list = QListWidget()
         self.vaccine_types_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
@@ -301,6 +305,11 @@ class VaccineTab(QWidget):
         self.save_button.clicked.connect(self.save_record)
         self.new_record_button = QPushButton("New vaccine record")
         self.new_record_button.clicked.connect(self.start_new_vaccine_record)
+        self.edit_today_record_button = QPushButton("Edit today's record")
+        self.edit_today_record_menu = QMenu(self.edit_today_record_button)
+        self.edit_today_record_button.clicked.connect(self._show_today_record_menu)
+        self.edit_today_record_button.hide()
+        self.patient_chart_no_input.textChanged.connect(self._clear_today_record_menu)
         self.prepare_flu_covid_button = QPushButton("Prepare Flu + COVID")
         self.prepare_flu_covid_button.clicked.connect(self.prepare_flu_and_covid)
         self.print_button = QPushButton("Print label")
@@ -379,6 +388,7 @@ class VaccineTab(QWidget):
         self._populate_records(self.covid_records_table, self._filter_records(records, "covid"))
         self._update_today_counts(settings, counts)
         self._refresh_previews()
+        self._refresh_today_record_menu()
 
     def fetch_current_patient_from_emr(self) -> bool:
         if self._kdca_thread is not None:
@@ -457,6 +467,7 @@ class VaccineTab(QWidget):
         self.patient_address_input.setText(context.patient_address)
         self._reset_program_checks()
         self._refresh_previews()
+        self._refresh_today_record_menu()
         self.status_label.setText(f"{result.message} New vaccine record ready.")
         return True
 
@@ -809,7 +820,58 @@ class VaccineTab(QWidget):
             self.status_label.setText("Vaccine record not found.")
             return
 
+        self._load_record_into_form(record)
+
+    def _clear_today_record_menu(self) -> None:
+        self.edit_today_record_menu.clear()
+        self.edit_today_record_button.hide()
+
+    def _today_patient_records(self) -> list[VaccineRecord]:
+        chart_no = self.patient_chart_no_input.text().strip()
+        if not chart_no:
+            return []
+        with connect(self._db_path) as connection:
+            return list_patient_vaccine_records_for_date(
+                connection, chart_no, datetime.now().date().isoformat()
+            )
+
+    def _refresh_today_record_menu(self) -> None:
+        self.edit_today_record_menu.clear()
+        records = self._today_patient_records()
+        for record in records:
+            action = self.edit_today_record_menu.addAction(
+                f"#{record.id} | {record.vaccine_type_name} | {record.status}"
+            )
+            action.setData(record.id)
+            action.triggered.connect(
+                lambda _checked=False, record_id=record.id: self._edit_today_record(record_id)
+            )
+        self.edit_today_record_button.setText(f"Edit today's record ({len(records)})")
+        self.edit_today_record_button.setVisible(bool(records))
+
+    def _show_today_record_menu(self) -> None:
+        self._refresh_today_record_menu()
+        if self.edit_today_record_menu.actions():
+            self.edit_today_record_menu.popup(
+                self.edit_today_record_button.mapToGlobal(
+                    self.edit_today_record_button.rect().bottomLeft()
+                )
+            )
+
+    def _edit_today_record(self, record_id: int) -> None:
+        # Recheck the patient and date in case the form or database changed.
+        record = next((r for r in self._today_patient_records() if r.id == record_id), None)
+        if record is None:
+            self._refresh_today_record_menu()
+            self.status_label.setText("This record no longer matches the current patient and date.")
+            return
+        self._load_record_into_form(record)
+        self.show_page(0)
+
+    def _load_record_into_form(self, record: VaccineRecord) -> None:
         self._current_record_id = record.id
+        self._prepared_pair_ids = None
+        self.prepared_pair_label.setText("Flu + COVID: Not prepared.")
         self.patient_chart_no_input.setText(record.patient_chart_no or "")
         self.patient_resident_id_input.setText(record.patient_resident_id or "")
         self.patient_name_input.setText(record.patient_name or "")
@@ -819,7 +881,10 @@ class VaccineTab(QWidget):
         self.patient_phone_input.setText(record.patient_phone or "")
         self.patient_address_input.setText(record.patient_address or "")
         self._select_vaccine_type(record.vaccine_type_id, record.vaccine_type_name)
-        self.status_label.setText("Loaded vaccine record.")
+        self._reset_program_checks()
+        self._refresh_previews()
+        self._refresh_today_record_menu()
+        self.status_label.setText(f"Loaded vaccine record #{record.id} for editing.")
 
     def delete_selected_record(self) -> None:
         selected_row = self._selected_record_id()
@@ -1647,8 +1712,10 @@ class VaccineTab(QWidget):
         record_actions = QHBoxLayout()
         record_actions.addWidget(self.save_button)
         record_actions.addWidget(self.print_button)
+        record_actions.addWidget(self.edit_today_record_button)
         record_actions.addStretch()
         preparation_layout.addLayout(record_actions)
+        preparation_layout.addWidget(self.record_state_label)
         combined_actions = QHBoxLayout()
         combined_actions.addWidget(self.prepare_flu_covid_button)
         combined_actions.addWidget(self.print_prepared_pair_button)
@@ -1750,6 +1817,11 @@ class VaccineTab(QWidget):
         return None
 
     def _refresh_previews(self) -> None:
+        self.record_state_label.setText(
+            "New vaccine record"
+            if self._current_record_id is None
+            else f"Vaccine record #{self._current_record_id}"
+        )
         selected_item = self.vaccine_types_list.currentItem()
         vaccine_name = selected_item.text() if selected_item is not None else "(no vaccine selected)"
         patient_name = self.patient_name_input.text().strip() or "(no patient name)"

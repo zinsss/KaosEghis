@@ -96,6 +96,16 @@ is retained. Existing records are unchanged; a new database record is created on
 by Save, Print, or explicit pair preparation. A failed fetch preserves the current
 form and record references.
 
+When the current chart number has records for today, `Edit today's record` appears
+beside Save/Print. Its menu lists each record's ID, vaccine, and status, including
+separate flu and COVID records. Selecting one explicitly loads it for editing;
+`Save record` then updates that record instead of inserting another. The record ID
+is shown above the previews. `New vaccine record` returns to a separate preparation.
+Matching uses the exact chart number, never a name-only match. The date is the
+completion date when available, otherwise the creation date in local time. Other
+dates remain accessible through the DB page. Editing does not change completion
+status or increment daily counts.
+
 For simultaneous vaccinations, fetch this patient context once. Save and, where
 appropriate, print the first vaccine record, then use `New vaccine record` before
 selecting the next vaccine type. That action clears only the current record reference
