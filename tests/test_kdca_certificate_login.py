@@ -8,6 +8,18 @@ import pytest
 from KaosEghis.core import kdca_certificate_login
 
 
+@pytest.fixture(autouse=True)
+def isolated_uia_and_clock(monkeypatch):
+    # Browser-origin/Win32 binding is tested separately with its real helpers.
+    monkeypatch.setattr(kdca_certificate_login, "refresh_window", lambda window: window)
+    monkeypatch.setattr(kdca_certificate_login, "document_for_url", lambda window, _url: window)
+    monkeypatch.setattr(kdca_certificate_login, "foreground_handle", lambda: 101)
+    monkeypatch.setattr(kdca_certificate_login, "owned_by_browser", lambda *_args: True)
+    clock = [0.0]
+    monkeypatch.setattr(kdca_certificate_login.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(kdca_certificate_login.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+
+
 class _Element:
     def __init__(
         self,
@@ -327,10 +339,7 @@ def test_post_certificate_wait_times_out_without_positive_logout(monkeypatch, st
     assert kdca_certificate_login._wait_for_session_state(
         browser, config, 0.3, wait_for_authenticated=True,
     ) == "unknown"
-    if state == "ambiguous":
-        assert clock[0] == 0
-    else:
-        assert clock[0] >= 0.3
+    assert clock[0] >= 0.3
     assert not login.activated and not logout.activated
 
 
@@ -365,7 +374,7 @@ def test_kdca_login_never_guesses_session_state_when_controls_are_missing(monkey
     monkeypatch.setattr(
         kdca_certificate_login,
         "_wait_for_session_state",
-        lambda *_args: "unknown",
+        lambda *_args, **_kwargs: "unknown",
     )
 
     result = kdca_certificate_login.start_kdca_certificate_login(
@@ -453,6 +462,7 @@ def _web_picker(*, children=None, heading="인증서 입력 (전자서명)", **k
     ("password_duplicate", "password_window_not_ready"),
     ("confirm_missing", "confirmation_failed"),
     ("confirm_duplicate", "confirmation_failed"),
+    ("vault_locked", "credential_unavailable"),
 ])
 def test_web_picker_login_is_scoped_to_unnamed_browser_dialog(monkeypatch, failure, expected_status):
     from dataclasses import replace
@@ -492,12 +502,18 @@ def test_web_picker_login_is_scoped_to_unnamed_browser_dialog(monkeypatch, failu
         _Element(name="확인", control_type="Button"),
     ])
     typed = []
+    vault_reads = []
+
+    def vault(_reference):
+        vault_reads.append(True)
+        return None if failure == "vault_locked" and len(vault_reads) > 1 else "fake-password"
+
     monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser])
     monkeypatch.setattr(kdca_certificate_login, "_open_portal", lambda _url: True)
     monkeypatch.setattr(kdca_certificate_login, "_type_secret", lambda target, value: typed.append((target, value)) or True)
 
     result = kdca_certificate_login.start_kdca_certificate_login(
-        _settings(), password_provider=lambda _reference: "fake-password",
+        _settings(), password_provider=vault,
     )
 
     assert result.status == expected_status
@@ -588,3 +604,123 @@ def test_kdca_login_coordinate_fallback_never_clicks_outside_browser(monkeypatch
     )
 
     assert kdca_certificate_login._click_configured_login_point(browser, config) is False
+
+
+def test_delayed_certificate_cell_and_duplicate_text_child(monkeypatch):
+    certificate = _Element(name="Configured certificate", control_type="DataItem")
+    label = _Element(name="Configured certificate", control_type="Text")
+    picker = _Element()
+    polls = []
+
+    def children():
+        polls.append(True)
+        return [] if len(polls) < 3 else [certificate, label]
+
+    monkeypatch.setattr(picker, "descendants", children)
+    control = kdca_certificate_login._wait_for_control(
+        lambda: kdca_certificate_login._find_certificate_control(picker, "Configured certificate"), 3,
+    )
+    assert control is certificate
+    assert len(polls) == 3
+
+
+def test_session_rebinds_after_navigation_and_waits_through_duplicate_controls(monkeypatch):
+    old_browser = _Element(handle=101)
+    new_browser = _Element(handle=101)
+    logout = _Element(name="로그아웃", control_type="Button")
+    polls = []
+    monkeypatch.setattr(kdca_certificate_login, "refresh_window", lambda window: new_browser)
+
+    def controls(window, _config):
+        assert window is new_browser
+        polls.append(True)
+        return ([], [logout, logout]) if len(polls) < 3 else ([], [logout])
+
+    monkeypatch.setattr(kdca_certificate_login, "_find_kdca_session_controls", controls)
+    config = kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(_settings())
+    assert kdca_certificate_login._wait_for_session_state(old_browser, config, 2) == "authenticated"
+    assert len(polls) == 3
+
+
+def test_multiple_portal_windows_prefer_verified_foreground(monkeypatch):
+    background = _Element(name="질병관리청", handle=202)
+    foreground = _Element(name="질병관리청", handle=101)
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [background, foreground])
+    config = kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(_settings())
+    assert kdca_certificate_login._wait_for_portal_window(config) is foreground
+    monkeypatch.setattr(kdca_certificate_login, "foreground_handle", lambda: 303)
+    assert kdca_certificate_login._wait_for_portal_window(config) is None
+
+
+def test_portal_title_without_verified_document_is_not_trusted(monkeypatch):
+    browser = _Element(name="질병관리청", handle=101)
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [browser])
+    monkeypatch.setattr(kdca_certificate_login, "document_for_url", lambda *_args: None)
+    config = kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(_settings())
+    assert kdca_certificate_login._wait_for_portal_window(config) is None
+    assert kdca_certificate_login._find_kdca_session_controls(browser, config) == ([], [])
+
+
+def test_new_portal_wait_does_not_reuse_stale_logged_in_document(monkeypatch):
+    browser = _Element(name="질병관리청", handle=101)
+    browser.element_info.runtime_id = (42, 1)
+    polls = []
+
+    def windows():
+        polls.append(True)
+        if len(polls) >= 3:
+            browser.element_info.runtime_id = (42, 2)
+        return [browser]
+
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", windows)
+    config = kdca_certificate_login.KdcaCertificateLoginConfig.from_settings(_settings())
+    assert kdca_certificate_login._wait_for_portal_window(
+        config, previous_documents={(42, 1)},
+    ) is browser
+    assert len(polls) == 3
+
+
+def test_native_certificate_window_must_belong_to_browser(monkeypatch):
+    browser = _Element(name="질병관리청", handle=101)
+    unrelated = _Element(name="인증서", handle=202)
+    monkeypatch.setattr(kdca_certificate_login, "_desktop_windows", lambda: [unrelated])
+    monkeypatch.setattr(kdca_certificate_login, "owned_by_browser", lambda *_args: False)
+    assert kdca_certificate_login._matching_windows("인증서", browser_window=browser) == []
+
+
+@pytest.mark.parametrize("focus_states,expected", [
+    ([False], False), ([True, True, False], False),
+    ([True, True, True], True), ([False, True, True, True], True),
+])
+def test_password_input_rechecks_focus_without_clipboard(monkeypatch, focus_states, expected):
+    import pywinauto.keyboard
+
+    keys, typed = [], []
+    password = _Element(control_type="Edit")
+    states = iter(focus_states)
+    monkeypatch.setattr(kdca_certificate_login, "has_keyboard_focus", lambda _element: next(states, focus_states[-1]))
+    monkeypatch.setattr(pywinauto.keyboard, "send_keys", lambda value, **_kwargs: keys.append(value))
+    monkeypatch.setattr(kdca_certificate_login, "_send_unicode_text", lambda value: typed.append(value) or True)
+    assert kdca_certificate_login._type_secret(password, "fake-secret") is expected
+    assert typed == (["fake-secret"] if expected else [])
+    assert keys == (["^a"] if any(focus_states) else [])
+
+
+def test_cancelled_operation_never_opens_portal_or_requests_password(monkeypatch):
+    monkeypatch.setattr(kdca_certificate_login, "_open_portal", lambda _url: pytest.fail("opened"))
+    result = kdca_certificate_login.start_kdca_certificate_login(
+        _settings(), cancelled=lambda: True,
+        password_provider=lambda _key: pytest.fail("requested password"),
+    )
+    assert not result.success
+
+
+def test_password_selection_uses_real_uia_is_password_property():
+    search = _Element(control_type="Edit")
+    password = _Element(control_type="Edit")
+    search.element_info.element = SimpleNamespace(CurrentIsPassword=False)
+    password.element_info.element = SimpleNamespace(CurrentIsPassword=True)
+    picker = _Element(children=[search, password])
+    assert kdca_certificate_login._find_single_password_descendant(
+        picker, automation_id="", control_type="Edit",
+    ) is password

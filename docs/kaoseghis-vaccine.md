@@ -354,12 +354,52 @@ and checks the current browser page using the configured accessible controls:
   `javascript:fnPkiCall('pLo')` exposed by Chrome accessibility: sign-in required; the
   guarded certificate flow runs;
 - both, neither, duplicate actionable links/buttons, or inaccessible controls:
-  stop safely without accessing the certificate password or opening a system URL.
+  wait through loading/redirects, then stop safely if still unresolved at the deadline.
 
 Chrome can expose a text heading/child and the actual login link with the same name.
 Only the clickable link/button counts toward sign-in detection; a matching `Text`
 element is not another login action and cannot establish an authenticated session.
 Each check reads login and logout controls from one UIA tree snapshot.
+
+#### Login/Launch Reliability
+
+The explicit KDCA operation runs in one background COM worker. Progress identifies
+portal detection, certificate picker, password field, confirmed sign-in, deep-link
+navigation, and destination detection. Other launch buttons and Fetch from EMR are
+disabled while it runs; automatic session reset is deferred and Reset Now is blocked.
+`Stop` prevents subsequent actions after the current UIA call returns. No second
+worker is started while that call is outstanding.
+
+- Browser title alone is insufficient: a visible browser Document must expose the
+  configured portal origin through UIA. With multiple portal windows, the verified
+  foreground window is preferred; unresolved ambiguity stops the operation.
+  Existing document runtime IDs are recorded before opening the portal so a stale
+  logout link in an old tab cannot satisfy the new session check.
+- UIA browser wrappers are rebound by HWND across navigation. Read-only readiness
+  checks retry for up to 30 seconds per phase, including delayed certificate rows
+  and confirmation buttons. A cell and its Text child count as one certificate;
+  distinct duplicate cells remain ambiguous.
+- Native certificate dialogs must be owned by that browser; the known web picker
+  remains scoped to it. Password focus is checked before and after selecting existing
+  text. The secret is retrieved again immediately before use in case the vault was
+  locked during loading, and is submitted only once. No clipboard is used.
+- After positive sign-in, the saved deep link is entered in the **same browser's
+  address field**, not handed to the default browser to choose another window/profile.
+  A native modal popup or changed focus stops navigation. Notices are not dismissed
+  automatically and unknown browser states never count as signed in.
+- Success now requires the configured General/COVID title **and** class to be
+  visible, or the configured influenza resident input to appear on the OIS page.
+  Merely accepting a URL is not success. Destination detection waits up to 30 seconds;
+  launch permission dialogs and failed launches produce an actionable failure, not
+  an automatic duplicate launch. An already-open native system is brought forward,
+  not relaunched; multiple matching native windows stop the action.
+- Logs include fixed workflow stages, outcome, and elapsed time only, never passwords,
+  certificate contents, patient data, page contents, or raw provider exceptions.
+
+Live acceptance checks: restart KaosEghis, try each Open action once signed out and
+once signed in, test a delayed certificate picker and a portal notice, and confirm
+that failure/Stop re-enables the buttons. Unit tests use fake portals, vault values,
+and windows; they do not sign in to KDCA or send real patient data.
 
 `Vaccine -> Main` provides explicit `Open General`, `Open Influenza`, and `Open COVID`
 actions. They never read or enter patient data, and never automate a vaccination step.
@@ -369,8 +409,8 @@ actions. They never read or enter patient data, and never automate a vaccination
 System launch no longer sends `Win+Left`, `Win+Right`, or `Win+Down`. The previous
 relative shortcut sequence could wrap between zones and depend on the window's
 starting position, so it could not reliably restore a workflow layout. Its
-positioning timer and launch-button wait have been removed. KDCA authentication
-and the configured system deep links are unchanged.
+positioning timer has been removed. The readiness wait above only verifies launch;
+it does not move or resize a window. The configured system deep links are unchanged.
 
 Position General and COVID manually for now. A future replacement should save and
 restore an explicit window rectangle rather than count directional shortcuts;

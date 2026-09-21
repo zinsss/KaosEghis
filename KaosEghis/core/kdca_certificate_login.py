@@ -13,6 +13,10 @@ from typing import Any, Callable
 import webbrowser
 
 from KaosEghis.core.pw_runtime import get_unlocked_credential_password
+from KaosEghis.core.kdca_browser import (
+    document_for_url, document_identity, foreground_handle, has_keyboard_focus,
+    owned_by_browser, refresh_window,
+)
 
 
 # KDCA renders its signed-out certificate action as this JavaScript anchor. Chrome
@@ -36,7 +40,7 @@ class KdcaCertificateLoginConfig:
     password_control_type: str
     confirm_control_name: str
     credential_reference: str
-    timeout_seconds: float = 12.0
+    timeout_seconds: float = 30.0
 
     @classmethod
     def from_settings(cls, settings: dict[str, str]) -> "KdcaCertificateLoginConfig":
@@ -102,12 +106,15 @@ class KdcaCertificateLoginResult:
     success: bool
     status: str
     message: str
+    browser_handle: int | None = None
 
 
 def start_kdca_certificate_login(
     settings: dict[str, str],
     *,
     password_provider: Callable[[str], str | None] = get_unlocked_credential_password,
+    progress: Callable[[str], None] = lambda _message: None,
+    cancelled: Callable[[], bool] = lambda: False,
 ) -> KdcaCertificateLoginResult:
     """Start one explicit KDCA certificate login attempt.
 
@@ -120,12 +127,18 @@ def start_kdca_certificate_login(
     if configuration_error:
         return _result(False, "configuration_required", configuration_error)
 
-    if not _open_portal(config.portal_url):
+    if cancelled():
+        return _result(False, "cancelled", "KDCA operation cancelled.")
+    previous_documents = {
+        identity for window in _matching_windows(config.browser_window_title_contains)
+        if (identity := document_identity(document_for_url(window, config.portal_url))) is not None
+    }
+    progress("KDCA: opening portal...")
+    if cancelled() or not _open_portal(config.portal_url):
         return _result(False, "portal_unavailable", "KDCA portal could not be opened.")
 
-    browser_window = _wait_for_single_window(
-        config.browser_window_title_contains,
-        config.timeout_seconds,
+    browser_window = _wait_for_portal_window(
+        config, previous_documents=previous_documents, cancelled=cancelled,
     )
     if browser_window is None:
         return _result(
@@ -133,13 +146,18 @@ def start_kdca_certificate_login(
             "browser_not_ready",
             "KDCA portal window was not ready. No certificate password was typed.",
         )
+    browser_handle = _window_handle(browser_window)
 
-    session_state = _wait_for_session_state(browser_window, config, config.timeout_seconds)
+    progress("KDCA: checking sign-in state...")
+    session_state = _wait_for_session_state(
+        browser_window, config, config.timeout_seconds, cancelled=cancelled,
+    )
     if session_state == "authenticated":
         return _result(
             True,
             "already_authenticated",
             "KDCA is already signed in. No certificate password was requested.",
+            browser_handle,
         )
     if session_state != "login_required":
         return _result(
@@ -148,15 +166,17 @@ def start_kdca_certificate_login(
             "KDCA sign-in state could not be confirmed. No certificate password was typed.",
         )
 
-    password = password_provider(config.credential_reference)
-    if not password:
+    if cancelled() or not password_provider(config.credential_reference):
         return _result(
             False,
             "credential_unavailable",
             "KDCA certificate credential is unavailable. Unlock KaosEghis-pw first.",
         )
 
+    browser_window = refresh_window(browser_window)
     login_control = _find_single_kdca_login_control(browser_window, config)
+    if cancelled():
+        return _result(False, "cancelled", "KDCA operation cancelled.")
     if login_control is not None:
         if not _activate(login_control):
             return _result(
@@ -172,10 +192,12 @@ def start_kdca_certificate_login(
             "in Vaccine System targets; no certificate password was typed.",
         )
 
+    progress("KDCA: waiting for certificate picker...")
     certificate_window = _wait_for_single_window(
         config.certificate_window_title_contains,
         config.timeout_seconds,
         browser_window=browser_window,
+        cancelled=cancelled,
         exclude_handles={
             handle
             for handle in (_window_handle(browser_window),)
@@ -189,9 +211,16 @@ def start_kdca_certificate_login(
             "Certificate picker was not ready. No certificate password was typed.",
         )
 
-    certificate_control = _find_single_descendant(
-        certificate_window,
-        name=config.certificate_name,
+    def certificate_target():
+        windows = _matching_windows(
+            config.certificate_window_title_contains, browser_window=browser_window,
+            exclude_handles={_window_handle(browser_window)},
+        )
+        return _find_certificate_control(windows[0], config.certificate_name) if len(windows) == 1 else None
+
+    certificate_control = _wait_for_control(
+        certificate_target,
+        config.timeout_seconds, cancelled=cancelled,
     )
     if certificate_control is None:
         return _result(
@@ -199,18 +228,20 @@ def start_kdca_certificate_login(
             "certificate_not_found",
             "Configured certificate was not found. No certificate password was typed.",
         )
-    if not _activate(certificate_control):
+    if cancelled() or not _select_certificate(certificate_control):
         return _result(
             False,
             "certificate_selection_failed",
             "Configured certificate could not be selected. No certificate password was typed.",
         )
 
+    progress("KDCA: waiting for certificate password field...")
     password_window, password_control = _wait_for_password_target(
         config,
         config.password_window_title_contains,
         config.timeout_seconds,
         browser_window=browser_window,
+        cancelled=cancelled,
         exclude_handles={handle for handle in (_window_handle(browser_window),) if handle is not None},
     )
     if password_window is None or password_control is None:
@@ -219,9 +250,9 @@ def start_kdca_certificate_login(
             "password_window_not_ready",
             "Certificate password window was not ready. No certificate password was typed.",
         )
-    confirm_control = _find_single_descendant(
-        password_window,
-        name=config.confirm_control_name,
+    confirm_control = _wait_for_control(
+        lambda: _find_confirm_control(password_window, config.confirm_control_name),
+        config.timeout_seconds, cancelled=cancelled,
     )
     if confirm_control is None:
         return _result(
@@ -229,22 +260,33 @@ def start_kdca_certificate_login(
             "confirmation_failed",
             "Certificate confirmation control was not available. No certificate password was typed.",
         )
-    if not _type_secret(password_control, password):
+    # Re-read the vault immediately before use; it may have been locked while
+    # the certificate list was loading. Never put the secret in a worker signal.
+    password = None if cancelled() else password_provider(config.credential_reference)
+    if not password:
+        return _result(False, "credential_unavailable", "Certificate credential is unavailable. Unlock KaosEghis-pw first.")
+    if document_for_url(refresh_window(browser_window), config.portal_url) is None:
+        return _result(False, "browser_changed", "KDCA browser page changed. No certificate password was typed.")
+    entered = False if cancelled() else _type_secret(password_control, password)
+    password = None
+    if not entered:
         return _result(
             False,
             "password_input_failed",
             "Certificate password could not be entered.",
         )
 
-    if not _activate(confirm_control):
+    if cancelled() or not _activate(confirm_control):
         return _result(
             False,
             "confirmation_failed",
             "Certificate confirmation control was not available.",
         )
 
+    progress("KDCA: waiting for confirmed sign-in...")
     if _wait_for_session_state(
         browser_window, config, config.timeout_seconds, wait_for_authenticated=True,
+        cancelled=cancelled,
     ) != "authenticated":
         return _result(
             False,
@@ -256,6 +298,7 @@ def start_kdca_certificate_login(
         True,
         "authenticated",
         "KDCA sign-in was confirmed.",
+        browser_handle,
     )
 
 
@@ -264,6 +307,60 @@ def _open_portal(url: str) -> bool:
         return bool(webbrowser.open(url, new=2, autoraise=True))
     except Exception:
         return False
+
+
+def _wait_for_portal_window(config, *, previous_documents=None, cancelled=lambda: False):
+    deadline = time.monotonic() + config.timeout_seconds
+    while time.monotonic() < deadline and not cancelled():
+        matches = []
+        for window in _matching_windows(config.browser_window_title_contains):
+            if _window_handle(window) is None:
+                continue
+            document = document_for_url(window, config.portal_url)
+            if document is None or document_identity(document) in (previous_documents or set()):
+                continue
+            matches.append(window)
+        foreground = [window for window in matches if _window_handle(window) == foreground_handle()]
+        if len(foreground) == 1:
+            return foreground[0]
+        if len(matches) == 1:
+            return matches[0]
+        time.sleep(0.25)
+    return None
+
+
+def _wait_for_control(find, timeout_seconds, *, cancelled=lambda: False):
+    deadline = time.monotonic() + max(timeout_seconds, 0.1)
+    while time.monotonic() < deadline and not cancelled():
+        control = find()
+        if control is not None:
+            return control
+        time.sleep(0.25)
+    return None
+
+
+def _find_certificate_control(window, name):
+    matches = _find_visible_named_descendants(window, name)
+    # Chromium can expose the same label as a cell and its Text child. Prefer
+    # the selectable cell; two separate matching cells remain ambiguous.
+    selectable = [item for item in matches if _element_control_type(item) in {"DataItem", "ListItem"}]
+    if selectable:
+        matches = selectable
+    return matches[0] if len(matches) == 1 else None
+
+
+def _find_confirm_control(window, name):
+    matches = [item for item in _find_visible_named_descendants(window, name)
+               if _element_control_type(item) in {"Button", "Hyperlink"}]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _select_certificate(element):
+    try:
+        element.select()
+        return True
+    except Exception:
+        return _activate(element)
 
 
 def _click_configured_login_point(
@@ -284,6 +381,8 @@ def _click_configured_login_point(
     try:
         browser_window.set_focus()
     except Exception:
+        return False
+    if not _screen_point_belongs_to_window(browser_handle, config.login_x, config.login_y):
         return False
     try:
         import pyautogui
@@ -318,17 +417,16 @@ def _wait_for_single_window(
     *,
     exclude_handles: set[int] | None = None,
     browser_window: Any | None = None,
+    cancelled: Callable[[], bool] = lambda: False,
 ) -> Any | None:
     deadline = time.monotonic() + max(timeout_seconds, 0.1)
-    while time.monotonic() < deadline:
+    while time.monotonic() < deadline and not cancelled():
         matches = _matching_windows(
             title_contains, exclude_handles=exclude_handles, browser_window=browser_window,
         )
         if len(matches) == 1:
             return matches[0]
-        if len(matches) > 1:
-            return None
-        time.sleep(0.1)
+        time.sleep(0.25)
     return None
 
 
@@ -343,16 +441,17 @@ def _matching_windows(
         if _is_visible(window)
         and _title_contains(_window_title(window), title_contains)
         and _window_handle(window) not in (exclude_handles or set())
+        and (browser_window is None or owned_by_browser(window, browser_window))
     ]
     if browser_window is None or not _is_visible(browser_window):
         return matches
+    browser_window = refresh_window(browser_window)
     try:
         dialogs = browser_window.descendants(control_type="Window")
     except Exception:
         return matches
     for dialog in dialogs:
-        info = getattr(dialog, "element_info", None)
-        classes = str(getattr(info, "class_name", "") or "").split()
+        classes = _element_info_value(dialog, "class_name").split()
         if not _is_visible(dialog) or not _is_enabled(dialog) or "xwup_cert_pop" not in classes:
             continue
         # KDCA's web picker has no window title/HWND. Its heading is a Text child;
@@ -375,6 +474,7 @@ def _wait_for_session_state(
     timeout_seconds: float,
     *,
     wait_for_authenticated: bool = False,
+    cancelled: Callable[[], bool] = lambda: False,
 ) -> str:
     """Return only a positively identified KDCA sign-in state.
 
@@ -389,15 +489,14 @@ def _wait_for_session_state(
 
     _focus(browser_window)
     deadline = time.monotonic() + max(timeout_seconds, 0.1)
-    while time.monotonic() < deadline:
-        login_controls, logout_controls = _find_kdca_session_controls(browser_window, config)
+    while time.monotonic() < deadline and not cancelled():
+        current_window = refresh_window(browser_window)
+        login_controls, logout_controls = _find_kdca_session_controls(current_window, config)
         if len(logout_controls) == 1 and not login_controls:
             return "authenticated"
         if len(login_controls) == 1 and not logout_controls and not wait_for_authenticated:
             return "login_required"
-        if len(login_controls) > 1 or len(logout_controls) > 1:
-            return "unknown"
-        time.sleep(0.1)
+        time.sleep(0.25)
     return "unknown"
 
 
@@ -417,11 +516,12 @@ def _wait_for_password_target(
     *,
     exclude_handles: set[int] | None = None,
     browser_window: Any | None = None,
+    cancelled: Callable[[], bool] = lambda: False,
 ) -> tuple[Any | None, Any | None]:
     """Find one verified password input, whether it shares the picker or is a new dialog."""
 
     deadline = time.monotonic() + max(timeout_seconds, 0.1)
-    while time.monotonic() < deadline:
+    while time.monotonic() < deadline and not cancelled():
         matches: list[tuple[Any, Any]] = []
         for window in _matching_windows(
             title_contains, exclude_handles=exclude_handles, browser_window=browser_window,
@@ -435,33 +535,8 @@ def _wait_for_password_target(
                 matches.append((window, control))
         if len(matches) == 1:
             return matches[0]
-        if len(matches) > 1:
-            return None, None
-        time.sleep(0.1)
+        time.sleep(0.25)
     return None, None
-
-
-def _find_single_descendant(
-    window: Any,
-    *,
-    name: str = "",
-    automation_id: str = "",
-    control_type: str = "",
-) -> Any | None:
-    try:
-        elements = list(window.descendants())
-    except Exception:
-        return None
-    matches = [
-        element
-        for element in elements
-        if _is_visible(element)
-        and _is_enabled(element)
-        and (not name or _matches_text(_element_name(element), name))
-        and (not automation_id or _element_automation_id(element) == automation_id)
-        and (not control_type or _element_control_type(element) == control_type)
-    ]
-    return matches[0] if len(matches) == 1 else None
 
 
 def _find_single_kdca_login_control(
@@ -509,7 +584,10 @@ def _find_kdca_session_controls(
     # Chromium exposes an anchor and a Text heading/child with the same name. Only
     # actionable controls count, and both states must use the same tree snapshot.
     try:
-        elements = list(window.descendants())
+        scope = document_for_url(window, config.portal_url)
+        if scope is None:
+            return [], []
+        elements = list(scope.descendants())
     except Exception:
         return [], []
     login_controls = []
@@ -604,7 +682,17 @@ def _type_secret(element: Any, password: str) -> bool:
     """Type directly into the verified password control without clipboard use."""
 
     try:
+        from pywinauto.keyboard import send_keys
+
         element.set_focus()
+        deadline = time.monotonic() + 0.75
+        while not has_keyboard_focus(element) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not has_keyboard_focus(element):
+            return False
+        send_keys("^a", pause=0.05)
+        if not has_keyboard_focus(element):
+            return False
     except Exception:
         return False
     return _send_unicode_text(password)
@@ -706,18 +794,22 @@ def _window_title(element: Any) -> str:
 
 
 def _element_name(element: Any) -> str:
-    info = getattr(element, "element_info", None)
-    return str(getattr(info, "name", "") or "")
+    return _element_info_value(element, "name")
 
 
 def _element_automation_id(element: Any) -> str:
-    info = getattr(element, "element_info", None)
-    return str(getattr(info, "automation_id", "") or "")
+    return _element_info_value(element, "automation_id")
 
 
 def _element_control_type(element: Any) -> str:
-    info = getattr(element, "element_info", None)
-    return str(getattr(info, "control_type", "") or "")
+    return _element_info_value(element, "control_type")
+
+
+def _element_info_value(element: Any, key: str) -> str:
+    try:
+        return str(getattr(element.element_info, key, "") or "")
+    except Exception:
+        return ""
 
 
 def _element_legacy_value(element: Any) -> str:
@@ -745,6 +837,10 @@ def _normalise_kdca_href(value: str) -> str:
 
 
 def _is_password_field(element: Any) -> bool:
+    try:
+        return bool(element.element_info.element.CurrentIsPassword)
+    except Exception:
+        pass
     info = getattr(element, "element_info", None)
     value = getattr(info, "is_password", None)
     if value is not None:
@@ -759,10 +855,10 @@ def _is_password_field(element: Any) -> bool:
 
 
 def _window_handle(element: Any) -> int | None:
-    handle = getattr(element, "handle", None)
     try:
+        handle = getattr(element, "handle", None)
         return int(handle) if handle else None
-    except (TypeError, ValueError):
+    except Exception:
         return None
 
 
@@ -801,5 +897,5 @@ def _title_contains(actual: str, expected: str) -> bool:
     return expected.strip().casefold() in actual.strip().casefold()
 
 
-def _result(success: bool, status: str, message: str) -> KdcaCertificateLoginResult:
-    return KdcaCertificateLoginResult(success, status, message)
+def _result(success: bool, status: str, message: str, browser_handle=None) -> KdcaCertificateLoginResult:
+    return KdcaCertificateLoginResult(success, status, message, browser_handle)

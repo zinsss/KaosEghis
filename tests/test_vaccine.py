@@ -94,11 +94,12 @@ def test_vaccine_system_launch_opens_only_the_configured_saved_url() -> None:
         {"vaccine_influenza_system_launch_url": "https://example.test/flu"},
         "influenza",
         opener=open_browser,
+        ready=lambda *_args: True,
     )
 
     assert result.success is True
     assert opened_urls == ["https://example.test/flu"]
-    assert "Influenza vaccine system opened." in result.message
+    assert "Influenza vaccine system opened and detected." in result.message
 
 
 def test_vaccine_system_launch_rejects_missing_or_unsafe_urls() -> None:
@@ -116,6 +117,80 @@ def test_vaccine_system_launch_rejects_missing_or_unsafe_urls() -> None:
     assert "launch URL" in unsafe.message
 
 
+def _wait_for_kdca(panel):
+    assert panel._kdca_thread is not None
+    panel._kdca_thread.join(timeout=3)
+    assert not panel._kdca_thread.is_alive()
+    _app().processEvents()
+    assert panel._kdca_thread is None
+
+
+def test_kdca_worker_is_single_flight_and_defers_session_reset(tmp_path, monkeypatch):
+    import threading
+    import KaosEghis.ui.tabs.vaccine_tab as module
+
+    app = _app()
+    entered, release = threading.Event(), threading.Event()
+    main_thread = threading.get_ident()
+    calls = []
+
+    def authenticate(_settings, *, progress, cancelled):
+        assert threading.get_ident() != main_thread
+        calls.append(True)
+        entered.set()
+        progress("KDCA: waiting for certificate picker...")
+        assert release.wait(3)
+        return module.KdcaCertificateLoginResult(False, "stopped", "Stopped")
+
+    monkeypatch.setattr(module, "start_kdca_certificate_login", authenticate)
+    monkeypatch.setattr(module, "reset_vaccine_session", lambda *_args, **_kwargs: pytest.fail("reset during login"))
+    panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    try:
+        assert panel.open_vaccine_system("general")
+        assert entered.wait(2)
+        app.processEvents()
+        assert "certificate picker" in panel.status_label.text()
+        assert not panel.log_in_to_kdca()
+        assert not panel.open_covid_system_button.isEnabled()
+        assert not panel.fetch_button.isEnabled()
+        assert panel.fetch_current_patient_from_emr() is False
+        panel.reset_vaccine_sessions_now()
+        timer = module.QTimer(panel)
+        timer.setSingleShot(True)
+        panel._session_keeper_targets["general"] = SimpleNamespace(key="general")
+        panel._session_keeper_timers["general"] = timer
+        panel._run_session_keeper("general")
+        assert timer.isActive()
+        timer.stop()
+        panel.kdca_stop_button.click()
+        assert panel._kdca_cancel.is_set()
+        assert panel._kdca_thread is not None
+    finally:
+        release.set()
+        _wait_for_kdca(panel)
+    assert len(calls) == 1
+    assert panel.kdca_login_button.isEnabled()
+    assert panel.fetch_button.isEnabled()
+    assert panel.status_label.text() == "KDCA operation stopped."
+
+
+def test_kdca_worker_failure_restores_buttons_without_exposing_exception(tmp_path, monkeypatch):
+    import KaosEghis.ui.tabs.vaccine_tab as module
+
+    _app()
+
+    def authenticate(*_args, **_kwargs):
+        raise RuntimeError("fake-secret-do-not-display")
+
+    monkeypatch.setattr(module, "start_kdca_certificate_login", authenticate)
+    panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    assert panel.log_in_to_kdca()
+    _wait_for_kdca(panel)
+    assert panel.kdca_login_button.isEnabled()
+    assert "failed" in panel.status_label.text()
+    assert "fake-secret" not in panel.status_label.text()
+
+
 def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
     tmp_path,
     monkeypatch,
@@ -125,7 +200,7 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
 
     launched_systems: list[str] = []
 
-    def fake_launch(_settings, system):
+    def fake_launch(_settings, system, **_kwargs):
         launched_systems.append(system)
         return SimpleNamespace(success=True, message=f"{system} opened.")
 
@@ -137,13 +212,16 @@ def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
     monkeypatch.setattr(
         vaccine_tab_module,
         "start_kdca_certificate_login",
-        lambda _settings: SimpleNamespace(success=True, message="KDCA signed in."),
+        lambda _settings, **_kwargs: SimpleNamespace(success=True, message="KDCA signed in.", browser_handle=101),
     )
     panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
 
     panel.open_general_system_button.click()
+    _wait_for_kdca(panel)
     panel.open_influenza_system_button.click()
+    _wait_for_kdca(panel)
     panel.open_covid_system_button.click()
+    _wait_for_kdca(panel)
 
     assert launched_systems == ["general", "influenza", "covid"]
     assert panel.status_label.text() == "covid opened."
@@ -157,15 +235,16 @@ def test_open_general_waits_for_signed_out_login_before_launch(tmp_path, monkeyp
     events = []
     authenticated = {"value": False}
 
-    def authenticate(settings):
+    def authenticate(settings, **_kwargs):
         events.append("sign_in")
         assert settings["vaccine_kdca_portal_url"] == "https://is.kdca.go.kr/"
         authenticated["value"] = True
-        return kdca.KdcaCertificateLoginResult(True, "authenticated", "KDCA sign-in confirmed.")
+        return kdca.KdcaCertificateLoginResult(True, "authenticated", "KDCA sign-in confirmed.", 101)
 
-    def launch(settings, system):
+    def launch(settings, system, **_kwargs):
         assert authenticated["value"] is True
         assert system == "general"
+        assert _kwargs["browser_handle"] == 101
         events.append(settings["vaccine_general_system_launch_url"])
         return SimpleNamespace(success=True, message="General vaccine system opened.")
 
@@ -173,6 +252,7 @@ def test_open_general_waits_for_signed_out_login_before_launch(tmp_path, monkeyp
     monkeypatch.setattr(vaccine_tab_module, "open_vaccine_system", launch)
     panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
     panel.open_general_system_button.click()
+    _wait_for_kdca(panel)
 
     assert events == ["sign_in", "https://ois.kdca.go.kr/iris/index_run.jsp"]
     assert panel.status_label.text() == "General vaccine system opened."
@@ -190,7 +270,7 @@ def test_authenticated_system_buttons_send_exact_deep_links_to_browser(tmp_path,
 
     events = []
 
-    def authenticate(_settings):
+    def authenticate(_settings, **_kwargs):
         events.append("authenticated")
         return KdcaCertificateLoginResult(True, "already_authenticated", "KDCA signed in.")
 
@@ -201,13 +281,19 @@ def test_authenticated_system_buttons_send_exact_deep_links_to_browser(tmp_path,
         return True
 
     monkeypatch.setattr(module, "start_kdca_certificate_login", authenticate)
-    monkeypatch.setattr(module, "open_vaccine_system", partial(open_vaccine_system, opener=launch_url))
+    monkeypatch.setattr(module, "open_vaccine_system", partial(
+        open_vaccine_system, opener=launch_url,
+        ready=lambda *_args: events[-1] != "authenticated",
+    ))
     hotkey = Mock(side_effect=AssertionError("Launch must not send positioning shortcuts"))
     monkeypatch.setattr(pyautogui, "hotkey", hotkey)
     panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
     panel.open_general_system_button.click()
+    _wait_for_kdca(panel)
     panel.open_influenza_system_button.click()
+    _wait_for_kdca(panel)
     panel.open_covid_system_button.click()
+    _wait_for_kdca(panel)
 
     assert events == [
         "authenticated", "https://ois.kdca.go.kr/iris/index_run.jsp",
@@ -220,7 +306,7 @@ def test_authenticated_system_buttons_send_exact_deep_links_to_browser(tmp_path,
     assert panel.open_influenza_system_button.isEnabled()
     assert panel.open_covid_system_button.isEnabled()
     assert panel.kdca_login_button.isEnabled()
-    assert "COVID vaccine system opened." in panel.status_label.text()
+    assert "COVID vaccine system opened and detected." in panel.status_label.text()
 
 
 def test_vaccine_system_open_stops_when_kdca_authentication_is_not_confirmed(
@@ -234,7 +320,7 @@ def test_vaccine_system_open_stops_when_kdca_authentication_is_not_confirmed(
     monkeypatch.setattr(
         vaccine_tab_module,
         "start_kdca_certificate_login",
-        lambda _settings: SimpleNamespace(
+        lambda _settings, **_kwargs: SimpleNamespace(
             success=False,
             message="KDCA sign-in state could not be confirmed.",
         ),
@@ -246,7 +332,8 @@ def test_vaccine_system_open_stops_when_kdca_authentication_is_not_confirmed(
     )
     panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
 
-    assert panel.open_vaccine_system("influenza") is False
+    assert panel.open_vaccine_system("influenza") is True
+    _wait_for_kdca(panel)
     assert calls == []
     assert "could not be confirmed" in panel.status_label.text()
 
@@ -1349,7 +1436,7 @@ def test_kdca_login_is_explicit_and_uses_vaccine_settings(tmp_path, monkeypatch)
     monkeypatch.setattr(
         vaccine_tab,
         "start_kdca_certificate_login",
-        lambda settings: calls.append(settings)
+        lambda settings, **_kwargs: calls.append(settings)
         or KdcaCertificateLoginResult(
             True,
             "submitted",
@@ -1362,5 +1449,6 @@ def test_kdca_login_is_explicit_and_uses_vaccine_settings(tmp_path, monkeypatch)
     assert page.kdca_login_button.text() == "Log in to KDCA"
     assert calls == []
     assert page.log_in_to_kdca() is True
+    _wait_for_kdca(page)
     assert calls[0]["vaccine_kdca_certificate_name"] == "Test certificate"
     assert "submitted" in page.status_label.text()

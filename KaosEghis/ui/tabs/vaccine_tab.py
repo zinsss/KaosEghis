@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
 from time import monotonic
+import threading
+import logging
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QCoreApplication, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -40,7 +42,9 @@ from KaosEghis.core.vaccine_patient_context import (
     resident_id_for_label,
 )
 from KaosEghis.core.vaccine_system_launch import open_vaccine_system
-from KaosEghis.core.kdca_certificate_login import start_kdca_certificate_login
+from KaosEghis.core.kdca_certificate_login import (
+    KdcaCertificateLoginResult, start_kdca_certificate_login,
+)
 from KaosEghis.core.vaccine_session_keeper import (
     SESSION_KEEPER_INTERVAL_MS,
     SESSION_KEEPER_RETRY_MS,
@@ -154,12 +158,22 @@ class VaccineTypeDialog(QDialog):
 
 class VaccineTab(QWidget):
     TOP_PAGES = ["Main", "DB", "Settings"]
+    kdca_progress = Signal(str)
+    kdca_finished = Signal(object)
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
         self._db_path = db_path
         self._current_record_id: int | None = None
         self._prepared_pair_ids: tuple[int, int] | None = None
+        self._kdca_thread: threading.Thread | None = None
+        self._kdca_cancel = threading.Event()
+        self.kdca_progress.connect(self._show_kdca_progress)
+        self.kdca_finished.connect(self._finish_kdca_operation)
+        self.destroyed.connect(self._kdca_cancel.set)
+        application = QCoreApplication.instance()
+        if application is not None:
+            application.aboutToQuit.connect(self._kdca_cancel.set)
         self._session_keeper_targets: dict[str, VaccineSessionResetTarget] = {}
         self._session_keeper_timers: dict[str, QTimer] = {}
         self._session_keeper_retry_deadlines: dict[str, float] = {}
@@ -268,6 +282,9 @@ class VaccineTab(QWidget):
         self.fetch_button.clicked.connect(self.fetch_current_patient_from_emr)
         self.kdca_login_button = QPushButton("Log in to KDCA")
         self.kdca_login_button.clicked.connect(self.log_in_to_kdca)
+        self.kdca_stop_button = QPushButton("Stop")
+        self.kdca_stop_button.setEnabled(False)
+        self.kdca_stop_button.clicked.connect(self._stop_kdca_operation)
         self.open_general_system_button = QPushButton("Open General")
         self.open_general_system_button.clicked.connect(
             lambda: self.open_vaccine_system("general")
@@ -364,6 +381,8 @@ class VaccineTab(QWidget):
         self._refresh_previews()
 
     def fetch_current_patient_from_emr(self) -> bool:
+        if self._kdca_thread is not None:
+            return False
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             profile = get_active_emr_target_profile(connection)
@@ -437,32 +456,89 @@ class VaccineTab(QWidget):
         return True
 
     def log_in_to_kdca(self) -> bool:
-        """Run one explicit certificate-login attempt using the unlocked vault only."""
-
-        initialize_database(self._db_path)
-        with connect(self._db_path) as connection:
-            settings = get_settings(connection)
-        result = start_kdca_certificate_login(settings)
-        self.status_label.setText(result.message)
-        return result.success
+        return self._start_kdca_operation()
 
     def open_vaccine_system(self, system: str) -> bool:
-        """Confirm KDCA authentication, then open one configured system.
+        return self._start_kdca_operation(system)
 
-        No patient context, resident number, or credential value is transferred to
-        the external site from this action.
-        """
-
+    def _start_kdca_operation(self, system: str | None = None) -> bool:
+        """Return whether a single background operation was accepted."""
+        if self._kdca_thread is not None:
+            return False
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
-        authentication = start_kdca_certificate_login(settings)
-        if not authentication.success:
-            self.status_label.setText(authentication.message)
-            return False
-        result = open_vaccine_system(settings, system)
+        self._kdca_cancel.clear()
+        self._set_kdca_busy(True)
+        self.status_label.setText("KDCA: starting...")
+
+        def worker() -> None:
+            com_initialized = False
+            started = monotonic()
+
+            def progress(message: str) -> None:
+                logging.getLogger(__name__).info("KDCA stage: %s (%.1fs)", message, monotonic() - started)
+                self.kdca_progress.emit(message)
+
+            try:
+                import pythoncom
+
+                pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+                com_initialized = True
+                result = start_kdca_certificate_login(
+                    settings, progress=progress,
+                    cancelled=self._kdca_cancel.is_set,
+                )
+                if result.success and system and not self._kdca_cancel.is_set():
+                    result = open_vaccine_system(
+                        settings, system, browser_handle=result.browser_handle,
+                        progress=progress,
+                        cancelled=self._kdca_cancel.is_set,
+                    )
+            except Exception:
+                # Provider exceptions may contain sensitive data. Do not display
+                # raw exceptions or send credentials through Qt signals.
+                result = KdcaCertificateLoginResult(
+                    False, "unexpected_error", "KDCA operation failed. Check the current browser/popup and retry.",
+                )
+            finally:
+                if com_initialized:
+                    pythoncom.CoUninitialize()
+                if self._kdca_cancel.is_set():
+                    result = KdcaCertificateLoginResult(False, "cancelled", "KDCA operation stopped.")
+                logging.getLogger(__name__).info(
+                    "KDCA outcome: success=%s (%.1fs)", result.success, monotonic() - started,
+                )
+                try:
+                    self.kdca_finished.emit(result)
+                except RuntimeError:
+                    pass  # The widget was destroyed while a UIA call returned.
+
+        self._kdca_thread = threading.Thread(target=worker, name="KDCA login and launch", daemon=True)
+        self._kdca_thread.start()
+        return True
+
+    def _set_kdca_busy(self, busy: bool) -> None:
+        self.kdca_stop_button.setEnabled(busy)
+        for button in (
+            self.kdca_login_button, self.open_general_system_button,
+            self.open_influenza_system_button, self.open_covid_system_button,
+            self.fetch_button, self.settings_page.system_targets_editor.session_reset_now_button,
+        ):
+            button.setEnabled(not busy)
+
+    def _stop_kdca_operation(self) -> None:
+        self._kdca_cancel.set()
+        self.kdca_stop_button.setEnabled(False)
+        self.status_label.setText("KDCA: stopping after the current UIA call...")
+
+    def _show_kdca_progress(self, message: str) -> None:
+        self.status_label.setText(message)
+
+    def _finish_kdca_operation(self, result) -> None:
+        self._kdca_thread = None
+        self._set_kdca_busy(False)
         self.status_label.setText(result.message)
-        return result.success
 
     def check_influenza_program(self) -> InfluenzaEligibilityResult:
         initialize_database(self._db_path)
@@ -946,6 +1022,9 @@ class VaccineTab(QWidget):
         timer = self._session_keeper_timers.get(target_key)
         if target is None or timer is None:
             return
+        if self._kdca_thread is not None:
+            timer.start(SESSION_KEEPER_RETRY_MS)
+            return
         deadline = self._session_keeper_retry_deadlines.get(target_key)
         if deadline is not None and monotonic() >= deadline:
             self._stop_session_keeper_retry(target)
@@ -1012,6 +1091,8 @@ class VaccineTab(QWidget):
     def reset_vaccine_sessions_now(self) -> None:
         """Run one guarded native-session reset without requiring timer opt-in."""
 
+        if self._kdca_thread is not None:
+            return
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
@@ -1583,6 +1664,7 @@ class VaccineTab(QWidget):
         system_controls.addWidget(self.open_general_system_button)
         system_controls.addWidget(self.open_influenza_system_button)
         system_controls.addWidget(self.open_covid_system_button)
+        system_controls.addWidget(self.kdca_stop_button)
         system_controls.addStretch()
 
         content = QGridLayout()
