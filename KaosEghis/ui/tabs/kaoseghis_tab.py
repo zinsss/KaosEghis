@@ -422,6 +422,7 @@ class LauncherPage(QWidget):
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("Macro status will appear here.")
         self.log.setFixedHeight(72)
+        self.log.document().setMaximumBlockCount(200)
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
@@ -440,6 +441,9 @@ class LauncherPage(QWidget):
 
     def activate_page(self) -> None:
         pass
+
+    def show_emr_signal_status(self, message: str) -> None:
+        self.log.appendPlainText(message)
 
     def toggle_connection(self, checked: bool) -> None:
         if checked:

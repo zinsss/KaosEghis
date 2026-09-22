@@ -2,9 +2,53 @@
 
 Last updated: 2026-09-22
 
-Status: design requirements agreed with the operator; the shared manager and
-F6/F7 listener are not implemented yet. This document changes no runtime settings,
-database privileges, polling behavior, or EMR data.
+Status: the shared DB manager is still a design. An observation-only F6/F7 probe
+now writes to the existing Launcher status area. It does not change database
+privileges, polling behavior, or EMR data.
+
+## Observation-Only Probe
+
+`core/emr_signal_probe.py` starts with runtime services, not workspace construction.
+No new UI is added. Launcher status lines distinguish `F6`, `F7`, `F6 button`, and
+`F7 button`, followed by the chart number and the age of its pre-action snapshot.
+
+- The existing EMR connection supplies the process, root window, and treatment
+  window. Keyboard capture requires focus inside the treatment child, not merely
+  the EMR process. Claim-page F7, other apps, modal dialogs, modified keys,
+  injected inputs, and held-key repeats are excluded.
+- Button capture uses exact `BtnF6`/`BtnF7` UIA IDs under the treatment window,
+  then native HWND hit-testing for a matching left-button press and release.
+  Dragging off a button is not a click. A first click activating EMR may show
+  chart unavailable until a fresh treatment-context snapshot is available.
+- Chart capture uses the operator-supplied screen point `(222, 115)`. The point
+  must belong to a Text control in the connected EMR window. The background
+  worker validates that target and reads its numeric text with a bounded native
+  WM_GETTEXT call, approximately every 250 ms. It never opens patient information.
+- UIA discovery runs only in that worker, is scoped, and caches button handles.
+  Missing buttons retry at most every five seconds. Input callbacks do no UIA
+  searches, DB reads, text reads, synchronous UI updates, or input injection.
+  Both listeners use `suppress=False` and always pass input through.
+- Snapshots older than 750 ms, missing/non-numeric values, and uncertain contexts
+  are not presented as chart identity. The status says `Chart unavailable`.
+  Even a recent snapshot is provisional: a patient switch between sampling and
+  the input can race. Live validation is required before downstream use.
+- Observations remain only in memory and the bounded existing status text area.
+  No chart numbers are written to files, databases, or network destinations.
+  Queue overload is reported, rather than silently implying complete coverage.
+- No 20-second reconciliation timer or DB queue is enabled in this probe. Each
+  separate physical press/click remains visible for diagnosis. PACS polling and
+  flu reports are untouched.
+
+After restarting KaosEghis, connect EMR and verify the four inputs during normal
+work. Compare every displayed chart number with the patient on screen, including
+rapid patient changes and F7 confirmation/print dialogs. Also test claim-page F7,
+EMR restart/reconnect, and launcher drag/drop. Do not trigger clinical actions just
+to exercise the probe. Changed screen placement/DPI may invalidate the chart point;
+this diagnostic is not yet an authoritative patient-identity source.
+
+The input-hook constraints follow Microsoft's
+[low-level hook guidance](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)
+and pynput's [suppression documentation](https://pynput.readthedocs.io/en/latest/faq.html).
 
 ## Purpose and Ownership
 
@@ -157,4 +201,5 @@ Before enabling the new source path:
 `core/eghis_db.py` already requests read-only sessions and uses nested cursor and
 connection cleanup. Flu queries have connection/statement limits. This is useful
 groundwork, but not certification of the complete policy above: the shared queue,
-reviewed-operation API, privilege verification, and signal capture remain work to do.
+reviewed-operation API, privilege verification, and production validation of signal
+capture remain work to do.

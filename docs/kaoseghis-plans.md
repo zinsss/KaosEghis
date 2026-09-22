@@ -48,6 +48,8 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 
 - planned shared read adapter for PACS, KaosOrders, patient lookups, and on-demand
   flu reporting; implementation is not yet enabled
+- observation-only probe implemented: Launcher status displays F6/F7 key or button
+  source with a provisional chart snapshot; no DB reads or polling changes
 - observe F6/F7 and their buttons, capture verified chart identity, and reconcile
   source state after the fixed per-chart 20-second delay
 - coordinate a bounded background queue with at most one live source DB connection;

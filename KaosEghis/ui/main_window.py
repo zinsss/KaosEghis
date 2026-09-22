@@ -23,6 +23,7 @@ from KaosEghis.core.emr_patient_alert import (
     EmrPatientAlertResult,
     patient_alert_configuration_from_settings,
 )
+from KaosEghis.core.emr_signal_probe import EmrSignalProbeRuntime
 from KaosEghis.core.launcher_hotkey import LauncherHotkeyRuntime, SoclHotkeyRuntime
 from KaosEghis.core.pw_runtime import ForegroundWindowContext, PwRuntime
 from KaosEghis.core.scheduler import SchedulerRuntime
@@ -112,6 +113,10 @@ class MainWindow(QMainWindow):
             self.notification_area, Qt.Corner.TopRightCorner
         )
         self.kaoseghis_tab = KaosEghisTab()
+        self.emr_signal_probe = EmrSignalProbeRuntime(self)
+        self.emr_signal_probe.status_message.connect(
+            self.kaoseghis_tab.launcher_page.show_emr_signal_status
+        )
         self.scheduler_runtime = SchedulerRuntime(parent=self)
         tabs.addTab(self.kaoseghis_tab, "KaosEghis")
         self.memos_tab = MemosTab()
@@ -158,6 +163,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setTabToolTip(self.pacs_tab_index, reason)
 
     def closeEvent(self, event) -> None:
+        self.emr_signal_probe.stop()
         self.patient_alert_monitor.stop()
         self.patient_alert_popup.close()
         self.kaoseghis_tab.close_socl_window()
@@ -180,6 +186,7 @@ class MainWindow(QMainWindow):
             )
         self.pw_runtime.start()
         self.patient_alert_monitor.start()
+        self.emr_signal_probe.start()
 
     def _handle_launcher_hotkey(self) -> None:
         self.tabs.setCurrentWidget(self.kaoseghis_tab)

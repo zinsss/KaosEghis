@@ -12,8 +12,10 @@ Signal observation and source database access will belong to the shared
 reporting. Its mandatory read-only and immediate-connection-closure policy applies
 to this entire source path; downstream publishing starts only after DB closure.
 
-The captured controls and timing below are planning data only. They do not enable a
-runtime listener, change eGHIS, or post any patient/order data today.
+An observation-only probe now displays key/button sources and provisional chart
+snapshots in the existing Launcher status area. It neither changes eGHIS nor posts
+patient/order data. The fixed-delay reconciliation and shared DB manager below
+are still planned; see the probe's limitations in the adapter document.
 
 ## Verified eGHIS Action Targets
 
@@ -85,7 +87,8 @@ duplicate database reads and duplicate downstream notifications.
 
 ## Next Implementation Work
 
-1. Add configurable F6/F7 and `BtnF6`/`BtnF7` signal targets to KaosEghis-emr.
+1. Validate the observation-only probe in normal work, then make its targets
+   configurable and establish authoritative chart capture before downstream use.
 2. Implement the chart-scoped fixed-delay queue with tests for deduplication and
    independent patients.
 3. Verify the narrow read-only queries for `보류`, `완료`, and `취소` against the
