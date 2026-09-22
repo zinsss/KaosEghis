@@ -1,6 +1,6 @@
 # KaosEghis Plans
 
-Last updated: 2026-08-28
+Last updated: 2026-09-22
 
 ## Current Working State
 
@@ -43,6 +43,21 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - encounter selections and generated text are not persisted
 - no diagnosis, Assessment/Plan, order, or EMR automation behavior
 - detailed design: `docs/kaoseghis-socl.md`
+
+### KaosEghis-emr
+
+- planned shared read adapter for PACS, KaosOrders, patient lookups, and on-demand
+  flu reporting; implementation is not yet enabled
+- observe F6/F7 and their buttons, capture verified chart identity, and reconcile
+  source state after the fixed per-chart 20-second delay
+- coordinate a bounded background queue with one active source read at a time
+- mandatory: never modify the EMR database; fail closed without verified read-only
+  access and reviewed operations
+- mandatory: close every source connection immediately after its read, including
+  error/timeout/cancellation cleanup; no idle pool or connection held for publishing
+- preserve fallback reconciliation until signal capture is validated and account
+  for independently running legacy pollers during migration
+- requirements and acceptance gates: [KaosEghis-emr](kaoseghis-emr.md)
 
 ### KaosEghis-pacs
 

@@ -1,12 +1,16 @@
 # KaosOrders Signal Capture Plan
 
-Last updated: 2026-09-10
+Last updated: 2026-09-22
 
 ## Status
 
 KaosOrders is planned as a separate staff-facing order-board service. KaosEghis will
 remain the eGHIS-side adapter: it observes configured eGHIS operator actions, reads
 the database in read-only mode, and later publishes verified order state to KaosOrders.
+Signal observation and source database access will belong to the shared
+[KaosEghis-emr adapter](kaoseghis-emr.md), also used by PACS and on-demand flu
+reporting. Its mandatory read-only and immediate-connection-closure policy applies
+to this entire source path; downstream publishing starts only after DB closure.
 
 The captured controls and timing below are planning data only. They do not enable a
 runtime listener, change eGHIS, or post any patient/order data today.
@@ -81,8 +85,7 @@ duplicate database reads and duplicate downstream notifications.
 
 ## Next Implementation Work
 
-1. Add configurable F6/F7 and `BtnF6`/`BtnF7` signal targets to the future KaosOrders
-   adapter.
+1. Add configurable F6/F7 and `BtnF6`/`BtnF7` signal targets to KaosEghis-emr.
 2. Implement the chart-scoped fixed-delay queue with tests for deduplication and
    independent patients.
 3. Verify the narrow read-only queries for `보류`, `완료`, and `취소` against the
