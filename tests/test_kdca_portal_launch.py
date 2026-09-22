@@ -273,6 +273,61 @@ def test_duplicate_selection_links_are_not_guessed(scene):
     assert all(item.clicked == 0 for item in links)
 
 
+@pytest.mark.parametrize("system,image_id", [("general", "ocs_button1"), ("influenza", "inf_button1")])
+@pytest.mark.parametrize("wrapped_image", [False, True])
+def test_launch_link_and_its_named_image_are_one_action(scene, system, image_id, wrapped_image):
+    from KaosEghis.db.repositories import DEFAULT_SETTINGS
+
+    operation = portal.KdcaPortalLaunch(scene.settings | DEFAULT_SETTINGS, system, 101)
+    operation.phase = "system_link"
+    name = portal.LAUNCH_CONTROL_NAMES[system]
+    image = Node("Image", name=name, auto_id=image_id)
+    child = Node("Group", children=[image]) if wrapped_image else image
+    link = Node("Hyperlink", name=name, children=[child])
+    selection = Node("Document", url="https://ois.kdca.go.kr/irad/regsCommon.do", children=[link])
+    scene.document.replace(selection)
+
+    assert operation.advance() is None
+    assert operation.phase == "system_window"
+    assert link.clicked == 1
+    assert image.clicked == 0
+    assert operation.advance() is None
+    assert link.clicked == 1
+
+
+def test_separate_identically_named_link_image_pairs_remain_ambiguous(scene):
+    operation = portal.KdcaPortalLaunch(scene.settings, "general", 101)
+    operation.phase = "system_link"
+    name = portal.LAUNCH_CONTROL_NAMES["general"]
+    links = [Node("Hyperlink", name=name, children=[Node("Image", name=name)]) for _ in range(2)]
+    scene.document.replace(*links)
+    assert "Multiple" in operation.advance()
+    assert all(link.clicked == link.children[0].clicked == 0 for link in links)
+
+
+def test_named_image_is_retained_when_its_parent_does_not_match(scene):
+    operation = portal.KdcaPortalLaunch(scene.settings, "general", 101)
+    operation.phase = "system_link"
+    image = Node("Image", name=portal.LAUNCH_CONTROL_NAMES["general"], auto_id="ocs_button1")
+    other_link = Node("Hyperlink", name="Unrelated action", children=[image])
+    scene.document.replace(other_link)
+    assert operation.advance() is None
+    assert image.clicked == 1
+    assert other_link.clicked == 0
+
+
+def test_named_image_is_not_collapsed_across_document_boundary(scene):
+    operation = portal.KdcaPortalLaunch(scene.settings, "general", 101)
+    operation.phase = "system_link"
+    name = portal.LAUNCH_CONTROL_NAMES["general"]
+    image = Node("Image", name=name)
+    nested = Node("Document", url="https://ois.kdca.go.kr/irad/regsCommon.do", children=[image])
+    link = Node("Hyperlink", name=name, children=[nested])
+    scene.document.replace(link)
+    assert "Multiple" in operation.advance()
+    assert link.clicked == image.clicked == 0
+
+
 def test_nested_document_enumeration_deduplicates_same_link(scene):
     operation = portal.KdcaPortalLaunch(scene.settings, "general", 101)
     operation.phase = "system_link"

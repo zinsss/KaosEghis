@@ -85,6 +85,32 @@ def _matches_launch_link(element, launch_url, control_name):
         return False
 
 
+def _collapse_link_images(matches):
+    """Chrome exposes a launch link and its contained image as separate matches."""
+    identities = {(int(window.handle), document_identity(element))
+                  for window, element in matches}
+    actions = []
+    for window, element in matches:
+        contained_image = False
+        if element.element_info.control_type == "Image":
+            try:
+                parent = element.parent()
+                for _ in range(40):
+                    kind = parent.element_info.control_type
+                    if kind in {"Document", "Window"}:
+                        break
+                    if kind in {"Hyperlink", "Button"}:
+                        contained_image = (int(window.handle), document_identity(parent)) in identities
+                        break
+                    parent = parent.parent()
+            except Exception:
+                # An unverified relationship must remain ambiguous.
+                pass
+        if not contained_image:
+            actions.append((window, element))
+    return actions
+
+
 def _activate_once(window, element, origins, cancelled):
     """Resolve the input method before dispatch: never retry a dispatched click."""
     try:
@@ -227,6 +253,7 @@ class KdcaPortalLaunch:
                     if identity not in seen and identity not in self.activated_ids:
                         matches.append((window, element))
                         seen.add(identity)
+        matches = _collapse_link_images(matches)
         if len(matches) > 1:
             return "Multiple vaccine launch controls match. Check System targets or open the system manually."
         if not matches:

@@ -478,6 +478,11 @@ worker is started while that call is outstanding.
   considered only when an explicit launch-control name is configured. Foreign-origin
   iframe controls are excluded. Each matched action is sent once, with no direct-URL
   fallback and no second click after an uncertain provider error.
+- Chrome exposes the General/Influenza launch link and its contained image
+  (`ocs_button1` / `inf_button1`) as two UIA elements with the same name. A matching
+  image whose nearest actionable ancestor is also a matched link/button is counted
+  once, and that ancestor is activated. Separate links, separate windows, and controls
+  across a Document boundary are not merged; true ambiguity still stops the launch.
 - A system-selection page or Influenza popup can be followed in the original browser
   window, or a newly visible/owned window in the same browser process. Unrelated
   pre-existing browser windows and other browser processes are excluded. Influenza
