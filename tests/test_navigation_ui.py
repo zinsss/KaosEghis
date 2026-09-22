@@ -907,6 +907,60 @@ def test_flu_panel_unconfigured_worker_result_is_non_modal(tmp_path) -> None:
     assert panel.total_visits_label.text() == "Total Visits(Practice) Count: 0"
     assert panel.search_button.isEnabled() is True
 
+
+def test_flu_worker_reports_timeout_and_records_connection_cleanup(tmp_path, monkeypatch):
+    import json
+    from KaosEghis.ui.plugins import flu_panel as module
+
+    _app()
+    panel = module.FluPanel(tmp_path / "KaosEghis.sqlite")
+    panel._load_generation = 1
+    panel._loading = True
+    monkeypatch.setattr(panel, "_load_report_settings", lambda: {
+        "eghis_db_connection_string": "postgresql://secret-credentials",
+    })
+
+    def fetch(_settings, **kwargs):
+        kwargs["timings"].update({"connected": 0.01, "connection_closed": 3.01})
+        raise module.WeeklyAgeReportingTimeoutError("Flu report stopped at the 3-second DB limit.")
+
+    monkeypatch.setattr(module, "fetch_weekly_age_report", fetch)
+    panel._load_report_worker(38, 1)
+    assert "3-second DB limit" in panel.status_label.text()
+    assert panel.search_button.isEnabled()
+    assert not panel._loading
+    text = (tmp_path / "flu-report.jsonl").read_text(encoding="utf-8")
+    record = json.loads(text)
+    assert record["outcome"] == "timeout"
+    assert "connection_closed" in record["stages_seconds"]
+    assert "secret" not in text
+
+
+def test_flu_worker_delivers_report_even_when_log_directory_is_unavailable(monkeypatch):
+    from types import SimpleNamespace
+    from KaosEghis.ui.plugins import flu_panel as module
+
+    _app()
+    panel = module.FluPanel()
+    panel._load_generation = 1
+    panel._loading = True
+    monkeypatch.setattr(panel, "_load_report_settings", lambda: {
+        "eghis_db_connection_string": "postgresql://example",
+    })
+    monkeypatch.setattr(module, "fetch_weekly_age_report", lambda *_args, **_kwargs: [
+        SimpleNamespace(age_group="65 over", visit_count=2, patient_count=1),
+    ])
+
+    def unavailable():
+        raise OSError("log directory unavailable")
+
+    monkeypatch.setattr(module, "get_database_path", unavailable)
+    panel._load_report_worker(38, 1)
+    assert panel.status_label.text() == "Report loaded."
+    assert panel.total_visits_label.text().endswith(": 2")
+    assert panel.search_button.isEnabled()
+    assert not panel._loading
+
 def test_kaosgdd_profile_persists_cookies_and_cache(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 

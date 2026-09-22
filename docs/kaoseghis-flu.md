@@ -1,6 +1,6 @@
 # KaosEghis Flu
 
-Last updated: 2026-09-01
+Last updated: 2026-09-22
 
 Project name: `KaosEghis-flu`
 
@@ -15,7 +15,7 @@ Current visible scope is intentionally small:
 - select an ISO week
 - inspect the derived date range
 - run the weekly age-group practice-count query
-- display the result as plain report text
+- display aggregate results in a table
 
 ## Current Visible UI
 
@@ -27,7 +27,7 @@ Current visible layout:
 
 - title: `Weekly - Influenza Report`
 - `Week No. [ ] : <date range> [Search]`
-- plain-text report output area
+- age-group, visit-count and distinct-patient-count table
 
 Current rendered report format:
 
@@ -61,12 +61,57 @@ Current backend behavior:
 - returns visit count and distinct patient count per group
 - loads SQLite settings and runs PostgreSQL work outside the Qt GUI thread
 - retries a brief SQLite lock once and bounds PostgreSQL connection setup to five seconds
+- limits the flu SQL statement to three seconds on its own connection; no automatic query retry
+- names that PostgreSQL session `KaosEghis-Flu` for attribution
+- closes the cursor and connection on success, error and query timeout
+- stops if a read-only session cannot be established, rather than silently falling back
 - initializes/migrates local SQLite only during application startup, not on every report load
 
 Source tables currently used:
 
 - `public.h1opdin`
 - `public.hz_mst_ptnt`
+
+## EMR Slowdown Investigation (2026-09-22)
+
+The repeatable operator report remains unresolved; closing a connection does not prove
+that a query could not have competed with EMR for database CPU, memory or I/O.
+
+Read-only live metadata and `EXPLAIN (FORMAT JSON)` checks (without `ANALYZE`) found:
+
+- The local eGHIS PostgreSQL server reports version 9.2.4.
+- The configured flu query is the built-in query, not an override.
+- Current and two previous weekly plans use `h1opdin_id01` for the visit date and
+  `hz_mst_ptnt_pkey` for the patient join. No full-table scan appears in these plans.
+- The flu path does not call UIA, change foreground focus, or trigger grid caching.
+- Connection cleanup already existed; SQL execution itself was previously unbounded.
+- The database activity snapshot did not expose other sessions' state to this login,
+  so it cannot establish whether EMR was blocked. Planner estimates are not measured
+  execution times and do not rule out resource contention.
+
+The new timeout is session-local `statement_timeout`, supported by PostgreSQL 9.2.
+No `lock_timeout`, JIT or parallel-worker settings are applied to this older server.
+No schema, index, EMR data or server-wide configuration changes were made. The count
+query and age-group semantics are unchanged.
+
+Each Search writes a bounded timing record beside the local settings database:
+`data/flu-report.jsonl` (64 KiB plus one rotated backup). Fields include UTC timestamp,
+requested week, outcome, total elapsed seconds and cumulative DB milestones through
+`connection_closed`. The file contains no SQL, connection string, raw exception text,
+patient data, or result counts. Logging failure does not change the query result.
+
+On the next slowdown, compare the log timestamp and `connection_closed` milestone with
+when EMR slowed and recovered. A fast, closed report followed by prolonged EMR slowness
+needs a simultaneous database/EMR-service investigation, not another blind query rewrite.
+The three-second cap reduces exposure; it is not evidence that the reported cause is fixed.
+
+The operator confirmed slowness persists after `Report loaded`, not only during Search.
+A live, no-patient-data probe verified read-only mode and the three-second setting on
+9.2.4. A separate 100 ms timeout test using `pg_sleep` raised SQLSTATE `57014`, recorded
+connection closure, and left zero probe sessions in `pg_stat_activity`. This validates
+cleanup/timeout behavior only; it does not reproduce or resolve the EMR slowdown.
+
+Reference: [PostgreSQL 9.2 statement timeout](https://www.postgresql.org/docs/9.2/runtime-config-client.html).
 
 ## Relation to Practice-Count Reporting
 

@@ -1,6 +1,8 @@
 import builtins
 import sys
 
+import pytest
+
 from KaosEghis.core.weekly_age_reporting import (
     WeeklyAgeReportingUnavailableError,
     build_weekly_age_report_query,
@@ -97,8 +99,9 @@ def test_fetch_weekly_age_report_returns_rows(monkeypatch) -> None:
         ("19-49", 12, 8),
         ("65 over", 4, 3),
     ]
-    assert "public.h1opdin" in executed_queries[0]
-    assert fake_psycopg2.options == {"connect_timeout": 5}
+    assert executed_queries[0] == "SET statement_timeout = 3000"
+    assert "public.h1opdin" in executed_queries[1]
+    assert fake_psycopg2.options == {"connect_timeout": 5, "application_name": "KaosEghis-Flu"}
 
 
 def test_fetch_weekly_age_report_uses_configured_query_template(monkeypatch) -> None:
@@ -150,9 +153,10 @@ def test_fetch_weekly_age_report_uses_configured_query_template(monkeypatch) -> 
     )
 
     assert rows[0].age_group == "~0"
-    assert "public.h1opdin" not in executed_queries[0]
-    assert "20260126" in executed_queries[0]
-    assert "5 AS visit_count" in executed_queries[0]
+    assert executed_queries[0] == "SET statement_timeout = 3000"
+    assert "public.h1opdin" not in executed_queries[1]
+    assert "20260126" in executed_queries[1]
+    assert "5 AS visit_count" in executed_queries[1]
 
 
 def test_fetch_weekly_age_report_returns_empty_without_connection_string() -> None:
@@ -236,3 +240,108 @@ def test_run_readonly_query_closes_cursor_and_connection_on_error(monkeypatch) -
         "cursor_close",
         "connection_close",
     ]
+
+
+@pytest.mark.parametrize("failure", [None, "readonly", "timeout_setup", "query", "fetch", "cursor_close"])
+def test_bounded_query_closes_resources_and_records_stages(monkeypatch, failure):
+    from types import SimpleNamespace
+    from KaosEghis.core.eghis_db import EghisDbUnavailableError, run_readonly_query
+
+    events = []
+    timings = {}
+
+    class FakeCursor:
+        description = [("value",)]
+
+        def execute(self, query):
+            events.append(query)
+            if failure == "timeout_setup" and query.startswith("SET"):
+                raise RuntimeError("timeout setup failed")
+            if failure == "query" and query == "SELECT 1":
+                raise RuntimeError("query failed")
+
+        def fetchall(self):
+            if failure == "fetch":
+                raise RuntimeError("fetch failed")
+            return [(1,)]
+
+        def close(self):
+            events.append("cursor_close")
+            if failure == "cursor_close":
+                raise RuntimeError("cursor close failed")
+
+    class FakeConnection:
+        def set_session(self, **options):
+            assert options == {"readonly": True, "autocommit": True}
+            if failure == "readonly":
+                raise RuntimeError("readonly failed")
+
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            events.append("connection_close")
+
+    monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=lambda *_args, **_kwargs: FakeConnection()))
+
+    def run():
+        return run_readonly_query(
+            "postgresql://example", "SELECT 1", statement_timeout_seconds=0.125,
+            timings=timings,
+        )
+
+    if failure is None:
+        assert run() == (["value"], [(1,)])
+    else:
+        with pytest.raises(EghisDbUnavailableError if failure == "readonly" else RuntimeError):
+            run()
+    assert events[-1] == "connection_close"
+    assert "connection_closed" in timings
+    assert list(timings.values()) == sorted(timings.values())
+    if failure == "readonly":
+        assert events == ["connection_close"]
+    else:
+        assert events[0] == "SET statement_timeout = 125"
+        assert "cursor_close" in events
+    if failure in {"readonly", "timeout_setup"}:
+        assert "SELECT 1" not in events
+    if failure in {"readonly", "timeout_setup", "query"}:
+        assert "query_finished" not in timings
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf"), 2147484])
+def test_statement_timeout_cannot_disable_limit_or_overflow(monkeypatch, timeout):
+    from types import SimpleNamespace
+    from KaosEghis.core.eghis_db import run_readonly_query
+
+    monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(
+        connect=lambda *_args, **_kwargs: pytest.fail("must validate before connecting"),
+    ))
+    with pytest.raises(ValueError):
+        run_readonly_query("postgresql://example", "SELECT 1", statement_timeout_seconds=timeout)
+
+
+def test_weekly_report_timeout_is_recognized_without_automatic_retry(monkeypatch):
+    from KaosEghis.core import weekly_age_reporting as module
+
+    class TimedOut(Exception):
+        pgcode = "57014"
+
+    calls = []
+    stages = {}
+
+    def run(_connection, _query, **kwargs):
+        calls.append(kwargs)
+        raise TimedOut("sensitive SQL/connection details")
+
+    monkeypatch.setattr(module, "run_readonly_query", run)
+    with pytest.raises(module.WeeklyAgeReportingTimeoutError) as error:
+        module.fetch_weekly_age_report(
+            {"eghis_db_connection_string": "postgresql://example"},
+            year=2026, start_week=38, timings=stages,
+        )
+    assert len(calls) == 1
+    assert calls[0]["statement_timeout_seconds"] == 3
+    assert calls[0]["timings"] is stages
+    assert "3-second DB limit" in str(error.value)
+    assert "sensitive" not in str(error.value)

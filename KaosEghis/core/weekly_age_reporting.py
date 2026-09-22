@@ -21,6 +21,7 @@ AGE_GROUP_ORDER = [
     "65 over",
 ]
 FLU_DB_CONNECT_TIMEOUT_SECONDS = 5.0
+FLU_DB_STATEMENT_TIMEOUT_SECONDS = 3.0
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,10 @@ class WeeklyAgeRow:
 
 class WeeklyAgeReportingUnavailableError(RuntimeError):
     """Raised when the reporting adapter is unavailable."""
+
+
+class WeeklyAgeReportingTimeoutError(WeeklyAgeReportingUnavailableError):
+    """Raised when the report exceeds its database execution budget."""
 
 
 def iso_week_range(year: int, iso_week: int) -> tuple[str, str]:
@@ -109,6 +114,7 @@ def fetch_weekly_age_report(
     year: int,
     start_week: int,
     end_week: int | None = None,
+    timings: dict[str, float] | None = None,
 ) -> list[WeeklyAgeRow]:
     connection_string = (settings.get("eghis_db_connection_string") or "").strip()
     if not connection_string:
@@ -130,9 +136,18 @@ def fetch_weekly_age_report(
             connection_string,
             query,
             connect_timeout_seconds=FLU_DB_CONNECT_TIMEOUT_SECONDS,
+            statement_timeout_seconds=FLU_DB_STATEMENT_TIMEOUT_SECONDS,
+            application_name="KaosEghis-Flu",
+            timings=timings,
         )
     except (EghisDbQueryRejectedError, EghisDbUnavailableError) as exc:
         raise WeeklyAgeReportingUnavailableError(str(exc)) from exc
+    except Exception as exc:
+        if getattr(exc, "pgcode", None) == "57014":
+            raise WeeklyAgeReportingTimeoutError(
+                "Flu report stopped at the 3-second DB limit. Retry when EMR is idle."
+            ) from exc
+        raise
 
     return [_map_weekly_age_row(column_names, row) for row in rows]
 

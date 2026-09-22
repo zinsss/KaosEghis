@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from KaosEghis.core.weekly_age_reporting import (
     AGE_GROUP_ORDER,
+    WeeklyAgeReportingTimeoutError,
     WeeklyAgeReportingUnavailableError,
     fetch_weekly_age_report,
     iso_week_range,
@@ -29,7 +30,8 @@ from KaosEghis.core.eghis_db import (
     EghisDbQueryRejectedError,
     EghisDbUnavailableError,
 )
-from KaosEghis.db.database import connect
+from KaosEghis.core.flu_report_diagnostics import write_flu_report_diagnostic
+from KaosEghis.db.database import connect, get_database_path
 from KaosEghis.db.repositories import get_settings
 
 
@@ -168,9 +170,13 @@ class FluPanel(QWidget):
         week_number: int,
         generation: int,
     ) -> None:
+        started = time.perf_counter()
+        timings: dict[str, float] = {}
+        outcome = "error"
         try:
             settings = self._load_report_settings()
             if not (settings.get("eghis_db_connection_string") or "").strip():
+                outcome = "unconfigured"
                 self.report_unconfigured.emit(generation)
                 return
             rows = fetch_weekly_age_report(
@@ -178,17 +184,33 @@ class FluPanel(QWidget):
                 year=self._current_year,
                 start_week=week_number,
                 end_week=week_number,
+                timings=timings,
             )
+            outcome = "loaded"
+        except WeeklyAgeReportingTimeoutError as exc:
+            outcome = "timeout"
+            self.report_failed.emit(generation, str(exc))
+            return
         except (
             WeeklyAgeReportingUnavailableError,
             EghisDbUnavailableError,
             EghisDbQueryRejectedError,
         ):
+            outcome = "unavailable"
             self.report_failed.emit(generation, "Flu report DB query failed.")
             return
         except Exception:
             self.report_failed.emit(generation, "Flu report DB query failed.")
             return
+        finally:
+            try:
+                write_flu_report_diagnostic(
+                    (self._db_path or get_database_path()).with_name("flu-report.jsonl"),
+                    year=self._current_year, week=week_number, outcome=outcome,
+                    elapsed_seconds=time.perf_counter() - started, stages=timings,
+                )
+            except OSError:
+                pass  # Resolving the log directory must not change the report result.
 
         counts_by_age = {label: (0, 0) for label in AGE_GROUP_ORDER}
         total_visits = 0
