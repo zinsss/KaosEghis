@@ -379,6 +379,18 @@ The captured targets are used only after explicit post-print consent:
   Focus and URL scope are rechecked. Browser focus and the final value readback
   may settle for up to 750 ms each, within the existing overall deadline, without
   retyping. The full entered value must read back correctly before Enter.
+  If the field's focus flag is false, an exact runtime-ID/type/Automation-ID match
+  against UIA's current focused element can confirm focus instead. Neither a
+  matching field name nor browser foreground alone authorizes typing. If UIA
+  SetFocus does not take, one click may be attempted at the live input rectangle,
+  after verifying that the point hits the same field in the correct foreground
+  browser. Covered/moved fields stop; the saved screen coordinate is not used as
+  an unchecked fallback. Focus must still be independently confirmed after the
+  click. Timeout, input interruption, desktop change, and field-focus failures
+  during activation have separate status messages; they retain the form and send
+  no digits. A later interruption can leave a partial entry, but never sends Enter.
+  UIA's focused-element API is documented by
+  [Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation-getfocusedelement).
 - COVID system: top-level window name `코로나19통합관리시스템`, class
   `CyWindowClass`. Its configured non-clinical session-reset coordinate is
   `(2456, 1982)` and its resident-number input coordinate is `(1466, 2107)`.

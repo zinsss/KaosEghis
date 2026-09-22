@@ -9,7 +9,7 @@ from typing import Callable
 from urllib.parse import urlparse
 
 from KaosEghis.core.kdca_browser import (
-    _document_url, document_identity, foreground_handle, has_keyboard_focus,
+    _document_url, document_identity, focused_element, foreground_handle, has_keyboard_focus,
     iter_documents_for_url,
 )
 from KaosEghis.core.kdca_certificate_login import (
@@ -51,6 +51,7 @@ class _InputTarget:
     activate: Callable[[Callable[[], bool]], bool]
     ready: Callable[[], bool]
     read_value: Callable[[], str] | None = None
+    activation_error: Callable[[], str] | None = None
 
 
 def handoff_request_for_record(record) -> VaccineHandoffRequest:
@@ -105,11 +106,27 @@ def enter_vaccine_resident(
                     "Keep one influenza patient-lookup tab visible and check its input Automation ID."
                 ))
             return VaccineHandoffResult(False, "Open the correct system and check its configured input target.")
+        activation_block = ""
+
         def can_activate() -> bool:
-            return allowed() and first_virtual_desktop_is_active() and _input_is_idle(0) is True
+            nonlocal activation_block
+            if cancelled():
+                activation_block = "Entry stopped before typing."
+            elif monotonic() >= deadline:
+                activation_block = "Entry timed out while focusing the system. No number was typed."
+            elif not first_virtual_desktop_is_active():
+                activation_block = "Virtual Desktop 1 is no longer active. No number was typed."
+            elif _input_is_idle(0) is not True:
+                activation_block = "Keyboard or mouse input interrupted focusing. No number was typed."
+            else:
+                return True
+            return False
 
         if not can_activate() or not target.activate(can_activate):
-            return VaccineHandoffResult(False, "The system input could not be focused. No number was typed.")
+            detail = activation_block or (target.activation_error() if target.activation_error else "")
+            return VaccineHandoffResult(
+                False, detail or "The system input could not be focused. No number was typed.",
+            )
 
         def ready() -> bool:
             return (
@@ -239,6 +256,57 @@ def _focus_belongs_to_window(focused: int, handle: int) -> bool:
     )
 
 
+def _same_browser_input(control, candidate) -> bool:
+    identity = document_identity(control)
+    return (
+        identity is not None and document_identity(candidate) == identity
+        and candidate.element_info.control_type == "Edit"
+        and candidate.element_info.automation_id == control.element_info.automation_id
+    )
+
+
+def _browser_input_has_focus(control) -> bool:
+    if has_keyboard_focus(control):
+        return True
+    try:
+        # A field flag alone can lag behind UIA's current focused element.
+        return _same_browser_input(control, focused_element())
+    except Exception:
+        return False
+
+
+def _click_verified_browser_input(window, control, guard: Callable[[], bool]) -> bool:
+    """One click at the live field, never at an unverified stored coordinate."""
+    try:
+        from pywinauto import Desktop
+        import pyautogui
+
+        handle = int(window.handle)
+        if not guard() or foreground_handle() != handle:
+            return False
+        rectangle = control.rectangle()
+        if rectangle.right <= rectangle.left or rectangle.bottom <= rectangle.top:
+            return False
+        x = (rectangle.left + rectangle.right) // 2
+        y = (rectangle.top + rectangle.bottom) // 2
+        if not guard() or not _screen_point_belongs_to_window(handle, x, y):
+            return False
+        hit = Desktop(backend="uia").from_point(x, y)
+        if not _same_browser_input(control, hit) or foreground_handle() != handle:
+            return False
+        if not guard():
+            return False
+        current = control.rectangle()
+        if not (current.left <= x < current.right and current.top <= y < current.bottom):
+            return False
+        if foreground_handle() != handle or not _screen_point_belongs_to_window(handle, x, y):
+            return False
+        pyautogui.click(x=x, y=y, duration=0)
+        return True
+    except Exception:
+        return False
+
+
 def _browser_input_target(settings: dict[str, str]) -> _InputTarget | None:
     from pywinauto import Desktop
 
@@ -287,6 +355,7 @@ def _browser_input_target(settings: dict[str, str]) -> _InputTarget | None:
         return None
     window, document, control = next(iter(matches.values()))
     owner_identity = document_identity(document)
+    activation_message = ""
 
     def document_ready() -> bool:
         owner = input_document(control)
@@ -299,23 +368,51 @@ def _browser_input_target(settings: dict[str, str]) -> _InputTarget | None:
         )
 
     def activate(guard: Callable[[], bool]) -> bool:
+        nonlocal activation_message
+        activation_message = "Influenza browser did not become the foreground window. No number was typed."
         if not guard():
             return False
-        window.set_focus()
+        if foreground_handle() != int(window.handle):
+            window.set_focus()
         if not _wait_for(lambda: foreground_handle() == int(window.handle), allowed=guard):
             return False
+        activation_message = "Influenza page or input changed before entry. No number was typed."
         if not guard() or not document_ready():
             return False
+        if _browser_input_has_focus(control):
+            return True
         control.set_focus()
+        def guarded() -> bool:
+            nonlocal activation_message
+            if not guard():
+                return False
+            if foreground_handle() != int(window.handle):
+                activation_message = "Influenza browser lost foreground focus. No number was typed."
+                return False
+            if not document_ready():
+                activation_message = "Influenza page or input changed while focusing. No number was typed."
+                return False
+            return True
+
+        activation_message = "Influenza input keyboard focus was not confirmed. No number was typed."
+        if _wait_for(lambda: _browser_input_has_focus(control), allowed=guarded):
+            return True
+        if not guarded():
+            return False
+        activation_message = "Influenza input could not be safely clicked. Check for a covering popup. No number was typed."
+        if not _click_verified_browser_input(window, control, guarded):
+            return False
+        activation_message = "Influenza input keyboard focus was not confirmed after clicking. No number was typed."
         return _wait_for(
-            lambda: has_keyboard_focus(control),
-            allowed=lambda: guard() and foreground_handle() == int(window.handle) and document_ready(),
+            lambda: _browser_input_has_focus(control), allowed=guarded,
         )
 
     def ready() -> bool:
         return (
-            foreground_handle() == int(window.handle) and has_keyboard_focus(control)
+            foreground_handle() == int(window.handle) and _browser_input_has_focus(control)
             and document_ready()
         )
 
-    return _InputTarget(activate, ready, lambda: str(control.get_value() or ""))
+    return _InputTarget(
+        activate, ready, lambda: str(control.get_value() or ""), lambda: activation_message,
+    )
