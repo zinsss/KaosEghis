@@ -1,8 +1,8 @@
 # KaosEghis-emr
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
 
-Status: the shared DB manager is still a design. An observation-only F6/F7 probe
+Status: the shared DB manager is still a design. An observation-only F6/F7/chart probe
 now writes to the existing Launcher status area. It does not change database
 privileges, polling behavior, or EMR data.
 
@@ -12,6 +12,7 @@ privileges, polling behavior, or EMR data.
 No new UI is added. Launcher status lines distinguish `F6`, `F7`, `F6 button`,
 `F7 button`, `F6 activation (UIA)`, and `F7 activation (UIA)`, followed by the
 chart number and snapshot age when identity is available.
+Chart-field UIA events and sampled chart changes also appear here as distinct sources.
 
 - The existing EMR connection supplies the process, root window, and treatment
   window. Keyboard capture requires focus inside the treatment child, not merely
@@ -27,7 +28,7 @@ chart number and snapshot age when identity is available.
   the eGHIS provider emits this event for either keyboard or mouse activation.
   Both original input listeners remain enabled for comparison; duplicate lines
   are intentional in this diagnostic phase.
-- UIA event callbacks verify only cached sender metadata (process, automation
+- Button UIA event callbacks verify only cached sender metadata (process, automation
   ID, HWND, control type), then enqueue an observation from the existing chart
   snapshot. They do not read the sender's text, query the DB, scan a tree, or
   request a fresh patient read. An unverified sender is reported once per
@@ -59,7 +60,7 @@ chart number and snapshot age when identity is available.
   A UIA listener failure leaves the keyboard/mouse probe running. Cleanup failures
   disable the UIA listener instead of accumulating subscriptions. Removed handlers
   reject late callbacks. This code never calls process-wide `RemoveAllEventHandlers`.
-- Snapshots older than 750 ms, missing/non-numeric values, and uncertain contexts
+- F6/F7 snapshots older than 750 ms, missing/non-numeric values, and uncertain contexts
   are not presented as chart identity. The status says `Chart unavailable` with
   a non-patient reason: expired snapshot, unreadable/non-numeric UIA text,
   wrong/covered point, changed focus/target, or provider/access failure.
@@ -98,10 +99,46 @@ solely to exercise the probe. Record missing, duplicate, or delayed UIA events
 and check the chart snapshot against the patient on screen. Only after that
 validation should replacing either original listener be considered.
 
+### Chart-Change Comparison
+
+`core/emr_chart_probe.py` subscribes to Name, Value, LegacyName, and LegacyValue
+property changes on the exact verified Text control already found by the chart
+reader at `(222, 115)`. It does not save or depend on the numeric Automation ID.
+The binding is identified by the current EMR scope and UIA runtime ID. Reconnects
+or replaced controls remove the old handler and bind to the newly discovered
+instance, including virtual UIA controls without their own HWND. Late callbacks
+from a replaced binding are ignored.
+
+The chart listener uses the same MTA worker as the button listener for all
+registration/removal. Failed subscription retries are bounded to five seconds;
+cleanup failure stops this listener without accumulating handlers. Callbacks use
+cached process/runtime/type metadata and the event's new-value payload, never a
+fresh UIA text read. Invalid values are not displayed, and provider exception text
+is not logged. A verified empty field can be subscribed before a patient is selected.
+
+Launcher status distinguishes:
+
+- `UIA chart change subscribed`: listener registration succeeded, not proof of delivery.
+- `Chart field event (UIA Name)` (or Value/LegacyName/LegacyValue): a genuine
+  property callback, showing only a numeric chart value, a cleared-field status,
+  or a redacted unavailable-value status. Multiple properties may report the same change.
+- `Chart observed (sampled)`: the existing reader's initial/reconnected baseline.
+- `Chart changed (sampled)`: that reader saw a different number; this is not a UIA event.
+- `Chart field empty (sampled)`: the reader verified an empty field. Focus loss or
+  a read failure is not presented as a cleared patient.
+
+During normal patient changes, compare UIA lines with sampled lines. A value set
+before the first subscription may have only a sampled baseline. Same-patient
+reloads may not change any chart property. Neither kind of line proves that all
+patient fields/orders have finished loading, and property events do not overwrite
+F6/F7 snapshots or trigger alerts/DB work. Existing patient-alert monitoring is
+unchanged. EMR event delivery still requires live verification; a real property
+change on an isolated, hidden Windows test field has verified the callback path.
+
 ### Resource Boundaries
 
-The UIA activation listener adds no chart polling or database calls. It reuses
-the existing two button handles and the existing roughly 250-ms chart sampling.
+The UIA activation and chart listeners add no chart polling or database calls.
+They reuse the existing two button handles and roughly 250-ms chart sampling.
 That sampling still has UIA/provider cost: the whole diagnostic is not event-only.
 Subscriptions are element-scoped, never desktop-wide. Event handlers use a bounded
 queue and perform no synchronous UI update. No resource benchmark against EMR's
@@ -111,9 +148,11 @@ avoid idle queries but could issue more, narrower queries during busy work.
 The input-hook constraints follow Microsoft's
 [low-level hook guidance](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)
 and pynput's [suppression documentation](https://pynput.readthedocs.io/en/latest/faq.html).
-The activation listener follows Microsoft's
+The listeners follow Microsoft's
 [UIA event guidance](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-eventsforclients)
 and [UIA threading requirements](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-threading).
+Chart events use the
+[property-change callback](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationpropertychangedeventhandler-handlepropertychangedevent).
 
 ## Purpose and Ownership
 

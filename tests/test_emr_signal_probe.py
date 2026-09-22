@@ -240,6 +240,54 @@ def test_uia_activation_discards_obsolete_or_invalid_sources(capture, context):
     assert capture.output.empty()
 
 
+def test_sampled_chart_changes_are_distinct_and_do_not_repeat(capture):
+    first = capture.snapshot
+    capture.update_snapshot(first)
+    initial = capture.output.get_nowait()
+    assert initial.source == "Chart observed (sampled)"
+    assert "not a UIA event" in initial.status_text()
+    capture.update_snapshot(first)
+    capture.update_snapshot(None)  # Foreground/modal transitions are not patient changes.
+    capture.update_snapshot(first)
+    assert capture.output.empty()
+    capture.update_snapshot(replace(first, chart_no="000456"))
+    changed = capture.output.get_nowait()
+    assert changed.source == "Chart changed (sampled)"
+    assert changed.chart_no == "000456"
+    assert "000456" not in repr(changed)
+
+
+def test_sampled_chart_clears_only_on_verified_empty_value_and_resets_on_restart(capture):
+    first = capture.snapshot
+    capture.update_snapshot(first)
+    capture.output.get_nowait()
+    capture.update_snapshot(replace(first, chart_no="", unavailable_reason="EMR not focused"))
+    assert capture.output.empty()
+    capture.update_snapshot(replace(first, chart_no="", unavailable_reason="chart UIA text is empty"))
+    assert capture.output.get_nowait().source == "Chart field empty (sampled)"
+    capture.update_snapshot(first)
+    assert capture.output.get_nowait().source == "Chart observed (sampled)"
+    capture.test_state.pid += 1
+    capture.update_snapshot(replace(first, scope=probe.connected_scope(capture.test_state)))
+    assert capture.output.get_nowait().source == "Chart observed (sampled)"
+
+
+def test_property_event_uses_its_payload_not_previous_snapshot(capture):
+    scope = capture.snapshot.scope
+    capture.reader.chart_number = lambda scope: pytest.fail("Callback read chart")
+    capture.chart_property_event(scope, "Name", "000456")
+    event = capture.output.get_nowait()
+    assert event.chart_no == "000456"
+    assert "UIA Name" in event.status_text()
+    assert capture.snapshot.chart_no == "001234"  # Probe events do not authorize patient identity.
+    capture.test_state.pid += 1
+    capture.chart_property_event(scope, "Name", "000789")
+    assert capture.output.empty()
+    capture.enabled = False
+    capture.chart_property_event(probe.connected_scope(capture.test_state), "Name", "000789")
+    assert capture.output.empty()
+
+
 def test_sampler_caches_buttons_but_rereads_chart_and_recaches_after_restart():
     reader = Reader()
     current_state = state()
@@ -375,6 +423,7 @@ def test_runtime_starts_once_stops_and_discards_late_signals():
     application = app()
     listeners = (Listener(), Listener())
     activation_calls = []
+    chart_calls = []
 
     def activation_factory(capture, reader):
         activation_calls.append(("create", threading.get_ident()))
@@ -383,9 +432,17 @@ def test_runtime_starts_once_stops_and_discards_late_signals():
             close=lambda: activation_calls.append(("close", threading.get_ident())),
         )
 
+    def chart_factory(capture, reader):
+        chart_calls.append(("create", threading.get_ident()))
+        return SimpleNamespace(
+            sync=lambda scope, target: chart_calls.append(("sync", threading.get_ident())),
+            close=lambda: chart_calls.append(("close", threading.get_ident())),
+        )
+
     runtime = probe.EmrSignalProbeRuntime(
         reader_factory=Reader, listener_factory=lambda _capture: listeners, state_provider=state,
         activation_factory=activation_factory,
+        chart_factory=chart_factory,
     )
     messages = []
     runtime.status_message.connect(messages.append)
@@ -407,6 +464,9 @@ def test_runtime_starts_once_stops_and_discards_late_signals():
     assert [name for name, _ in activation_calls][-1] == "close"
     assert {ident for _, ident in activation_calls} == {thread.ident}
     assert thread.ident != threading.get_ident()
+    assert chart_calls[0][0] == "create"
+    assert chart_calls[-1][0] == "close"
+    assert {ident for _, ident in chart_calls} == {thread.ident}
     size = len(messages)
     runtime._output.put_nowait("late")
     runtime._drain()
@@ -415,7 +475,8 @@ def test_runtime_starts_once_stops_and_discards_late_signals():
 
 
 @pytest.mark.parametrize("failure", ["factory", "sync"])
-def test_uia_listener_failure_does_not_stop_existing_probe(failure):
+@pytest.mark.parametrize("kind", ["activation", "chart"])
+def test_uia_listener_failure_does_not_stop_existing_probe(failure, kind):
     application = app()
     listeners = (Listener(), Listener())
     failed = threading.Event()
@@ -424,9 +485,14 @@ def test_uia_listener_failure_does_not_stop_existing_probe(failure):
         failed.set()
         raise RuntimeError("provider detail must not be logged")
 
+    factories = {
+        "activation_factory": lambda *args: SimpleNamespace(sync=lambda *args: None, close=lambda: None),
+        "chart_factory": lambda *args: SimpleNamespace(sync=lambda *args: None, close=lambda: None),
+    }
+    factories[f"{kind}_factory"] = fail if failure == "factory" else lambda *args: SimpleNamespace(sync=fail, close=fail)
     runtime = probe.EmrSignalProbeRuntime(
         reader_factory=Reader, listener_factory=lambda capture: listeners, state_provider=state,
-        activation_factory=fail if failure == "factory" else lambda *args: SimpleNamespace(sync=fail, close=fail),
+        **factories,
     )
     runtime.start()
     try:
@@ -513,6 +579,20 @@ def test_chart_read_reuses_control_but_reads_fresh_uia_text(chart_reader):
     assert reader.chart_number(scope) == "000456"
     assert chart_reader.lookups == [(222, 115)]
     assert chart_reader.cache_options == [False]
+    assert reader.chart_target.node is chart_reader.node
+    assert reader.chart_target.owner_handle == 110
+
+
+def test_empty_chart_still_exposes_verified_target_for_property_listener(chart_reader):
+    chart_reader.info.name = ""
+    scope = probe.connected_scope(state())
+    with pytest.raises(probe._ChartUnavailable, match="empty"):
+        chart_reader.reader.chart_number(scope)
+    assert chart_reader.reader.chart_target.node is chart_reader.node
+    chart_reader.reader.keyboard_context = lambda scope: False
+    with pytest.raises(probe._ChartUnavailable, match="not focused"):
+        chart_reader.reader.chart_number(scope)
+    assert chart_reader.reader.chart_target is None
 
 
 @pytest.mark.parametrize("path", ["value", "legacy", "name"])
@@ -620,6 +700,7 @@ def test_chart_read_discards_value_when_context_changes_mid_read(chart_reader, m
     with pytest.raises(probe._ChartUnavailable):
         reader.chart_number(probe.connected_scope(state()))
     assert reader._chart_node is None
+    assert reader.chart_target is None
 
 
 def test_chart_never_reads_other_application_at_coordinate():

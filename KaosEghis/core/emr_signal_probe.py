@@ -16,6 +16,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from KaosEghis.core.eghis_connector import get_cached_eghis_state
 from KaosEghis.core.emr_activation_probe import UiaActivationListener
+from KaosEghis.core.emr_chart_probe import ChartFieldObservation, ChartTarget, UiaChartListener
 from KaosEghis.core.ui_capture import _best_text_value
 from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
@@ -109,6 +110,7 @@ class Win32SignalReader:
         self.user32.SendMessageTimeoutW.restype = wintypes.LPARAM
         self._chart_identity = None
         self._chart_node = None
+        self.chart_target = None
 
     def _belongs(self, parent: int, child: int) -> bool:
         return bool(child and (parent == child or self.gui.IsChild(parent, child)))
@@ -194,6 +196,14 @@ class Win32SignalReader:
             for _, handle in buttons
         )
 
+    def chart_target_live(self, scope: SignalScope, handle: int) -> bool:
+        return bool(
+            self.gui.IsWindow(scope.root) and self.gui.IsWindow(handle)
+            and self._belongs(scope.root, handle)
+            and self.process.GetWindowThreadProcessId(scope.root)[1] == scope.pid
+            and self.process.GetWindowThreadProcessId(handle)[1] == scope.pid
+        )
+
     def _chart_target_error(self, scope, node, hit) -> str:
         info = node.element_info
         if info.control_type != "Text":
@@ -222,6 +232,7 @@ class Win32SignalReader:
         return "chart target window ownership could not be confirmed"
 
     def chart_number(self, scope: SignalScope) -> str:
+        self.chart_target = None
         try:
             if not self.keyboard_context(scope):
                 raise _ChartUnavailable("EMR treatment entry was not focused at sampling")
@@ -243,15 +254,18 @@ class Win32SignalReader:
             # Reuse only the verified control, never its patient value. This is
             # the inspector's Value/Legacy/Name path, not the parent's caption.
             value = (_best_text_value(node) or "").strip()
-            if not value:
-                raise _ChartUnavailable("chart UIA text is empty")
-            if not re.fullmatch(r"[0-9]{1,20}", value):
-                raise _ChartUnavailable("chart UIA text is not numeric")
             if not self.keyboard_context(scope) or self.gui.WindowFromPoint(CHART_POINT) != hit:
                 raise _ChartUnavailable("EMR focus or chart target changed while reading")
             reason = self._chart_target_error(scope, node, hit)
             if reason:
                 raise _ChartUnavailable(reason)
+            # Also expose an empty verified field to the event listener, so its
+            # next patient update can be observed. This stays on the MTA worker.
+            self.chart_target = ChartTarget(scope, node, hit)
+            if not value:
+                raise _ChartUnavailable("chart UIA text is empty")
+            if not re.fullmatch(r"[0-9]{1,20}", value):
+                raise _ChartUnavailable("chart UIA text is not numeric")
             # Parent/virtual hits are reacquired each sample to exclude newly
             # overlaid UIA siblings that share the same native window.
             self._chart_identity = identity if int(node.element_info.handle or 0) == hit else None
@@ -311,6 +325,35 @@ class EmrSignalCapture:
         self.dropped_count = 0
         self._keys_down = set()
         self._mouse_down = None
+        self._sample_scope = None
+        self._sample_chart = ""
+
+    def update_snapshot(self, snapshot) -> None:
+        self.snapshot = snapshot
+        scope = connected_scope(self.state_provider())
+        if scope != self._sample_scope:
+            self._sample_scope, self._sample_chart = scope, ""
+        if not self.enabled or snapshot is None or snapshot.scope != scope:
+            return
+        if snapshot.chart_no and snapshot.chart_no != self._sample_chart:
+            source = "Chart changed (sampled)" if self._sample_chart else "Chart observed (sampled)"
+            self._sample_chart = snapshot.chart_no
+            self._emit(ChartFieldObservation(
+                source, snapshot.chart_no, "not a UIA event; load completion unverified",
+                datetime.now().strftime("%H:%M:%S"),
+            ))
+        elif self._sample_chart and snapshot.unavailable_reason == "chart UIA text is empty":
+            self._sample_chart = ""
+            self._emit(ChartFieldObservation(
+                "Chart field empty (sampled)", "", "not a UIA event", datetime.now().strftime("%H:%M:%S"),
+            ))
+
+    def chart_property_event(self, scope, property_name, value) -> None:
+        if (
+            self.enabled and connected_scope(self.state_provider()) == scope
+            and property_name in {"Name", "Value", "LegacyName", "LegacyValue"}
+        ):
+            self._emit(ChartFieldObservation.from_event(property_name, value))
 
     def _current(self) -> SignalSnapshot | None:
         snapshot = self.snapshot
@@ -438,12 +481,13 @@ class EmrSignalProbeRuntime(QObject):
 
     def __init__(self, parent=None, *, reader_factory=Win32SignalReader,
                  listener_factory=_listeners, state_provider=get_cached_eghis_state,
-                 activation_factory=UiaActivationListener):
+                 activation_factory=UiaActivationListener, chart_factory=UiaChartListener):
         super().__init__(parent)
         self.reader_factory = reader_factory
         self.listener_factory = listener_factory
         self.state_provider = state_provider
         self.activation_factory = activation_factory
+        self.chart_factory = chart_factory
         self._output = queue.Queue(maxsize=64)
         self._stop = threading.Event()
         self._thread = None
@@ -486,6 +530,7 @@ class EmrSignalProbeRuntime(QObject):
 
         initialized = False
         activation = None
+        chart_listener = None
         try:
             pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
             initialized = True
@@ -504,13 +549,17 @@ class EmrSignalProbeRuntime(QObject):
                 activation = self.activation_factory(capture, reader)
             except Exception:
                 capture._emit("EMR probe | UIA activation listener unavailable. Keyboard/mouse probe remains active.")
+            try:
+                chart_listener = self.chart_factory(capture, reader)
+            except Exception:
+                capture._emit("EMR probe | UIA chart listener unavailable. Other probes remain active.")
             while not self._stop.is_set():
                 if not all(listener.is_alive() for listener in self._listeners):
                     raise RuntimeError("Signal listener stopped")
                 try:
-                    capture.snapshot = sampler.sample()
+                    capture.update_snapshot(sampler.sample())
                 except Exception:
-                    capture.snapshot = None
+                    capture.update_snapshot(None)
                 if activation is not None:
                     try:
                         activation.sync(
@@ -524,6 +573,19 @@ class EmrSignalProbeRuntime(QObject):
                             pass
                         activation = None
                         capture._emit("EMR probe | UIA activation listener stopped. Keyboard/mouse probe remains active.")
+                if chart_listener is not None:
+                    try:
+                        chart_listener.sync(
+                            connected_scope(self.state_provider()),
+                            getattr(reader, "chart_target", None) if capture.snapshot else None,
+                        )
+                    except Exception:
+                        try:
+                            chart_listener.close()
+                        except Exception:
+                            pass
+                        chart_listener = None
+                        capture._emit("EMR probe | UIA chart listener stopped. Other probes remain active.")
                 self._stop.wait(0.25)
         except Exception:
             try:
@@ -539,6 +601,13 @@ class EmrSignalProbeRuntime(QObject):
                     activation.close()
                 except Exception:
                     pass
+                activation = None
+            if chart_listener is not None:
+                try:
+                    chart_listener.close()
+                except Exception:
+                    pass
+                chart_listener = None
             for listener in self._listeners:
                 try:
                     listener.stop()
@@ -555,7 +624,7 @@ class EmrSignalProbeRuntime(QObject):
                 break
             if self._running:
                 self.status_message.emit(
-                    item.status_text() if isinstance(item, SignalObservation) else item
+                    item.status_text() if isinstance(item, (SignalObservation, ChartFieldObservation)) else item
                 )
         if self._running and self._capture and self._capture.dropped_count != self._reported_drops:
             self._reported_drops = self._capture.dropped_count
