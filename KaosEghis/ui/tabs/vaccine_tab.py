@@ -318,6 +318,9 @@ class VaccineTab(QWidget):
         self.open_covid_system_button.clicked.connect(
             lambda: self.open_vaccine_system("covid")
         )
+        self.session_reset_now_button = QPushButton("Reset Now")
+        self.session_reset_now_button.setToolTip("Reset General and COVID vaccination sessions")
+        self.session_reset_now_button.clicked.connect(self.reset_vaccine_sessions_now)
         self.save_button = QPushButton("Save record")
         self.save_button.clicked.connect(self.save_record)
         self.new_record_button = QPushButton("New vaccine record")
@@ -563,6 +566,7 @@ class VaccineTab(QWidget):
         for button in (
             self.kdca_login_button, self.open_general_system_button,
             self.open_influenza_system_button, self.open_covid_system_button,
+            self.session_reset_now_button,
             self.fetch_button, self.settings_page.system_targets_editor.session_reset_now_button,
         ):
             button.setEnabled(not busy)
@@ -950,6 +954,7 @@ class VaccineTab(QWidget):
             self.patient_sex_input, self.patient_age_input, self.patient_birth_date_input,
             self.patient_phone_input, self.patient_address_input,
             self.add_type_button, self.edit_type_button, self.delete_type_button,
+            self.session_reset_now_button,
             self.settings_page.system_targets_editor.session_reset_now_button,
         ):
             widget.setEnabled(not blocked)
@@ -1905,6 +1910,7 @@ class VaccineTab(QWidget):
         system_controls.addWidget(self.open_influenza_system_button)
         system_controls.addWidget(self.open_covid_system_button)
         system_controls.addWidget(self.kdca_stop_button)
+        system_controls.addWidget(self.session_reset_now_button)
         system_controls.addStretch()
 
         content = QGridLayout()

@@ -1,6 +1,8 @@
 import os
 from types import SimpleNamespace
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
@@ -153,6 +155,8 @@ def test_kdca_worker_is_single_flight_and_defers_session_reset(tmp_path, monkeyp
         assert not panel.log_in_to_kdca()
         assert not panel.open_covid_system_button.isEnabled()
         assert not panel.fetch_button.isEnabled()
+        assert not panel.session_reset_now_button.isEnabled()
+        panel.session_reset_now_button.click()
         assert panel.fetch_current_patient_from_emr() is False
         panel.reset_vaccine_sessions_now()
         timer = module.QTimer(panel)
@@ -171,6 +175,7 @@ def test_kdca_worker_is_single_flight_and_defers_session_reset(tmp_path, monkeyp
     assert len(calls) == 1
     assert panel.kdca_login_button.isEnabled()
     assert panel.fetch_button.isEnabled()
+    assert panel.session_reset_now_button.isEnabled()
     assert panel.status_label.text() == "KDCA operation stopped."
 
 
@@ -1386,9 +1391,11 @@ def test_session_keeper_is_opt_in_and_never_clicks_during_vaccine_tab_startup(
     )
 
 
+@pytest.mark.parametrize("surface", ["main", "settings"])
 def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
     tmp_path,
     monkeypatch,
+    surface,
 ) -> None:
     _app()
 
@@ -1418,7 +1425,15 @@ def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
     )
 
     page = vaccine_tab.VaccineTab(db_path)
-    page.settings_page.system_targets_editor.session_reset_now_button.click()
+    if surface == "main":
+        button = page.session_reset_now_button
+        row = button.parentWidget().layout()
+        assert button.parentWidget().title() == "KDCA systems"
+        assert row.itemAt(row.count() - 2).widget() is button
+        assert button.text() == "Reset Now"
+    else:
+        button = page.settings_page.system_targets_editor.session_reset_now_button
+    button.click()
 
     assert reset_calls == ["general", "covid"]
     assert "Reset now: General: Session reset sent.; COVID: Session reset sent." in (
@@ -1429,6 +1444,34 @@ def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
         page.settings_page.system_targets_editor.session_keeper_progress_bar.format()
         == "Next reset: off"
     )
+
+
+@pytest.mark.parametrize("state", ["printing", "pending_handoff", "active_handoff"])
+def test_main_session_reset_is_disabled_during_print_and_handoff(tmp_path, monkeypatch, state):
+    _app()
+    from KaosEghis.ui.tabs import vaccine_tab
+
+    monkeypatch.setattr(
+        vaccine_tab, "reset_vaccine_session",
+        lambda *_args, **_kwargs: pytest.fail("reset during print or handoff"),
+    )
+    page = vaccine_tab.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    page._print_in_progress = state == "printing"
+    page._pending_handoffs = [object()] if state == "pending_handoff" else []
+    page._handoff_thread = object() if state == "active_handoff" else None
+    page._update_handoff_controls()
+    for button in (
+        page.session_reset_now_button,
+        page.settings_page.system_targets_editor.session_reset_now_button,
+    ):
+        assert not button.isEnabled()
+        button.click()
+    page._print_in_progress = False
+    page._pending_handoffs = []
+    page._handoff_thread = None
+    page._update_handoff_controls()
+    assert page.session_reset_now_button.isEnabled()
+    assert page.settings_page.system_targets_editor.session_reset_now_button.isEnabled()
 
 
 def test_kdca_login_is_explicit_and_uses_vaccine_settings(tmp_path, monkeypatch) -> None:

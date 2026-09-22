@@ -923,7 +923,10 @@ Provide an explicit `Keep vaccination sessions active` toggle after the operator
 completed authenticated session preparation and KaosEghis has verified the relevant
 applications.
 
-`Vaccine -> Settings -> System targets -> Reset Now` performs one immediate guarded
+`Vaccine -> Main -> KDCA systems -> Reset Now` is the last button in the system row.
+The same action remains in `Vaccine -> Settings -> System targets -> Reset Now`.
+Both buttons are disabled during KDCA login/launch, printing, and resident-number handoff.
+Either button performs one immediate guarded
 reset for the configured General and COVID native windows, even when the recurring
 keeper is off. It uses the same desktop, held-button, exact-window and point-ownership
 checks as the timer, but does not require five seconds of idle time after the operator
