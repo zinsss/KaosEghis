@@ -21,15 +21,27 @@ No new UI is added. Launcher status lines distinguish `F6`, `F7`, `F6 button`, a
   Dragging off a button is not a click. A first click activating EMR may show
   chart unavailable until a fresh treatment-context snapshot is available.
 - Chart capture uses the operator-supplied screen point `(222, 115)`. The point
-  must belong to a Text control in the connected EMR window. The background
-  worker validates that target and reads its numeric text with a bounded native
-  WM_GETTEXT call, approximately every 250 ms. It never opens patient information.
+  must belong to a visible Text control in the connected EMR window and process.
+  The background worker reads its current UIA Value/Legacy/Name using the same
+  helper as the capture inspector, approximately every 250 ms. It never opens
+  patient information. A native window caption is not used as chart identity.
+  Native hit-testing may return the text's parent: the UIA target must still
+  contain the point and have verified EMR ownership, but HWND equality is not
+  required. Virtual targets use a bounded ancestor check, not a tree scan.
+  The control can be reused when the native hit is its own HWND; values are never
+  cached. Parent/virtual hits are resolved again each sample. Invalid controls,
+  unreadable values, changed placement, and connection changes trigger reacquisition.
 - UIA discovery runs only in that worker, is scoped, and caches button handles.
   Missing buttons retry at most every five seconds. Input callbacks do no UIA
   searches, DB reads, text reads, synchronous UI updates, or input injection.
   Both listeners use `suppress=False` and always pass input through.
 - Snapshots older than 750 ms, missing/non-numeric values, and uncertain contexts
-  are not presented as chart identity. The status says `Chart unavailable`.
+  are not presented as chart identity. The status says `Chart unavailable` with
+  a non-patient reason: expired snapshot, unreadable/non-numeric UIA text,
+  wrong/covered point, changed focus/target, or provider/access failure.
+  A failed read is not mislabeled as an expired snapshot. Both keyboard and
+  button observations preserve the pre-action failure reason. Sampling time is
+  measured before the UIA read, so a slow provider cannot make old text look fresh.
   Even a recent snapshot is provisional: a patient switch between sampling and
   the input can race. Live validation is required before downstream use.
 - Observations remain only in memory and the bounded existing status text area.
@@ -45,6 +57,12 @@ rapid patient changes and F7 confirmation/print dialogs. Also test claim-page F7
 EMR restart/reconnect, and launcher drag/drop. Do not trigger clinical actions just
 to exercise the probe. Changed screen placement/DPI may invalidate the chart point;
 this diagnostic is not yet an authoritative patient-identity source.
+
+The first live probe reported all sources but no chart. Its original reader
+required the UIA HWND to equal the native hit and then used only WM_GETTEXT.
+These assumptions have been removed, with regression tests for UIA-only values,
+parent/virtual hits, fresh values on cached controls, and rejected context changes.
+The corrected reader still needs live validation in the elevated clinical app.
 
 The input-hook constraints follow Microsoft's
 [low-level hook guidance](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)

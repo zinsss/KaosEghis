@@ -143,6 +143,22 @@ def test_stale_or_invalid_snapshot_never_shows_cached_patient(capture, age):
     assert not observation.chart_no
     assert "Chart unavailable" in observation.status_text()
     assert "001234" not in observation.status_text()
+    assert "snapshot expired" in observation.status_text() if age >= 0 else "timing invalid" in observation.status_text()
+
+
+@pytest.mark.parametrize("source", ["key", "button"])
+def test_missing_chart_shows_read_failure_not_stale_snapshot(capture, source):
+    capture.snapshot = replace(
+        capture.snapshot, chart_no="", unavailable_reason="chart UIA text is empty",
+    )
+    if source == "key":
+        key(capture)
+    else:
+        mouse(capture)
+        mouse(capture, message=0x202)
+    observation = capture.output.get_nowait()
+    assert "Chart unavailable (chart UIA text is empty)" in observation.status_text()
+    assert "no fresh snapshot" not in observation.status_text()
 
 
 @pytest.mark.parametrize("change", ["held", "patient"])
@@ -209,6 +225,24 @@ def test_sampler_missing_chart_preserves_signal_detection():
     sampler = probe.EmrSignalSampler(reader, state)
     assert sampler.sample().chart_no == ""
     assert len(sampler.sample().buttons) == 2
+    assert sampler.sample().unavailable_reason == "UIA chart read failed; target will be reacquired"
+
+
+@pytest.mark.parametrize("access_denied", [False, True])
+def test_sampler_failure_reason_never_includes_exception_or_patient_values(access_denied):
+    reader = Reader()
+    error = RuntimeError("patient value 001234")
+    if access_denied:
+        error.hresult = -2147024891
+
+    def fail(_scope):
+        raise error
+
+    reader.chart_number = fail
+    snapshot = probe.EmrSignalSampler(reader, state).sample()
+    assert "001234" not in snapshot.unavailable_reason
+    assert not snapshot.chart_no
+    assert ("access denied" in snapshot.unavailable_reason) == access_denied
 
 
 def test_sampler_clears_disconnected_and_inactive_context():
@@ -345,37 +379,153 @@ def test_launcher_appends_to_existing_status_without_new_widgets():
     assert application is not None
 
 
-def test_chart_read_is_scoped_to_text_at_configured_point(monkeypatch):
+@pytest.fixture
+def chart_reader(monkeypatch):
     import pywinauto
 
     reader = object.__new__(probe.Win32SignalReader)
     reader.keyboard_context = lambda scope: True
     reader._chart_identity = None
-    reader._belongs = lambda parent, child: parent == 100 and child == 110
+    reader._chart_node = None
+    reader._belongs = lambda parent, child: parent == child or (parent == 100 and child in (110, 111))
+    reader.process = SimpleNamespace(GetWindowThreadProcessId=lambda handle: (1, 42))
     reader.gui = SimpleNamespace(
         WindowFromPoint=lambda point: 110,
         GetWindowRect=lambda handle: (210, 100, 260, 120),
     )
-    native_reads = []
-    reader._text = lambda handle: native_reads.append(handle) or "001234"
-    info = SimpleNamespace(handle=110, control_type="Text")
+    reader._text = lambda handle: pytest.fail("Must read UIA value, not native caption")
+    cache_options = []
+    info = SimpleNamespace(
+        handle=110, control_type="Text", process_id=42, name="001234", visible=True,
+        rectangle=SimpleNamespace(left=210, top=100, right=260, bottom=120),
+        set_cache_strategy=cache_options.append,
+    )
+    node = SimpleNamespace(element_info=info)
     lookups = []
 
     def from_point(x, y):
         lookups.append((x, y))
-        return SimpleNamespace(element_info=info)
+        return node
 
     monkeypatch.setattr(pywinauto, "Desktop", lambda **kwargs: SimpleNamespace(from_point=from_point))
+    return SimpleNamespace(reader=reader, node=node, info=info, lookups=lookups, cache_options=cache_options)
+
+
+def test_chart_read_reuses_control_but_reads_fresh_uia_text(chart_reader):
+    reader, info = chart_reader.reader, chart_reader.info
     scope = probe.connected_scope(state())
     assert reader.chart_number(scope) == "001234"
+    info.name = "000456"
+    assert reader.chart_number(scope) == "000456"
+    assert chart_reader.lookups == [(222, 115)]
+    assert chart_reader.cache_options == [False]
+
+
+@pytest.mark.parametrize("path", ["value", "legacy", "name"])
+def test_chart_read_uses_same_value_paths_as_capture_inspector(chart_reader, path):
+    node = chart_reader.node
+    if path == "value":
+        node.iface_value = SimpleNamespace(CurrentValue="000456")
+    elif path == "legacy":
+        node.legacy_properties = lambda: {"Value": "000456"}
+    else:
+        node.element_info.name = "000456"
+    assert chart_reader.reader.chart_number(probe.connected_scope(state())) == "000456"
+
+
+@pytest.mark.parametrize("virtual", [False, True])
+def test_chart_read_accepts_native_parent_hit_only_for_verified_uia_text(chart_reader, virtual):
+    reader, info = chart_reader.reader, chart_reader.info
+    info.handle = 0 if virtual else 111
+    info.parent = SimpleNamespace(handle=110, process_id=42)
+    reader._belongs = lambda parent, child: parent == child or (parent, child) in {
+        (100, 110), (100, 111), (110, 111),
+    }
+    scope = probe.connected_scope(state())
     assert reader.chart_number(scope) == "001234"
-    assert lookups == [(222, 115)]
-    assert native_reads == [110, 110]
-    reader._text = lambda handle: "Not a chart number"
-    assert reader.chart_number(scope) == ""
-    reader._chart_identity = None
-    info.control_type = "Button"
-    assert reader.chart_number(scope) == ""
+    info.name = "000456"
+    assert reader.chart_number(scope) == "000456"
+    assert chart_reader.lookups == [(222, 115), (222, 115)]
+
+
+@pytest.mark.parametrize("change,reason", [
+    ("empty", "text is empty"), ("nonnumeric", "text is not numeric"),
+    ("type", "not a chart Text"), ("pid", "not owned"),
+    ("hidden", "moved or is hidden"), ("moved", "moved or is hidden"),
+    ("other_window", "ownership could not be confirmed"),
+])
+def test_chart_read_rejects_unverified_or_unreadable_target(chart_reader, change, reason):
+    reader, info = chart_reader.reader, chart_reader.info
+    scope = probe.connected_scope(state())
+    assert reader.chart_number(scope) == "001234"
+    if change in {"empty", "nonnumeric"}:
+        info.name = "" if change == "empty" else "Patient 001234"
+    elif change == "type":
+        info.control_type = "Button"
+    elif change == "pid":
+        info.process_id = 43
+    elif change == "hidden":
+        info.visible = False
+    elif change == "moved":
+        info.rectangle.top = 200
+    else:
+        info.handle = 999
+    with pytest.raises(probe._ChartUnavailable, match=reason):
+        reader.chart_number(scope)
+    assert reader._chart_identity is None
+    assert reader._chart_node is None
+
+
+def test_chart_read_reacquires_after_value_failure_and_emr_restart(chart_reader):
+    reader, info = chart_reader.reader, chart_reader.info
+    scope = probe.connected_scope(state())
+    assert reader.chart_number(scope) == "001234"
+    info.name = ""
+    with pytest.raises(probe._ChartUnavailable):
+        reader.chart_number(scope)
+    info.name = "000456"
+    assert reader.chart_number(scope) == "000456"
+    info.process_id = 43
+    reader.process.GetWindowThreadProcessId = lambda handle: (1, 43)
+    assert reader.chart_number(replace(scope, pid=43)) == "000456"
+    assert len(chart_reader.lookups) == 3
+
+
+def test_chart_read_reacquires_invalid_cached_element(chart_reader, monkeypatch):
+    import pywinauto
+
+    reader, info = chart_reader.reader, chart_reader.info
+    scope = probe.connected_scope(state())
+    assert reader.chart_number(scope) == "001234"
+    info.visible = False
+    new_info = SimpleNamespace(**vars(info))
+    new_info.visible = True
+    new_info.name = "000456"
+    monkeypatch.setattr(pywinauto, "Desktop", lambda **kwargs: SimpleNamespace(
+        from_point=lambda *point: SimpleNamespace(element_info=new_info),
+    ))
+    assert reader.chart_number(scope) == "000456"
+
+
+@pytest.mark.parametrize("change", ["focus", "point", "moved", "pid"])
+def test_chart_read_discards_value_when_context_changes_mid_read(chart_reader, monkeypatch, change):
+    reader, info = chart_reader.reader, chart_reader.info
+
+    def value(_node):
+        if change == "focus":
+            reader.keyboard_context = lambda scope: False
+        elif change == "point":
+            reader.gui.WindowFromPoint = lambda point: 999
+        elif change == "moved":
+            info.rectangle.left = 300
+        else:
+            info.process_id = 43
+        return "001234"
+
+    monkeypatch.setattr(probe, "_best_text_value", value)
+    with pytest.raises(probe._ChartUnavailable):
+        reader.chart_number(probe.connected_scope(state()))
+    assert reader._chart_node is None
 
 
 def test_chart_never_reads_other_application_at_coordinate():
@@ -384,7 +534,8 @@ def test_chart_never_reads_other_application_at_coordinate():
     reader._belongs = lambda parent, child: False
     reader.gui = SimpleNamespace(WindowFromPoint=lambda point: 999)
     reader._text = lambda handle: pytest.fail("Read another app")
-    assert reader.chart_number(probe.connected_scope(state())) == ""
+    with pytest.raises(probe._ChartUnavailable, match="outside EMR or covered"):
+        reader.chart_number(probe.connected_scope(state()))
 
 
 def test_button_discovery_requires_unique_exact_id_in_treatment_scope(monkeypatch):

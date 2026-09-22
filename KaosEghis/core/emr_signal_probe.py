@@ -15,6 +15,7 @@ import time
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from KaosEghis.core.eghis_connector import get_cached_eghis_state
+from KaosEghis.core.ui_capture import _best_text_value
 from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
 
@@ -44,6 +45,7 @@ class SignalSnapshot:
     buttons: tuple[tuple[str, int], ...]
     chart_no: str = field(repr=False)
     sampled_at: float
+    unavailable_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -52,13 +54,27 @@ class SignalObservation:
     chart_no: str = field(repr=False)
     age_ms: int | None
     clock_text: str
+    unavailable_reason: str = ""
 
     def status_text(self) -> str:
         detail = (
             f"Chart {self.chart_no} (snapshot {self.age_ms} ms)"
-            if self.chart_no else "Chart unavailable (no fresh snapshot)"
+            if self.chart_no else
+            f"Chart unavailable ({self.unavailable_reason or 'no fresh snapshot'})"
         )
         return f"{self.clock_text} | EMR probe | {self.source} | {detail}"
+
+
+class _ChartUnavailable(Exception):
+    """Only fixed, non-patient diagnostic messages belong in this exception."""
+
+
+def _chart_error_reason(error: Exception) -> str:
+    if isinstance(error, _ChartUnavailable):
+        return str(error)
+    if getattr(error, "hresult", None) == -2147024891 or getattr(error, "winerror", None) == 5:
+        return "UIA access denied; check KaosEghis/EMR administrator levels"
+    return "UIA chart read failed; target will be reacquired"
 
 
 class _GuiThreadInfo(ctypes.Structure):
@@ -91,6 +107,7 @@ class Win32SignalReader:
         ]
         self.user32.SendMessageTimeoutW.restype = wintypes.LPARAM
         self._chart_identity = None
+        self._chart_node = None
 
     def _belongs(self, parent: int, child: int) -> bool:
         return bool(child and (parent == child or self.gui.IsChild(parent, child)))
@@ -176,28 +193,72 @@ class Win32SignalReader:
             for _, handle in buttons
         )
 
-    def chart_number(self, scope: SignalScope) -> str:
-        if not self.keyboard_context(scope):
-            return ""
-        handle = self.gui.WindowFromPoint(CHART_POINT)
-        if not self._belongs(scope.root, handle):
-            return ""
-        identity = (scope, handle, self.gui.GetWindowRect(handle))
-        if identity != self._chart_identity:
-            from pywinauto import Desktop
+    def _chart_target_error(self, scope, node, hit) -> str:
+        info = node.element_info
+        if info.control_type != "Text":
+            return "point (222, 115) is not a chart Text control"
+        if info.process_id != scope.pid:
+            return "chart target is not owned by the connected EMR"
+        rect = info.rectangle
+        x, y = CHART_POINT
+        if not info.visible or not (rect.left <= x < rect.right and rect.top <= y < rect.bottom):
+            return "chart target moved or is hidden"
+        # Native hit-testing can return the text's parent. Virtual UIA children
+        # have no HWND, so walk only their short ancestor chain, never a subtree.
+        for _ in range(8):
+            handle = int(info.handle or 0)
+            if handle:
+                if (
+                    self._belongs(scope.root, handle)
+                    and self.process.GetWindowThreadProcessId(handle)[1] == scope.pid
+                    and (self._belongs(hit, handle) or self._belongs(handle, hit))
+                ):
+                    return ""
+                break
+            info = info.parent
+            if info is None or info.process_id != scope.pid:
+                break
+        return "chart target window ownership could not be confirmed"
 
-            self._chart_identity = None
-            node = Desktop(backend="uia").from_point(*CHART_POINT)
-            if (
-                int(node.element_info.handle or 0) != handle
-                or node.element_info.control_type != "Text"
-            ):
-                return ""
-            self._chart_identity = identity
-        value = self._text(handle)
-        if not self.keyboard_context(scope) or self.gui.WindowFromPoint(CHART_POINT) != handle:
-            return ""
-        return value if re.fullmatch(r"[0-9]{1,20}", value) else ""
+    def chart_number(self, scope: SignalScope) -> str:
+        try:
+            if not self.keyboard_context(scope):
+                raise _ChartUnavailable("EMR treatment entry was not focused at sampling")
+            hit = self.gui.WindowFromPoint(CHART_POINT)
+            if not self._belongs(scope.root, hit):
+                raise _ChartUnavailable("point (222, 115) is outside EMR or covered")
+            identity = (scope, hit, self.gui.GetWindowRect(hit))
+            node = self._chart_node if identity == self._chart_identity else None
+            if node is not None and self._chart_target_error(scope, node, hit):
+                node = None
+            if node is None:
+                from pywinauto import Desktop
+
+                node = Desktop(backend="uia").from_point(*CHART_POINT)
+                node.element_info.set_cache_strategy(False)
+                reason = self._chart_target_error(scope, node, hit)
+                if reason:
+                    raise _ChartUnavailable(reason)
+            # Reuse only the verified control, never its patient value. This is
+            # the inspector's Value/Legacy/Name path, not the parent's caption.
+            value = (_best_text_value(node) or "").strip()
+            if not value:
+                raise _ChartUnavailable("chart UIA text is empty")
+            if not re.fullmatch(r"[0-9]{1,20}", value):
+                raise _ChartUnavailable("chart UIA text is not numeric")
+            if not self.keyboard_context(scope) or self.gui.WindowFromPoint(CHART_POINT) != hit:
+                raise _ChartUnavailable("EMR focus or chart target changed while reading")
+            reason = self._chart_target_error(scope, node, hit)
+            if reason:
+                raise _ChartUnavailable(reason)
+            # Parent/virtual hits are reacquired each sample to exclude newly
+            # overlaid UIA siblings that share the same native window.
+            self._chart_identity = identity if int(node.element_info.handle or 0) == hit else None
+            self._chart_node = node if self._chart_identity else None
+            return value
+        except Exception:
+            self._chart_identity = self._chart_node = None
+            raise
 
 
 class EmrSignalSampler:
@@ -224,11 +285,15 @@ class EmrSignalSampler:
             except Exception:
                 self._buttons = ()
         sampled_at = self.clock()
+        reason = ""
         try:
             chart_no = self.reader.chart_number(scope)
-        except Exception:
+            if not chart_no:
+                reason = "chart text unavailable"
+        except Exception as error:
             chart_no = ""
-        return SignalSnapshot(scope, self._buttons, chart_no, sampled_at)
+            reason = _chart_error_reason(error)
+        return SignalSnapshot(scope, self._buttons, chart_no, sampled_at, reason)
 
 
 class EmrSignalCapture:
@@ -257,9 +322,13 @@ class EmrSignalCapture:
     def _observation(self, source, snapshot) -> SignalObservation:
         age = self.clock() - snapshot.sampled_at
         fresh = 0 <= age <= MAX_SNAPSHOT_AGE
+        reason = snapshot.unavailable_reason
+        if not fresh:
+            reason = f"snapshot expired ({round(age * 1000)} ms)" if age >= 0 else "snapshot timing invalid"
         return SignalObservation(
             source, snapshot.chart_no if fresh else "",
             round(age * 1000) if fresh else None, datetime.now().strftime("%H:%M:%S"),
+            reason,
         )
 
     def _emit(self, observation) -> None:
@@ -309,11 +378,17 @@ class EmrSignalCapture:
                         observation.age_ms + round((self.clock() - pending[3]) * 1000)
                         if observation.age_ms is not None else None
                     )
-                    if (
-                        age_ms is None or not 0 <= age_ms <= MAX_SNAPSHOT_AGE * 1000
-                        or snapshot.chart_no != observation.chart_no
-                    ):
-                        observation = SignalObservation(source, "", None, observation.clock_text)
+                    if not observation.chart_no:
+                        pass  # Preserve the reason from the pre-click snapshot.
+                    elif age_ms is None or not 0 <= age_ms <= MAX_SNAPSHOT_AGE * 1000:
+                        observation = SignalObservation(
+                            source, "", None, observation.clock_text, "snapshot expired during click",
+                        )
+                    elif snapshot.chart_no != observation.chart_no:
+                        observation = SignalObservation(
+                            source, "", None, observation.clock_text,
+                            snapshot.unavailable_reason or "chart changed during click",
+                        )
                     else:
                         observation = SignalObservation(
                             source, observation.chart_no, age_ms, observation.clock_text,
