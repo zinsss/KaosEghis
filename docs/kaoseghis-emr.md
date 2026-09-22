@@ -59,6 +59,30 @@ PostgreSQL documents the limits of read-only transaction mode and separately
 controlled privileges: [read-only transactions](https://www.postgresql.org/docs/9.2/sql-set-transaction.html),
 [object privileges](https://www.postgresql.org/docs/9.2/ddl-priv.html).
 
+## Exclusive Connection Ownership
+
+**At most one Kaos-managed EMR database connection may exist at a time.**
+Serializing SQL execution while leaving multiple connections open is not sufficient.
+
+- Every source operation uses the same queue: PACS, KaosOrders, flu reports, patient
+  lookups, health checks, diagnostics, retries, and fallback reconciliation.
+- Reserve the single connection slot before attempting to connect and retain it
+  through cursor/connection cleanup. No other connection attempt starts until that
+  cleanup completes successfully.
+- An on-demand flu request arriving during another read stays queued with no DB
+  connection. Show a queued status without blocking the GUI; do not preempt the
+  active operation, open a second connection, or bypass the queue on timeout.
+- A cancelled or expired queued request never connects. Cancelling an active request
+  does not release the slot until its connection has actually been closed.
+- If closure is uncertain or fails, mark the manager unhealthy and block new source
+  connections pending recovery. Do not open a second diagnostic connection to probe
+  the first while ownership remains unresolved.
+- Multiple KaosEghis instances and legacy agents must share the same owner or refuse
+  duplicate DB access. Separate per-module/per-process locks are not enough.
+
+This limit applies to Kaos-owned connections. It must not close, block, or reconfigure
+the eGHIS application's own connections or connections owned by unrelated software.
+
 ## Connection Lifetime
 
 **Close the cursor and physical connection immediately after each bounded source
@@ -116,6 +140,11 @@ Before enabling the new source path:
   shutdown and cleanup errors must not produce late successful results.
 - Test concurrency, queue deadlines, duplicate signals, independent patients, and
   slow-query behavior while the GUI remains responsive.
+- Assert a maximum live connection count of one, including connection setup, delayed
+  cleanup, cancellation, health checks, and multiple callers. Specifically test that
+  flu requested during PACS work cannot connect until the PACS connection closes.
+- Verify cleanup failure stops queue dispatch and duplicate application/agent
+  instances cannot independently acquire another source connection.
 - Validate chart identity and both buttons in observation-only mode, including
   unrelated F7 uses such as claim aggregation, modals, EMR restarts, and DPI changes.
 - Compare flu totals and age-at-visit boundaries with the established report.

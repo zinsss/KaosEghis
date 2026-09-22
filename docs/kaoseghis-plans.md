@@ -50,7 +50,8 @@ The project has moved beyond scaffold-only status and now contains real guarded 
   flu reporting; implementation is not yet enabled
 - observe F6/F7 and their buttons, capture verified chart identity, and reconcile
   source state after the fixed per-chart 20-second delay
-- coordinate a bounded background queue with one active source read at a time
+- coordinate a bounded background queue with at most one live source DB connection;
+  on-demand flu waits without connecting until the active connection has closed
 - mandatory: never modify the EMR database; fail closed without verified read-only
   access and reviewed operations
 - mandatory: close every source connection immediately after its read, including
