@@ -258,31 +258,41 @@ def test_open_general_waits_for_signed_out_login_before_launch(tmp_path, monkeyp
     assert panel.status_label.text() == "General vaccine system opened."
 
 
-def test_authenticated_system_buttons_send_exact_deep_links_to_browser(tmp_path, monkeypatch):
+def test_authenticated_system_buttons_use_portal_menu_in_verified_browser(tmp_path, monkeypatch):
     from functools import partial
     from unittest.mock import Mock
     import pyautogui
+    import pytest
 
     _app()
     import KaosEghis.ui.tabs.vaccine_tab as module
     from KaosEghis.core.kdca_certificate_login import KdcaCertificateLoginResult
     from KaosEghis.core.vaccine_system_launch import open_vaccine_system
+    from KaosEghis.core import vaccine_system_launch
 
     events = []
 
     def authenticate(_settings, **_kwargs):
         events.append("authenticated")
-        return KdcaCertificateLoginResult(True, "already_authenticated", "KDCA signed in.")
+        return KdcaCertificateLoginResult(True, "already_authenticated", "KDCA signed in.", 101)
 
-    def launch_url(url, *, new, autoraise):
-        assert events[-1] == "authenticated"
-        assert new == 2 and autoraise is True
-        events.append(url)
-        return True
+    class Portal:
+        phase = "portal_menu"
+        waiting_message = "waiting for menu"
+
+        def __init__(self, _settings, system, handle, **_kwargs):
+            assert events[-1] == "authenticated"
+            assert handle == 101
+            self.system = system
+
+        def advance(self):
+            events.append(("portal_menu", self.system))
+            self.phase = "system_window"
 
     monkeypatch.setattr(module, "start_kdca_certificate_login", authenticate)
+    monkeypatch.setattr(vaccine_system_launch, "KdcaPortalLaunch", Portal)
     monkeypatch.setattr(module, "open_vaccine_system", partial(
-        open_vaccine_system, opener=launch_url,
+        open_vaccine_system, opener=lambda *_args, **_kwargs: pytest.fail("direct URL launch"),
         ready=lambda *_args: events[-1] != "authenticated",
     ))
     hotkey = Mock(side_effect=AssertionError("Launch must not send positioning shortcuts"))
@@ -296,9 +306,9 @@ def test_authenticated_system_buttons_send_exact_deep_links_to_browser(tmp_path,
     _wait_for_kdca(panel)
 
     assert events == [
-        "authenticated", "https://ois.kdca.go.kr/iris/index_run.jsp",
-        "authenticated", "https://ois.kdca.go.kr/iroi/indexWSP.jsp",
-        "authenticated", "https://ois.kdca.go.kr/covr/index_run.jsp",
+        "authenticated", ("portal_menu", "general"),
+        "authenticated", ("portal_menu", "influenza"),
+        "authenticated", ("portal_menu", "covid"),
     ]
     hotkey.assert_not_called()
     assert not hasattr(panel, "_system_position_timer")

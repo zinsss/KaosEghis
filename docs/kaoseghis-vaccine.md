@@ -405,14 +405,15 @@ links:
 | COVID | `https://ois.kdca.go.kr/covr/index_run.jsp` |
 | Influenza | `https://ois.kdca.go.kr/iroi/indexWSP.jsp` |
 
-The intended operator flow is to select the OIS service and then open the relevant saved
-system-entry URL. The URLs contain no credentials, session IDs, patient values, or
-vaccination data. Before it opens a selected service, KaosEghis opens the KDCA portal
+The Open buttons follow the signed-in portal's real menu controls; they do not type
+these URLs into the address bar. The saved URLs remain exact selectors for launch
+links on a system-selection page and for destination-origin verification. They contain
+no credentials, session IDs, patient values, or vaccination data. Before it opens a selected service, KaosEghis opens the KDCA portal
 and checks the current browser page using the configured accessible controls:
 
 - visible `로그아웃` link/button only, or the KDCA session anchor `/isc/logout.do`
   (including its absolute `https://is.kdca.go.kr/isc/logout.do` form) exposed by Chrome
-  accessibility: signed in; the system URL opens without accessing the vault;
+  accessibility: signed in; the system menu is used without accessing the vault;
 - visible `공동인증서 로그인` link/button only, or the KDCA certificate anchor
   `javascript:fnPkiCall('pLo')` exposed by Chrome accessibility: sign-in required; the
   guarded certificate flow runs;
@@ -424,11 +425,29 @@ Only the clickable link/button counts toward sign-in detection; a matching `Text
 element is not another login action and cannot establish an authenticated session.
 Each check reads login and logout controls from one UIA tree snapshot.
 
+The editable `Portal menu path` and `Launch control text (optional)` fields are under
+`Vaccine > Settings > System targets` for each system:
+
+- General: `예방접종관리` (captured portal link `menuid=197625`), then the link to
+  the configured General launch URL. An exact selection-button/image name can be
+  entered if the page uses JavaScript rather than an exposed destination URL.
+- Influenza: `예방접종관리`, then the image with accessible/alt text
+  `현물공급인플루엔자시스템` (captured HTML ID `inf_button1`).
+- COVID: `코로나19 예방접종관리 > 등록시스템 > 예방접종등록시스템`. If the leaf link
+  (captured `menuid=203488`) is already visible, it is clicked directly. Otherwise
+  only the configured ancestors are expanded, each once.
+
+The captured menu IDs are documentation, not URLs navigated to directly. Normal
+control activation preserves the website's own navigation, frames, and session handoff.
+No tokens/cookies are extracted and no page scripts are injected. If a selector is
+missing or ambiguous, the operation stops with the current stage and leaves the page
+for manual review. A permission/notice dialog is never accepted automatically.
+
 #### Login/Launch Reliability
 
 The explicit KDCA operation runs in one background COM worker. Progress identifies
-portal detection, certificate picker, password field, confirmed sign-in, deep-link
-navigation, and destination detection. Other launch buttons and Fetch from EMR are
+portal detection, certificate picker, password field, confirmed sign-in, portal menu,
+optional selection control, and destination detection. Other launch buttons and Fetch from EMR are
 disabled while it runs; automatic session reset is deferred and Reset Now is blocked.
 `Stop` prevents subsequent actions after the current UIA call returns. No second
 worker is started while that call is outstanding.
@@ -446,10 +465,17 @@ worker is started while that call is outstanding.
   remains scoped to it. Password focus is checked before and after selecting existing
   text. The secret is retrieved again immediately before use in case the vault was
   locked during loading, and is submitted only once. No clipboard is used.
-- After positive sign-in, the saved deep link is entered in the **same browser's
-  address field**, not handed to the default browser to choose another window/profile.
-  A native modal popup or changed focus stops navigation. Notices are not dismissed
-  automatically and unknown browser states never count as signed in.
+- After positive sign-in, the menu is activated inside that same verified portal
+  Document. A native modal popup or changed focus stops activation. Exact control
+  names/URLs are required; a Text child is not a second clickable link. Images are
+  considered only when an explicit launch-control name is configured. Foreign-origin
+  iframe controls are excluded. Each matched action is sent once, with no direct-URL
+  fallback and no second click after an uncertain provider error.
+- A system-selection page or Influenza popup can be followed in the original browser
+  window, or a newly visible/owned window in the same browser process. Unrelated
+  pre-existing browser windows and other browser processes are excluded. Influenza
+  readiness requires its configured input under the OIS `/iroi/` application, not
+  just any page at the OIS host.
 - Success now requires the configured General/COVID title **and** class to be
   visible, or the configured influenza resident input to appear on the OIS page.
   Merely accepting a URL is not success. Destination detection waits up to 30 seconds;

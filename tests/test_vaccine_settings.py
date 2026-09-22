@@ -226,6 +226,8 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     targets = page.system_targets_editor
 
     assert page.tabs.tabText(2) == "System targets"
+    assert page.tabs.widget(2).widget() is targets
+    assert page.tabs.widget(2).widgetResizable()
     assert (
         targets.general_launch_url_input.text()
         == "https://ois.kdca.go.kr/iris/index_run.jsp"
@@ -254,6 +256,11 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     assert targets.covid_keepalive_x_input.value() == 2456
     assert targets.covid_keepalive_y_input.value() == 1982
     assert targets.kdca_logout_control_name_input.text() == "로그아웃"
+    assert targets.portal_menu_inputs["general"].text() == "예방접종관리"
+    assert targets.portal_menu_inputs["influenza"].text() == "예방접종관리"
+    assert targets.portal_menu_inputs["covid"].text() == "코로나19 예방접종관리 > 등록시스템 > 예방접종등록시스템"
+    assert targets.launch_control_inputs["influenza"].text() == "현물공급인플루엔자시스템"
+    assert not targets.launch_control_inputs["general"].text()
     assert targets.session_keeper_enabled_check.isChecked() is False
     assert targets.session_reset_now_button.text() == "Reset Now"
     assert targets.session_keeper_progress_bar.format() == "Next reset: off"
@@ -288,6 +295,8 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
     targets.covid_keepalive_x_input.setValue(401)
     targets.covid_keepalive_y_input.setValue(402)
     targets.covid_launch_url_input.setText("https://example.test/covid")
+    targets.portal_menu_inputs["general"].setText("Vaccine menu")
+    targets.launch_control_inputs["general"].setText("Start General")
 
     assert page.save_settings()
 
@@ -295,6 +304,8 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
         settings = get_settings(connection)
     assert settings["vaccine_general_system_window_title"] == "Updated general system"
     assert settings["vaccine_general_system_launch_url"] == "https://example.test/general"
+    assert settings["vaccine_general_system_portal_menu_name"] == "Vaccine menu"
+    assert settings["vaccine_general_system_launch_control_name"] == "Start General"
     assert settings["vaccine_general_system_resident_x"] == "100"
     assert settings["vaccine_general_system_resident_y"] == "200"
     assert settings["vaccine_general_system_keepalive_x"] == "201"

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import posixpath
 from typing import Callable
 from urllib.parse import urlparse
 import time
 import webbrowser
 
-from KaosEghis.core.kdca_browser import document_for_url, foreground_handle, navigate_browser
+from KaosEghis.core.kdca_browser import _document_url, foreground_handle
+from KaosEghis.core.kdca_portal_launch import KdcaPortalLaunch
 
 @dataclass(frozen=True)
 class VaccineSystemLaunchResult:
@@ -83,16 +85,18 @@ def open_vaccine_system(
                 f"{label} is already open and focused." if focused else
                 f"{label} is already open, but focus could not be confirmed. No duplicate launch was sent."
             ))
-    ready = ready or (lambda values, key: vaccine_system_is_ready(values, key, browser_handle=browser_handle))
+    if browser_handle:
+        return _open_from_portal(
+            settings, system, label, browser_handle, ready=ready,
+            timeout_seconds=timeout_seconds, progress=progress, cancelled=cancelled,
+        )
+    ready = ready or vaccine_system_is_ready
     # Native systems need not be launched twice. No resident number is entered.
     if system in {"general", "covid"} and ready(settings, system):
         return VaccineSystemLaunchResult(True, f"{label} is already open.")
     progress(f"{label}: opening saved deep link...")
     try:
-        opened = (
-            navigate_browser(browser_handle, url, cancelled=cancelled)
-            if browser_handle else bool(opener(url, new=2, autoraise=True))
-        )
+        opened = bool(opener(url, new=2, autoraise=True))
     except Exception:
         opened = False
     if not opened:
@@ -110,7 +114,40 @@ def open_vaccine_system(
     ))
 
 
-def vaccine_system_is_ready(settings: dict[str, str], system: str, *, browser_handle=None) -> bool:
+def _open_from_portal(settings, system, label, browser_handle, *, ready,
+                      timeout_seconds, progress, cancelled):
+    try:
+        portal = KdcaPortalLaunch(settings, system, browser_handle, cancelled=cancelled)
+        progress(f"{label}: {portal.waiting_message}...")
+        deadline = time.monotonic() + max(timeout_seconds, 0.1)
+        while time.monotonic() < deadline and not cancelled():
+            if system != "influenza" or portal.phase != "portal_menu":
+                detected = ready(settings, system) if ready else vaccine_system_is_ready(
+                    settings, system,
+                    windows=portal.windows() if system == "influenza" else None,
+                )
+                if detected and not cancelled():
+                    return VaccineSystemLaunchResult(True, f"{label} opened and detected.")
+            previous_phase = portal.phase
+            error = portal.advance()
+            if error:
+                return VaccineSystemLaunchResult(False, error)
+            if previous_phase != portal.phase:
+                progress(f"{label}: {portal.waiting_message}...")
+            time.sleep(0.5)
+        message = (
+            "Vaccine system launch cancelled." if cancelled() else
+            f"{label}: {portal.waiting_message}, but it was not detected in time. "
+            "Check for a notice or launch permission. If a system-selection page is open, "
+            "check its launch-control text in Vaccine > Settings > System targets. "
+            "No direct URL or duplicate launch was sent."
+        )
+    except Exception:
+        message = "KDCA launch could not be verified. Check the portal window and retry. No direct URL fallback was sent."
+    return VaccineSystemLaunchResult(False, message)
+
+
+def vaccine_system_is_ready(settings: dict[str, str], system: str, *, browser_handle=None, windows=None) -> bool:
     if system in {"general", "covid"}:
         return len(_native_handles(settings, system)) == 1
     if system != "influenza":
@@ -122,17 +159,22 @@ def vaccine_system_is_ready(settings: dict[str, str], system: str, *, browser_ha
         target_id = settings.get("vaccine_influenza_system_resident_automation_id", "edtPtntRrn1")
         if not url or not target_id:
             return False
-        for window in Desktop(backend="uia").windows():
+        expected = urlparse(url)
+        application_path = posixpath.dirname(expected.path).rstrip("/") + "/"
+        for window in windows if windows is not None else Desktop(backend="uia").windows():
             if str(window.element_info.class_name) not in {"Chrome_WidgetWin_1", "MozillaWindowClass"}:
                 continue
             if browser_handle and int(window.handle or 0) != browser_handle:
                 continue
-            document = document_for_url(window, url)
-            if document is None:
-                continue
-            matches = document.descendants(auto_id=target_id, control_type="Edit")
-            if len(matches) == 1 and matches[0].is_visible() and matches[0].is_enabled():
-                return True
+            for document in window.descendants(control_type="Document"):
+                actual = urlparse(_document_url(document))
+                if (not document.is_visible()
+                        or (actual.scheme, actual.netloc.casefold()) != (expected.scheme, expected.netloc.casefold())
+                        or not actual.path.startswith(application_path)):
+                    continue
+                matches = document.descendants(auto_id=target_id, control_type="Edit")
+                if len(matches) == 1 and matches[0].is_visible() and matches[0].is_enabled():
+                    return True
     except Exception:
         pass
     return False

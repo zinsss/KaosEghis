@@ -337,6 +337,13 @@ class VaccineSystemTargetsEditor(QWidget):
         self.covid_keepalive_x_input = self._coordinate_input()
         self.covid_keepalive_y_input = self._coordinate_input()
 
+        self.portal_menu_inputs = {key: QLineEdit() for key in ("general", "influenza", "covid")}
+        for widget in self.portal_menu_inputs.values():
+            widget.setToolTip("Exact menu text, or a nested path separated by >. Visible leaf links are used directly.")
+        self.launch_control_inputs = {key: QLineEdit() for key in self.portal_menu_inputs}
+        for widget in self.launch_control_inputs.values():
+            widget.setToolTip("Exact link/button text or image alt text on the system-selection page. Leave empty to match Launch URL.")
+
         self.kdca_portal_url_input = QLineEdit()
         self.kdca_browser_title_input = QLineEdit()
         self.kdca_login_control_name_input = QLineEdit()
@@ -372,6 +379,8 @@ class VaccineSystemTargetsEditor(QWidget):
         general_group = QGroupBox("General vaccine system")
         general_form = QFormLayout(general_group)
         general_form.addRow("Launch URL", self.general_launch_url_input)
+        general_form.addRow("Portal menu path", self.portal_menu_inputs["general"])
+        general_form.addRow("Launch control text (optional)", self.launch_control_inputs["general"])
         general_form.addRow("Window title", self.general_window_title_input)
         general_form.addRow("Window class", self.general_window_class_input)
         general_form.addRow("Resident input X", self.general_resident_x_input)
@@ -382,6 +391,8 @@ class VaccineSystemTargetsEditor(QWidget):
         influenza_group = QGroupBox("Influenza browser system")
         influenza_form = QFormLayout(influenza_group)
         influenza_form.addRow("Launch URL", self.influenza_launch_url_input)
+        influenza_form.addRow("Portal menu path", self.portal_menu_inputs["influenza"])
+        influenza_form.addRow("Launch control text (optional)", self.launch_control_inputs["influenza"])
         influenza_form.addRow("Window or tab title", self.influenza_window_title_input)
         influenza_form.addRow(
             "Resident input automation ID",
@@ -401,6 +412,8 @@ class VaccineSystemTargetsEditor(QWidget):
         covid_group = QGroupBox("COVID system")
         covid_form = QFormLayout(covid_group)
         covid_form.addRow("Launch URL", self.covid_launch_url_input)
+        covid_form.addRow("Portal menu path", self.portal_menu_inputs["covid"])
+        covid_form.addRow("Launch control text (optional)", self.launch_control_inputs["covid"])
         covid_form.addRow("Window title", self.covid_window_title_input)
         covid_form.addRow("Window class", self.covid_window_class_input)
         covid_form.addRow("Resident input X", self.covid_resident_x_input)
@@ -484,6 +497,9 @@ class VaccineSystemTargetsEditor(QWidget):
         return input_widget
 
     def load_values(self, settings: dict[str, str]) -> None:
+        for key, widget in self.portal_menu_inputs.items():
+            widget.setText(settings.get(f"vaccine_{key}_system_portal_menu_name", ""))
+            self.launch_control_inputs[key].setText(settings.get(f"vaccine_{key}_system_launch_control_name", ""))
         self.general_window_title_input.setText(
             settings.get("vaccine_general_system_window_title", "")
         )
@@ -592,6 +608,10 @@ class VaccineSystemTargetsEditor(QWidget):
 
     def values(self) -> dict[str, str]:
         return {
+            **{f"vaccine_{key}_system_portal_menu_name": widget.text().strip()
+               for key, widget in self.portal_menu_inputs.items()},
+            **{f"vaccine_{key}_system_launch_control_name": widget.text().strip()
+               for key, widget in self.launch_control_inputs.items()},
             "vaccine_general_system_launch_url": (
                 self.general_launch_url_input.text().strip()
             ),
@@ -725,9 +745,12 @@ class VaccineSettingsPage(QWidget):
         self.influenza_editor = VaccineProgramEditor("influenza")
         self.covid_editor = VaccineProgramEditor("covid")
         self.system_targets_editor = VaccineSystemTargetsEditor()
+        system_targets_scroll = QScrollArea()
+        system_targets_scroll.setWidgetResizable(True)
+        system_targets_scroll.setWidget(self.system_targets_editor)
         self.tabs.addTab(self.influenza_editor, "Influenza schedule")
         self.tabs.addTab(self.covid_editor, "COVID schedule")
-        self.tabs.addTab(self.system_targets_editor, "System targets")
+        self.tabs.addTab(system_targets_scroll, "System targets")
 
         self.printer_name_input = QLineEdit()
         printer_group = QGroupBox("Thermal label printer")

@@ -81,8 +81,20 @@ def fake_clock(monkeypatch):
 
 @pytest.mark.parametrize("system", ["general", "covid", "influenza"])
 def test_launch_uses_authenticated_browser_and_waits_for_real_system(monkeypatch, fake_clock, system):
-    navigated = []
-    monkeypatch.setattr(launch, "navigate_browser", lambda hwnd, url, **_kwargs: navigated.append((hwnd, url)) or True)
+    activated = []
+    class Portal:
+        phase = "portal_menu"
+        waiting_message = "waiting for portal menu"
+
+        def __init__(self, settings, key, hwnd, **_kwargs):
+            assert key == system and hwnd == 101
+
+        def advance(self):
+            if self.phase == "portal_menu":
+                activated.append(system)
+                self.phase = "system_window"
+
+    monkeypatch.setattr(launch, "KdcaPortalLaunch", Portal)
     url = "https://ois.kdca.go.kr/fixture"
     result = launch.open_vaccine_system(
         {f"vaccine_{system}_system_launch_url": url}, system, browser_handle=101,
@@ -92,7 +104,7 @@ def test_launch_uses_authenticated_browser_and_waits_for_real_system(monkeypatch
     )
     assert result.success
     assert fake_clock[0] == 2
-    assert navigated == [(101, url)]
+    assert activated == [system]
 
 
 def test_browser_accepting_url_is_not_system_launch_success(fake_clock):
@@ -107,8 +119,11 @@ def test_browser_accepting_url_is_not_system_launch_success(fake_clock):
     assert len(requests) == 1
 
 
-def test_failed_same_browser_navigation_does_not_fall_back_to_default_browser(monkeypatch):
-    monkeypatch.setattr(launch, "navigate_browser", lambda *_args, **_kwargs: False)
+def test_failed_portal_menu_does_not_fall_back_to_default_browser(monkeypatch):
+    monkeypatch.setattr(launch, "KdcaPortalLaunch", lambda *_args, **_kwargs: SimpleNamespace(
+        phase="portal_menu", waiting_message="waiting for portal menu",
+        advance=lambda: "Could not activate menu. Check browser focus.",
+    ))
     result = launch.open_vaccine_system(
         {"vaccine_general_system_launch_url": "https://ois.kdca.go.kr/iris/index_run.jsp"}, "general",
         browser_handle=101, ready=lambda *_args: False,
@@ -116,6 +131,37 @@ def test_failed_same_browser_navigation_does_not_fall_back_to_default_browser(mo
     )
     assert not result.success
     assert "browser focus" in result.message
+
+
+def test_menu_activation_without_destination_does_not_report_success(monkeypatch, fake_clock):
+    actions = []
+    portal = SimpleNamespace(phase="portal_menu", waiting_message="waiting for launch link")
+    def advance():
+        if portal.phase == "portal_menu":
+            actions.append("menu")
+            portal.phase = "system_link"
+    portal.advance = advance
+    monkeypatch.setattr(launch, "KdcaPortalLaunch", lambda *_args, **_kwargs: portal)
+    result = launch.open_vaccine_system(
+        {"vaccine_general_system_launch_url": "https://ois.kdca.go.kr/iris/index_run.jsp"}, "general",
+        browser_handle=101, ready=lambda *_args: False, timeout_seconds=2,
+        opener=lambda *_args, **_kwargs: pytest.fail("direct URL fallback"),
+    )
+    assert not result.success
+    assert "launch-control text" in result.message
+    assert actions == ["menu"]
+
+
+def test_portal_cancellation_stops_before_launch(monkeypatch, fake_clock):
+    portal = SimpleNamespace(phase="portal_menu", waiting_message="waiting for menu",
+                             advance=lambda: pytest.fail("cancelled click"))
+    monkeypatch.setattr(launch, "KdcaPortalLaunch", lambda *_args, **_kwargs: portal)
+    result = launch.open_vaccine_system(
+        {"vaccine_general_system_launch_url": "https://ois.kdca.go.kr/iris/index_run.jsp"}, "general",
+        browser_handle=101, ready=lambda *_args: False, cancelled=lambda: True,
+    )
+    assert not result.success
+    assert "cancelled" in result.message
 
 
 def test_existing_native_system_is_not_relaunched(fake_clock):
