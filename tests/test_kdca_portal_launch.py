@@ -140,6 +140,57 @@ def test_covid_expands_configured_ancestors_then_clicks_registration_leaf(scene)
     assert [item.clicked for item in (root, branch, leaf)] == [1, 1, 1]
 
 
+def test_covid_launch_leaf_with_live_icon_prefix_is_activated_once(scene):
+    scene.settings["vaccine_covid_system_launch_url"] = "https://ois.kdca.go.kr/covr/index_run.jsp"
+    leaf_name = portal.PORTAL_MENU_NAMES["covid"].split(">")[-1].strip()
+    scene.menu.element_info.name = "\uea80 " + leaf_name
+    scene.menu.url = "https://is.kdca.go.kr/isc/main/menuGo.do?menuid=203488"
+    operation = portal.KdcaPortalLaunch(scene.settings, "covid", 101)
+
+    assert operation.advance() is None
+    assert scene.menu.clicked == 1
+    assert operation.phase == "system_link"
+    assert operation.advance() is None
+    assert scene.menu.clicked == 1
+
+
+@pytest.mark.parametrize("system", ["general", "influenza", "covid"])
+def test_system_selector_with_current_selection_can_be_opened(scene, system):
+    scene.settings[f"vaccine_{system}_system_launch_url"] = LAUNCH_URL
+    scene.menu.element_info.name = portal.SYSTEM_SELECTOR_NAME + " / \ud604\uc7ac \uc120\ud0dd\ub41c \uc2dc\uc2a4\ud15c : \ucf54\ub85c\ub09819 \uc608\ubc29\uc811\uc885\uad00\ub9ac"
+    operation = portal.KdcaPortalLaunch(scene.settings, system, 101)
+    assert operation.advance() is None
+    assert operation.phase == "portal_menu"
+    assert scene.menu.clicked == 1
+    assert operation.advance() is None
+    assert scene.menu.clicked == 1
+
+
+@pytest.mark.parametrize("actual,expected,match", [
+    ("\uea80 Launch", "Launch", True),
+    ("\uea80 \uea81 Launch", "Launch", True),
+    ("\uea80 Launch", "\uea80 Launch", True),
+    ("Launch\uea80", "Launch", False),
+    ("La\uea80unch", "Launch", False),
+    ("\uea80 Launch help", "Launch", False),
+    ("Other Launch", "Launch", False),
+    (portal.SYSTEM_SELECTOR_NAME + " / Help", portal.SYSTEM_SELECTOR_NAME, False),
+    (portal.SYSTEM_SELECTOR_NAME + " / \ud604\uc7ac \uc120\ud0dd\ub41c \uc2dc\uc2a4\ud15c : ", portal.SYSTEM_SELECTOR_NAME, False),
+    ("Custom / \ud604\uc7ac \uc120\ud0dd\ub41c \uc2dc\uc2a4\ud15c : General", "Custom", False),
+    ("", "", False),
+])
+def test_menu_matching_only_ignores_known_decorations(actual, expected, match):
+    assert portal._menu_name_matches(Node("Hyperlink", name=actual), expected) is match
+
+
+def test_icon_normalization_does_not_hide_duplicate_menus(scene):
+    duplicate = Node("Hyperlink", name="\uea80 " + scene.menu.element_info.name)
+    scene.document.replace(scene.logout, scene.menu, duplicate)
+    operation = portal.KdcaPortalLaunch(scene.settings, "general", 101)
+    assert "ambiguous" in operation.advance()
+    assert scene.menu.clicked == duplicate.clicked == 0
+
+
 @pytest.mark.parametrize("system,image_id", [("general", "ocs_button1"), ("influenza", "inf_button1")])
 def test_selection_image_matches_exact_alt_text(scene, system, image_id):
     scene.settings["vaccine_influenza_system_launch_url"] = "https://ois.kdca.go.kr/iroi/indexWSP.jsp"

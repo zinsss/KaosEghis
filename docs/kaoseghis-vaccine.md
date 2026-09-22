@@ -440,6 +440,13 @@ The editable `Portal menu path` and `Launch control text (optional)` fields are 
   (captured `menuid=203488`) is already visible, it is clicked directly. Otherwise
   only the configured ancestors are expanded, each once.
 
+Chrome includes KDCA's icon-font prefix (observed `U+EA80`) in the final COVID
+link's accessible name. Menu matching ignores leading private-use icon characters,
+but still matches the remaining label exactly. The selector also accepts the observed
+`시스템을 선택해주세요 / 현재 선택된 시스템 : ...` accessible name after a system
+has been selected. Other prefixes/suffixes are not accepted, and multiple matches
+remain ambiguous. These display decorations do not need to be copied into settings.
+
 Existing saved copies of the previous defaults are upgraded once on database initialization.
 Custom paths, custom launch-control names, and routes with a custom launch URL are
 preserved. All three paths and the selection-image names remain editable here.

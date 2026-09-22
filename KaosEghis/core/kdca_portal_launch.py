@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from urllib.parse import urljoin, urlparse
 
 from KaosEghis.core.kdca_browser import (
@@ -40,6 +41,26 @@ def _origin(url):
 
 def _name(element):
     return " ".join(str(element.element_info.name or "").split())
+
+
+def _menu_name_matches(element, expected):
+    expected = " ".join(expected.split())
+    if not expected:
+        return False
+    actual = _name(element)
+    if actual == expected:
+        return True
+    # KDCA's icon font contributes private-use characters to Chrome's UIA name.
+    while actual and unicodedata.category(actual[0]) == "Co":
+        actual = actual[1:].lstrip()
+    if actual == expected:
+        return True
+    if expected != SYSTEM_SELECTOR_NAME:
+        return False
+    label, separator, selected = actual.partition(" / ")
+    marker = "\ud604\uc7ac \uc120\ud0dd\ub41c \uc2dc\uc2a4\ud15c : "
+    return bool(separator and label == expected and selected.startswith(marker)
+                and selected[len(marker):].strip())
 
 
 def _containing_document(element):
@@ -216,7 +237,7 @@ class KdcaPortalLaunch:
         for name in reversed(self.menu_path):
             if name in self.activated_menu_names:
                 continue
-            matches = [item for item in controls if _name(item) == name
+            matches = [item for item in controls if _menu_name_matches(item, name)
                        and document_identity(item) not in self.activated_ids]
             if matches:
                 matched_name = name
