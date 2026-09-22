@@ -428,14 +428,21 @@ Each check reads login and logout controls from one UIA tree snapshot.
 The editable `Portal menu path` and `Launch control text (optional)` fields are under
 `Vaccine > Settings > System targets` for each system:
 
-- General: `예방접종관리` (captured portal link `menuid=197625`), then the link to
-  the configured General launch URL. An exact selection-button/image name can be
-  entered if the page uses JavaScript rather than an exposed destination URL.
-- Influenza: `예방접종관리`, then the image with accessible/alt text
+- General: `시스템을 선택해주세요 > 예방접종관리` (captured portal link
+  `menuid=197625`), then, after the selection page loads, the image with
+  accessible/alt text `예방접종통합관리시스템` (HTML ID `ocs_button1`, image
+  `/irad/regs/common/images/main/case5_off.gif`).
+- Influenza: `시스템을 선택해주세요 > 예방접종관리`, then the image with accessible/alt text
   `현물공급인플루엔자시스템` (captured HTML ID `inf_button1`).
-- COVID: `코로나19 예방접종관리 > 등록시스템 > 예방접종등록시스템`. If the leaf link
+- COVID: `시스템을 선택해주세요 > 코로나19 예방접종관리 > 등록시스템 > 예방접종등록시스템`.
+  The COVID root has HTML `menuid=203443`; its empty `href`, and the empty `href`
+  on `등록시스템`, are intentional menu controls, not navigation URLs. If the leaf link
   (captured `menuid=203488`) is already visible, it is clicked directly. Otherwise
   only the configured ancestors are expanded, each once.
+
+Existing saved copies of the previous defaults are upgraded once on database initialization.
+Custom paths, custom launch-control names, and routes with a custom launch URL are
+preserved. All three paths and the selection-image names remain editable here.
 
 The captured menu IDs are documentation, not URLs navigated to directly. Normal
 control activation preserves the website's own navigation, frames, and session handoff.

@@ -256,11 +256,11 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     assert targets.covid_keepalive_x_input.value() == 2456
     assert targets.covid_keepalive_y_input.value() == 1982
     assert targets.kdca_logout_control_name_input.text() == "로그아웃"
-    assert targets.portal_menu_inputs["general"].text() == "예방접종관리"
-    assert targets.portal_menu_inputs["influenza"].text() == "예방접종관리"
-    assert targets.portal_menu_inputs["covid"].text() == "코로나19 예방접종관리 > 등록시스템 > 예방접종등록시스템"
+    assert targets.portal_menu_inputs["general"].text() == "시스템을 선택해주세요 > 예방접종관리"
+    assert targets.portal_menu_inputs["influenza"].text() == "시스템을 선택해주세요 > 예방접종관리"
+    assert targets.portal_menu_inputs["covid"].text() == "시스템을 선택해주세요 > 코로나19 예방접종관리 > 등록시스템 > 예방접종등록시스템"
     assert targets.launch_control_inputs["influenza"].text() == "현물공급인플루엔자시스템"
-    assert not targets.launch_control_inputs["general"].text()
+    assert targets.launch_control_inputs["general"].text() == "예방접종통합관리시스템"
     assert targets.session_keeper_enabled_check.isChecked() is False
     assert targets.session_reset_now_button.text() == "Reset Now"
     assert targets.session_keeper_progress_bar.format() == "Next reset: off"
@@ -395,3 +395,82 @@ def test_external_system_coordinate_migration_preserves_custom_values(tmp_path) 
     assert settings["vaccine_general_system_resident_y"] == "2074"
     assert settings["vaccine_covid_system_resident_x"] == "1466"
     assert settings["vaccine_covid_system_resident_y"] == "2107"
+
+
+def test_portal_route_migration_updates_old_defaults_idempotently(tmp_path):
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import DEFAULT_SETTINGS, get_settings, set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    old = {
+        "vaccine_general_system_portal_menu_name": "예방접종관리",
+        "vaccine_influenza_system_portal_menu_name": "예방접종관리",
+        "vaccine_covid_system_portal_menu_name": "코로나19 예방접종관리 > 등록시스템 > 예방접종등록시스템",
+        "vaccine_general_system_launch_control_name": "",
+    }
+    with connect(db_path) as connection:
+        connection.execute("DELETE FROM app_settings WHERE key = 'vaccine_portal_routes_v2_migrated'")
+        set_settings(connection, old)
+    for _ in range(2):
+        initialize_database(db_path)
+        with connect(db_path) as connection:
+            settings = get_settings(connection)
+        for key in old:
+            assert settings[key] == DEFAULT_SETTINGS[key]
+
+
+def test_portal_route_migration_preserves_custom_settings(tmp_path):
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    custom = {
+        "vaccine_general_system_portal_menu_name": "Custom portal > General",
+        "vaccine_general_system_launch_control_name": "",
+        "vaccine_influenza_system_launch_url": "https://example.test/flu",
+        "vaccine_influenza_system_portal_menu_name": "예방접종관리",
+        "vaccine_covid_system_portal_menu_name": "Custom COVID",
+        "vaccine_covid_system_launch_control_name": "Launch COVID",
+    }
+    with connect(db_path) as connection:
+        connection.execute("DELETE FROM app_settings WHERE key = 'vaccine_portal_routes_v2_migrated'")
+        set_settings(connection, custom)
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+    for key, value in custom.items():
+        assert settings[key] == value
+
+
+def test_portal_route_migration_preserves_custom_general_launch_control(tmp_path):
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        connection.execute("DELETE FROM app_settings WHERE key = 'vaccine_portal_routes_v2_migrated'")
+        set_settings(connection, {
+            "vaccine_general_system_portal_menu_name": "예방접종관리",
+            "vaccine_general_system_launch_control_name": "Custom image",
+        })
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+    assert settings["vaccine_general_system_launch_control_name"] == "Custom image"
+
+
+def test_general_launch_text_can_be_cleared_after_defaults_upgrade(tmp_path):
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, set_settings
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(connection, {"vaccine_general_system_launch_control_name": ""})
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+    assert settings["vaccine_general_system_launch_control_name"] == ""

@@ -13,12 +13,16 @@ from KaosEghis.core.kdca_certificate_login import (
 )
 
 
+SYSTEM_SELECTOR_NAME = "\uc2dc\uc2a4\ud15c\uc744 \uc120\ud0dd\ud574\uc8fc\uc138\uc694"
 PORTAL_MENU_NAMES = {
-    "general": "\uc608\ubc29\uc811\uc885\uad00\ub9ac",
-    "influenza": "\uc608\ubc29\uc811\uc885\uad00\ub9ac",
-    "covid": "\ucf54\ub85c\ub09819 \uc608\ubc29\uc811\uc885\uad00\ub9ac > \ub4f1\ub85d\uc2dc\uc2a4\ud15c > \uc608\ubc29\uc811\uc885\ub4f1\ub85d\uc2dc\uc2a4\ud15c",
+    "general": SYSTEM_SELECTOR_NAME + " > \uc608\ubc29\uc811\uc885\uad00\ub9ac",
+    "influenza": SYSTEM_SELECTOR_NAME + " > \uc608\ubc29\uc811\uc885\uad00\ub9ac",
+    "covid": SYSTEM_SELECTOR_NAME + " > \ucf54\ub85c\ub09819 \uc608\ubc29\uc811\uc885\uad00\ub9ac > \ub4f1\ub85d\uc2dc\uc2a4\ud15c > \uc608\ubc29\uc811\uc885\ub4f1\ub85d\uc2dc\uc2a4\ud15c",
 }
-LAUNCH_CONTROL_NAMES = {"influenza": "\ud604\ubb3c\uacf5\uae09\uc778\ud50c\ub8e8\uc5d4\uc790\uc2dc\uc2a4\ud15c"}
+LAUNCH_CONTROL_NAMES = {
+    "general": "\uc608\ubc29\uc811\uc885\ud1b5\ud569\uad00\ub9ac\uc2dc\uc2a4\ud15c",
+    "influenza": "\ud604\ubb3c\uacf5\uae09\uc778\ud50c\ub8e8\uc5d4\uc790\uc2dc\uc2a4\ud15c",
+}
 _BROWSER_CLASSES = {"Chrome_WidgetWin_1", "MozillaWindowClass"}
 
 

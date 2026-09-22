@@ -5,7 +5,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from KaosEghis.db.repositories import get_settings
+from KaosEghis.db.repositories import DEFAULT_SETTINGS, get_settings
 
 
 APP_DIR_NAME = "KaosEghis"
@@ -151,6 +151,7 @@ def initialize_database(path: Path | None = None) -> None:
         _migrate_rural_exception_defaults(connection)
         _migrate_vaccine_september_2026_schedule_revision(connection)
         _migrate_vaccine_external_system_coordinates(connection)
+        _migrate_vaccine_portal_launch_defaults(connection)
         _seed_default_emr_target_profile(connection)
         _seed_vaccine_emr_targets(connection)
         _seed_eghis_shutdown_targets(connection)
@@ -894,6 +895,45 @@ def _migrate_vaccine_external_system_coordinates(connection: sqlite3.Connection)
             "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
             (new_values[1], y_key),
         )
+
+
+def _migrate_vaccine_portal_launch_defaults(connection: sqlite3.Connection) -> None:
+    """Complete only the original KDCA routes, preserving custom selectors/URLs."""
+    marker = "vaccine_portal_routes_v2_migrated"
+    if connection.execute(
+        "SELECT 1 FROM app_settings WHERE key = ? AND value = 'true'", (marker,),
+    ).fetchone():
+        return
+    old_paths = {
+        "general": "예방접종관리",
+        "influenza": "예방접종관리",
+        "covid": "코로나19 예방접종관리 > 등록시스템 > 예방접종등록시스템",
+    }
+    for system, old_path in old_paths.items():
+        prefix = f"vaccine_{system}_system_"
+        rows = dict(connection.execute(
+            "SELECT key, value FROM app_settings WHERE key IN (?, ?, ?)",
+            (prefix + "portal_menu_name", prefix + "launch_url", prefix + "launch_control_name"),
+        ))
+        if rows.get(prefix + "launch_url", DEFAULT_SETTINGS[prefix + "launch_url"]) != DEFAULT_SETTINGS[prefix + "launch_url"]:
+            continue
+        if rows.get(prefix + "portal_menu_name", old_path) not in {old_path, DEFAULT_SETTINGS[prefix + "portal_menu_name"]}:
+            continue
+        if rows.get(prefix + "portal_menu_name") == old_path:
+            connection.execute(
+                "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ? AND value = ?",
+                (DEFAULT_SETTINGS[prefix + "portal_menu_name"], prefix + "portal_menu_name", old_path),
+            )
+        if system == "general" and rows.get(prefix + "launch_control_name") == "":
+            connection.execute(
+                "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ? AND value = ''",
+                (DEFAULT_SETTINGS[prefix + "launch_control_name"], prefix + "launch_control_name"),
+            )
+    connection.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?, 'true') "
+        "ON CONFLICT(key) DO UPDATE SET value = 'true', updated_at = CURRENT_TIMESTAMP",
+        (marker,),
+    )
 
 
 def _seed_default_vaccine_types(connection: sqlite3.Connection) -> None:

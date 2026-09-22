@@ -67,7 +67,7 @@ class Node:
 
 @pytest.fixture
 def scene(monkeypatch):
-    menu = Node("Hyperlink", name=portal.PORTAL_MENU_NAMES["general"])
+    menu = Node("Hyperlink", name=portal.PORTAL_MENU_NAMES["general"].split(">")[-1].strip())
     logout = Node("Hyperlink", name="Logout", url="https://is.kdca.go.kr/isc/logout.do")
     document = Node("Document", url=PORTAL_URL, children=[menu, logout])
     window = Node("Window", handle=101, children=[document])
@@ -118,7 +118,7 @@ def test_each_system_uses_its_exact_configured_menu(scene, system):
 
 def test_covid_expands_configured_ancestors_then_clicks_registration_leaf(scene):
     scene.settings["vaccine_covid_system_launch_url"] = "https://ois.kdca.go.kr/covr/index_run.jsp"
-    path = [name.strip() for name in portal.PORTAL_MENU_NAMES["covid"].split(">")]
+    path = [name.strip() for name in portal.PORTAL_MENU_NAMES["covid"].split(">")][1:]
     root, branch, leaf = [Node("Hyperlink", name=name) for name in path]
     leaf.url = "menuGo.do?menuid=203488"
     scene.document.replace(scene.logout, root)
@@ -140,17 +140,56 @@ def test_covid_expands_configured_ancestors_then_clicks_registration_leaf(scene)
     assert [item.clicked for item in (root, branch, leaf)] == [1, 1, 1]
 
 
-def test_influenza_selection_image_matches_exact_alt_text(scene):
+@pytest.mark.parametrize("system,image_id", [("general", "ocs_button1"), ("influenza", "inf_button1")])
+def test_selection_image_matches_exact_alt_text(scene, system, image_id):
     scene.settings["vaccine_influenza_system_launch_url"] = "https://ois.kdca.go.kr/iroi/indexWSP.jsp"
-    operation = portal.KdcaPortalLaunch(scene.settings, "influenza", 101)
+    operation = portal.KdcaPortalLaunch(scene.settings, system, 101)
     assert operation.advance() is None
-    image = Node("Image", name=portal.LAUNCH_CONTROL_NAMES["influenza"], auto_id="inf_button1")
+    image = Node("Image", name=portal.LAUNCH_CONTROL_NAMES[system], auto_id=image_id)
     unrelated = Node("Image", name="Other system")
     scene.document.url = "https://ois.kdca.go.kr/irad/regsCommon.do"
     scene.document.replace(image, unrelated)
     assert operation.advance() is None
     assert image.clicked == 1
     assert unrelated.clicked == 0
+
+
+@pytest.mark.parametrize("system", ["general", "influenza", "covid"])
+def test_closed_system_selector_opens_full_route_once(scene, system):
+    from KaosEghis.db.repositories import DEFAULT_SETTINGS
+
+    scene.settings[f"vaccine_{system}_system_launch_url"] = DEFAULT_SETTINGS[f"vaccine_{system}_system_launch_url"]
+    path = [part.strip() for part in portal.PORTAL_MENU_NAMES[system].split(">")]
+    controls = [Node("Hyperlink", name=part) for part in path]
+    assert controls[0].element_info.name == portal.SYSTEM_SELECTOR_NAME
+    controls[-1].url = "menuGo.do?menuid=" + ("203488" if system == "covid" else "197625")
+    operation = portal.KdcaPortalLaunch(scene.settings, system, 101)
+
+    for index, control in enumerate(controls):
+        scene.document.replace(scene.logout, *controls[:index + 1])
+        assert operation.advance() is None
+        assert control.clicked == 1
+        assert all(item.clicked == 1 for item in controls[:index + 1])
+        assert operation.advance() is None
+        assert control.clicked == 1
+        assert operation.phase == ("system_link" if index == len(controls) - 1 else "portal_menu")
+
+    if system in {"general", "influenza"}:
+        general = Node("Image", name=portal.LAUNCH_CONTROL_NAMES["general"], auto_id="ocs_button1")
+        influenza = Node("Image", name=portal.LAUNCH_CONTROL_NAMES["influenza"], auto_id="inf_button1")
+        selection = Node("Document", url="https://ois.kdca.go.kr/irad/regsCommon.do", children=[general, influenza])
+        scene.document.replace(scene.logout, selection)
+        assert operation.advance() is None
+        assert operation.phase == "system_window"
+        assert (general.clicked, influenza.clicked) == ((1, 0) if system == "general" else (0, 1))
+
+
+def test_portal_fallback_selectors_match_settings_defaults():
+    from KaosEghis.db.repositories import DEFAULT_SETTINGS
+
+    for system, path in portal.PORTAL_MENU_NAMES.items():
+        assert DEFAULT_SETTINGS[f"vaccine_{system}_system_portal_menu_name"] == path
+        assert DEFAULT_SETTINGS[f"vaccine_{system}_system_launch_control_name"] == portal.LAUNCH_CONTROL_NAMES.get(system, "")
 
 
 @pytest.mark.parametrize("problem", ["text_child", "duplicate", "hidden", "disabled", "wrong_name", "iframe"])
