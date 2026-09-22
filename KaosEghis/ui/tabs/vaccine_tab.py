@@ -176,6 +176,7 @@ class VaccineTab(QWidget):
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
         self._db_path = db_path
+        initialize_database(self._db_path)
         self._current_record_id: int | None = None
         self._prepared_pair_ids: tuple[int, int] | None = None
         self._kdca_thread: threading.Thread | None = None
@@ -398,7 +399,6 @@ class VaccineTab(QWidget):
             self.nav_buttons[name].setChecked(button_index == index)
 
     def refresh_view(self) -> None:
-        initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             vaccine_types = list_vaccine_types(connection)
             records = list_vaccine_records(connection)
@@ -419,7 +419,6 @@ class VaccineTab(QWidget):
     def fetch_current_patient_from_emr(self) -> bool:
         if self._kdca_thread is not None or self._pending_handoffs or self._print_in_progress:
             return False
-        initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             profile = get_active_emr_target_profile(connection)
             settings = get_settings(connection)
@@ -1506,7 +1505,6 @@ class VaccineTab(QWidget):
         if not isinstance(vaccine_type_id, int):
             self.chart_note_preview.clear()
             return
-        initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             vaccine_type = get_vaccine_type(connection, vaccine_type_id)
         self.chart_note_preview.setPlainText(

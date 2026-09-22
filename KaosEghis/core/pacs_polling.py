@@ -12,6 +12,7 @@ from KaosEghis.db.database import connect, get_database_path, initialize_databas
 from KaosEghis.db.repositories import (
     create_pacs_audit_event,
     create_pacs_worklist_item,
+    get_pacs_worklist_item,
     list_pacs_worklist_items,
     update_pacs_worklist_status,
 )
@@ -243,8 +244,11 @@ def poll_eghis_image_orders_into_local_worklist(
             )
             inserted += 1
 
-        selected_ymd = _normalize_selected_ymd(selected_date)
-        if selected_ymd is not None:
+        connection.commit()
+
+    selected_ymd = _normalize_selected_ymd(selected_date)
+    if selected_ymd is not None:
+        with connect(db_file) as connection:
             local_active_items = [
                 item
                 for item in list_pacs_worklist_items(connection, "active")
@@ -252,19 +256,27 @@ def poll_eghis_image_orders_into_local_worklist(
                 and _is_eghis_polled_row(item.source)
                 and _blank_to_none(item.accession_or_order_id) is not None
             ]
-            existing_mwl_ids = _fetch_existing_mwl_order_ids(
-                settings,
-                selected_ymd,
-                [
-                    item.accession_or_order_id
-                    for item in local_active_items
-                    if item.accession_or_order_id is not None
-                ],
-            )
-            if existing_mwl_ids is not None:
-                for item in local_active_items:
-                    accession = _blank_to_none(item.accession_or_order_id)
-                    if accession is None or accession in existing_mwl_ids:
+        # No local transaction may stay open across an external EMR query.
+        # Otherwise a slow query also blocks unrelated GUI database writes.
+        existing_mwl_ids = _fetch_existing_mwl_order_ids(
+            settings,
+            selected_ymd,
+            [
+                item.accession_or_order_id
+                for item in local_active_items
+                if item.accession_or_order_id is not None
+            ],
+        )
+        if existing_mwl_ids is not None:
+            for item in local_active_items:
+                accession = _blank_to_none(item.accession_or_order_id)
+                if accession is None or accession in existing_mwl_ids:
+                    continue
+                with connect(db_file) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    # Do not overwrite a completion, cancellation, or edit made
+                    # while the remote existence check was in progress.
+                    if get_pacs_worklist_item(connection, item.id) != item:
                         continue
                     if update_pacs_worklist_status(
                         connection,
@@ -281,7 +293,6 @@ def poll_eghis_image_orders_into_local_worklist(
                             summary="active order removed from eGHIS MWL -> marked cancelled",
                         )
                         removed_active += 1
-        connection.commit()
 
     return PollResult(
         inserted=inserted,
