@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlparse
 
@@ -17,11 +18,16 @@ def refresh_window(window: Any) -> Any | None:
 
 
 def document_for_url(window: Any, url: str, *, match_path: bool = False) -> Any | None:
+    return next(iter_documents_for_url(window, url, match_path=match_path), None)
+
+
+def iter_documents_for_url(window: Any, url: str, *, match_path: bool = False) -> Iterator[Any]:
+    """Include matching frames, while keeping single-document callers lazy."""
     expected = urlparse(url)
     try:
         documents = window.descendants(control_type="Document")
     except Exception:
-        return None
+        return
     for document in documents:
         try:
             if not document.is_visible():
@@ -33,10 +39,9 @@ def document_for_url(window: Any, url: str, *, match_path: bool = False) -> Any 
                 continue
             if match_path and actual.path != expected.path:
                 continue
-            return document
+            yield document
         except Exception:
             continue
-    return None
 
 
 def _document_url(document: Any) -> str:

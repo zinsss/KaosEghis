@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import posixpath
-from time import monotonic
+from time import monotonic, sleep
 from typing import Callable
 from urllib.parse import urlparse
 
-from KaosEghis.core.kdca_browser import _document_url, document_for_url, foreground_handle, has_keyboard_focus
+from KaosEghis.core.kdca_browser import (
+    _document_url, document_identity, foreground_handle, has_keyboard_focus,
+    iter_documents_for_url,
+)
 from KaosEghis.core.kdca_certificate_login import (
     _screen_point_belongs_to_window,
     _send_unicode_text,
 )
 from KaosEghis.core.vaccine_patient_context import resident_id_for_vaccine_system
+from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 from KaosEghis.core.vaccine_session_keeper import _input_is_idle
 from KaosEghis.core.vaccine_system_launch import _focus_native_window, find_native_vaccine_windows
 from KaosEghis.core.windows_desktop import interactive_desktop_error
@@ -92,7 +96,14 @@ def enter_vaccine_resident(
         if not desktop.success or not allowed():
             return VaccineHandoffResult(False, "Virtual Desktop 1 could not be confirmed.")
         target = _resolve_input_target(settings, request.system)
-        if target is None or not allowed():
+        if not allowed():
+            return VaccineHandoffResult(False, "Input target search timed out or was stopped. No number was typed.")
+        if target is None:
+            if request.system == "influenza":
+                return VaccineHandoffResult(False, (
+                    "The influenza resident-number field could not be uniquely identified. "
+                    "Keep one influenza patient-lookup tab visible and check its input Automation ID."
+                ))
             return VaccineHandoffResult(False, "Open the correct system and check its configured input target.")
         def can_activate() -> bool:
             return allowed() and first_virtual_desktop_is_active() and _input_is_idle(0) is True
@@ -115,7 +126,10 @@ def enter_vaccine_resident(
         if not ready():
             return VaccineHandoffResult(False, "Entry focus changed. Check the system; Enter was not sent.")
         if target.read_value is not None:
-            if resident_id_for_vaccine_system(target.read_value()) != digits:
+            if not _wait_for(
+                lambda: resident_id_for_vaccine_system(target.read_value()) == digits,
+                allowed=ready,
+            ):
                 return VaccineHandoffResult(False, "The input value could not be verified; Enter was not sent.")
         if not ready():
             return VaccineHandoffResult(False, "Entry stopped before patient lookup.")
@@ -130,6 +144,19 @@ def _send_keys(keys: str) -> None:
     from pywinauto.keyboard import send_keys
 
     send_keys(keys, pause=0.05)
+
+
+def _wait_for(
+    predicate: Callable[[], bool], *, allowed: Callable[[], bool], timeout_seconds: float = 0.75,
+) -> bool:
+    deadline = monotonic() + timeout_seconds
+    while allowed():
+        if predicate():
+            return allowed()
+        if monotonic() >= deadline:
+            break
+        sleep(0.025)
+    return False
 
 
 def _resolve_input_target(settings: dict[str, str], system: str) -> _InputTarget | None:
@@ -229,36 +256,66 @@ def _browser_input_target(settings: dict[str, str]) -> _InputTarget | None:
             and actual.path.startswith(path_prefix)
         )
 
-    matches = []
+    def input_document(control):
+        # A trusted outer page must not authorize input into an unrelated iframe.
+        parent = control.parent()
+        for _ in range(32):
+            if parent.element_info.control_type == "Document":
+                return parent if parent.is_visible() and matches_document(parent) else None
+            parent = parent.parent()
+        return None
+
+    matches = {}
     for window in Desktop(backend="uia").windows():
         if window.element_info.class_name not in {"Chrome_WidgetWin_1", "MozillaWindowClass"}:
             continue
-        document = document_for_url(window, url)
-        if document is None or not matches_document(document):
-            continue
-        for control in document.descendants(auto_id=target_id, control_type="Edit"):
-            if control.is_visible() and control.is_enabled():
-                matches.append((window, document, control))
+        for document in iter_documents_for_url(window, url):
+            if not matches_document(document):
+                continue
+            controls = find_uia_elements_by_automation_ids(
+                (target_id,), root_element=document, control_type="Edit",
+            ).get(target_id, [])
+            for control in controls:
+                identity = document_identity(control)
+                if identity is None or not control.is_visible() or not control.is_enabled():
+                    continue
+                owner = input_document(control)
+                if owner is not None:
+                    # The same field can occur in both outer and nested document searches.
+                    matches[(int(window.handle), identity)] = (window, owner, control)
     if len(matches) != 1:
         return None
-    window, document, control = matches[0]
+    window, document, control = next(iter(matches.values()))
+    owner_identity = document_identity(document)
+
+    def document_ready() -> bool:
+        owner = input_document(control)
+        return (
+            owner_identity is not None and owner is not None
+            and document_identity(owner) == owner_identity
+            and matches_document(document) and document.is_visible()
+            and window.is_enabled() and control.is_visible() and control.is_enabled()
+            and control.element_info.automation_id == target_id
+        )
 
     def activate(guard: Callable[[], bool]) -> bool:
         if not guard():
             return False
         window.set_focus()
-        if not guard() or foreground_handle() != int(window.handle):
+        if not _wait_for(lambda: foreground_handle() == int(window.handle), allowed=guard):
+            return False
+        if not guard() or not document_ready():
             return False
         control.set_focus()
-        return has_keyboard_focus(control)
+        return _wait_for(
+            lambda: has_keyboard_focus(control),
+            allowed=lambda: guard() and foreground_handle() == int(window.handle) and document_ready(),
+        )
 
     def ready() -> bool:
         return (
             foreground_handle() == int(window.handle) and has_keyboard_focus(control)
-            and matches_document(document)
-            and document.is_visible() and window.is_enabled()
-            and control.is_visible() and control.is_enabled()
-            and control.element_info.automation_id == target_id
+            and document_ready()
         )
 
     return _InputTarget(activate, ready, lambda: str(control.get_value() or ""))

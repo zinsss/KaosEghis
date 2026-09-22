@@ -45,6 +45,26 @@ def test_document_binding_requires_visible_exact_origin(actual, visible, match):
     assert result is (document if match else None)
 
 
+def test_document_iterator_includes_all_matching_visible_frames():
+    first = Element(url="https://ois.kdca.go.kr/iris/index_run.jsp")
+    second = Element(url="https://ois.kdca.go.kr/iroi/main")
+    hidden = Element(url="https://ois.kdca.go.kr/iroi/hidden", visible=False)
+    unrelated = Element(url="https://unrelated.test/")
+    window = SimpleNamespace(descendants=lambda **kwargs: [first, hidden, unrelated, second])
+    assert list(browser.iter_documents_for_url(window, "https://ois.kdca.go.kr/iroi/main")) == [first, second]
+    assert list(browser.iter_documents_for_url(
+        window, "https://ois.kdca.go.kr/iroi/main", match_path=True,
+    )) == [second]
+
+
+def test_single_document_lookup_does_not_read_later_frames():
+    first = Element(url="https://is.kdca.go.kr/")
+    second = Element(url="https://is.kdca.go.kr/another")
+    second.get_value = lambda: pytest.fail("single-document caller must stay lazy")
+    window = SimpleNamespace(descendants=lambda **kwargs: [first, second])
+    assert browser.document_for_url(window, "https://is.kdca.go.kr/") is first
+
+
 @pytest.mark.parametrize("failure", ["", "modal", "page_edit", "lost_focus", "partial_input", "cancelled"])
 def test_navigation_is_bound_to_browser_address_field(monkeypatch, failure):
     import pywinauto

@@ -370,9 +370,15 @@ The captured targets are used only after explicit post-print consent:
   session-reset coordinate is `(1154, 1968)`.
 - Influenza browser system: the resident-number field exposes Automation ID
   `edtPtntRrn1` (`Edit`, `w2input`). Resolution is scoped to the visible document at
-  the configured OIS origin and application directory. Focus and URL scope are
-  rechecked, and the entered value
-  must read back correctly before Enter.
+  the configured OIS origin and application directory. It checks all matching
+  visible browser documents/frames, not only the first OIS document. Exact-ID
+  native UIA queries are scoped to those documents; duplicate references to the
+  same field are collapsed by runtime identity. Two distinct matching fields
+  still stop the handoff. The field's nearest containing document must remain
+  within the configured influenza application, including when nested in a frame.
+  Focus and URL scope are rechecked. Browser focus and the final value readback
+  may settle for up to 750 ms each, within the existing overall deadline, without
+  retyping. The full entered value must read back correctly before Enter.
 - COVID system: top-level window name `코로나19통합관리시스템`, class
   `CyWindowClass`. Its configured non-clinical session-reset coordinate is
   `(2456, 1982)` and its resident-number input coordinate is `(1466, 2107)`.
