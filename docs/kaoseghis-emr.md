@@ -9,8 +9,9 @@ privileges, polling behavior, or EMR data.
 ## Observation-Only Probe
 
 `core/emr_signal_probe.py` starts with runtime services, not workspace construction.
-No new UI is added. Launcher status lines distinguish `F6`, `F7`, `F6 button`, and
-`F7 button`, followed by the chart number and the age of its pre-action snapshot.
+No new UI is added. Launcher status lines distinguish `F6`, `F7`, `F6 button`,
+`F7 button`, `F6 activation (UIA)`, and `F7 activation (UIA)`, followed by the
+chart number and snapshot age when identity is available.
 
 - The existing EMR connection supplies the process, root window, and treatment
   window. Keyboard capture requires focus inside the treatment child, not merely
@@ -20,6 +21,23 @@ No new UI is added. Launcher status lines distinguish `F6`, `F7`, `F6 button`, a
   then native HWND hit-testing for a matching left-button press and release.
   Dragging off a button is not a click. A first click activating EMR may show
   chart unavailable until a fresh treatment-context snapshot is available.
+- An additional passive UIA listener subscribes to `UIA_Invoke_InvokedEventId`
+  on each exact, already-discovered `BtnF6`/`BtnF7` element (`TreeScope_Element`).
+  It does not invoke the control. Subscribing successfully does not prove that
+  the eGHIS provider emits this event for either keyboard or mouse activation.
+  Both original input listeners remain enabled for comparison; duplicate lines
+  are intentional in this diagnostic phase.
+- UIA event callbacks verify only cached sender metadata (process, automation
+  ID, HWND, control type), then enqueue an observation from the existing chart
+  snapshot. They do not read the sender's text, query the DB, scan a tree, or
+  request a fresh patient read. An unverified sender is reported once per
+  subscription without any raw provider details or patient data.
+- An activation can be delivered after a dialog opens or an action finishes.
+  Existing subscriptions remain while the connected buttons still exist, even
+  when modal focus temporarily prevents chart sampling. The activation is shown
+  without a chart when no fresh snapshot is available. UIA snapshot identity is
+  provisional too: event delivery is not a guarantee of pre-action timing,
+  successful order completion, or a committed DB change.
 - Chart capture uses the operator-supplied screen point `(222, 115)`. The point
   must belong to a visible Text control in the connected EMR window and process.
   The background worker reads its current UIA Value/Legacy/Name using the same
@@ -35,6 +53,12 @@ No new UI is added. Launcher status lines distinguish `F6`, `F7`, `F6 button`, a
   Missing buttons retry at most every five seconds. Input callbacks do no UIA
   searches, DB reads, text reads, synchronous UI updates, or input injection.
   Both listeners use `suppress=False` and always pass input through.
+- UIA registration and removal run on the same non-UI MTA sampling worker.
+  EMR reconnects/button recreation replace subscriptions; unchanged samples do
+  not repeat registration. Failed registrations retry at most every five seconds.
+  A UIA listener failure leaves the keyboard/mouse probe running. Cleanup failures
+  disable the UIA listener instead of accumulating subscriptions. Removed handlers
+  reject late callbacks. This code never calls process-wide `RemoveAllEventHandlers`.
 - Snapshots older than 750 ms, missing/non-numeric values, and uncertain contexts
   are not presented as chart identity. The status says `Chart unavailable` with
   a non-patient reason: expired snapshot, unreadable/non-numeric UIA text,
@@ -64,9 +88,32 @@ These assumptions have been removed, with regression tests for UIA-only values,
 parent/virtual hits, fresh values on cached controls, and rejected context changes.
 The corrected reader still needs live validation in the elevated clinical app.
 
+### Activation Comparison
+
+During normal clinical use, look for `UIA activation subscribed: F6, F7` first.
+Then compare each ordinary F6/F7 press or button click with the corresponding
+`F6 activation (UIA)` / `F7 activation (UIA)` line. Test both keys and both buttons,
+including F7 confirmation/print dialogs and an EMR restart. Do not send orders
+solely to exercise the probe. Record missing, duplicate, or delayed UIA events
+and check the chart snapshot against the patient on screen. Only after that
+validation should replacing either original listener be considered.
+
+### Resource Boundaries
+
+The UIA activation listener adds no chart polling or database calls. It reuses
+the existing two button handles and the existing roughly 250-ms chart sampling.
+That sampling still has UIA/provider cost: the whole diagnostic is not event-only.
+Subscriptions are element-scoped, never desktop-wide. Event handlers use a bounded
+queue and perform no synchronous UI update. No resource benchmark against EMR's
+30-second PACS DB polling has been claimed. A future event-triggered DB queue may
+avoid idle queries but could issue more, narrower queries during busy work.
+
 The input-hook constraints follow Microsoft's
 [low-level hook guidance](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)
 and pynput's [suppression documentation](https://pynput.readthedocs.io/en/latest/faq.html).
+The activation listener follows Microsoft's
+[UIA event guidance](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-eventsforclients)
+and [UIA threading requirements](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-threading).
 
 ## Purpose and Ownership
 

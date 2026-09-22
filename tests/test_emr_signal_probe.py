@@ -1,5 +1,6 @@
 from dataclasses import replace
 import queue
+import threading
 import time
 from types import SimpleNamespace
 
@@ -193,6 +194,52 @@ def test_hook_does_not_read_chart_or_resolve_uia(capture):
     assert capture.output.qsize() == 2
 
 
+@pytest.mark.parametrize("source,handle", [("F6", 106), ("F7", 107)])
+def test_uia_activation_is_distinct_from_key_or_mouse_and_does_not_read(capture, source, handle):
+    capture.reader.chart_number = lambda scope: pytest.fail("UIA callback read chart")
+    capture.reader.keyboard_context = lambda scope: pytest.fail("UIA callback queried foreground")
+    capture.reader.discover_buttons = lambda scope: pytest.fail("UIA callback scanned tree")
+    capture.activation_event(source, capture.snapshot.scope, handle)
+    observation = capture.output.get_nowait()
+    assert observation.source == f"{source} activation (UIA)"
+    assert observation.chart_no == "001234"
+    assert observation.age_ms == 100
+
+
+@pytest.mark.parametrize("context", ["modal", "expired", "unreadable"])
+def test_uia_activation_remains_visible_without_fresh_chart(capture, context):
+    scope = capture.snapshot.scope
+    if context == "modal":
+        capture.snapshot = None
+    elif context == "expired":
+        capture.test_clock[0] += 1
+    else:
+        capture.snapshot = replace(capture.snapshot, chart_no="", unavailable_reason="chart UIA text is empty")
+    capture.activation_event("F7", scope, 107)
+    observation = capture.output.get_nowait()
+    assert observation.source == "F7 activation (UIA)"
+    assert not observation.chart_no
+    assert observation.unavailable_reason
+
+
+@pytest.mark.parametrize("context", ["disconnected", "restart", "stopped", "destroyed", "other_source"])
+def test_uia_activation_discards_obsolete_or_invalid_sources(capture, context):
+    scope = capture.snapshot.scope
+    source = "F7"
+    if context == "disconnected":
+        capture.test_state.status = "red"
+    elif context == "restart":
+        capture.test_state.pid += 1
+    elif context == "stopped":
+        capture.enabled = False
+    elif context == "destroyed":
+        capture.reader.live_buttons = False
+    else:
+        source = "F8"
+    capture.activation_event(source, scope, 107)
+    assert capture.output.empty()
+
+
 def test_sampler_caches_buttons_but_rereads_chart_and_recaches_after_restart():
     reader = Reader()
     current_state = state()
@@ -327,8 +374,18 @@ def app():
 def test_runtime_starts_once_stops_and_discards_late_signals():
     application = app()
     listeners = (Listener(), Listener())
+    activation_calls = []
+
+    def activation_factory(capture, reader):
+        activation_calls.append(("create", threading.get_ident()))
+        return SimpleNamespace(
+            sync=lambda scope, buttons: activation_calls.append(("sync", threading.get_ident())),
+            close=lambda: activation_calls.append(("close", threading.get_ident())),
+        )
+
     runtime = probe.EmrSignalProbeRuntime(
         reader_factory=Reader, listener_factory=lambda _capture: listeners, state_provider=state,
+        activation_factory=activation_factory,
     )
     messages = []
     runtime.status_message.connect(messages.append)
@@ -346,10 +403,47 @@ def test_runtime_starts_once_stops_and_discards_late_signals():
     runtime.stop()
     assert not thread.is_alive()
     assert not any(listener.alive for listener in listeners)
+    assert [name for name, _ in activation_calls][0] == "create"
+    assert [name for name, _ in activation_calls][-1] == "close"
+    assert {ident for _, ident in activation_calls} == {thread.ident}
+    assert thread.ident != threading.get_ident()
     size = len(messages)
     runtime._output.put_nowait("late")
     runtime._drain()
     assert len(messages) == size
+    assert application is not None
+
+
+@pytest.mark.parametrize("failure", ["factory", "sync"])
+def test_uia_listener_failure_does_not_stop_existing_probe(failure):
+    application = app()
+    listeners = (Listener(), Listener())
+    failed = threading.Event()
+
+    def fail(*args):
+        failed.set()
+        raise RuntimeError("provider detail must not be logged")
+
+    runtime = probe.EmrSignalProbeRuntime(
+        reader_factory=Reader, listener_factory=lambda capture: listeners, state_provider=state,
+        activation_factory=fail if failure == "factory" else lambda *args: SimpleNamespace(sync=fail, close=fail),
+    )
+    runtime.start()
+    try:
+        assert failed.wait(3)
+        deadline = time.monotonic() + 3
+        while runtime._capture.snapshot is None:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        key(runtime._capture)
+        items = []
+        while not runtime._output.empty():
+            items.append(runtime._output.get_nowait())
+        assert any(isinstance(item, probe.SignalObservation) for item in items)
+        assert all(listener.alive for listener in listeners)
+        assert "provider detail" not in repr(items)
+    finally:
+        runtime.stop()
     assert application is not None
 
 

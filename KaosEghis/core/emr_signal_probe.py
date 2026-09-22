@@ -15,6 +15,7 @@ import time
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from KaosEghis.core.eghis_connector import get_cached_eghis_state
+from KaosEghis.core.emr_activation_probe import UiaActivationListener
 from KaosEghis.core.ui_capture import _best_text_value
 from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
@@ -337,6 +338,29 @@ class EmrSignalCapture:
         except queue.Full:
             self.dropped_count += 1
 
+    def activation_event(self, source, scope, handle) -> None:
+        try:
+            if (
+                not self.enabled or source not in {"F6", "F7"}
+                or connected_scope(self.state_provider()) != scope
+                or not self.reader.buttons_live(scope, ((f"{source} button", handle),))
+            ):
+                return
+            label = f"{source} activation (UIA)"
+            snapshot = self._current()
+            if snapshot is not None and (f"{source} button", handle) in snapshot.buttons:
+                observation = self._observation(label, snapshot)
+            else:
+                observation = SignalObservation(
+                    label, "", None, datetime.now().strftime("%H:%M:%S"),
+                    "no fresh snapshot at activation",
+                )
+            # Activation can arrive after a dialog takes focus. Its exact
+            # subscribed source is still useful even without patient identity.
+            self._emit(observation)
+        except Exception:
+            pass
+
     def keyboard_event(self, message, data) -> bool:
         try:
             key = int(data.vkCode)
@@ -413,11 +437,13 @@ class EmrSignalProbeRuntime(QObject):
     status_message = Signal(str)
 
     def __init__(self, parent=None, *, reader_factory=Win32SignalReader,
-                 listener_factory=_listeners, state_provider=get_cached_eghis_state):
+                 listener_factory=_listeners, state_provider=get_cached_eghis_state,
+                 activation_factory=UiaActivationListener):
         super().__init__(parent)
         self.reader_factory = reader_factory
         self.listener_factory = listener_factory
         self.state_provider = state_provider
+        self.activation_factory = activation_factory
         self._output = queue.Queue(maxsize=64)
         self._stop = threading.Event()
         self._thread = None
@@ -459,6 +485,7 @@ class EmrSignalProbeRuntime(QObject):
         import pythoncom
 
         initialized = False
+        activation = None
         try:
             pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
             initialized = True
@@ -473,6 +500,10 @@ class EmrSignalProbeRuntime(QObject):
                 listener.start()
                 listener.wait()
             self._output.put_nowait("EMR signal probe active (observation only).")
+            try:
+                activation = self.activation_factory(capture, reader)
+            except Exception:
+                capture._emit("EMR probe | UIA activation listener unavailable. Keyboard/mouse probe remains active.")
             while not self._stop.is_set():
                 if not all(listener.is_alive() for listener in self._listeners):
                     raise RuntimeError("Signal listener stopped")
@@ -480,6 +511,19 @@ class EmrSignalProbeRuntime(QObject):
                     capture.snapshot = sampler.sample()
                 except Exception:
                     capture.snapshot = None
+                if activation is not None:
+                    try:
+                        activation.sync(
+                            connected_scope(self.state_provider()),
+                            capture.snapshot.buttons if capture.snapshot else None,
+                        )
+                    except Exception:
+                        try:
+                            activation.close()
+                        except Exception:
+                            pass
+                        activation = None
+                        capture._emit("EMR probe | UIA activation listener stopped. Keyboard/mouse probe remains active.")
                 self._stop.wait(0.25)
         except Exception:
             try:
@@ -490,6 +534,11 @@ class EmrSignalProbeRuntime(QObject):
             if self._capture:
                 self._capture.enabled = False
                 self._capture.snapshot = None
+            if activation is not None:
+                try:
+                    activation.close()
+                except Exception:
+                    pass
             for listener in self._listeners:
                 try:
                     listener.stop()
