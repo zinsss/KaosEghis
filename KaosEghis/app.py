@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QApplication
 
+from KaosEghis.core.startup_diagnostics import StartupDiagnostics
 from KaosEghis.ui.startup_splash import StartupSplash
 from KaosEghis.ui.theme import apply_nord_theme
 
@@ -9,14 +10,19 @@ def run() -> int:
     apply_nord_theme(app)
     splash = StartupSplash()
     splash.show()
+    diagnostics = StartupDiagnostics()
+
+    def stage(message: str) -> None:
+        diagnostics.stage(message)
+        splash.set_status(message)
 
     try:
-        splash.set_status("Preparing local data...")
+        stage("Preparing local data...")
         from KaosEghis.db.database import initialize_database
 
         initialize_database()
 
-        splash.set_status("Starting integrations...")
+        stage("Starting integrations...")
         from KaosEghis.service.kaospacs_api import start_server_in_thread
 
         patient_context_runtime = None
@@ -30,18 +36,22 @@ def run() -> int:
 
         # Qt establishes the Windows GUI thread as STA. Import automation modules
         # only afterward so they cannot initialize COM as MTA and disable OLE drag/drop.
-        splash.set_status("Building workspace...")
+        stage("Building workspace...")
         from KaosEghis.ui.main_window import MainWindow
 
         window = MainWindow()
-        splash.set_status("Starting runtime services...")
+        stage("Starting runtime services...")
         window.initialize_runtime_services()
         window.show()
         app.processEvents()
         splash.finish(window)
+        diagnostics.close("ready")
         window.prompt_startup_master_password()
-    except Exception:
+    except Exception as exc:
+        diagnostics.close("failed:" + type(exc).__name__)
         splash.close()
         raise
+    finally:
+        diagnostics.close()
 
     return app.exec()
