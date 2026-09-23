@@ -44,6 +44,16 @@ def test_handoff_routing_uses_program_not_product_name(program, system):
     assert "700101" not in repr(request)
 
 
+def test_handoff_charting_snapshot_is_transient_and_excluded_from_repr():
+    request = handoff.handoff_request_for_record(
+        SimpleNamespace(program_type="national_influenza", patient_resident_id="700101-1000000"),
+        charting_text="Private charting note.",
+    )
+    assert request.charting_text == "Private charting note."
+    assert "Private charting note" not in repr(request)
+    assert "700101" not in repr(request)
+
+
 @pytest.mark.parametrize("system", ["general", "covid", "influenza"])
 def test_handoff_sends_digits_and_exactly_one_enter(input_target, system):
     result = handoff.enter_vaccine_resident({}, handoff.VaccineHandoffRequest(system, "700101-1000000"))

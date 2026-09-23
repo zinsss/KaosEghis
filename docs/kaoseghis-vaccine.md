@@ -324,7 +324,8 @@ The post-print handoff is limited to the printed vaccine's configured external s
 2. Resolve or click its configured resident-number input.
 3. Type the resident number with its hyphen removed.
 4. Send one `Enter` to request that system's patient lookup.
-5. Stop. All subsequent search-result review, eligibility confirmation, entry, and
+5. After confirmed input dispatch, copy the corresponding charting text to the clipboard.
+6. Stop. All subsequent search-result review, eligibility confirmation, entry, and
    final registration remain manual operator actions.
 
 Routing uses the record's program type: national influenza goes to the influenza
@@ -346,6 +347,16 @@ systems are removed from the pending queue, so retry only visits unfinished syst
 If input was interrupted or submission is uncertain, inspect the system before
 retrying. There are no automatic input retries. `Stop` cancels further input after
 the current external call returns; already-sent input cannot be undone.
+
+Charting text is snapshotted before the handoff prompt from each printed record's
+vaccine-type note, using the same fallback as the Charting text preview. Only
+successfully dispatched lookups contribute notes. Flu + COVID notes are joined
+with a newline; a retry adds only the newly successful system's note. A wholly
+failed, cancelled, or declined handoff does not change the clipboard. No patient
+identifiers are automatically appended. Clipboard copying runs in the GUI completion
+handler, before form clearing. If it fails, input is not retried: the status warns
+and the note remains in the Charting text preview for manual copying. This does not
+certify that the national system accepted the lookup or registered a vaccination.
 
 The handoff runs on a COM-initialized worker, using transient snapshots of the
 printed records rather than live form text. Patient editing, Fetch, Print, and

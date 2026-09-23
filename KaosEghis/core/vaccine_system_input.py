@@ -37,6 +37,7 @@ SYSTEM_LABELS = {
 class VaccineHandoffRequest:
     system: str
     resident_id: str = field(repr=False)
+    charting_text: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,7 @@ class _InputTarget:
     activation_error: Callable[[], str] | None = None
 
 
-def handoff_request_for_record(record) -> VaccineHandoffRequest:
+def handoff_request_for_record(record, *, charting_text: str = "") -> VaccineHandoffRequest:
     systems = {
         "national_influenza": "influenza",
         "national_covid": "covid",
@@ -61,7 +62,7 @@ def handoff_request_for_record(record) -> VaccineHandoffRequest:
         "general": "general",
     }
     return VaccineHandoffRequest(
-        systems.get(record.program_type, ""), record.patient_resident_id or ""
+        systems.get(record.program_type, ""), record.patient_resident_id or "", charting_text
     )
 
 

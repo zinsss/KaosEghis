@@ -28,10 +28,13 @@ def page(tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.StandardButton.No)
     monkeypatch.setattr(vaccine_tab, "print_vaccine_label", lambda *_a, **_kw: VaccineLabelPrintResult(True, "Printed."))
     monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", lambda *_a, **_kw: VaccineHandoffResult(False, "Test failure."))
+    clipboard = []
+    monkeypatch.setattr(vaccine_tab, "copy_text", clipboard.append)
     monkeypatch.setitem(sys.modules, "pythoncom", SimpleNamespace(
         COINIT_MULTITHREADED=0, CoInitializeEx=lambda _mode: None, CoUninitialize=lambda: None,
     ))
     panel = vaccine_tab.VaccineTab(db)
+    panel.test_clipboard = clipboard
     panel._select_vaccine_type(None, "Test General")
     panel.patient_chart_no_input.setText("0000")
     panel.patient_name_input.setText("Test Patient")
@@ -68,14 +71,17 @@ def test_declining_handoff_clears_only_form_after_print(page, monkeypatch):
     assert page._current_record_id is None
     assert page._prepared_pair_ids is None
     assert page._pending_handoffs == []
+    assert page.test_clipboard == []
     with connect(page._db_path) as connection:
         assert len(list_vaccine_records(connection)) == 1
 
 
 def test_yes_uses_printed_snapshot_and_clears_after_success(page, monkeypatch):
     entered = []
+    charting_text = page.charting_text_preview.toPlainText()
     def accept(*_args):
         page.patient_resident_id_input.setText("different live form")
+        page.charting_text_preview.setPlainText("different live note")
         return QMessageBox.StandardButton.Yes
     monkeypatch.setattr(QMessageBox, "question", accept)
     monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", lambda _s, request, **_kw: (
@@ -85,6 +91,10 @@ def test_yes_uses_printed_snapshot_and_clears_after_success(page, monkeypatch):
     _wait(page)
     assert len(entered) == 1
     assert entered[0].resident_id == "700101-1000000"
+    assert entered[0].charting_text == charting_text
+    assert page.test_clipboard == [charting_text]
+    assert "700101" not in page.test_clipboard[0]
+    assert "copied to clipboard" in page.status_label.text()
     assert page.patient_resident_id_input.text() == ""
     assert page._pending_handoffs == []
 
@@ -92,6 +102,7 @@ def test_yes_uses_printed_snapshot_and_clears_after_success(page, monkeypatch):
 def test_failure_retains_form_and_retry_does_not_print_or_count(page, monkeypatch):
     prints = []
     attempts = []
+    charting_text = page.charting_text_preview.toPlainText()
     monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(vaccine_tab, "print_vaccine_label", lambda *_a, **_kw: (
         prints.append(True) or VaccineLabelPrintResult(True, "Printed.")
@@ -103,6 +114,7 @@ def test_failure_retains_form_and_retry_does_not_print_or_count(page, monkeypatc
     page.print_label()
     _wait(page)
     assert page.patient_name_input.text() == "Test Patient"
+    assert page.test_clipboard == []
     assert not page.retry_handoff_button.isHidden()
     assert not page.fetch_button.isEnabled()
     assert page.fetch_current_patient_from_emr() is False
@@ -116,6 +128,7 @@ def test_failure_retains_form_and_retry_does_not_print_or_count(page, monkeypatc
     with connect(page._db_path) as connection:
         assert list_vaccine_records(connection) == before
     assert page.patient_name_input.text() == ""
+    assert page.test_clipboard == [charting_text]
 
 
 def test_skip_after_failed_handoff_keeps_printed_record(page, monkeypatch):
@@ -125,6 +138,7 @@ def test_skip_after_failed_handoff_keeps_printed_record(page, monkeypatch):
     page.skip_handoff_button.click()
     assert page.patient_chart_no_input.text() == ""
     assert page.fetch_button.isEnabled()
+    assert page.test_clipboard == []
     with connect(page._db_path) as connection:
         assert list_vaccine_records(connection)[0].status == "completed"
 
@@ -145,6 +159,7 @@ def test_failed_print_never_prompts_or_clears(page, monkeypatch, failure):
     assert prompts == []
     assert page.patient_name_input.text() == "Test Patient"
     assert page._pending_handoffs == []
+    assert page.test_clipboard == []
 
 
 def _prepare_pair(page, monkeypatch):
@@ -160,6 +175,7 @@ def test_pair_prompts_once_after_both_prints_and_retries_only_failed_system(page
     printed = []
     entered = []
     prompts = []
+    notes = []
     def confirm(*args):
         prompts.append(args[1])
         if args[1] == "Vaccine system patient lookup":
@@ -171,6 +187,7 @@ def test_pair_prompts_once_after_both_prints_and_retries_only_failed_system(page
     ))
     def enter(_s, request, **_kw):
         entered.append(request.system)
+        notes.append(request.charting_text)
         return VaccineHandoffResult(len(entered) != 2, "Test outcome.")
     monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", enter)
     page.print_prepared_pair()
@@ -179,9 +196,12 @@ def test_pair_prompts_once_after_both_prints_and_retries_only_failed_system(page
     assert prompts == ["Print Flu + COVID labels", "Vaccine system patient lookup"]
     assert page.patient_chart_no_input.text() == "0000"
     assert [r.system for r in page._pending_handoffs] == ["covid"]
+    assert page.test_clipboard == [notes[0]]
     page._start_handoff()
     _wait(page)
     assert entered == ["influenza", "covid", "covid"]
+    assert page.test_clipboard == [notes[0], "\n".join(notes[:2])]
+    assert page._completed_handoff_charting_texts == []
     assert len(printed) == 2
     with connect(page._db_path) as connection:
         records = list_vaccine_records(connection)
@@ -208,6 +228,25 @@ def test_pair_reprint_failure_not_mistaken_for_successful_print(page, monkeypatc
     assert "1 of 2" in page.status_label.text()
     assert page._prepared_pair_ids is not None
     assert page.patient_chart_no_input.text() == "0000"
+    assert page.test_clipboard == []
+
+
+def test_successful_pair_copies_both_notes_once(page, monkeypatch):
+    _prepare_pair(page, monkeypatch)
+    entered = []
+
+    def enter(_s, request, **_kw):
+        assert page.test_clipboard == []
+        entered.append(request)
+        return VaccineHandoffResult(True, "Sent.")
+
+    monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", enter)
+    page.print_prepared_pair()
+    _wait(page)
+    assert [request.system for request in entered] == ["influenza", "covid"]
+    assert page.test_clipboard == ["\n".join(request.charting_text for request in entered)]
+    assert page.patient_chart_no_input.text() == ""
+    assert page._completed_handoff_charting_texts == []
 
 
 def test_pending_handoff_defers_resets_and_blocks_mutation(page, monkeypatch):
@@ -263,3 +302,88 @@ def test_handoff_runs_off_gui_thread_is_single_flight_and_can_stop(page, monkeyp
     assert page._pending_handoffs
     assert page.patient_chart_no_input.text() == "0000"
     assert page.retry_handoff_button.isEnabled()
+    assert page.test_clipboard == []
+
+
+def test_template_note_is_copied_after_success_on_gui_thread(page, monkeypatch):
+    import threading
+
+    main_thread = threading.get_ident()
+    with connect(page._db_path) as connection:
+        vaccine_type = create_vaccine_type(
+            connection, name="With chart note", code="note", program_type="general",
+            chart_note_template="Chart note line one.\nChart note line two.",
+        )
+    page.refresh_view()
+    page._select_vaccine_type(vaccine_type.id, vaccine_type.name)
+    expected = page.charting_text_preview.toPlainText()
+    entered = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.StandardButton.Yes)
+
+    def enter(*_a, **_kw):
+        assert page.test_clipboard == []
+        entered.append(True)
+        return VaccineHandoffResult(True, "Sent.")
+
+    def copy(text):
+        assert threading.get_ident() == main_thread
+        assert entered == [True]
+        page.test_clipboard.append(text)
+
+    monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", enter)
+    monkeypatch.setattr(vaccine_tab, "copy_text", copy)
+    page.print_label()
+    _wait(page)
+    assert page.test_clipboard == [expected]
+    assert expected == "Chart note line one.\nChart note line two."
+
+
+def test_clipboard_failure_does_not_retry_successful_entry_or_lose_note(page, monkeypatch):
+    expected = page.charting_text_preview.toPlainText()
+    entered = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", lambda *_a, **_kw: (
+        entered.append(True) or VaccineHandoffResult(True, "Sent.")
+    ))
+
+    def fail_copy(_text):
+        raise RuntimeError("private clipboard data")
+
+    monkeypatch.setattr(vaccine_tab, "copy_text", fail_copy)
+    page.print_label()
+    _wait(page)
+    assert page._pending_handoffs == []
+    assert page.patient_chart_no_input.text() == ""
+    assert page.charting_text_preview.toPlainText() == expected
+    assert "could not be copied" in page.status_label.text()
+    assert "private clipboard data" not in page.status_label.text()
+    assert page.retry_handoff_button.isHidden()
+    page._start_handoff()
+    assert entered == [True]
+
+
+def test_pair_notes_do_not_leak_into_next_patient_after_skip(page, monkeypatch):
+    _prepare_pair(page, monkeypatch)
+    entered = []
+
+    def enter(_s, request, **_kw):
+        entered.append(request)
+        return VaccineHandoffResult(request.system == "influenza", "Test outcome.")
+
+    monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", enter)
+    page.print_prepared_pair()
+    _wait(page)
+    assert page.test_clipboard == [entered[0].charting_text]
+    page._skip_handoff()
+    assert page._completed_handoff_charting_texts == []
+    assert len(page.test_clipboard) == 1
+    page._select_vaccine_type(None, "Test General")
+    page.patient_chart_no_input.setText("0001")
+    page.patient_name_input.setText("Next test patient")
+    page.patient_resident_id_input.setText("700101-1000000")
+    expected = page.charting_text_preview.toPlainText()
+    monkeypatch.setattr(page, "_confirm_program_printing", lambda *_a: (True, False))
+    monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", lambda *_a, **_kw: VaccineHandoffResult(True, "Sent."))
+    page.print_label()
+    _wait(page)
+    assert page.test_clipboard == [entered[0].charting_text, expected]

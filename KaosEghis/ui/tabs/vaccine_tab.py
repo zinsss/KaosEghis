@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from KaosEghis.core.clipboard_service import copy_text
 from KaosEghis.core.eghis_connector import build_connector_settings
 from KaosEghis.core.printer_service import (
     VaccineLabelContent,
@@ -111,6 +112,10 @@ VACCINE_TARGET_KEYS = {
 }
 
 
+def _charting_text(vaccine_name: str, chart_note: str | None) -> str:
+    return (chart_note or "").strip() or f"{vaccine_name} 예방접종 준비."
+
+
 class VaccineTypeDialog(QDialog):
     PROGRAM_TYPES = (
         ("General / private", "general"),
@@ -182,6 +187,7 @@ class VaccineTab(QWidget):
         self._kdca_thread: threading.Thread | None = None
         self._handoff_thread: threading.Thread | None = None
         self._pending_handoffs: list[VaccineHandoffRequest] = []
+        self._completed_handoff_charting_texts: list[str] = []
         self._print_in_progress = False
         self._handoff_cancel = threading.Event()
         self.handoff_progress.connect(self._show_handoff_progress)
@@ -865,7 +871,16 @@ class VaccineTab(QWidget):
         return record
 
     def _begin_post_print_handoff(self, records: list[VaccineRecord]) -> None:
-        self._pending_handoffs = [handoff_request_for_record(record) for record in records]
+        self._pending_handoffs = []
+        self._completed_handoff_charting_texts = []
+        with connect(self._db_path) as connection:
+            for record in records:
+                vaccine_type = get_vaccine_type(connection, record.vaccine_type_id)
+                charting_text = _charting_text(
+                    record.vaccine_type_name,
+                    vaccine_type.chart_note_template if vaccine_type is not None else None,
+                )
+                self._pending_handoffs.append(handoff_request_for_record(record, charting_text=charting_text))
         self._update_handoff_controls()
         labels = ", ".join(SYSTEM_LABELS.get(request.system, "Unconfigured system") for request in self._pending_handoffs)
         answer = QMessageBox.question(
@@ -924,18 +939,37 @@ class VaccineTab(QWidget):
 
     def _finish_handoff(self, completed: int, result: VaccineHandoffResult) -> None:
         self._handoff_thread = None
+        self._completed_handoff_charting_texts.extend(
+            request.charting_text for request in self._pending_handoffs[:completed] if request.charting_text
+        )
+        charting_text = "\n".join(self._completed_handoff_charting_texts)
+        clipboard_message = ""
+        copy_failed = False
+        if completed and charting_text:
+            try:
+                copy_text(charting_text)
+                clipboard_message = " Charting text copied to clipboard."
+            except Exception:
+                copy_failed = True
+                clipboard_message = " Charting text could not be copied; copy it manually from the Charting text preview."
         del self._pending_handoffs[:completed]
         self._set_kdca_busy(False)
         if not self._pending_handoffs:
+            self._completed_handoff_charting_texts.clear()
             self.clear_form()
-            self.status_label.setText("Patient lookup input sent. Form cleared; review the vaccine system manually.")
+            self.status_label.setText(
+                "Patient lookup input sent. Form cleared; review the vaccine system manually." + clipboard_message
+            )
         else:
-            self.status_label.setText(f"{result.message} Form retained. Retry entry or skip and clear.")
+            self.status_label.setText(f"{result.message} Form retained. Retry entry or skip and clear." + clipboard_message)
+        if copy_failed:
+            self.charting_text_preview.setPlainText(charting_text)
 
     def _skip_handoff(self) -> None:
         if self._handoff_thread is not None or self._kdca_thread is not None:
             return
         self._pending_handoffs.clear()
+        self._completed_handoff_charting_texts.clear()
         self._update_handoff_controls()
         self.clear_form()
         self.status_label.setText("System entry skipped. Printed records retained; form cleared.")
@@ -2019,7 +2053,7 @@ class VaccineTab(QWidget):
             )
         )
         self.charting_text_preview.setPlainText(
-            chart_note if chart_note else f"{vaccine_name} 예방접종 준비."
+            _charting_text(vaccine_name, chart_note)
         )
 
     @staticmethod
