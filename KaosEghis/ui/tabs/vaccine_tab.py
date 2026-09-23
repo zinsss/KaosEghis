@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from KaosEghis.core.clipboard_service import copy_text
 from KaosEghis.core.eghis_connector import build_connector_settings
+from KaosEghis.core.vaccine_emr_charting import paste_vaccine_charting
 from KaosEghis.core.printer_service import (
     VaccineLabelContent,
     print_vaccine_label,
@@ -177,6 +178,7 @@ class VaccineTab(QWidget):
     kdca_finished = Signal(object)
     handoff_progress = Signal(str)
     handoff_finished = Signal(int, object)
+    charting_finished = Signal(object)
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -192,6 +194,7 @@ class VaccineTab(QWidget):
         self._handoff_cancel = threading.Event()
         self.handoff_progress.connect(self._show_handoff_progress)
         self.handoff_finished.connect(self._finish_handoff)
+        self.charting_finished.connect(self._finish_emr_charting)
         self.destroyed.connect(self._handoff_cancel.set)
         self._kdca_cancel = threading.Event()
         self.kdca_progress.connect(self._show_kdca_progress)
@@ -423,7 +426,7 @@ class VaccineTab(QWidget):
         self._refresh_today_record_menu()
 
     def fetch_current_patient_from_emr(self) -> bool:
-        if self._kdca_thread is not None or self._pending_handoffs or self._print_in_progress:
+        if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress:
             return False
         with connect(self._db_path) as connection:
             profile = get_active_emr_target_profile(connection)
@@ -679,7 +682,7 @@ class VaccineTab(QWidget):
     def prepare_flu_and_covid(self) -> tuple[object, object] | None:
         """Create separate Flu and COVID preparation records from one patient context."""
 
-        if self._pending_handoffs or self._print_in_progress:
+        if self._pending_handoffs or self._handoff_thread is not None or self._print_in_progress:
             return None
         if (
             not self.patient_name_input.text().strip()
@@ -728,7 +731,7 @@ class VaccineTab(QWidget):
         return flu_record, covid_record
 
     def print_prepared_pair(self) -> None:
-        if self._print_in_progress or self._pending_handoffs or self._kdca_thread is not None:
+        if self._print_in_progress or self._pending_handoffs or self._handoff_thread is not None or self._kdca_thread is not None:
             return
         if self._prepared_pair_ids is None:
             self.status_label.setText("Prepare a Flu + COVID pair first.")
@@ -787,7 +790,7 @@ class VaccineTab(QWidget):
         )
 
     def print_label(self) -> None:
-        if self._print_in_progress or self._pending_handoffs or self._kdca_thread is not None:
+        if self._print_in_progress or self._pending_handoffs or self._handoff_thread is not None or self._kdca_thread is not None:
             return
         self._print_in_progress = True
         self._update_handoff_controls()
@@ -885,7 +888,7 @@ class VaccineTab(QWidget):
         labels = ", ".join(SYSTEM_LABELS.get(request.system, "Unconfigured system") for request in self._pending_handoffs)
         answer = QMessageBox.question(
             self, "Vaccine system patient lookup",
-            f"Label printing finished. Enter the resident number into {labels}?",
+            f"Label printing finished. Enter the resident number into {labels}, then paste charting text into EMR?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -953,6 +956,9 @@ class VaccineTab(QWidget):
                 copy_failed = True
                 clipboard_message = " Charting text could not be copied; copy it manually from the Charting text preview."
         del self._pending_handoffs[:completed]
+        if not self._pending_handoffs and charting_text and not copy_failed:
+            self._start_emr_charting(charting_text)
+            return
         self._set_kdca_busy(False)
         if not self._pending_handoffs:
             self._completed_handoff_charting_texts.clear()
@@ -963,6 +969,55 @@ class VaccineTab(QWidget):
         else:
             self.status_label.setText(f"{result.message} Form retained. Retry entry or skip and clear." + clipboard_message)
         if copy_failed:
+            self.charting_text_preview.setPlainText(charting_text)
+
+    def _start_emr_charting(self, charting_text: str) -> None:
+        def worker() -> None:
+            initialized = False
+            result = VaccineHandoffResult(False, "EMR charting could not be started. Paste manually after reviewing the chart.")
+            try:
+                import pythoncom
+
+                pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+                initialized = True
+                with connect(self._db_path) as connection:
+                    settings = get_settings(connection)
+                    profile = get_active_emr_target_profile(connection)
+                if profile is not None:
+                    settings = build_connector_settings(
+                        settings,
+                        process_name=profile.process_name or settings.get("eghis_process_name"),
+                        window_title_contains=profile.window_title_contains or settings.get("eghis_window_title_contains"),
+                        executable_path=profile.executable_path or settings.get("eghis_executable_path"),
+                    )
+                    result = paste_vaccine_charting(settings, charting_text, cancelled=self._handoff_cancel.is_set)
+                else:
+                    result = VaccineHandoffResult(False, "No enabled EMR profile is available. Paste charting text manually.")
+            except Exception:
+                pass
+            finally:
+                if initialized:
+                    pythoncom.CoUninitialize()
+                try:
+                    self.charting_finished.emit(result)
+                except RuntimeError:
+                    pass
+
+        self._handoff_thread = threading.Thread(target=worker, name="Vaccine EMR charting", daemon=True)
+        self._set_kdca_busy(True)
+        self.status_label.setText("Charting text copied to clipboard. Focusing EMR for F1, Enter, paste...")
+        self._handoff_thread.start()
+
+    def _finish_emr_charting(self, result: VaccineHandoffResult) -> None:
+        self._handoff_thread = None
+        charting_text = "\n".join(self._completed_handoff_charting_texts)
+        self._completed_handoff_charting_texts.clear()
+        self._set_kdca_busy(False)
+        self.clear_form()
+        self.status_label.setText(
+            "Patient lookup input sent. Form cleared. Charting text copied to clipboard. " + result.message
+        )
+        if not result.success:
             self.charting_text_preview.setPlainText(charting_text)
 
     def _skip_handoff(self) -> None:
@@ -997,7 +1052,7 @@ class VaccineTab(QWidget):
         self.skip_handoff_button.setEnabled(pending and not active)
 
     def load_selected_record(self) -> None:
-        if self._pending_handoffs or self._print_in_progress:
+        if self._pending_handoffs or self._handoff_thread is not None or self._print_in_progress:
             return
         selected_row = self._selected_record_id()
         if selected_row is None:
@@ -1050,7 +1105,7 @@ class VaccineTab(QWidget):
             )
 
     def _edit_today_record(self, record_id: int) -> None:
-        if self._pending_handoffs or self._print_in_progress:
+        if self._pending_handoffs or self._handoff_thread is not None or self._print_in_progress:
             return
         # Recheck the patient and date in case the form or database changed.
         record = next((r for r in self._today_patient_records() if r.id == record_id), None)
@@ -1175,7 +1230,7 @@ class VaccineTab(QWidget):
         )
 
     def clear_form(self) -> None:
-        if self._pending_handoffs or self._print_in_progress:
+        if self._pending_handoffs or self._handoff_thread is not None or self._print_in_progress:
             return
         self._current_record_id = None
         self._prepared_pair_ids = None
@@ -1200,7 +1255,7 @@ class VaccineTab(QWidget):
     def start_new_vaccine_record(self) -> None:
         """Keep the fetched patient context while preparing another vaccine entry."""
 
-        if self._pending_handoffs or self._print_in_progress:
+        if self._pending_handoffs or self._handoff_thread is not None or self._print_in_progress:
             return
         self._current_record_id = None
         self._prepared_pair_ids = None
@@ -1293,7 +1348,7 @@ class VaccineTab(QWidget):
         timer = self._session_keeper_timers.get(target_key)
         if target is None or timer is None:
             return
-        if self._kdca_thread is not None or self._pending_handoffs or self._print_in_progress:
+        if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress:
             timer.start(SESSION_KEEPER_RETRY_MS)
             return
         deadline = self._session_keeper_retry_deadlines.get(target_key)
@@ -1362,7 +1417,7 @@ class VaccineTab(QWidget):
     def reset_vaccine_sessions_now(self) -> None:
         """Run one guarded native-session reset without requiring timer opt-in."""
 
-        if self._kdca_thread is not None or self._pending_handoffs or self._print_in_progress:
+        if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress:
             return
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:

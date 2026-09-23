@@ -318,15 +318,18 @@ action.
 
 ### External System Handoff
 
-The post-print handoff is limited to the printed vaccine's configured external system:
+The post-print handoff uses the printed vaccine's configured external system,
+then the manually connected EMR:
 
 1. Verify and focus the expected system window.
 2. Resolve or click its configured resident-number input.
 3. Type the resident number with its hyphen removed.
 4. Send one `Enter` to request that system's patient lookup.
 5. After confirmed input dispatch, copy the corresponding charting text to the clipboard.
-6. Stop. All subsequent search-result review, eligibility confirmation, entry, and
-   final registration remain manual operator actions.
+6. Once all requested lookups have been dispatched, focus EMR and send `F1`,
+   `Enter`, then `Ctrl+V`. There is no final Enter or automatic chart submission.
+7. Clear the form. All vaccine-system search-result review, eligibility confirmation,
+   entry, and final registration remain manual operator actions.
 
 Routing uses the record's program type: national influenza goes to the influenza
 browser system; national COVID (both Pfizer and Moderna) goes to COVID; general
@@ -355,12 +358,29 @@ with a newline; a retry adds only the newly successful system's note. A wholly
 failed, cancelled, or declined handoff does not change the clipboard. No patient
 identifiers are automatically appended. Clipboard copying runs in the GUI completion
 handler, before form clearing. If it fails, input is not retried: the status warns
-and the note remains in the Charting text preview for manual copying. This does not
-certify that the national system accepted the lookup or registered a vaccination.
+and the note remains in the Charting text preview for manual copying; no EMR keys
+are sent. This does not certify that the national system accepted the lookup or
+registered a vaccination.
+
+EMR charting runs on a separate background continuation after clipboard copying.
+For Flu + COVID, partial success copies the available note but does not start EMR
+charting yet. After the remaining lookup succeeds, both notes are pasted together
+once. Skipping the remaining lookup does not paste a partial note automatically.
+The connected EMR process/root window is validated with existing focus helpers,
+without grid-cache preloading. Each key checks desktop availability, held inputs,
+and the exact foreground EMR window/focus. Short guarded waits separate the keys.
+Clipboard contents must still match the captured note immediately before paste.
+An unexpected popup, focus change, Stop request, or clipboard failure stops the
+sequence without refocusing, replaying the lookup, or retrying an uncertain paste.
+The text remains on the clipboard, and charting failure also retains it in the
+preview after form clearing. Check the chart before pasting manually to avoid a
+duplicate. The operator must keep the same patient selected in EMR throughout:
+these focus checks do not independently verify patient identity or pasted contents.
 
 The handoff runs on a COM-initialized worker, using transient snapshots of the
 printed records rather than live form text. Patient editing, Fetch, Print, and
-record-changing buttons are disabled while a handoff is pending. Login/launch can
+record-changing buttons are disabled while a handoff is pending or EMR charting
+is active. Login/launch can
 be used after a failed handoff, before Retry. Automatic and manual session resets
 are deferred during printing, the handoff prompt, and pending/active handoffs.
 
