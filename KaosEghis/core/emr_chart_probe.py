@@ -27,14 +27,20 @@ class ChartFieldObservation:
     def from_event(cls, property_name, value):
         source = f"Chart field event (UIA {property_name})"
         chart_no = ""
-        detail = "Value unavailable/non-numeric; not displayed"
-        if isinstance(value, str):
+        detail = "Event payload is not text; not displayed"
+        if value is None:
+            detail = "Event payload missing; chart clear/change not confirmed"
+        elif isinstance(value, str):
             value = value.strip()
             if not value:
                 detail = "Chart field cleared"
             elif re.fullmatch(r"[0-9]{1,20}", value):
                 chart_no = value
                 detail = "load completion unverified"
+            elif re.fullmatch(r"[0-9]+", value):
+                detail = "Event numeric text exceeds chart-number length limit; not displayed"
+            else:
+                detail = "Event text is not a numeric chart number; not displayed"
         return cls(source, chart_no, detail, datetime.now().strftime("%H:%M:%S"))
 
     def status_text(self):

@@ -140,6 +140,11 @@ Launcher status distinguishes:
 - `Chart field event (UIA Name)` (or Value/LegacyName/LegacyValue): a genuine
   property callback, showing only a numeric chart value, a cleared-field status,
   or a redacted unavailable-value status. Multiple properties may report the same change.
+  Rejected payloads distinguish missing values, non-text values, non-numeric text,
+  and numeric text exceeding the 20-digit limit. No rejected content is displayed
+  or coerced to a chart number. A missing payload is not a confirmed cleared field.
+  These messages alone do not say whether the independent sampled/F6/F7 chart
+  read succeeded; compare the following sampled and input-signal lines.
 - `Chart observed (sampled)`: the existing reader's initial/reconnected baseline.
 - `Chart changed (sampled)`: that reader saw a different number; this is not a UIA event.
 - `Chart field empty (sampled)`: the reader verified an empty field. Focus loss or

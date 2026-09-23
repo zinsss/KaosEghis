@@ -10,8 +10,9 @@ from KaosEghis.core.emr_signal_probe import SignalScope
 @pytest.mark.parametrize("value,number,detail", [
     (" 001234 ", "001234", "load completion unverified"),
     ("", "", "cleared"), ("  ", "", "cleared"),
-    ("private patient memo", "", "not displayed"), (None, "", "not displayed"),
-    (1234, "", "not displayed"), ("1" * 21, "", "not displayed"),
+    ("private patient memo", "", "not a numeric chart number"),
+    (None, "", "payload missing"),
+    (1234, "", "payload is not text"), ("1" * 21, "", "length limit"),
 ])
 def test_property_observation_only_displays_valid_numeric_chart(value, number, detail):
     event = ChartFieldObservation.from_event("Name", value)
@@ -19,6 +20,30 @@ def test_property_observation_only_displays_valid_numeric_chart(value, number, d
     assert detail in event.status_text()
     assert "private patient memo" not in event.status_text()
     assert "001234" not in repr(event)
+
+
+@pytest.mark.parametrize("value", [1234, 12.34, True, b"1234", ["1234"], {"chart": "1234"}])
+def test_non_text_payloads_are_not_coerced_into_chart_identity(value):
+    event = ChartFieldObservation.from_event("Name", value)
+    assert event.chart_no == ""
+    assert event.detail == "Event payload is not text; not displayed"
+    assert "1234" not in event.status_text()
+
+
+@pytest.mark.parametrize("value", ["1234 memo", "1234\u200b", "\uff11\uff12\uff13\uff14", "1234\n5678", "1234" * 6])
+def test_rejected_event_text_is_never_exposed_in_diagnostics(value):
+    event = ChartFieldObservation.from_event("Name", value)
+    assert event.chart_no == ""
+    assert value not in event.status_text()
+    assert value not in repr(event)
+    assert "not displayed" in event.detail
+
+
+def test_missing_payload_is_not_reported_as_a_confirmed_clear():
+    missing = ChartFieldObservation.from_event("Name", None)
+    cleared = ChartFieldObservation.from_event("Name", "")
+    assert "not confirmed" in missing.detail
+    assert cleared.detail == "Chart field cleared"
 
 
 class Backend:
@@ -232,6 +257,31 @@ def test_handler_accepts_cached_identity_and_variant_payload_without_live_reads(
     assert len(calls) == 1
     interface = handler.QueryInterface(b.dll.IUIAutomationPropertyChangedEventHandler)
     interface.HandlePropertyChangedEvent(None, b.dll.UIA_NamePropertyId, VARIANT("001234"))
+
+
+@pytest.mark.parametrize("value,detail", [
+    (None, "payload missing"), (1234, "payload is not text"),
+    ("private patient memo", "not a numeric chart number"),
+    ("", "Chart field cleared"), ("001234", "load completion unverified"),
+])
+def test_variant_payload_diagnostics_match_unwrapped_payload(com_backend, value, detail):
+    from comtypes.automation import VARIANT
+
+    b = com_backend
+    events, rejected = [], []
+    subscription = b.subscribe(
+        b.test.target, (42, 110),
+        lambda prop, payload: events.append(ChartFieldObservation.from_event(prop, payload)),
+        lambda: rejected.append(True),
+    )
+    sender = SimpleNamespace(CachedProcessId=42, GetCachedPropertyValue=lambda prop: (42, 110),
+                             CachedControlType=b.dll.UIA_TextControlTypeId)
+    subscription.handler.HandlePropertyChangedEvent(sender, b.dll.UIA_NamePropertyId, VARIANT(value))
+    assert len(events) == 1
+    assert detail in events[0].detail
+    assert events[0].chart_no == ChartFieldObservation.from_event("Name", value).chart_no
+    assert "private patient memo" not in events[0].status_text()
+    assert not rejected
 
 
 def test_real_property_event_on_our_own_hidden_text():
