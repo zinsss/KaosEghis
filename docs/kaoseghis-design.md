@@ -346,8 +346,9 @@ The design strategy is milestone-based:
   boundary, and treat Raspberry Pi as a reload-only, 21-inch touch-first consumer with
   no mouse/keyboard requirement for routine staff use
 - `KaosEghis-scan` uses a non-GUI NAPS2 process with the Canon DR-C125 Native profile, keeps PDFs in a dedicated temporary folder, and supports manual browser upload through in-app preview, native file drag-out, and a View folder fallback
-- the EMR patient-note alert is a read-only, in-memory safety surface: it checks only
-  once per detected chart-number change for the `***` marker, displays no memo
+- the EMR patient-note alert is a read-only, in-memory safety surface: it waits five
+  seconds after a shared patient-change notification, then checks the memo once
+  for the `***` marker without a separate chart polling loop; it displays no memo
   contents, persists neither chart number nor memo data, and performs no EMR input or
   focus action; its generic memo textbox is disambiguated by an optional persisted
   Inspect.exe ancestor path, which contains UI structure only and no patient data

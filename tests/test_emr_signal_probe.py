@@ -69,6 +69,90 @@ def mouse(capture, x=7, message=0x201, flags=0):
     return capture.mouse_event(message, SimpleNamespace(pt=SimpleNamespace(x=x, y=1), flags=flags))
 
 
+def test_shared_patient_context_deduplicates_samples_and_same_value_events(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    context = capture.patient_context
+    assert context.chart_no == snapshot.chart_no
+    assert capture.patient_is_current(context)
+    capture.chart_property_event(snapshot.scope, "Name", snapshot.chart_no)
+    capture.update_snapshot(replace(snapshot, sampled_at=10.1))
+    assert capture.patient_context == context
+    assert capture.patient_is_current(context)
+    assert snapshot.chart_no not in repr(context)
+
+
+def test_chart_clear_immediately_invalidates_patient_and_old_inflight_samples(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    context = capture.patient_context
+    capture.chart_property_event(snapshot.scope, "Name", "")
+    assert capture.patient_context is None
+    assert not capture.patient_is_current(context)
+    capture.update_snapshot(snapshot)
+    assert capture.patient_context is None
+    capture.test_clock[0] += 0.3
+    capture.update_snapshot(replace(snapshot, sampled_at=capture.test_clock[0]))
+    reloaded = capture.patient_context
+    assert reloaded.chart_no == context.chart_no
+    assert reloaded.revision > context.revision
+    assert capture.patient_is_current(reloaded)
+    assert not capture.patient_is_current(context)
+
+
+def test_patient_context_survives_focus_gap_but_cannot_validate_stale_snapshot(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    context = capture.patient_context
+    capture.update_snapshot(None)
+    assert capture.patient_context == context
+    assert not capture.patient_is_current(context)
+    capture.update_snapshot(snapshot)
+    assert capture.patient_context == context
+    capture.test_clock[0] += 1
+    assert not capture.patient_is_current(context)
+    capture.update_snapshot(replace(snapshot, sampled_at=capture.test_clock[0]))
+    assert capture.patient_is_current(context)
+
+
+def test_sampled_clear_and_connection_change_invalidate_patient(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    context = capture.patient_context
+    capture.update_snapshot(replace(snapshot, chart_no="", unavailable_reason="chart UIA text is empty"))
+    assert capture.patient_context is None
+    capture.update_snapshot(snapshot)
+    assert capture.patient_context != context
+    capture.test_state.pid += 1
+    assert not capture.patient_is_current(capture.patient_context)
+    capture.update_snapshot(None)
+    assert capture.patient_context is None
+
+
+def test_runtime_publishes_shared_patient_changes_even_if_status_queue_is_full(capture):
+    app()
+    runtime = probe.EmrSignalProbeRuntime(state_provider=lambda: capture.test_state)
+    runtime._running = True
+    runtime._capture = capture
+    contexts = []
+    runtime.patient_changed.connect(contexts.append)
+    try:
+        capture.update_snapshot(capture.snapshot)
+        context = capture.patient_context
+        for _ in range(runtime._output.maxsize):
+            runtime._output.put_nowait("diagnostic")
+        runtime._drain()
+        runtime._drain()
+        assert contexts == [context]
+        assert runtime.is_patient_current(context)
+        capture.chart_property_event(context.scope, "Name", "")
+        assert not runtime.is_patient_current(context)
+        runtime._drain()
+        assert contexts == [context, None]
+    finally:
+        runtime.stop()
+
+
 @pytest.mark.parametrize("vk,source", [(0x75, "F6"), (0x76, "F7")])
 def test_keyboard_reports_source_and_pre_action_snapshot(capture, vk, source):
     assert key(capture, vk) is True

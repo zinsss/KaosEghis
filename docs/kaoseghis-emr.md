@@ -2,9 +2,10 @@
 
 Last updated: 2026-09-23
 
-Status: the shared DB manager is still a design. An observation-only F6/F7/chart probe
-now writes to the existing Launcher status area. It does not change database
-privileges, polling behavior, or EMR data.
+Status: the shared DB manager is still a design. F6/F7 observations write to the
+existing Launcher status area without changing DB polling or EMR data. The shared
+chart observer now also schedules the read-only `***` patient-memo alert, replacing
+that alert's separate polling loop.
 
 ## Observation-Only Probe
 
@@ -170,11 +171,39 @@ During normal patient changes, compare UIA lines with sampled lines. A value set
 before the first subscription may have only a sampled baseline. Same-patient
 reloads may not change any chart property. Neither kind of line proves that all
 patient fields/orders have finished loading, and property events do not overwrite
-F6/F7 snapshots or trigger alerts/DB work. Existing patient-alert monitoring is
-unchanged. Live logs now confirm eGHIS Name-change event delivery, including clear
+F6/F7 snapshots or trigger DB work. Clear/change events invalidate pending memo
+checks; subsequent sampled chart identity schedules a delayed alert check as
+described below. Live logs now confirm eGHIS Name-change event delivery, including clear
 and numeric transitions, but not complete coverage or patient-load completion.
 A real property change on an isolated, hidden Windows test field also verified
 the callback path. Button activation-event delivery remains unverified.
+
+### Delayed Patient-Memo Alert
+
+With `Enable *** patient-note alert` enabled, the shared chart observer schedules
+one memo check **five seconds after observing a new patient context**. The existing
+red, always-on-top popup and configurable memo target are reused. The default memo
+Automation ID remains `TreatmentPtntMemo`.
+
+- The alert no longer starts its own 1.5-second chart polling loop. It does not
+  resolve the old chart-target settings; it uses the shared sampled identity.
+- Duplicate numeric UIA events/samples do not restart the timer or repeat a check.
+- A clear or different patient cancels pending work and clears the old alert.
+  A clear followed by the same chart number is a new visit and gets a new check.
+- The timer never fires early. A five-second delay is an operator-selected settling
+  period, not proof that EMR finished loading every field.
+- Memo UIA access runs off the GUI thread, once per context. The shared snapshot
+  must still be fresh and identify the same EMR process/window/patient both before
+  and after reading. UIA change callbacks invalidate it immediately; samples that
+  started before that change cannot restore it.
+- Checks are serialized. A slow old read cannot overlap a new one or display a
+  stale alert. Stop, disconnect, and settings changes invalidate in-flight results.
+- An unreadable memo is unavailable, not a confirmed absence of `***`. There is
+  no endless retry or memo polling after this attempt. Reloading the patient or
+  saving the alert settings can schedule another delayed check.
+- No patient memo contents are logged, persisted, or sent through Qt signals.
+  The enabled setting is preserved; installing the change does not silently turn
+  a disabled alert back on.
 
 ### Resource Boundaries
 

@@ -100,7 +100,8 @@ class MainWindow(QMainWindow):
         self.pw_runtime = PwRuntime(self)
         self.patient_alert_popup = EmrPatientAlertPopup()
         self.patient_alert_monitor = EmrPatientAlertMonitor(
-            probe=self._create_patient_alert_probe(), parent=self
+            probe=self._create_patient_alert_probe(), parent=self,
+            patient_is_current=lambda context: self.emr_signal_probe.is_patient_current(context),
         )
         self.patient_alert_monitor.result_changed.connect(
             self._handle_patient_alert_result
@@ -117,6 +118,7 @@ class MainWindow(QMainWindow):
         self.emr_signal_probe.status_message.connect(
             self.kaoseghis_tab.launcher_page.show_emr_signal_status
         )
+        self.emr_signal_probe.patient_changed.connect(self.patient_alert_monitor.patient_changed)
         self.scheduler_runtime = SchedulerRuntime(parent=self)
         tabs.addTab(self.kaoseghis_tab, "KaosEghis")
         self.memos_tab = MemosTab()

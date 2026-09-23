@@ -1,4 +1,4 @@
-"""Passive, memory-only order-signal diagnostics. No DB access or input injection."""
+"""Passive order-signal diagnostics and shared chart state. No DB access or input injection."""
 
 from __future__ import annotations
 
@@ -32,6 +32,13 @@ class SignalScope:
     pid: int
     root: int
     treatment: int
+
+
+@dataclass(frozen=True)
+class PatientChartContext:
+    scope: SignalScope
+    chart_no: str = field(repr=False)
+    revision: int
 
 
 def connected_scope(state) -> SignalScope | None:
@@ -368,10 +375,50 @@ class EmrSignalCapture:
         self._mouse_down = None
         self._sample_scope = None
         self._sample_chart = ""
+        self._patient_lock = threading.Lock()
+        self._patient_context = None
+        self._patient_revision = 0
+        self._patient_invalidated_at = float("-inf")
+
+    @property
+    def patient_context(self):
+        with self._patient_lock:
+            return self._patient_context
+
+    def patient_is_current(self, context) -> bool:
+        with self._patient_lock:
+            snapshot = self.snapshot
+            return bool(
+                context is not None and self.enabled and context == self._patient_context
+                and connected_scope(self.state_provider()) == context.scope
+                and snapshot is not None and snapshot.scope == context.scope
+                and snapshot.chart_no == context.chart_no
+                and snapshot.sampled_at > self._patient_invalidated_at
+                and 0 <= self.clock() - snapshot.sampled_at <= MAX_SNAPSHOT_AGE
+            )
+
+    def _update_patient_context(self, scope, snapshot) -> None:
+        with self._patient_lock:
+            if self._patient_context is not None and self._patient_context.scope != scope:
+                self._patient_context = None
+            if not self.enabled or scope is None:
+                self._patient_context = None
+                return
+            if snapshot is None or snapshot.scope != scope:
+                return  # A temporary focus/read failure is not a patient change.
+            if snapshot.sampled_at <= self._patient_invalidated_at:
+                return
+            if snapshot.unavailable_reason == "chart UIA text is empty":
+                self._patient_context = None
+            elif re.fullmatch(r"[0-9]{1,20}", snapshot.chart_no):
+                if self._patient_context is None or self._patient_context.chart_no != snapshot.chart_no:
+                    self._patient_revision += 1
+                    self._patient_context = PatientChartContext(scope, snapshot.chart_no, self._patient_revision)
 
     def update_snapshot(self, snapshot) -> None:
         self.snapshot = snapshot
         scope = connected_scope(self.state_provider())
+        self._update_patient_context(scope, snapshot)
         if scope != self._sample_scope:
             self._sample_scope, self._sample_chart = scope, ""
         if not self.enabled or snapshot is None or snapshot.scope != scope:
@@ -394,6 +441,14 @@ class EmrSignalCapture:
             self.enabled and connected_scope(self.state_provider()) == scope
             and property_name in {"Name", "Value", "LegacyName", "LegacyValue"}
         ):
+            # Invalidate memo work immediately, even before the Qt status queue
+            # drains. Only a subsequent sampled read can arm the new patient.
+            if isinstance(value, str):
+                with self._patient_lock:
+                    normalized = value.strip()
+                    if self._patient_context is None or normalized != self._patient_context.chart_no:
+                        self._patient_context = None
+                        self._patient_invalidated_at = self.clock()
             self._emit(ChartFieldObservation.from_event(property_name, value))
 
     def _current(self) -> SignalSnapshot | None:
@@ -519,6 +574,7 @@ def _listeners(capture):
 
 class EmrSignalProbeRuntime(QObject):
     status_message = Signal(str)
+    patient_changed = Signal(object)
 
     def __init__(self, parent=None, *, reader_factory=Win32SignalReader,
                  listener_factory=_listeners, state_provider=get_cached_eghis_state,
@@ -536,6 +592,7 @@ class EmrSignalProbeRuntime(QObject):
         self._capture = None
         self._running = False
         self._reported_drops = 0
+        self._published_patient = None
         self._timer = QTimer(self)
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._drain)
@@ -566,6 +623,9 @@ class EmrSignalProbeRuntime(QObject):
             self._thread.join(timeout=0.25)
         self._drain()
 
+    def is_patient_current(self, context) -> bool:
+        return bool(self._running and self._capture and self._capture.patient_is_current(context))
+
     def _run(self) -> None:
         import pythoncom
 
@@ -585,7 +645,7 @@ class EmrSignalProbeRuntime(QObject):
                     return
                 listener.start()
                 listener.wait()
-            self._output.put_nowait("EMR signal probe active (observation only).")
+            self._output.put_nowait("EMR signal probe active (order signals observation only; shared patient-change alerts).")
             try:
                 activation = self.activation_factory(capture, reader)
             except Exception:
@@ -658,6 +718,12 @@ class EmrSignalProbeRuntime(QObject):
                 pythoncom.CoUninitialize()
 
     def _drain(self) -> None:
+        context = self._capture.patient_context if self._running and self._capture and self._capture.enabled else None
+        if context is not None and connected_scope(self.state_provider()) != context.scope:
+            context = None
+        if context != self._published_patient:
+            self._published_patient = context
+            self.patient_changed.emit(context)
         for _ in range(64):
             try:
                 item = self._output.get_nowait()

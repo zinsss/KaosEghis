@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 import re
 import threading
 import time
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 from KaosEghis.core.eghis_connector import get_cached_eghis_state
 
@@ -99,6 +100,10 @@ class EmrPatientAlertProbe:
         self._patient_changed_at = 0.0
         self._current_marker_found = False
 
+    @property
+    def enabled(self) -> bool:
+        return self._configuration.enabled
+
     def reset(self) -> None:
         self._connection_identity = None
         self._chart_element = None
@@ -176,6 +181,34 @@ class EmrPatientAlertProbe:
                 message="Patient change detected; waiting for patient memo.",
             )
 
+        result = self._read_memo_result(state)
+        if result.available:
+            self._checked_patient_token = patient_token
+            self._current_marker_found = result.marker_found
+        return result
+
+    def check_for_patient(self, context, is_current: Callable[[Any], bool]) -> EmrPatientAlertResult:
+        """Read only the memo, using the shared chart snapshot for identity."""
+        if not self.enabled:
+            return EmrPatientAlertResult(False, False, False, "Patient-note alert is disabled.")
+        state = self._state_provider()
+        if not _state_is_connected(state):
+            return EmrPatientAlertResult(False, False, False, "EMR is not connected.")
+        if (
+            context is None or not is_current(context)
+            or (state.pid, state.window_handle, state.main_window_handle)
+            != (context.scope.pid, context.scope.root, context.scope.treatment)
+        ):
+            return EmrPatientAlertResult(True, False, False, "Patient identity unavailable; memo check skipped.")
+        # Patient panels may be recreated on each load. Resolve within the
+        # connected treatment window once, without a second chart-field scan.
+        self.reset()
+        result = self._read_memo_result(state)
+        if not is_current(context):
+            return EmrPatientAlertResult(True, False, False, "Patient changed during memo check; result discarded.")
+        return result
+
+    def _read_memo_result(self, state) -> EmrPatientAlertResult:
         if self._memo_element is None:
             if self._clock() < self._next_memo_resolution_at:
                 return EmrPatientAlertResult(
@@ -216,9 +249,11 @@ class EmrPatientAlertProbe:
                 message="Patient memo field could not be read.",
             )
 
-        self._checked_patient_token = patient_token
-        self._current_marker_found = bool(self._marker and self._marker in value)
-        return self._checked_result()
+        found = bool(self._marker and self._marker in value)
+        return EmrPatientAlertResult(
+            True, True, found,
+            "Important patient-note marker detected." if found else "No patient-note marker detected.",
+        )
 
     def _checked_result(self) -> EmrPatientAlertResult:
         return EmrPatientAlertResult(
@@ -470,88 +505,123 @@ def _matches_ancestor(element: Any, node: dict[str, str]) -> bool:
 
 
 class EmrPatientAlertMonitor(QObject):
+    """One delayed memo read per shared patient-change notification, never a poller."""
+
     result_changed = Signal(object)
+    _check_finished = Signal(object, object)
 
     def __init__(
         self,
         *,
         probe: EmrPatientAlertProbe | None = None,
-        poll_interval_seconds: float = 1.5,
+        delay_seconds: float = 5.0,
+        patient_is_current: Callable[[Any], bool] = lambda _context: False,
+        clock: Callable[[], float] = time.monotonic,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._probe = probe or EmrPatientAlertProbe()
-        self._poll_interval_seconds = max(float(poll_interval_seconds), 0.2)
-        self._stop_event = threading.Event()
+        self._delay_seconds = max(float(delay_seconds), 0.0)
+        self._patient_is_current = patient_is_current
+        self._clock = clock
+        self._active = False
+        self._context = None
+        self._token = object()
+        self._attempted_token = None
+        self._deadline = 0.0
+        self._due = False
         self._thread: threading.Thread | None = None
-        self._last_result: EmrPatientAlertResult | None = None
-        self._probe_lock = threading.Lock()
-        self._pending_probe: EmrPatientAlertProbe | None = None
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._timer.timeout.connect(self._begin_check)
+        self._check_finished.connect(self._finish_check)
 
     @property
     def is_running(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
+        return self._active
 
     def start(self) -> None:
         if self.is_running:
             return
-        self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._run,
-            name="KaosEghis patient alert monitor",
-            daemon=True,
-        )
-        self._thread.start()
+        self._active = True
+        self._schedule_current()
 
     def stop(self) -> None:
-        self._stop_event.set()
-        thread = self._thread
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=0.5)
-        self._thread = None
-        self._probe.reset()
+        self._active = False
+        self._context = None
+        self._schedule_current()
+
+    def patient_changed(self, context) -> None:
+        if context != self._context:
+            self._context = context
+            self._schedule_current()
 
     def replace_probe(self, probe: EmrPatientAlertProbe) -> None:
-        with self._probe_lock:
-            self._pending_probe = probe
+        self._probe = probe
+        self._schedule_current()
 
-    def _run(self) -> None:
-        pythoncom = None
-        try:
-            import pythoncom as imported_pythoncom
+    def _schedule_current(self) -> None:
+        self._timer.stop()
+        self._token = object()
+        self._due = False
+        self.result_changed.emit(EmrPatientAlertResult(
+            self._context is not None, True, False, "Patient-note alert cleared.",
+        ))
+        if self._active and self._context is not None and self._probe.enabled:
+            self._deadline = self._clock() + self._delay_seconds
+            self._timer.start(math.ceil(self._delay_seconds * 1000))
 
-            pythoncom = imported_pythoncom
-            pythoncom.CoInitialize()
-        except (ImportError, OSError):
-            pythoncom = None
+    def _begin_check(self) -> None:
+        if not self._active or self._context is None or not self._probe.enabled:
+            return
+        if self._attempted_token is self._token:
+            return
+        remaining = self._deadline - self._clock()
+        if remaining > 0:
+            self._timer.start(max(1, math.ceil(remaining * 1000)))
+            return
+        self._timer.stop()
+        if self._thread is not None:
+            self._due = True
+            return
+        self._due = False
+        token, context, probe = self._token, self._context, self._probe
+        self._attempted_token = token
 
-        try:
-            while not self._stop_event.is_set():
-                with self._probe_lock:
-                    if self._pending_probe is not None:
-                        self._probe = self._pending_probe
-                        self._pending_probe = None
-                        self._last_result = None
-                try:
-                    result = self._probe.check()
-                except Exception:
-                    self._probe.reset()
-                    result = EmrPatientAlertResult(
-                        connected=False,
-                        available=False,
-                        marker_found=False,
-                        message="Patient alert check unavailable.",
-                    )
-                if result != self._last_result:
-                    self._last_result = result
-                    self.result_changed.emit(result)
-                self._stop_event.wait(self._poll_interval_seconds)
-        finally:
-            if pythoncom is not None:
-                try:
+        def is_current(candidate) -> bool:
+            return self._active and self._token is token and self._patient_is_current(candidate)
+
+        def worker() -> None:
+            initialized = False
+            result = EmrPatientAlertResult(True, False, False, "Patient alert check unavailable.")
+            try:
+                import pythoncom
+
+                pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+                initialized = True
+                result = probe.check_for_patient(context, is_current)
+            except Exception:
+                pass  # UIA errors may contain patient text.
+            finally:
+                if initialized:
                     pythoncom.CoUninitialize()
-                except OSError:
+                try:
+                    self._check_finished.emit(token, result)
+                except RuntimeError:
                     pass
+
+        self._thread = threading.Thread(target=worker, name="EMR patient memo check", daemon=True)
+        self._thread.start()
+
+    def _finish_check(self, token, result: EmrPatientAlertResult) -> None:
+        self._thread = None
+        if self._active and token is self._token:
+            if not self._patient_is_current(self._context):
+                result = EmrPatientAlertResult(True, False, False, "Patient identity unavailable; memo result discarded.")
+            self.result_changed.emit(result)
+        if self._due:
+            self._begin_check()
 
 
 def _state_is_connected(state: Any) -> bool:
