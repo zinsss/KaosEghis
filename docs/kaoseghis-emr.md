@@ -39,7 +39,7 @@ Chart-field UIA events and sampled chart changes also appear here as distinct so
   without a chart when no fresh snapshot is available. UIA snapshot identity is
   provisional too: event delivery is not a guarantee of pre-action timing,
   successful order completion, or a committed DB change.
-- Chart discovery uses the operator-supplied screen point `(222, 115)`. The point
+- Chart discovery uses the latest operator-captured screen point `(205, 115)`. The point
   must belong to a visible Text control in the connected EMR window and process.
   The background worker reads its current UIA Value/Legacy/Name using the same
   helper as the capture inspector, approximately every 250 ms. It never opens
@@ -53,7 +53,12 @@ Chart-field UIA events and sampled chart changes also appear here as distinct so
   of the main window; the keyboard treatment-focus restrictions are unchanged.
   The verified UIA control is cached by connection scope, runtime ID, and native
   owner. Subsequent reads follow that control's current bounds, not the old pixel.
-  Focus loss and empty/non-numeric text discard the sample but keep the control.
+  A newly discovered control must first expose a numeric chart value before it
+  is cached or subscribed. Focus loss and a temporarily empty known chart discard
+  the sample but keep that verified control. Non-numeric text invalidates the cache
+  and detaches its property listener; it cannot keep reporting from that control
+  indefinitely. Failed discovery/read attempts retry at most once per second in
+  the worker, with no tree scan or input injection. A new EMR scope can retry immediately.
   Stale/hidden controls, provider failures, changed identity, and connection changes
   trigger reacquisition. Every successful sample reads fresh text and revalidates
   identity and focus; a previous chart number or property event is never substituted.
@@ -107,6 +112,16 @@ host, foreign/unrelated windows, bounded walks, moved cached controls, focus los
 fresh values, and replaced runtime identities. Post-restart F7 chart identity still
 requires observation during ordinary clinical work.
 
+A later capture at `(205, 115)` confirmed a numeric Text control with matching
+Name and Value while the probe had reported persistent non-numeric cached text.
+Both the old and new points hit the same native label during the read-only check,
+so the exact original misbinding was not reproduced. The confirmed code defect
+was indefinite reuse of a non-numeric cached control. Discovery now uses the
+latest captured point, nearer the label's left edge, and invalid text forces
+bounded reacquisition. No numeric HWND/Automation ID or patient value from the
+capture is saved. Tests cover rejected initial blank/text controls, cache replacement,
+listener removal/late-event rejection, narrow labels, and retry limits.
+
 ### Activation Comparison
 
 During normal clinical use, look for `UIA activation subscribed: F6, F7` first.
@@ -121,7 +136,7 @@ validation should replacing either original listener be considered.
 
 `core/emr_chart_probe.py` subscribes to Name, Value, LegacyName, and LegacyValue
 property changes on the exact verified Text control already found by the chart
-reader at `(222, 115)`. It does not save or depend on the numeric Automation ID.
+reader at `(205, 115)`. It does not save or depend on the numeric Automation ID.
 The binding is identified by the current EMR scope and UIA runtime ID. Reconnects
 or replaced controls remove the old handler and bind to the newly discovered
 instance, including virtual UIA controls without their own HWND. Late callbacks
@@ -132,7 +147,8 @@ registration/removal. Failed subscription retries are bounded to five seconds;
 cleanup failure stops this listener without accumulating handlers. Callbacks use
 cached process/runtime/type metadata and the event's new-value payload, never a
 fresh UIA text read. Invalid values are not displayed, and provider exception text
-is not logged. A verified empty field can be subscribed before a patient is selected.
+is not logged. An already-verified chart field remains subscribed when cleared;
+an unknown empty Text control is not subscribed before numeric verification.
 
 Launcher status distinguishes:
 

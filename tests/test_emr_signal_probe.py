@@ -547,11 +547,14 @@ def chart_reader(monkeypatch):
     reader.keyboard_context = lambda scope: True
     reader._chart_identity = None
     reader._chart_node = None
+    reader._chart_retry = None
+    clock = [10.0]
+    reader._clock = lambda: clock[0]
     reader._belongs = lambda parent, child: parent == child or (parent == 100 and child in (110, 111))
     reader.process = SimpleNamespace(GetWindowThreadProcessId=lambda handle: (1, 42))
     reader.gui = SimpleNamespace(
         WindowFromPoint=lambda point: 110,
-        GetWindowRect=lambda handle: (210, 100, 260, 120),
+        GetWindowRect=lambda handle: (197, 107, 237, 128),
         IsWindow=lambda handle: handle > 0,
         GetParent=lambda handle: 100 if handle in (110, 111) else 0,
         GetWindow=lambda handle, flag: 0,
@@ -561,18 +564,20 @@ def chart_reader(monkeypatch):
     info = SimpleNamespace(
         handle=110, control_type="Text", process_id=42, name="001234", visible=True,
         runtime_id=(42, 110),
-        rectangle=SimpleNamespace(left=210, top=100, right=260, bottom=120),
+        rectangle=SimpleNamespace(left=197, top=107, right=237, bottom=128),
         set_cache_strategy=cache_options.append,
     )
     node = SimpleNamespace(element_info=info)
+    discovered = [node]
     lookups = []
 
     def from_point(x, y):
         lookups.append((x, y))
-        return node
+        return discovered[0]
 
     monkeypatch.setattr(pywinauto, "Desktop", lambda **kwargs: SimpleNamespace(from_point=from_point))
-    return SimpleNamespace(reader=reader, node=node, info=info, lookups=lookups, cache_options=cache_options)
+    return SimpleNamespace(reader=reader, node=node, info=info, lookups=lookups,
+                           cache_options=cache_options, clock=clock, discovered=discovered)
 
 
 def test_chart_read_reuses_control_but_reads_fresh_uia_text(chart_reader):
@@ -581,15 +586,16 @@ def test_chart_read_reuses_control_but_reads_fresh_uia_text(chart_reader):
     assert reader.chart_number(scope) == "001234"
     info.name = "000456"
     assert reader.chart_number(scope) == "000456"
-    assert chart_reader.lookups == [(222, 115)]
+    assert chart_reader.lookups == [(205, 115)]
     assert chart_reader.cache_options == [False]
     assert reader.chart_target.node is chart_reader.node
     assert reader.chart_target.owner_handle == 110
 
 
-def test_empty_chart_still_exposes_verified_target_for_property_listener(chart_reader):
-    chart_reader.info.name = ""
+def test_known_chart_clearing_keeps_verified_target_for_property_listener(chart_reader):
     scope = probe.connected_scope(state())
+    chart_reader.reader.chart_number(scope)
+    chart_reader.info.name = ""
     with pytest.raises(probe._ChartUnavailable, match="empty"):
         chart_reader.reader.chart_number(scope)
     assert chart_reader.reader.chart_target.node is chart_reader.node
@@ -597,6 +603,95 @@ def test_empty_chart_still_exposes_verified_target_for_property_listener(chart_r
     with pytest.raises(probe._ChartUnavailable, match="not focused"):
         chart_reader.reader.chart_number(scope)
     assert chart_reader.reader.chart_target is None
+
+
+@pytest.mark.parametrize("initial", ["", "Patient", "Patient 001234", "1" * 21])
+def test_discovery_requires_numeric_text_and_retries_at_bounded_rate(chart_reader, initial):
+    reader, info = chart_reader.reader, chart_reader.info
+    scope = probe.connected_scope(state())
+    info.name = initial
+    with pytest.raises(probe._ChartUnavailable):
+        reader.chart_number(scope)
+    assert reader._chart_node is None
+    assert reader.chart_target is None
+    assert not reader.chart_target_live(scope, 110)
+    info.name = "000456"
+    for elapsed in (0, 0.25, 0.5, 0.99):
+        chart_reader.clock[0] = 10.0 + elapsed
+        with pytest.raises(probe._ChartUnavailable):
+            reader.chart_number(scope)
+    assert chart_reader.lookups == [(205, 115)]
+    chart_reader.clock[0] = 10.0 + probe.CHART_REDISCOVERY_INTERVAL
+    assert reader.chart_number(scope) == "000456"
+    assert len(chart_reader.lookups) == 2
+    assert reader.chart_target_live(scope, 110)
+
+
+def test_nonnumeric_cache_is_removed_and_replaced_by_new_chart_control(chart_reader):
+    reader, info = chart_reader.reader, chart_reader.info
+    scope = probe.connected_scope(state())
+    assert reader.chart_number(scope) == "001234"
+    info.name = "Patient 000456"
+    with pytest.raises(probe._ChartUnavailable, match="not numeric; rediscovering"):
+        reader.chart_number(scope)
+    assert reader._chart_node is None
+    assert reader.chart_target is None
+    assert not reader.chart_target_live(scope, 110)
+
+    replacement = SimpleNamespace(element_info=SimpleNamespace(**{
+        **vars(info), "name": "000789", "handle": 111, "runtime_id": (42, 111),
+    }))
+    chart_reader.discovered[0] = replacement
+    chart_reader.clock[0] += probe.CHART_REDISCOVERY_INTERVAL
+    assert reader.chart_number(scope) == "000789"
+    assert reader.chart_target.node is replacement
+    assert reader.chart_target_live(scope, 111)
+    assert not reader.chart_target_live(scope, 110)
+    assert len(chart_reader.lookups) == 2
+
+
+def test_invalid_chart_cache_detaches_listener_and_rejects_late_events(chart_reader):
+    reader, scope = chart_reader.reader, probe.connected_scope(state())
+    subscriptions, removed, events = [], [], []
+
+    def subscribe(target, runtime_id, callback, rejected):
+        subscription = SimpleNamespace(callback=callback)
+        subscriptions.append(subscription)
+        return subscription
+
+    backend = SimpleNamespace(subscribe=subscribe, unsubscribe=removed.append)
+    capture = SimpleNamespace(_emit=lambda text: None, chart_property_event=lambda *args: events.append(args))
+    listener = probe.UiaChartListener(capture, reader, backend_factory=lambda: backend)
+    reader.chart_number(scope)
+    listener.sync(scope, reader.chart_target)
+    assert len(subscriptions) == 1
+    chart_reader.info.name = "Patient"
+    with pytest.raises(probe._ChartUnavailable):
+        reader.chart_number(scope)
+    listener.sync(scope, reader.chart_target)
+    assert removed == subscriptions
+    subscriptions[0].callback("Name", "001234")
+    assert not events
+
+
+def test_discovery_retry_does_not_delay_new_emr_scope(chart_reader):
+    reader, info = chart_reader.reader, chart_reader.info
+    scope = probe.connected_scope(state())
+    info.name = "Patient"
+    with pytest.raises(probe._ChartUnavailable):
+        reader.chart_number(scope)
+    info.name, info.process_id = "000456", 43
+    reader.process.GetWindowThreadProcessId = lambda handle: (1, 43)
+    assert reader.chart_number(replace(scope, pid=43)) == "000456"
+    assert len(chart_reader.lookups) == 2
+
+
+def test_chart_anchor_stays_inside_a_narrow_label(chart_reader):
+    # The latest capture is near the label's left edge, not its variable right edge.
+    chart_reader.info.rectangle.right = 215
+    chart_reader.info.name = "12"
+    assert chart_reader.reader.chart_number(probe.connected_scope(state())) == "12"
+    assert chart_reader.lookups == [(205, 115)]
 
 
 @pytest.mark.parametrize("path", ["value", "legacy", "name"])
@@ -623,7 +718,7 @@ def test_chart_read_accepts_native_parent_hit_only_for_verified_uia_text(chart_r
     assert reader.chart_number(scope) == "001234"
     info.name = "000456"
     assert reader.chart_number(scope) == "000456"
-    assert chart_reader.lookups == [(222, 115)]
+    assert chart_reader.lookups == [(205, 115)]
 
 
 @pytest.mark.parametrize("change,reason", [
@@ -650,7 +745,7 @@ def test_chart_read_rejects_unverified_or_unreadable_target(chart_reader, change
         info.handle = 999
     with pytest.raises(probe._ChartUnavailable, match=reason):
         reader.chart_number(scope)
-    if change in {"empty", "nonnumeric"}:
+    if change == "empty":
         assert reader._chart_node is chart_reader.node
     else:
         assert reader._chart_identity is None
@@ -714,6 +809,8 @@ def test_chart_never_reads_other_application_at_coordinate():
     reader = object.__new__(probe.Win32SignalReader)
     reader.keyboard_context = lambda scope: True
     reader._chart_identity = reader._chart_node = None
+    reader._chart_retry = None
+    reader._clock = lambda: 10.0
     reader._belongs = lambda parent, child: False
     reader._chart_window_belongs = lambda scope, handle: False
     reader.gui = SimpleNamespace(WindowFromPoint=lambda point: 999)
@@ -755,6 +852,7 @@ def test_chart_window_membership_follows_bounded_same_process_ownership(chart_re
     reader.process.GetWindowThreadProcessId = lambda handle: (1, pids.get(handle, 42))
     scope = probe.connected_scope(state())
     assert reader._chart_window_belongs(scope, 110) is expected
+    reader._chart_identity, reader._chart_node = (scope, (42, 110), 110), chart_reader.node
     assert reader.chart_target_live(scope, 110) is expected
 
 
@@ -785,7 +883,7 @@ def test_cached_chart_follows_live_control_not_old_screen_point(chart_reader):
     info.name = "000456"
     reader.gui.WindowFromPoint = lambda point: pytest.fail("Cached chart must not depend on old coordinates")
     assert reader.chart_number(scope) == "000456"
-    assert chart_reader.lookups == [(222, 115)]
+    assert chart_reader.lookups == [(205, 115)]
 
 
 def test_focus_change_keeps_control_but_never_reuses_previous_patient_value(chart_reader):
@@ -800,7 +898,7 @@ def test_focus_change_keeps_control_but_never_reuses_previous_patient_value(char
     reader.keyboard_context = lambda scope: True
     reader.gui.WindowFromPoint = lambda point: pytest.fail("Focus change must not require rediscovery")
     assert reader.chart_number(scope) == "000456"
-    assert chart_reader.lookups == [(222, 115)]
+    assert chart_reader.lookups == [(205, 115)]
 
 
 def test_changed_runtime_identity_is_reacquired_and_mid_read_change_is_rejected(chart_reader, monkeypatch):

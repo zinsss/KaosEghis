@@ -21,7 +21,8 @@ from KaosEghis.core.ui_capture import _best_text_value
 from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
 
-CHART_POINT = (222, 115)
+CHART_POINT = (205, 115)
+CHART_REDISCOVERY_INTERVAL = 1.0
 MAX_SNAPSHOT_AGE = 0.75
 TREATMENT_TITLE = "\uc9c4\ub8cc\uc2e4"
 
@@ -90,7 +91,7 @@ class _GuiThreadInfo(ctypes.Structure):
 
 
 class Win32SignalReader:
-    def __init__(self) -> None:
+    def __init__(self, *, clock=time.monotonic) -> None:
         import win32api
         import win32gui
         import win32process
@@ -110,6 +111,8 @@ class Win32SignalReader:
         self.user32.SendMessageTimeoutW.restype = wintypes.LPARAM
         self._chart_identity = None
         self._chart_node = None
+        self._chart_retry = None
+        self._clock = clock
         self.chart_target = None
 
     def _belongs(self, parent: int, child: int) -> bool:
@@ -197,7 +200,11 @@ class Win32SignalReader:
         )
 
     def chart_target_live(self, scope: SignalScope, handle: int) -> bool:
-        return self._chart_window_belongs(scope, handle)
+        identity = self._chart_identity
+        return bool(
+            identity is not None and identity[0] == scope and identity[2] == handle
+            and self._chart_node is not None and self._chart_window_belongs(scope, handle)
+        )
 
     def _chart_window_belongs(self, scope, handle) -> bool:
         if (
@@ -263,12 +270,16 @@ class Win32SignalReader:
             except Exception:
                 node = None
         discovering = node is None
+        if discovering and self._chart_retry is not None:
+            retry_scope, retry_at, reason = self._chart_retry
+            if retry_scope == scope and self._clock() < retry_at:
+                raise _ChartUnavailable(reason)
         try:
             if discovering:
                 self._chart_identity = self._chart_node = None
                 hit = self.gui.WindowFromPoint(CHART_POINT)
                 if not self._chart_window_belongs(scope, hit):
-                    raise _ChartUnavailable("discovery point (222, 115) is not in the connected EMR window hierarchy")
+                    raise _ChartUnavailable(f"discovery point {CHART_POINT} is not in the connected EMR window hierarchy")
                 from pywinauto import Desktop
 
                 node = Desktop(backend="uia").from_point(*CHART_POINT)
@@ -286,17 +297,23 @@ class Win32SignalReader:
                 raise _ChartUnavailable("chart target identity changed while reading")
             if discovering and self.gui.WindowFromPoint(CHART_POINT) != hit:
                 raise _ChartUnavailable("chart discovery point changed while reading")
-        except Exception:
+            # An arbitrary blank/non-numeric Text control must not become the
+            # chart binding. A known chart may briefly clear during a switch.
+            if value and not re.fullmatch(r"[0-9]{1,20}", value):
+                raise _ChartUnavailable("chart UIA text is not numeric; rediscovering chart field")
+            if discovering and not value:
+                raise _ChartUnavailable("chart field not yet verified (empty text); retrying discovery")
+        except Exception as error:
             self._chart_identity = self._chart_node = None
+            self._chart_retry = (scope, self._clock() + CHART_REDISCOVERY_INTERVAL, _chart_error_reason(error))
             raise
         self._chart_identity, self._chart_node = identity, node
+        self._chart_retry = None
         if not self.keyboard_context(scope):
             raise _ChartUnavailable("EMR focus changed while reading")
         self.chart_target = ChartTarget(scope, node, owner)
         if not value:
             raise _ChartUnavailable("chart UIA text is empty")
-        if not re.fullmatch(r"[0-9]{1,20}", value):
-            raise _ChartUnavailable("chart UIA text is not numeric")
         return value
 
 

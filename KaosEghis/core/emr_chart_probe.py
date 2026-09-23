@@ -192,7 +192,7 @@ class UiaChartListener:
             return
         if target is None or target.scope != scope:
             if self._subscription is None:
-                self._status("UIA chart listener waiting for the verified chart field at (222, 115).")
+                self._status("UIA chart listener waiting for a verified numeric chart field.")
             return
         if not self.reader.chart_target_live(scope, target.owner_handle):
             return
