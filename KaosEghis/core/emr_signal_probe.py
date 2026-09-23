@@ -197,83 +197,107 @@ class Win32SignalReader:
         )
 
     def chart_target_live(self, scope: SignalScope, handle: int) -> bool:
-        return bool(
-            self.gui.IsWindow(scope.root) and self.gui.IsWindow(handle)
-            and self._belongs(scope.root, handle)
-            and self.process.GetWindowThreadProcessId(scope.root)[1] == scope.pid
-            and self.process.GetWindowThreadProcessId(handle)[1] == scope.pid
-        )
+        return self._chart_window_belongs(scope, handle)
 
-    def _chart_target_error(self, scope, node, hit) -> str:
+    def _chart_window_belongs(self, scope, handle) -> bool:
+        if (
+            not self.gui.IsWindow(scope.root)
+            or self.process.GetWindowThreadProcessId(scope.root)[1] != scope.pid
+        ):
+            return False
+        # eGHIS can host the chart label in a small owned window. IsChild alone
+        # rejects it; follow a bounded parent/owner chain, checking every PID.
+        pending, seen = [handle], set()
+        while pending and len(seen) < 16:
+            current = int(pending.pop() or 0)
+            if not current or current in seen:
+                continue
+            seen.add(current)
+            if (
+                not self.gui.IsWindow(current)
+                or self.process.GetWindowThreadProcessId(current)[1] != scope.pid
+            ):
+                continue
+            if current == scope.root:
+                return True
+            pending.extend((self.gui.GetParent(current), self.gui.GetWindow(current, 4)))  # GW_OWNER
+        return False
+
+    def _chart_target_owner(self, scope, node, *, point=None) -> int:
         info = node.element_info
         if info.control_type != "Text":
-            return "point (222, 115) is not a chart Text control"
+            raise _ChartUnavailable("chart target is not a Text control")
         if info.process_id != scope.pid:
-            return "chart target is not owned by the connected EMR"
+            raise _ChartUnavailable("chart target is not owned by the connected EMR")
         rect = info.rectangle
-        x, y = CHART_POINT
-        if not info.visible or not (rect.left <= x < rect.right and rect.top <= y < rect.bottom):
-            return "chart target moved or is hidden"
-        # Native hit-testing can return the text's parent. Virtual UIA children
-        # have no HWND, so walk only their short ancestor chain, never a subtree.
+        if not info.visible or rect.right <= rect.left or rect.bottom <= rect.top:
+            raise _ChartUnavailable("chart target is hidden or has invalid bounds")
+        if point is not None and not (rect.left <= point[0] < rect.right and rect.top <= point[1] < rect.bottom):
+            raise _ChartUnavailable("chart discovery point no longer matches the Text control")
+        # Virtual UIA text can inherit its native window from an ancestor.
         for _ in range(8):
             handle = int(info.handle or 0)
             if handle:
-                if (
-                    self._belongs(scope.root, handle)
-                    and self.process.GetWindowThreadProcessId(handle)[1] == scope.pid
-                    and (self._belongs(hit, handle) or self._belongs(handle, hit))
-                ):
-                    return ""
+                if self._chart_window_belongs(scope, handle):
+                    return handle
                 break
             info = info.parent
             if info is None or info.process_id != scope.pid:
                 break
-        return "chart target window ownership could not be confirmed"
+        raise _ChartUnavailable("chart target window ownership could not be confirmed")
 
     def chart_number(self, scope: SignalScope) -> str:
         self.chart_target = None
-        try:
-            if not self.keyboard_context(scope):
-                raise _ChartUnavailable("EMR treatment entry was not focused at sampling")
-            hit = self.gui.WindowFromPoint(CHART_POINT)
-            if not self._belongs(scope.root, hit):
-                raise _ChartUnavailable("point (222, 115) is outside EMR or covered")
-            identity = (scope, hit, self.gui.GetWindowRect(hit))
-            node = self._chart_node if identity == self._chart_identity else None
-            if node is not None and self._chart_target_error(scope, node, hit):
+        if self._chart_identity is not None and self._chart_identity[0] != scope:
+            self._chart_identity = self._chart_node = None
+        # Focus loss invalidates a sample, not the discovered control itself.
+        if not self.keyboard_context(scope):
+            raise _ChartUnavailable("EMR treatment entry was not focused at sampling")
+        node = self._chart_node
+        if node is not None:
+            try:
+                owner = self._chart_target_owner(scope, node)
+                identity = (scope, tuple(node.element_info.runtime_id or ()), owner)
+                if identity != self._chart_identity:
+                    node = None
+            except Exception:
                 node = None
-            if node is None:
+        discovering = node is None
+        try:
+            if discovering:
+                self._chart_identity = self._chart_node = None
+                hit = self.gui.WindowFromPoint(CHART_POINT)
+                if not self._chart_window_belongs(scope, hit):
+                    raise _ChartUnavailable("discovery point (222, 115) is not in the connected EMR window hierarchy")
                 from pywinauto import Desktop
 
                 node = Desktop(backend="uia").from_point(*CHART_POINT)
                 node.element_info.set_cache_strategy(False)
-                reason = self._chart_target_error(scope, node, hit)
-                if reason:
-                    raise _ChartUnavailable(reason)
-            # Reuse only the verified control, never its patient value. This is
-            # the inspector's Value/Legacy/Name path, not the parent's caption.
+                owner = self._chart_target_owner(scope, node, point=CHART_POINT)
+                runtime_id = tuple(node.element_info.runtime_id or ())
+                if not runtime_id:
+                    raise _ChartUnavailable("chart target runtime identity unavailable")
+                identity = (scope, runtime_id, owner)
+            # Follow the verified UIA instance, not a fixed desktop pixel, and
+            # read current text every time. No previous patient value is reused.
             value = (_best_text_value(node) or "").strip()
-            if not self.keyboard_context(scope) or self.gui.WindowFromPoint(CHART_POINT) != hit:
-                raise _ChartUnavailable("EMR focus or chart target changed while reading")
-            reason = self._chart_target_error(scope, node, hit)
-            if reason:
-                raise _ChartUnavailable(reason)
-            # Also expose an empty verified field to the event listener, so its
-            # next patient update can be observed. This stays on the MTA worker.
-            self.chart_target = ChartTarget(scope, node, hit)
-            if not value:
-                raise _ChartUnavailable("chart UIA text is empty")
-            if not re.fullmatch(r"[0-9]{1,20}", value):
-                raise _ChartUnavailable("chart UIA text is not numeric")
-            # Parent/virtual hits are reacquired each sample to exclude newly
-            # overlaid UIA siblings that share the same native window.
-            self._chart_identity = identity if int(node.element_info.handle or 0) == hit else None
-            self._chart_node = node if self._chart_identity else None
-            return value
+            owner = self._chart_target_owner(scope, node, point=CHART_POINT if discovering else None)
+            if (scope, tuple(node.element_info.runtime_id or ()), owner) != identity:
+                raise _ChartUnavailable("chart target identity changed while reading")
+            if discovering and self.gui.WindowFromPoint(CHART_POINT) != hit:
+                raise _ChartUnavailable("chart discovery point changed while reading")
         except Exception:
             self._chart_identity = self._chart_node = None
             raise
+        self._chart_identity, self._chart_node = identity, node
+        if not self.keyboard_context(scope):
+            raise _ChartUnavailable("EMR focus changed while reading")
+        self.chart_target = ChartTarget(scope, node, owner)
+        if not value:
+            raise _ChartUnavailable("chart UIA text is empty")
+        if not re.fullmatch(r"[0-9]{1,20}", value):
+            raise _ChartUnavailable("chart UIA text is not numeric")
+        return value
 
 
 class EmrSignalSampler:

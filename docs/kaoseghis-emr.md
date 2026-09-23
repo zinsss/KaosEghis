@@ -39,7 +39,7 @@ Chart-field UIA events and sampled chart changes also appear here as distinct so
   without a chart when no fresh snapshot is available. UIA snapshot identity is
   provisional too: event delivery is not a guarantee of pre-action timing,
   successful order completion, or a committed DB change.
-- Chart capture uses the operator-supplied screen point `(222, 115)`. The point
+- Chart discovery uses the operator-supplied screen point `(222, 115)`. The point
   must belong to a visible Text control in the connected EMR window and process.
   The background worker reads its current UIA Value/Legacy/Name using the same
   helper as the capture inspector, approximately every 250 ms. It never opens
@@ -47,9 +47,16 @@ Chart-field UIA events and sampled chart changes also appear here as distinct so
   Native hit-testing may return the text's parent: the UIA target must still
   contain the point and have verified EMR ownership, but HWND equality is not
   required. Virtual targets use a bounded ancestor check, not a tree scan.
-  The control can be reused when the native hit is its own HWND; values are never
-  cached. Parent/virtual hits are resolved again each sample. Invalid controls,
-  unreadable values, changed placement, and connection changes trigger reacquisition.
+  Ownership follows a bounded native parent/owner chain to the connected EMR
+  root, with a matching process at every step. Same-process membership alone is
+  insufficient. This also accepts eGHIS-owned header windows that are not children
+  of the main window; the keyboard treatment-focus restrictions are unchanged.
+  The verified UIA control is cached by connection scope, runtime ID, and native
+  owner. Subsequent reads follow that control's current bounds, not the old pixel.
+  Focus loss and empty/non-numeric text discard the sample but keep the control.
+  Stale/hidden controls, provider failures, changed identity, and connection changes
+  trigger reacquisition. Every successful sample reads fresh text and revalidates
+  identity and focus; a previous chart number or property event is never substituted.
 - UIA discovery runs only in that worker, is scoped, and caches button handles.
   Missing buttons retry at most every five seconds. Input callbacks do no UIA
   searches, DB reads, text reads, synchronous UI updates, or input injection.
@@ -63,7 +70,8 @@ Chart-field UIA events and sampled chart changes also appear here as distinct so
 - F6/F7 snapshots older than 750 ms, missing/non-numeric values, and uncertain contexts
   are not presented as chart identity. The status says `Chart unavailable` with
   a non-patient reason: expired snapshot, unreadable/non-numeric UIA text,
-  wrong/covered point, changed focus/target, or provider/access failure.
+  discovery point outside the EMR hierarchy, changed focus/target, or provider/access
+  failure. The discovery error does not assume that a window is covered.
   A failed read is not mislabeled as an expired snapshot. Both keyboard and
   button observations preserve the pre-action failure reason. Sampling time is
   measured before the UIA read, so a slow provider cannot make old text look fresh.
@@ -88,6 +96,16 @@ required the UIA HWND to equal the native hit and then used only WM_GETTEXT.
 These assumptions have been removed, with regression tests for UIA-only values,
 parent/virtual hits, fresh values on cached controls, and rejected context changes.
 The corrected reader still needs live validation in the elevated clinical app.
+
+On 2026-09-23, real chart Name-change events arrived while F7 repeatedly reported
+the point as "outside EMR or covered." Read-only native diagnostics found that the
+header Text window belonged to eGHIS through an owned host window, not an IsChild
+relationship with the main window. On that live hierarchy, the old child-only
+check returned false and the bounded parent/owner check returned true. No patient
+text was read or input sent for this diagnostic. Regression tests cover the owned
+host, foreign/unrelated windows, bounded walks, moved cached controls, focus loss,
+fresh values, and replaced runtime identities. Post-restart F7 chart identity still
+requires observation during ordinary clinical work.
 
 ### Activation Comparison
 
@@ -132,8 +150,10 @@ before the first subscription may have only a sampled baseline. Same-patient
 reloads may not change any chart property. Neither kind of line proves that all
 patient fields/orders have finished loading, and property events do not overwrite
 F6/F7 snapshots or trigger alerts/DB work. Existing patient-alert monitoring is
-unchanged. EMR event delivery still requires live verification; a real property
-change on an isolated, hidden Windows test field has verified the callback path.
+unchanged. Live logs now confirm eGHIS Name-change event delivery, including clear
+and numeric transitions, but not complete coverage or patient-load completion.
+A real property change on an isolated, hidden Windows test field also verified
+the callback path. Button activation-event delivery remains unverified.
 
 ### Resource Boundaries
 

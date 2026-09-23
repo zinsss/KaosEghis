@@ -552,11 +552,15 @@ def chart_reader(monkeypatch):
     reader.gui = SimpleNamespace(
         WindowFromPoint=lambda point: 110,
         GetWindowRect=lambda handle: (210, 100, 260, 120),
+        IsWindow=lambda handle: handle > 0,
+        GetParent=lambda handle: 100 if handle in (110, 111) else 0,
+        GetWindow=lambda handle, flag: 0,
     )
     reader._text = lambda handle: pytest.fail("Must read UIA value, not native caption")
     cache_options = []
     info = SimpleNamespace(
         handle=110, control_type="Text", process_id=42, name="001234", visible=True,
+        runtime_id=(42, 110),
         rectangle=SimpleNamespace(left=210, top=100, right=260, bottom=120),
         set_cache_strategy=cache_options.append,
     )
@@ -619,13 +623,13 @@ def test_chart_read_accepts_native_parent_hit_only_for_verified_uia_text(chart_r
     assert reader.chart_number(scope) == "001234"
     info.name = "000456"
     assert reader.chart_number(scope) == "000456"
-    assert chart_reader.lookups == [(222, 115), (222, 115)]
+    assert chart_reader.lookups == [(222, 115)]
 
 
 @pytest.mark.parametrize("change,reason", [
     ("empty", "text is empty"), ("nonnumeric", "text is not numeric"),
-    ("type", "not a chart Text"), ("pid", "not owned"),
-    ("hidden", "moved or is hidden"), ("moved", "moved or is hidden"),
+    ("type", "not a Text"), ("pid", "not owned"),
+    ("hidden", "hidden or has invalid bounds"), ("moved", "hidden or has invalid bounds"),
     ("other_window", "ownership could not be confirmed"),
 ])
 def test_chart_read_rejects_unverified_or_unreadable_target(chart_reader, change, reason):
@@ -646,8 +650,11 @@ def test_chart_read_rejects_unverified_or_unreadable_target(chart_reader, change
         info.handle = 999
     with pytest.raises(probe._ChartUnavailable, match=reason):
         reader.chart_number(scope)
-    assert reader._chart_identity is None
-    assert reader._chart_node is None
+    if change in {"empty", "nonnumeric"}:
+        assert reader._chart_node is chart_reader.node
+    else:
+        assert reader._chart_identity is None
+        assert reader._chart_node is None
 
 
 def test_chart_read_reacquires_after_value_failure_and_emr_restart(chart_reader):
@@ -662,7 +669,7 @@ def test_chart_read_reacquires_after_value_failure_and_emr_restart(chart_reader)
     info.process_id = 43
     reader.process.GetWindowThreadProcessId = lambda handle: (1, 43)
     assert reader.chart_number(replace(scope, pid=43)) == "000456"
-    assert len(chart_reader.lookups) == 3
+    assert len(chart_reader.lookups) == 2
 
 
 def test_chart_read_reacquires_invalid_cached_element(chart_reader, monkeypatch):
@@ -699,18 +706,121 @@ def test_chart_read_discards_value_when_context_changes_mid_read(chart_reader, m
     monkeypatch.setattr(probe, "_best_text_value", value)
     with pytest.raises(probe._ChartUnavailable):
         reader.chart_number(probe.connected_scope(state()))
-    assert reader._chart_node is None
+    assert (reader._chart_node is not None) == (change == "focus")
     assert reader.chart_target is None
 
 
 def test_chart_never_reads_other_application_at_coordinate():
     reader = object.__new__(probe.Win32SignalReader)
     reader.keyboard_context = lambda scope: True
+    reader._chart_identity = reader._chart_node = None
     reader._belongs = lambda parent, child: False
+    reader._chart_window_belongs = lambda scope, handle: False
     reader.gui = SimpleNamespace(WindowFromPoint=lambda point: 999)
     reader._text = lambda handle: pytest.fail("Read another app")
-    with pytest.raises(probe._ChartUnavailable, match="outside EMR or covered"):
+    with pytest.raises(probe._ChartUnavailable, match="discovery point.*not in the connected EMR"):
         reader.chart_number(probe.connected_scope(state()))
+
+
+@pytest.mark.parametrize("case,expected", [
+    ("child", True), ("owned", True), ("owned_child", True),
+    ("unrelated_same_process", False), ("other_process", False),
+    ("foreign_owner", False), ("cycle", False), ("destroyed", False),
+    ("reused_root", False),
+])
+def test_chart_window_membership_follows_bounded_same_process_ownership(chart_reader, case, expected):
+    reader = chart_reader.reader
+    parents, owners, pids = {}, {}, {}
+    if case == "child":
+        parents[110] = 100
+    elif case == "owned":
+        owners[110] = 100
+    elif case in {"owned_child", "foreign_owner"}:
+        parents[110] = 200
+        owners[200] = 100
+        if case == "foreign_owner":
+            pids[200] = 43
+    elif case == "other_process":
+        parents[110] = 100
+        pids[110] = 43
+    elif case == "cycle":
+        parents.update({110: 200, 200: 110})
+    elif case in {"destroyed", "reused_root"}:
+        parents[110] = 100
+        if case == "reused_root":
+            pids[100] = 43
+    reader.gui.GetParent = lambda handle: parents.get(handle, 0)
+    reader.gui.GetWindow = lambda handle, flag: owners.get(handle, 0)
+    reader.gui.IsWindow = lambda handle: bool(handle) and not (case == "destroyed" and handle == 110)
+    reader.process.GetWindowThreadProcessId = lambda handle: (1, pids.get(handle, 42))
+    scope = probe.connected_scope(state())
+    assert reader._chart_window_belongs(scope, 110) is expected
+    assert reader.chart_target_live(scope, 110) is expected
+
+
+def test_chart_read_accepts_emr_owned_header_window_seen_in_live_diagnostics(chart_reader):
+    reader = chart_reader.reader
+    reader._belongs = lambda parent, child: parent == child  # Owned windows are not children.
+    reader.gui.GetParent = lambda handle: 200 if handle == 110 else 0
+    reader.gui.GetWindow = lambda handle, flag: 100 if handle == 200 else 0
+    assert not reader._belongs(100, 110)
+    assert reader.chart_number(probe.connected_scope(state())) == "001234"
+    assert reader.chart_target.owner_handle == 110
+
+
+def test_chart_window_membership_has_a_finite_walk_budget(chart_reader):
+    reader = chart_reader.reader
+    visited = []
+    reader.gui.GetParent = lambda handle: visited.append(handle) or handle + 1
+    reader.gui.GetWindow = lambda handle, flag: 0
+    assert not reader._chart_window_belongs(probe.connected_scope(state()), 200)
+    assert len(visited) == 16
+
+
+def test_cached_chart_follows_live_control_not_old_screen_point(chart_reader):
+    reader, info = chart_reader.reader, chart_reader.info
+    scope = probe.connected_scope(state())
+    assert reader.chart_number(scope) == "001234"
+    info.rectangle = SimpleNamespace(left=450, top=210, right=500, bottom=230)
+    info.name = "000456"
+    reader.gui.WindowFromPoint = lambda point: pytest.fail("Cached chart must not depend on old coordinates")
+    assert reader.chart_number(scope) == "000456"
+    assert chart_reader.lookups == [(222, 115)]
+
+
+def test_focus_change_keeps_control_but_never_reuses_previous_patient_value(chart_reader):
+    reader, info = chart_reader.reader, chart_reader.info
+    scope = probe.connected_scope(state())
+    assert reader.chart_number(scope) == "001234"
+    reader.keyboard_context = lambda scope: False
+    with pytest.raises(probe._ChartUnavailable, match="not focused"):
+        reader.chart_number(scope)
+    assert reader.chart_target is None
+    info.name = "000456"
+    reader.keyboard_context = lambda scope: True
+    reader.gui.WindowFromPoint = lambda point: pytest.fail("Focus change must not require rediscovery")
+    assert reader.chart_number(scope) == "000456"
+    assert chart_reader.lookups == [(222, 115)]
+
+
+def test_changed_runtime_identity_is_reacquired_and_mid_read_change_is_rejected(chart_reader, monkeypatch):
+    reader, info = chart_reader.reader, chart_reader.info
+    scope = probe.connected_scope(state())
+    assert reader.chart_number(scope) == "001234"
+    info.runtime_id = (42, 111)
+    info.name = "000456"
+    assert reader.chart_number(scope) == "000456"
+    assert len(chart_reader.lookups) == 2
+
+    def value(node):
+        info.runtime_id = (42, 112)
+        return "000789"
+
+    monkeypatch.setattr(probe, "_best_text_value", value)
+    with pytest.raises(probe._ChartUnavailable, match="identity changed"):
+        reader.chart_number(scope)
+    assert reader.chart_target is None
+    assert reader._chart_node is None
 
 
 def test_button_discovery_requires_unique_exact_id_in_treatment_scope(monkeypatch):
