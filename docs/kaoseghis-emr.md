@@ -5,7 +5,8 @@ Last updated: 2026-09-23
 Status: the shared DB manager is still a design. F6/F7 observations write to the
 existing Launcher status area without changing DB polling or EMR data. The shared
 chart observer now also schedules the read-only `***` patient-memo alert, replacing
-that alert's separate polling loop.
+that alert's separate polling loop. Confirmed chart clears additionally report a
+dry-run PACS/Orders refresh candidate; they do not yet enqueue database work.
 
 ## Observation-Only Probe
 
@@ -177,6 +178,54 @@ described below. Live logs now confirm eGHIS Name-change event delivery, includi
 and numeric transitions, but not complete coverage or patient-load completion.
 A real property change on an isolated, hidden Windows test field also verified
 the callback path. Button activation-event delivery remains unverified.
+
+### Clear-Triggered Refresh Dry Run
+
+The proposed primary refresh trigger is a confirmed chart-number clear, rather
+than F6/F7 key/button input. The previous patient's status and orders would be
+read after clearing; a clear is not itself proof of completed/saved orders.
+Switching patients can clear the field too.
+
+The existing Launcher status area now shows a separate diagnostic, for example:
+
+```text
+EMR probe | Chart cleared (UIA Name) | Chart 1234 -> would refresh PACS/Orders (dry run; previous snapshot 100 ms)
+```
+
+- A verified sampled patient context must exist before the clear. Numeric event
+  text alone does not establish the previous patient's identity.
+- Both a scoped UIA empty-string event and a verified sampled empty field can
+  produce the candidate. Consuming the previous context under the same lock
+  deduplicates the UIA properties and sampled clear, including simultaneous delivery.
+- A fresh subsequent numeric sample rearms the observer, including a reload of
+  the same chart. A sample started before a clear cannot rearm it.
+- The previous numeric sample must be no more than 750 ms old. Otherwise the
+  line says `Refresh skipped (previous chart snapshot not fresh; dry run)` and
+  omits the chart number. In particular, a long modal/focus gap may skip a candidate;
+  diagnostic evidence is needed before changing this safety limit.
+- Missing/non-text/non-numeric payloads, unreadable samples, focus loss,
+  disconnection, and EMR restart are not clear triggers. A different unverified
+  patient cannot inherit the old patient's refresh candidate.
+- This uses existing observations only: no extra UIA reads, timers, input, DB
+  queries, actual refresh queue, or downstream delivery. Chart numbers stay in
+  memory and the existing bounded status area, not logs/files/network traffic.
+  Queue overload still reports dropped observations; it is not reliable job delivery.
+- Memo cancellation still happens on clear, even if the diagnostic candidate is
+  skipped or its status queue is full. F6/F7 diagnostics and existing PACS polling
+  remain unchanged for comparison. The five-second memo delay is also unchanged;
+  caret/readiness-based memo triggering has not been implemented.
+
+After restarting, observe normal F6, F7, and both button workflows, patient
+switching, and same-patient reloads. Expect at most one dry-run refresh line per
+load/clear cycle, with the patient who just left, not the next patient. Note skipped,
+missing, duplicate, or wrong-patient candidates, especially across print/confirmation
+dialogs. Do not send clinical orders solely to test this observer.
+
+Only after live validation should this feed the planned single-connection read-only
+manager, with a settling period, bounded reconciliation, and explicit reads of
+completed/held/cancelled reception status and orders. Removing F6/F7 listeners or
+replacing PACS polling is a later change; clears may not cover edits that leave a
+chart open or changes made on other workstations.
 
 ### Delayed Patient-Memo Alert
 

@@ -122,6 +122,9 @@ def test_sampled_clear_and_connection_change_invalidate_patient(capture):
     capture.update_snapshot(replace(snapshot, chart_no="", unavailable_reason="chart UIA text is empty"))
     assert capture.patient_context is None
     capture.update_snapshot(snapshot)
+    assert capture.patient_context is None  # A pre-clear read cannot restore the patient.
+    capture.test_clock[0] += 0.3
+    capture.update_snapshot(replace(snapshot, sampled_at=capture.test_clock[0]))
     assert capture.patient_context != context
     capture.test_state.pid += 1
     assert not capture.patient_is_current(capture.patient_context)
@@ -149,6 +152,208 @@ def test_runtime_publishes_shared_patient_changes_even_if_status_queue_is_full(c
         assert not runtime.is_patient_current(context)
         runtime._drain()
         assert contexts == [context, None]
+    finally:
+        runtime.stop()
+
+
+def clear_observations(capture):
+    observations = []
+    while not capture.output.empty():
+        item = capture.output.get_nowait()
+        if isinstance(item, probe.ChartClearObservation):
+            observations.append(item)
+    return observations
+
+
+@pytest.mark.parametrize("first_source", ["event", "sample"])
+def test_confirmed_clear_reports_previous_chart_once_across_all_sources(capture, first_source):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    empty = replace(snapshot, chart_no="", unavailable_reason="chart UIA text is empty")
+    if first_source == "sample":
+        capture.update_snapshot(empty)
+    for name in ("Name", "Value", "LegacyName", "LegacyValue"):
+        capture.chart_property_event(snapshot.scope, name, " ")
+    capture.test_clock[0] += 0.1
+    capture.update_snapshot(replace(empty, sampled_at=capture.test_clock[0]))
+    capture.update_snapshot(replace(empty, sampled_at=capture.test_clock[0]))
+
+    observations = clear_observations(capture)
+    assert len(observations) == 1
+    observation = observations[0]
+    assert observation.source == ("sampled" if first_source == "sample" else "UIA Name")
+    assert observation.chart_no == "001234"
+    assert observation.age_ms == 100
+    assert "would refresh PACS/Orders" in observation.status_text()
+    assert "dry run" in observation.status_text()
+    assert "001234" not in repr(observation)
+    assert capture.patient_context is None
+
+
+@pytest.mark.parametrize("source", ["event", "sample"])
+def test_same_patient_reload_can_produce_another_clear_candidate(capture, source):
+    snapshot = capture.snapshot
+    for _ in range(2):
+        capture.test_clock[0] += 0.3
+        capture.update_snapshot(replace(snapshot, sampled_at=capture.test_clock[0]))
+        if source == "event":
+            capture.chart_property_event(snapshot.scope, "Name", "")
+        else:
+            capture.update_snapshot(replace(
+                snapshot, chart_no="", unavailable_reason="chart UIA text is empty",
+                sampled_at=capture.test_clock[0],
+            ))
+    assert [item.chart_no for item in clear_observations(capture)] == ["001234", "001234"]
+
+
+@pytest.mark.parametrize("age", [0.751, 5.0, -0.1])
+def test_clear_with_stale_or_invalid_previous_sample_skips_candidate(capture, age):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    capture.test_clock[0] = snapshot.sampled_at + age
+    capture.chart_property_event(snapshot.scope, "Name", "")
+    observations = clear_observations(capture)
+    assert len(observations) == 1
+    assert not observations[0].chart_no
+    assert "Refresh skipped" in observations[0].status_text()
+    assert "001234" not in observations[0].status_text()
+    assert capture.patient_context is None
+
+
+def test_clear_uses_latest_verified_sample_not_first_patient_sample(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    capture.test_clock[0] += 20
+    capture.update_snapshot(replace(snapshot, sampled_at=capture.test_clock[0]))
+    capture.test_clock[0] += 0.1
+    capture.chart_property_event(snapshot.scope, "Name", "")
+    observation, = clear_observations(capture)
+    assert observation.chart_no == "001234"
+    assert observation.age_ms == 100
+
+
+@pytest.mark.parametrize("value", [None, 1234, "private patient text", "9" * 21, "000456"])
+def test_non_clear_events_do_not_request_refresh(capture, value):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    capture.chart_property_event(snapshot.scope, "Name", value)
+    assert clear_observations(capture) == []
+    if isinstance(value, str):
+        # A changed/unverified patient must not inherit the old patient's number.
+        capture.chart_property_event(snapshot.scope, "Name", "")
+        assert clear_observations(capture) == []
+
+
+@pytest.mark.parametrize("reason", ["EMR not focused", "UIA chart read failed", "chart text unavailable"])
+def test_unavailable_sample_does_not_request_refresh(capture, reason):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    capture.update_snapshot(None)
+    capture.update_snapshot(replace(snapshot, chart_no="", unavailable_reason=reason))
+    assert clear_observations(capture) == []
+
+
+@pytest.mark.parametrize("change", ["disconnect", "restart", "stop"])
+def test_clear_does_not_reuse_previous_connection_patient(capture, change):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    if change == "disconnect":
+        capture.test_state.status = "red"
+    elif change == "restart":
+        capture.test_state.pid += 1
+    else:
+        capture.enabled = False
+    capture.chart_property_event(snapshot.scope, "Name", "")
+    scope = probe.connected_scope(capture.test_state)
+    capture.chart_property_event(scope, "Name", "")
+    capture.update_snapshot(replace(
+        snapshot, scope=scope, chart_no="", unavailable_reason="chart UIA text is empty",
+    ))
+    assert clear_observations(capture) == []
+
+
+def test_initial_empty_field_and_keys_alone_do_not_request_refresh(capture):
+    snapshot = capture.snapshot
+    capture.chart_property_event(snapshot.scope, "Name", "")
+    assert clear_observations(capture) == []
+    capture.test_clock[0] += 0.1
+    capture.update_snapshot(replace(snapshot, sampled_at=capture.test_clock[0]))
+    key(capture, 0x75)
+    key(capture, 0x76)
+    mouse(capture, 6)
+    mouse(capture, 6, 0x202)
+    mouse(capture, 7)
+    mouse(capture, 7, 0x202)
+    assert clear_observations(capture) == []
+
+
+def test_clear_callback_does_not_read_live_chart_or_scan(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    capture.reader.chart_number = lambda _scope: pytest.fail("Read inside callback")
+    capture.reader.discover_buttons = lambda _scope: pytest.fail("Scan inside callback")
+    capture.reader.keyboard_context = lambda _scope: pytest.fail("Focus check inside callback")
+    capture.chart_property_event(snapshot.scope, "Name", "")
+    assert len(clear_observations(capture)) == 1
+
+
+def test_dropped_clear_diagnostic_still_invalidates_patient_and_does_not_replay(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    context = capture.patient_context
+    clear_observations(capture)
+    for _ in range(capture.output.maxsize):
+        capture.output.put_nowait("diagnostic")
+    capture.chart_property_event(snapshot.scope, "Name", "")
+    assert capture.patient_context is None
+    assert not capture.patient_is_current(context)
+    assert capture.dropped_count == 2  # Candidate and original property observation.
+    assert clear_observations(capture) == []
+    capture.chart_property_event(snapshot.scope, "Value", "")
+    assert clear_observations(capture) == []
+
+
+def test_simultaneous_event_and_sample_clear_are_deduplicated(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    barrier = threading.Barrier(2)
+
+    def event():
+        barrier.wait(timeout=2)
+        capture.chart_property_event(snapshot.scope, "Name", "")
+
+    worker = threading.Thread(target=event)
+    worker.start()
+    try:
+        barrier.wait(timeout=2)
+        capture.update_snapshot(replace(
+            snapshot, chart_no="", unavailable_reason="chart UIA text is empty",
+        ))
+    finally:
+        worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert len(clear_observations(capture)) == 1
+
+
+def test_runtime_displays_clear_candidate_as_text_and_still_clears_patient(capture):
+    app()
+    runtime = probe.EmrSignalProbeRuntime(state_provider=lambda: capture.test_state)
+    runtime._running = True
+    runtime._capture = capture
+    runtime._output = capture.output
+    messages, contexts = [], []
+    runtime.status_message.connect(messages.append)
+    runtime.patient_changed.connect(contexts.append)
+    try:
+        snapshot = capture.snapshot
+        capture.update_snapshot(snapshot)
+        context = capture.patient_context
+        runtime._drain()
+        capture.chart_property_event(snapshot.scope, "Name", "")
+        runtime._drain()
+        assert contexts == [context, None]
+        assert len([line for line in messages if "would refresh PACS/Orders" in line]) == 1
+        assert any("Chart 001234" in line and "dry run" in line for line in messages)
     finally:
         runtime.stop()
 
@@ -348,7 +553,10 @@ def test_sampled_chart_clears_only_on_verified_empty_value_and_resets_on_restart
     capture.update_snapshot(replace(first, chart_no="", unavailable_reason="EMR not focused"))
     assert capture.output.empty()
     capture.update_snapshot(replace(first, chart_no="", unavailable_reason="chart UIA text is empty"))
+    assert isinstance(capture.output.get_nowait(), probe.ChartClearObservation)
     assert capture.output.get_nowait().source == "Chart field empty (sampled)"
+    capture.test_clock[0] += 0.3
+    first = replace(first, sampled_at=capture.test_clock[0])
     capture.update_snapshot(first)
     assert capture.output.get_nowait().source == "Chart observed (sampled)"
     capture.test_state.pid += 1

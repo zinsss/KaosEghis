@@ -75,6 +75,23 @@ class SignalObservation:
         return f"{self.clock_text} | EMR probe | {self.source} | {detail}"
 
 
+@dataclass(frozen=True)
+class ChartClearObservation:
+    source: str
+    chart_no: str = field(repr=False)
+    age_ms: int | None
+    clock_text: str
+
+    def status_text(self) -> str:
+        detail = (
+            f"Chart {self.chart_no} -> would refresh PACS/Orders "
+            f"(dry run; previous snapshot {self.age_ms} ms)"
+            if self.chart_no else
+            "Refresh skipped (previous chart snapshot not fresh; dry run)"
+        )
+        return f"{self.clock_text} | EMR probe | Chart cleared ({self.source}) | {detail}"
+
+
 class _ChartUnavailable(Exception):
     """Only fixed, non-patient diagnostic messages belong in this exception."""
 
@@ -377,6 +394,7 @@ class EmrSignalCapture:
         self._sample_chart = ""
         self._patient_lock = threading.Lock()
         self._patient_context = None
+        self._patient_last_sample = None
         self._patient_revision = 0
         self._patient_invalidated_at = float("-inf")
 
@@ -401,19 +419,43 @@ class EmrSignalCapture:
         with self._patient_lock:
             if self._patient_context is not None and self._patient_context.scope != scope:
                 self._patient_context = None
+                self._patient_last_sample = None
             if not self.enabled or scope is None:
                 self._patient_context = None
+                self._patient_last_sample = None
                 return
             if snapshot is None or snapshot.scope != scope:
                 return  # A temporary focus/read failure is not a patient change.
             if snapshot.sampled_at <= self._patient_invalidated_at:
                 return
             if snapshot.unavailable_reason == "chart UIA text is empty":
-                self._patient_context = None
+                self._observe_chart_clear("sampled", scope)
+                self._patient_invalidated_at = self.clock()
             elif re.fullmatch(r"[0-9]{1,20}", snapshot.chart_no):
                 if self._patient_context is None or self._patient_context.chart_no != snapshot.chart_no:
                     self._patient_revision += 1
                     self._patient_context = PatientChartContext(scope, snapshot.chart_no, self._patient_revision)
+                self._patient_last_sample = snapshot
+
+    def _observe_chart_clear(self, source, scope) -> None:
+        # Called under the patient lock. Consuming the context deduplicates UIA
+        # properties and sampled clears without suppressing a same-patient reload.
+        context, snapshot = self._patient_context, self._patient_last_sample
+        self._patient_context = self._patient_last_sample = None
+        if context is None or context.scope != scope:
+            return
+        age = self.clock() - snapshot.sampled_at if snapshot is not None else None
+        fresh = bool(
+            snapshot is not None and snapshot.scope == context.scope
+            and snapshot.chart_no == context.chart_no
+            and not snapshot.unavailable_reason
+            and age is not None and 0 <= age <= MAX_SNAPSHOT_AGE
+        )
+        self._emit(ChartClearObservation(
+            source, context.chart_no if fresh else "",
+            round(age * 1000) if fresh else None,
+            datetime.now().strftime("%H:%M:%S"),
+        ))
 
     def update_snapshot(self, snapshot) -> None:
         self.snapshot = snapshot
@@ -446,8 +488,11 @@ class EmrSignalCapture:
             if isinstance(value, str):
                 with self._patient_lock:
                     normalized = value.strip()
+                    if not normalized:
+                        self._observe_chart_clear(f"UIA {property_name}", scope)
                     if self._patient_context is None or normalized != self._patient_context.chart_no:
                         self._patient_context = None
+                        self._patient_last_sample = None
                         self._patient_invalidated_at = self.clock()
             self._emit(ChartFieldObservation.from_event(property_name, value))
 
@@ -731,7 +776,7 @@ class EmrSignalProbeRuntime(QObject):
                 break
             if self._running:
                 self.status_message.emit(
-                    item.status_text() if isinstance(item, (SignalObservation, ChartFieldObservation)) else item
+                    item.status_text() if isinstance(item, (SignalObservation, ChartFieldObservation, ChartClearObservation)) else item
                 )
         if self._running and self._capture and self._capture.dropped_count != self._reported_drops:
             self._reported_drops = self._capture.dropped_count
