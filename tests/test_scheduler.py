@@ -1,0 +1,656 @@
+from __future__ import annotations
+
+from datetime import datetime
+import os
+import time
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+def _app():
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
+
+
+def test_scheduler_repository_crud_and_history(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_item,
+        create_scheduler_job,
+        create_scheduler_run,
+        delete_scheduler_job,
+        finish_scheduler_run,
+        get_scheduler_job,
+        list_scheduler_jobs,
+        list_scheduler_runs,
+        start_scheduler_run,
+        update_scheduler_job,
+    )
+
+    db_path = tmp_path / "scheduler.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        macro = create_item(connection, "Backup macro", "macro", True)
+        job = create_scheduler_job(
+            connection,
+            "Lunch backup",
+            macro.id,
+            "12:30",
+            (0, 1, 2, 3, 4),
+        )
+
+        assert job.is_enabled is False
+        assert job.weekdays == (0, 1, 2, 3, 4)
+        assert list_scheduler_jobs(connection) == [job]
+
+        updated = update_scheduler_job(
+            connection,
+            job.id,
+            "Lunch backup updated",
+            macro.id,
+            "12:45",
+            (0, 2, 4),
+            True,
+            next_run_at="2026-08-03T12:45:00",
+        )
+        assert updated is not None
+        assert updated.is_enabled is True
+        assert updated.schedule_time == "12:45"
+        assert updated.weekdays == (0, 2, 4)
+
+        run = create_scheduler_run(
+            connection,
+            job.id,
+            macro.id,
+            "manual",
+            "2026-08-03T10:00:00",
+        )
+        start_scheduler_run(connection, run.id, "2026-08-03T10:00:01")
+        finished = finish_scheduler_run(
+            connection,
+            run.id,
+            "succeeded",
+            "2026-08-03T10:00:02",
+            3,
+            "Macro completed.",
+        )
+        assert finished is not None
+        assert finished.executed_steps == 3
+        assert list_scheduler_runs(connection, job.id)[0].status == "succeeded"
+
+        assert delete_scheduler_job(connection, job.id) is True
+        assert get_scheduler_job(connection, job.id) is None
+        assert list_scheduler_runs(connection, job.id) == []
+
+
+def test_scheduler_job_requires_macro_item(tmp_path) -> None:
+    import pytest
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_item, create_scheduler_job
+
+    db_path = tmp_path / "scheduler.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        text_item = create_item(connection, "Comment", "clipboard", True)
+        with pytest.raises(ValueError, match="macro item"):
+            create_scheduler_job(
+                connection,
+                "Invalid",
+                text_item.id,
+                "12:00",
+                (0,),
+            )
+
+
+def test_calculate_next_run_uses_selected_weekdays() -> None:
+    from KaosEghis.core.scheduler import calculate_next_run
+
+    monday_morning = datetime(2026, 8, 3, 9, 0, 0)
+    assert calculate_next_run("12:00", (0,), monday_morning) == datetime(
+        2026, 8, 3, 12, 0, 0
+    )
+    monday_afternoon = datetime(2026, 8, 3, 13, 0, 0)
+    assert calculate_next_run("12:00", (0,), monday_afternoon) == datetime(
+        2026, 8, 10, 12, 0, 0
+    )
+
+
+def test_scheduler_startup_recalculates_future_without_running(tmp_path) -> None:
+    from KaosEghis.core.scheduler import prepare_scheduler_startup
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_item,
+        create_scheduler_job,
+        get_scheduler_job,
+        list_scheduler_runs,
+    )
+
+    db_path = tmp_path / "scheduler.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        macro = create_item(connection, "Backup macro", "macro", True)
+        job = create_scheduler_job(
+            connection,
+            "Lunch backup",
+            macro.id,
+            "12:00",
+            (0,),
+            is_enabled=True,
+            next_run_at="2026-07-27T12:00:00",
+        )
+
+    prepare_scheduler_startup(db_path, datetime(2026, 8, 3, 13, 0, 0))
+
+    with connect(db_path) as connection:
+        refreshed = get_scheduler_job(connection, job.id)
+        assert refreshed is not None
+        assert refreshed.next_run_at == "2026-08-10T12:00:00"
+        assert list_scheduler_runs(connection) == []
+
+
+def test_due_scheduler_job_runs_macro_after_countdown(tmp_path) -> None:
+    app = _app()
+
+    from KaosEghis.core.macro_models import MacroRunResult
+    from KaosEghis.core.scheduler import SchedulerRuntime
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_item,
+        create_scheduler_job,
+        list_scheduler_runs,
+        update_scheduler_job_runtime,
+    )
+
+    db_path = tmp_path / "scheduler.sqlite"
+    initialize_database(db_path)
+    calls: list[int] = []
+
+    class FakeRunner:
+        def execute_macro(self, item_id: int, dry_run: bool = False):
+            calls.append(item_id)
+            return MacroRunResult(True, "Macro execution completed.", 2, None)
+
+        def cancel(self) -> None:
+            pass
+
+    with connect(db_path) as connection:
+        macro = create_item(connection, "Backup macro", "macro", True)
+        job = create_scheduler_job(
+            connection,
+            "Lunch backup",
+            macro.id,
+            "12:00",
+            (0,),
+            is_enabled=True,
+        )
+
+    runtime = SchedulerRuntime(
+        db_path,
+        runner_factory=lambda _path: FakeRunner(),
+        now_provider=lambda: datetime(2026, 8, 3, 11, 0, 0),
+        countdown_seconds=0,
+    )
+    runtime.start()
+    with connect(db_path) as connection:
+        update_scheduler_job_runtime(
+            connection,
+            job.id,
+            next_run_at="2026-08-03T10:59:00",
+        )
+
+    runtime.check_due_jobs()
+    deadline = time.monotonic() + 2
+    while runtime.is_busy and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+    assert calls == [macro.id]
+    with connect(db_path) as connection:
+        runs = list_scheduler_runs(connection, job.id)
+    assert runs[0].status == "succeeded"
+    assert runs[0].executed_steps == 2
+    runtime.stop()
+
+
+def test_scheduler_records_safe_failed_step_reason(tmp_path) -> None:
+    app = _app()
+
+    from KaosEghis.core.macro_models import MacroRunResult
+    from KaosEghis.core.scheduler import SchedulerRuntime
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_item,
+        create_macro_step,
+        create_scheduler_job,
+        list_scheduler_runs,
+        update_scheduler_job_runtime,
+    )
+
+    db_path = tmp_path / "scheduler.sqlite"
+    initialize_database(db_path)
+
+    class BlockedRunner:
+        def execute_macro(self, item_id: int, dry_run: bool = False):
+            return MacroRunResult(False, "credential unavailable", 0, 1)
+
+        def cancel(self) -> None:
+            pass
+
+    with connect(db_path) as connection:
+        macro = create_item(connection, "End of day", "macro", True)
+        create_macro_step(
+            connection,
+            macro.id,
+            1,
+            "unlock_eghis",
+            "shutdown.lock_password",
+            "credential-reference",
+            10.0,
+            0,
+        )
+        job = create_scheduler_job(
+            connection,
+            "Shutdown",
+            macro.id,
+            "11:00",
+            (0,),
+            is_enabled=True,
+        )
+
+    runtime = SchedulerRuntime(
+        db_path,
+        runner_factory=lambda _path: BlockedRunner(),
+        now_provider=lambda: datetime(2026, 8, 3, 11, 0, 0),
+        countdown_seconds=0,
+    )
+    runtime.start()
+    with connect(db_path) as connection:
+        update_scheduler_job_runtime(
+            connection,
+            job.id,
+            next_run_at="2026-08-03T10:59:00",
+        )
+
+    runtime.check_due_jobs()
+    deadline = time.monotonic() + 2
+    while runtime.is_busy and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+    with connect(db_path) as connection:
+        run = list_scheduler_runs(connection, job.id)[0]
+    assert run.status == "blocked"
+    assert run.executed_steps == 0
+    assert run.summary == (
+        "Blocked at step 1 (unlock_eghis): Credential unavailable."
+    )
+    assert "credential-reference" not in run.summary
+    runtime.stop()
+
+
+def test_scheduler_summary_categorizes_errors_without_storing_raw_details() -> None:
+    from KaosEghis.core.macro_models import MacroRunResult
+    from KaosEghis.core.scheduler import _safe_scheduler_summary
+
+    not_connected = _safe_scheduler_summary(
+        MacroRunResult(
+            False,
+            "Application not connected. Connect manually and retry.",
+            0,
+            None,
+        ),
+        "blocked",
+    )
+    raw_error = _safe_scheduler_summary(
+        MacroRunResult(
+            False,
+            "DriverError password=do-not-store server=private-host",
+            2,
+            3,
+        ),
+        "failed",
+        failed_action="not-an-allowed-action",
+    )
+    lock_focus = _safe_scheduler_summary(
+        MacroRunResult(False, "lock dialog focus failed", 0, 1),
+        "blocked",
+        failed_action="unlock_eghis",
+    )
+    main_focus = _safe_scheduler_summary(
+        MacroRunResult(False, "main EMR focus failed", 0, 1),
+        "blocked",
+        failed_action="unlock_eghis",
+    )
+
+    assert not_connected == "Blocked before macro steps: EMR not connected."
+    assert raw_error == "Failed at step 3: Unknown error."
+    assert lock_focus == (
+        "Blocked at step 1 (unlock_eghis): EMR lock dialog focus failed."
+    )
+    assert main_focus == "Blocked at step 1 (unlock_eghis): Main EMR focus failed."
+    assert "do-not-store" not in raw_error
+    assert "private-host" not in raw_error
+
+
+def test_late_scheduler_job_is_recorded_as_missed_without_running(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.core.scheduler import SchedulerRuntime
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_item,
+        create_scheduler_job,
+        get_scheduler_job,
+        list_scheduler_runs,
+        update_scheduler_job_runtime,
+    )
+
+    db_path = tmp_path / "scheduler.sqlite"
+    initialize_database(db_path)
+    calls: list[int] = []
+
+    class FakeRunner:
+        def execute_macro(self, item_id: int, dry_run: bool = False):
+            calls.append(item_id)
+
+        def cancel(self) -> None:
+            pass
+
+    with connect(db_path) as connection:
+        macro = create_item(connection, "Backup macro", "macro", True)
+        job = create_scheduler_job(
+            connection,
+            "Lunch backup",
+            macro.id,
+            "10:58",
+            (0,),
+            is_enabled=True,
+        )
+
+    now = datetime(2026, 8, 3, 11, 0, 0)
+    runtime = SchedulerRuntime(
+        db_path,
+        runner_factory=lambda _path: FakeRunner(),
+        now_provider=lambda: now,
+        countdown_seconds=0,
+    )
+    runtime.start()
+    with connect(db_path) as connection:
+        update_scheduler_job_runtime(
+            connection,
+            job.id,
+            next_run_at="2026-08-03T10:58:00",
+        )
+
+    runtime.check_due_jobs()
+
+    assert calls == []
+    with connect(db_path) as connection:
+        runs = list_scheduler_runs(connection, job.id)
+        refreshed = get_scheduler_job(connection, job.id)
+    assert runs[0].status == "missed"
+    assert runs[0].summary == "Missed schedule skipped."
+    assert refreshed is not None
+    assert refreshed.next_run_at == "2026-08-10T10:58:00"
+    runtime.stop()
+
+
+def test_prompt_policy_never_auto_runs_due_job(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.core.scheduler import SchedulerRuntime
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_item,
+        create_scheduler_job,
+        list_scheduler_runs,
+        update_scheduler_job_runtime,
+    )
+
+    db_path = tmp_path / "scheduler.sqlite"
+    initialize_database(db_path)
+    calls: list[int] = []
+
+    class FakeRunner:
+        def execute_macro(self, item_id: int, dry_run: bool = False):
+            calls.append(item_id)
+
+        def cancel(self) -> None:
+            pass
+
+    with connect(db_path) as connection:
+        macro = create_item(connection, "Backup macro", "macro", True)
+        job = create_scheduler_job(
+            connection,
+            "Lunch backup",
+            macro.id,
+            "11:00",
+            (0,),
+            is_enabled=True,
+            missed_run_policy="prompt",
+        )
+
+    runtime = SchedulerRuntime(
+        db_path,
+        runner_factory=lambda _path: FakeRunner(),
+        now_provider=lambda: datetime(2026, 8, 3, 11, 0, 10),
+        countdown_seconds=0,
+    )
+    runtime.start()
+    with connect(db_path) as connection:
+        update_scheduler_job_runtime(
+            connection,
+            job.id,
+            next_run_at="2026-08-03T11:00:00",
+        )
+
+    runtime.check_due_jobs()
+
+    assert calls == []
+    with connect(db_path) as connection:
+        runs = list_scheduler_runs(connection, job.id)
+    assert runs[0].status == "missed"
+    assert runs[0].summary == "Operator start required."
+    runtime.stop()
+
+
+def test_scheduler_countdown_can_be_cancelled_without_running_macro(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.core.scheduler import SchedulerRuntime
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_item,
+        create_scheduler_job,
+        list_scheduler_runs,
+    )
+
+    db_path = tmp_path / "scheduler.sqlite"
+    initialize_database(db_path)
+    calls: list[int] = []
+
+    class FakeRunner:
+        def execute_macro(self, item_id: int, dry_run: bool = False):
+            calls.append(item_id)
+
+        def cancel(self) -> None:
+            pass
+
+    with connect(db_path) as connection:
+        macro = create_item(connection, "Backup macro", "macro", True)
+        job = create_scheduler_job(
+            connection,
+            "Lunch backup",
+            macro.id,
+            "12:00",
+            (0,),
+            is_enabled=True,
+        )
+
+    runtime = SchedulerRuntime(
+        db_path,
+        runner_factory=lambda _path: FakeRunner(),
+        now_provider=lambda: datetime(2026, 8, 3, 11, 0, 0),
+        countdown_seconds=10,
+    )
+    runtime.start()
+    assert runtime.run_job_now(job.id) is True
+    assert runtime.cancel_active_run() is True
+
+    assert calls == []
+    with connect(db_path) as connection:
+        runs = list_scheduler_runs(connection, job.id)
+    assert runs[0].status == "cancelled"
+    runtime.stop()
+
+
+def test_scheduler_tab_instantiates_without_running_macro(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.core.scheduler import SchedulerRuntime
+    from KaosEghis.ui.tabs.scheduler_tab import SchedulerTab
+
+    runtime = SchedulerRuntime(tmp_path / "scheduler.sqlite")
+    tab = SchedulerTab(tmp_path / "scheduler.sqlite", runtime=runtime)
+
+    assert tab.jobs_table.columnCount() == 7
+    assert tab.new_button.text() == "New schedule"
+    assert tab.create_shutdown_macro_button.text() == "Create end-of-day macro"
+    assert tab.check_shutdown_button.text() == "Check shutdown setup"
+    assert tab.test_unlock_button.text() == "Test EMR Unlock"
+    assert tab.dry_run_button.text() == "Dry run"
+    assert tab.run_now_button.text() == "Run now"
+    assert runtime.is_busy is False
+
+
+def test_scheduler_creates_disabled_end_of_day_macro_without_schedule(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.core.scheduler import SchedulerRuntime
+    from KaosEghis.db.database import connect
+    from KaosEghis.db.repositories import list_items, list_scheduler_jobs
+    from KaosEghis.ui.tabs.scheduler_tab import SchedulerTab
+
+    db_path = tmp_path / "scheduler.sqlite"
+    runtime = SchedulerRuntime(db_path)
+    tab = SchedulerTab(db_path, runtime=runtime)
+
+    tab.create_end_of_day_macro()
+
+    with connect(db_path) as connection:
+        macros = [
+            item
+            for item in list_items(connection, "macro")
+            if item.name == "eGHIS End-of-Day Backup and Power Off"
+        ]
+        jobs = list_scheduler_jobs(connection)
+
+    assert len(macros) == 1
+    assert macros[0].is_enabled is False
+    assert macros[0].is_launcher_exposed is False
+    assert jobs == []
+    assert "No macro was run" in tab.log.toPlainText()
+
+
+def test_real_macro_execution_blocks_when_another_macro_holds_lock(
+    monkeypatch,
+) -> None:
+    import KaosEghis.core.macro_runner as macro_runner
+
+    class BusyLock:
+        def acquire(self, *, blocking: bool) -> bool:
+            assert blocking is False
+            return False
+
+        def release(self) -> None:
+            raise AssertionError("An unacquired lock must not be released.")
+
+    monkeypatch.setattr(macro_runner, "_MACRO_EXECUTION_LOCK", BusyLock())
+
+    result = macro_runner.MacroRunner().execute_macro(999, dry_run=False)
+
+    assert result.success is False
+    assert result.executed_steps == 0
+    assert result.message == "Macro execution blocked: another macro is running."
+
+
+def test_scheduler_preserves_windows_lock_reason():
+    from KaosEghis.core.macro_models import MacroRunResult
+    from KaosEghis.core.scheduler import _safe_scheduler_summary, _scheduler_status_from_result
+    from KaosEghis.core.windows_desktop import DESKTOP_UNAVAILABLE_MESSAGE
+
+    result = MacroRunResult(False, DESKTOP_UNAVAILABLE_MESSAGE)
+    status = _scheduler_status_from_result(result)
+    assert status == "blocked"
+    assert _safe_scheduler_summary(result, status) == (
+        "Blocked before macro steps: Windows desktop locked or unavailable; "
+        "unlock Windows and retry manually."
+    )
+
+
+def test_scheduler_unlock_test_uses_worker_without_running_saved_macro(tmp_path, monkeypatch):
+    import threading
+    from PySide6.QtWidgets import QMessageBox
+    from KaosEghis.core.macro_models import MacroRunResult
+    from KaosEghis.ui.tabs import scheduler_tab
+
+    app = _app()
+    calls = []
+    finished = threading.Event()
+
+    class UnlockRunner:
+        def __init__(self, _path):
+            pass
+
+        def execute_unlock_test(self):
+            calls.append(threading.current_thread().name)
+            finished.wait(2)
+            return MacroRunResult(True, "EMR focus/unlock verified.", 1)
+
+        def execute_macro(self, *_a, **_k):
+            raise AssertionError("Test must not run any saved macro")
+
+    monkeypatch.setattr(scheduler_tab, "MacroRunner", UnlockRunner)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.StandardButton.Yes)
+    tab = scheduler_tab.SchedulerTab(tmp_path / "unlock.sqlite")
+    tab.test_emr_unlock()
+    worker = tab._unlock_test_thread
+    assert worker is not None
+    assert not tab.test_unlock_button.isEnabled()
+    finished.set()
+    worker.join(timeout=3)
+    assert not worker.is_alive()
+    app.processEvents()
+    assert calls == ["KaosEghis unlock test"]
+    assert tab.test_unlock_button.isEnabled()
+    assert "Succeeded: EMR focus/unlock verified." in tab.log.toPlainText()
+    assert "No close, backup, or shutdown steps were run." in tab.log.toPlainText()
+
+
+def test_scheduler_unlock_test_requires_confirmation(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from KaosEghis.ui.tabs import scheduler_tab
+
+    _app()
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.StandardButton.No)
+    tab = scheduler_tab.SchedulerTab(tmp_path / "unlock.sqlite")
+    tab.test_emr_unlock()
+    assert tab._unlock_test_runner is None
+    assert tab._unlock_test_thread is None
+
+
+def test_scheduler_cancel_also_cancels_unlock_test(tmp_path):
+    from unittest.mock import Mock
+    from KaosEghis.ui.tabs.scheduler_tab import SchedulerTab
+
+    _app()
+    tab = SchedulerTab(tmp_path / "unlock.sqlite")
+    runner = Mock()
+    tab._unlock_test_runner = runner
+    tab.cancel_active()
+    runner.cancel.assert_called_once()
+    assert "cancellation requested" in tab.log.toPlainText()

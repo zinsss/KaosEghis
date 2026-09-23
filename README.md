@@ -13,6 +13,8 @@ pip install -r requirements.txt
 python main.py
 ```
 
+On Windows you can also double-click [`KaosEghis.pyw`](E:/Kaos/KaosEghis/KaosEghis.pyw) from the repo root. If Python is associated correctly, it starts KaosEghis without opening a console window.
+
 ## Current UI
 
 - Eghis Assist

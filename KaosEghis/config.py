@@ -1,15 +1,29 @@
 from dataclasses import dataclass
 
 
+DEFAULT_KAOSPACS_WEB_ADMIN_URL = "http://192.168.0.200:8070/imaging/worklist"
+
+
 @dataclass(frozen=True)
 class AppConfig:
     eghis_process_name: str = "Eghis.exe"
     eghis_window_title_contains: str = "Eghis"
     kaosgdd_url: str = "https://kaosgdd.net"
+    memos_url: str = "http://100.94.208.16:5230/"
+    paperless_url: str = "http://100.94.208.16:8000/"
+    stirling_pdf_url: str = "http://100.94.208.16:8082/"
+    rhwp_url: str = "http://100.94.208.16:8085/rhwp/"
+    wikijs_url: str = "http://100.94.208.16:3001/"
+    sftpgo_url: str = "http://100.94.208.16:8081/web/client/login"
     credential_reference_name: str = "default"
     eghis_db_connection_string: str = ""
     eghis_db_image_study_query: str = ""
     kaospacs_api_base_url: str = "http://127.0.0.1:8060"
+    kaospacs_gateway_url: str = "http://127.0.0.1:8060"
+    kaospacs_web_admin_url: str = DEFAULT_KAOSPACS_WEB_ADMIN_URL
+    kaospacs_patient_context_bind_host: str = "127.0.0.1"
+    kaospacs_patient_context_port: str = "8765"
+    kaospacs_integration_token: str = ""
     kaospacs_api_timeout_seconds: str = "5"
     pacs_auto_poll_enabled: str = "false"
     pacs_poll_interval_seconds: str = "60"

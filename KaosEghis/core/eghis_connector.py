@@ -1,12 +1,30 @@
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import PurePath
+import threading
 import time
+from typing import Any
+
+from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
 
 CACHE_TTL_SECONDS = 10
 FOCUS_RETRY_ATTEMPTS = 5
 FOCUS_RETRY_DELAY_SECONDS = 0.1
+GRID_AUTOMATION_IDS = (
+    "tabProc",
+    "tree처방",
+    "grdSymp",
+    "tree상병",
+    "grdOpdList",
+)
+GRID_SETTING_DEFAULTS = {
+    "eghis_patient_status_tab_automation_id": "tabProc",
+    "eghis_prescription_grid_automation_id": "tree처방",
+    "eghis_symptom_grid_automation_id": "grdSymp",
+    "eghis_diagnosis_grid_automation_id": "tree상병",
+    "eghis_patient_list_grid_automation_id": "grdOpdList",
+}
 
 
 @dataclass(frozen=True)
@@ -20,12 +38,16 @@ class EghisConnectorState:
     window_title: str | None
     window_handle: int | None
     window_owner_pid: int | None
+    main_window_automation_id: str | None
+    main_window_handle: int | None
     is_active: bool
     last_seen_at: str | None
     message: str
+    cached_grid_handles: dict[str, int] | None = None
 
 
 _CACHED_STATE: EghisConnectorState | None = None
+_CACHED_GRID_ELEMENTS: dict[tuple[int, str], tuple[int, Any] | Any] = {}
 
 
 def build_connector_settings(
@@ -34,6 +56,12 @@ def build_connector_settings(
     process_name: str | None = None,
     window_title_contains: str | None = None,
     executable_path: str | None = None,
+    main_window_automation_id: str | None = None,
+    patient_status_tab_automation_id: str | None = None,
+    prescription_grid_automation_id: str | None = None,
+    symptom_grid_automation_id: str | None = None,
+    diagnosis_grid_automation_id: str | None = None,
+    patient_list_grid_automation_id: str | None = None,
 ) -> dict[str, str]:
     settings = dict(base_settings)
     if process_name is not None:
@@ -42,16 +70,48 @@ def build_connector_settings(
         settings["eghis_window_title_contains"] = window_title_contains
     if executable_path is not None:
         settings["eghis_executable_path"] = executable_path
+    if main_window_automation_id is not None:
+        settings["eghis_main_window_automation_id"] = main_window_automation_id
+    if patient_status_tab_automation_id is not None:
+        settings["eghis_patient_status_tab_automation_id"] = patient_status_tab_automation_id
+    if prescription_grid_automation_id is not None:
+        settings["eghis_prescription_grid_automation_id"] = prescription_grid_automation_id
+    if symptom_grid_automation_id is not None:
+        settings["eghis_symptom_grid_automation_id"] = symptom_grid_automation_id
+    if diagnosis_grid_automation_id is not None:
+        settings["eghis_diagnosis_grid_automation_id"] = diagnosis_grid_automation_id
+    if patient_list_grid_automation_id is not None:
+        settings["eghis_patient_list_grid_automation_id"] = patient_list_grid_automation_id
     return settings
 
 
-def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
+def discover_eghis(
+    settings: dict[str, str],
+    *,
+    eager_grid_cache: bool = False,
+) -> EghisConnectorState:
     configured_process_name = settings.get("eghis_process_name", "")
     configured_window_title = settings.get("eghis_window_title_contains", "")
+    configured_main_window_automation_id = (
+        settings.get("eghis_main_window_automation_id", "") or ""
+    ).strip()
     process_info = _discover_process_info(configured_process_name)
     window_info = _discover_window_info(configured_window_title)
     window_handle = None if window_info is None else window_info.get("window_handle")
     window_owner_pid = _get_window_owner_pid(window_handle) if window_handle is not None else None
+    main_window_handle = _resolve_main_window_handle(
+        window_handle,
+        configured_main_window_automation_id,
+    )
+    cached_grid_handles = None
+    if eager_grid_cache:
+        try:
+            cached_grid_handles = _resolve_cached_grid_handles(
+                main_window_handle or window_handle,
+                _grid_automation_ids_from_settings(settings),
+            )
+        except Exception:
+            cached_grid_handles = None
     is_active = bool(window_handle is not None and _foreground_handle_matches(window_handle))
     last_seen_at = _timestamp_now() if process_info or window_info else None
 
@@ -69,9 +129,12 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
             window_owner_pid=window_owner_pid,
+            main_window_automation_id=configured_main_window_automation_id or None,
+            main_window_handle=main_window_handle,
             is_active=is_active,
             last_seen_at=last_seen_at,
             message="window process mismatch",
+            cached_grid_handles=cached_grid_handles,
         )
     if process_running and window_found and is_active:
         return EghisConnectorState(
@@ -84,9 +147,12 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
             window_owner_pid=window_owner_pid,
+            main_window_automation_id=configured_main_window_automation_id or None,
+            main_window_handle=main_window_handle,
             is_active=True,
             last_seen_at=last_seen_at,
             message="Connected and active",
+            cached_grid_handles=cached_grid_handles,
         )
     if process_running and window_found:
         return EghisConnectorState(
@@ -99,9 +165,12 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
             window_owner_pid=window_owner_pid,
+            main_window_automation_id=configured_main_window_automation_id or None,
+            main_window_handle=main_window_handle,
             is_active=False,
             last_seen_at=last_seen_at,
             message="Eghis found but not active",
+            cached_grid_handles=cached_grid_handles,
         )
     if process_running:
         return EghisConnectorState(
@@ -114,9 +183,12 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_title=None,
             window_handle=None,
             window_owner_pid=None,
+            main_window_automation_id=configured_main_window_automation_id or None,
+            main_window_handle=None,
             is_active=False,
             last_seen_at=last_seen_at,
             message="Eghis process found but window missing",
+            cached_grid_handles=None,
         )
     if window_found:
         return EghisConnectorState(
@@ -129,9 +201,12 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
             window_title=window_info["window_title"],
             window_handle=window_info["window_handle"],
             window_owner_pid=window_owner_pid,
+            main_window_automation_id=configured_main_window_automation_id or None,
+            main_window_handle=main_window_handle,
             is_active=is_active,
             last_seen_at=last_seen_at,
             message="Eghis window found but process mismatch",
+            cached_grid_handles=cached_grid_handles,
         )
     return EghisConnectorState(
         status="red",
@@ -143,9 +218,12 @@ def discover_eghis(settings: dict[str, str]) -> EghisConnectorState:
         window_title=None,
         window_handle=None,
         window_owner_pid=None,
+        main_window_automation_id=configured_main_window_automation_id or None,
+        main_window_handle=None,
         is_active=False,
         last_seen_at=None,
         message="Eghis not found",
+        cached_grid_handles=None,
     )
 
 
@@ -156,15 +234,104 @@ def get_cached_eghis_state() -> EghisConnectorState | None:
 def clear_cached_eghis_state() -> None:
     global _CACHED_STATE
     _CACHED_STATE = None
+    _CACHED_GRID_ELEMENTS.clear()
 
 
-def refresh_cached_eghis_state(settings: dict[str, str]) -> EghisConnectorState:
+def refresh_cached_eghis_state(
+    settings: dict[str, str],
+    *,
+    eager_grid_cache: bool = False,
+) -> EghisConnectorState:
     global _CACHED_STATE
-    _CACHED_STATE = discover_eghis(settings)
+    previous_state = _CACHED_STATE
+    if eager_grid_cache:
+        _CACHED_GRID_ELEMENTS.clear()
+    discovered = discover_eghis(settings, eager_grid_cache=eager_grid_cache)
+    if not eager_grid_cache:
+        if previous_state is not None and _same_cached_connection(
+            previous_state,
+            discovered,
+        ):
+            discovered = replace(
+                discovered,
+                cached_grid_handles=_merge_valid_grid_handles(
+                    previous_state.cached_grid_handles,
+                    discovered.cached_grid_handles,
+                ),
+            )
+        else:
+            _CACHED_GRID_ELEMENTS.clear()
+    _CACHED_STATE = discovered
     return _CACHED_STATE
 
 
-def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorState:
+def get_cached_grid_element(automation_id: str | None) -> Any | None:
+    normalized_id = (automation_id or "").strip()
+    state = get_cached_eghis_state()
+    scope_handle = _cached_grid_scope_handle(state)
+    if not normalized_id or scope_handle is None:
+        return None
+    return _cached_grid_element_for_scope(scope_handle, normalized_id)
+
+
+def invalidate_cached_grid_element(automation_id: str | None) -> None:
+    normalized_id = (automation_id or "").strip()
+    if not normalized_id:
+        return
+    for key in tuple(_CACHED_GRID_ELEMENTS):
+        if key[1] == normalized_id:
+            _CACHED_GRID_ELEMENTS.pop(key, None)
+
+
+def ensure_cached_grid_element(
+    settings: dict[str, str],
+    automation_id: str | None,
+) -> Any | None:
+    normalized_id = (automation_id or "").strip()
+    cached = get_cached_grid_element(normalized_id)
+    if cached is not None:
+        return cached
+    ensure_cached_grid_handle(settings, normalized_id)
+    return get_cached_grid_element(normalized_id)
+
+
+def ensure_cached_grid_handle(
+    settings: dict[str, str],
+    automation_id: str | None,
+) -> int | None:
+    """Repair one configured grid anchor without scanning every EMR descendant."""
+
+    global _CACHED_STATE
+    normalized_id = (automation_id or "").strip()
+    if not normalized_id or normalized_id not in _grid_automation_ids_from_settings(settings):
+        return None
+
+    state = get_cached_eghis_state()
+    if state is None:
+        return None
+    cached_element = get_cached_grid_element(normalized_id)
+    if cached_element is not None:
+        return _valid_native_handle(cached_element)
+    cached_handles = dict(state.cached_grid_handles or {})
+    cached_handle = cached_handles.get(normalized_id)
+    if cached_handle is not None and _window_handle_is_valid(cached_handle):
+        return cached_handle
+
+    scope_handle = state.main_window_handle or state.window_handle
+    resolved_handle = _resolve_cached_grid_handle(scope_handle, normalized_id)
+    if resolved_handle is None:
+        return None
+
+    cached_handles[normalized_id] = resolved_handle
+    _CACHED_STATE = replace(state, cached_grid_handles=cached_handles)
+    return resolved_handle
+
+
+def validate_cached_connection_identity(
+    settings: dict[str, str],
+) -> EghisConnectorState:
+    """Validate the manually cached process/window without rejecting expected modals."""
+
     global _CACHED_STATE
     state = get_cached_eghis_state()
     if state is None:
@@ -172,13 +339,6 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
             None,
             "Application not connected. Connect manually and retry.",
         )
-    if _is_state_stale(state):
-        blocked = _manual_reconnect_required(
-            state,
-            "Application connection stale. Reconnect manually and retry.",
-        )
-        _CACHED_STATE = blocked
-        return blocked
     if not state.process_running or state.pid is None or not _pid_exists(state.pid):
         blocked = _manual_reconnect_required(
             state,
@@ -208,6 +368,23 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
         )
         _CACHED_STATE = blocked
         return blocked
+    identity_valid = replace(
+        state,
+        status="yellow",
+        window_owner_pid=owner_pid,
+        last_seen_at=_timestamp_now(),
+        message="Application identity confirmed; readiness pending.",
+    )
+    _CACHED_STATE = identity_valid
+    return identity_valid
+
+
+def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorState:
+    global _CACHED_STATE
+    state = validate_cached_connection_identity(settings)
+    if state.status == "red":
+        return state
+    owner_pid = state.window_owner_pid
     if _has_blocking_modal_dialog(state, settings):
         blocked = _manual_reconnect_required(
             state,
@@ -215,9 +392,14 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
         )
         _CACHED_STATE = blocked
         return blocked
-    if not state.is_active:
+    focus_handle = state.window_handle or state.main_window_handle
+    foreground = _get_foreground_window_info()
+    if foreground is None or foreground.get("window_handle") not in {
+        state.window_handle,
+        state.main_window_handle,
+    }:
         focus_succeeded, _focus_reason = _focus_and_confirm_window(
-            state.window_handle,
+            focus_handle,
             state,
             settings,
         )
@@ -228,8 +410,11 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
             )
             _CACHED_STATE = blocked
             return blocked
-    foreground = _get_foreground_window_info()
-    if foreground is None or foreground.get("window_handle") != state.window_handle:
+        foreground = _get_foreground_window_info()
+    if foreground is None or foreground.get("window_handle") not in {
+        state.window_handle,
+        state.main_window_handle,
+    }:
         blocked = _manual_reconnect_required(
             state,
             "Application not focusable. Reconnect manually and retry.",
@@ -237,13 +422,21 @@ def ensure_cached_connection_ready(settings: dict[str, str]) -> EghisConnectorSt
         _CACHED_STATE = blocked
         return blocked
 
+    main_window_handle = _main_window_handle_for_state(state, settings)
+    cached_grid_handles = _grid_handles_for_state(
+        state,
+        settings,
+        scope_handle=main_window_handle or state.window_handle,
+    )
     ready = replace(
         state,
         status="green",
         is_active=True,
         window_owner_pid=owner_pid,
+        main_window_handle=main_window_handle,
         last_seen_at=_timestamp_now(),
         message="Connected and active",
+        cached_grid_handles=cached_grid_handles,
     )
     _CACHED_STATE = ready
     return ready
@@ -290,27 +483,154 @@ def ensure_ready_for_macro(settings: dict[str, str]) -> EghisConnectorState:
         _CACHED_STATE = blocked
         return blocked
 
+    focus_handle = state.window_handle or state.main_window_handle
     if not state.is_active:
         focus_succeeded, focus_reason = _focus_and_confirm_window(
-            state.window_handle,
+            focus_handle,
             state,
             settings,
         )
         if not focus_succeeded:
-            blocked = replace(state, status="red", is_active=False, message=focus_reason)
+            blocked = replace(
+                state,
+                status="red",
+                is_active=False,
+                message=focus_reason,
+            )
+            clear_cached_eghis_state()
             _CACHED_STATE = blocked
             return blocked
 
     foreground = _get_foreground_window_info()
-    if foreground is None or foreground.get("window_handle") != state.window_handle:
+    if foreground is None or foreground.get("window_handle") not in {
+        state.window_handle,
+        state.main_window_handle,
+    }:
         reason = "modal/popup detected" if _foreground_looks_like_modal(foreground, state, settings) else "foreground mismatch"
         blocked = replace(state, status="red", is_active=False, message=reason)
+        clear_cached_eghis_state()
         _CACHED_STATE = blocked
         return blocked
 
-    ready = replace(state, status="green", is_active=True, window_owner_pid=owner_pid, last_seen_at=_timestamp_now(), message="Connected and active")
+    main_window_handle = _main_window_handle_for_state(state, settings)
+    cached_grid_handles = _grid_handles_for_state(
+        state,
+        settings,
+        scope_handle=main_window_handle or state.window_handle,
+    )
+    ready = replace(
+        state,
+        status="green",
+        is_active=True,
+        window_owner_pid=owner_pid,
+        main_window_handle=main_window_handle,
+        last_seen_at=_timestamp_now(),
+        message="Connected and active",
+        cached_grid_handles=cached_grid_handles,
+    )
     _CACHED_STATE = ready
     return ready
+
+
+def focus_cached_eghis_window(settings: dict[str, str]) -> EghisConnectorState:
+    global _CACHED_STATE
+    state = get_cached_eghis_state()
+    if state is None:
+        return ensure_cached_connection_ready(settings)
+    if not state.process_running or state.pid is None or not _pid_exists(state.pid):
+        return ensure_cached_connection_ready(settings)
+    if not _process_identity_matches_state(state, settings):
+        return ensure_cached_connection_ready(settings)
+    if state.window_handle is None or not _window_handle_is_valid(state.window_handle):
+        return ensure_cached_connection_ready(settings)
+
+    owner_pid = _get_window_owner_pid(state.window_handle)
+    if owner_pid is None or owner_pid != state.pid:
+        return ensure_cached_connection_ready(settings)
+
+    main_window_handle = _main_window_handle_for_state(state, settings)
+    foreground = _get_foreground_window_info()
+    if foreground is not None and foreground.get("window_handle") in {
+        state.window_handle,
+        main_window_handle,
+    }:
+        ready = replace(
+            state,
+            status="green",
+            is_active=True,
+            window_owner_pid=owner_pid,
+            main_window_handle=main_window_handle,
+            last_seen_at=_timestamp_now(),
+            message="Connected and active",
+        )
+        _CACHED_STATE = ready
+        return ready
+
+    focus_handle = state.window_handle or main_window_handle
+    focus_succeeded, _focus_reason = _focus_and_confirm_window(
+        focus_handle,
+        replace(state, main_window_handle=main_window_handle),
+        settings,
+    )
+    if not focus_succeeded:
+        return ensure_cached_connection_ready(settings)
+
+    ready = replace(
+        state,
+        status="green",
+        is_active=True,
+        window_owner_pid=owner_pid,
+        main_window_handle=main_window_handle,
+        last_seen_at=_timestamp_now(),
+        message="Connected and active",
+    )
+    _CACHED_STATE = ready
+    return ready
+
+
+def focus_cached_eghis_process_window(
+    settings: dict[str, str],
+    window_handle: int,
+) -> tuple[bool, str]:
+    """Focus one exact window owned by the manually connected eGHIS process."""
+
+    global _CACHED_STATE
+    state = validate_cached_connection_identity(settings)
+    if state.status == "red" or state.pid is None:
+        return False, state.message or "window not ready"
+    try:
+        normalized_handle = int(window_handle)
+    except (TypeError, ValueError):
+        _CACHED_STATE = _manual_reconnect_required(
+            state,
+            "Application connection stale. Reconnect manually and retry.",
+        )
+        return False, "window handle invalid"
+    if normalized_handle <= 0 or not _window_handle_is_valid(normalized_handle):
+        _CACHED_STATE = _manual_reconnect_required(
+            state,
+            "Application connection stale. Reconnect manually and retry.",
+        )
+        return False, "window handle invalid"
+    if _get_window_owner_pid(normalized_handle) != state.pid:
+        _CACHED_STATE = _manual_reconnect_required(
+            state,
+            "Connected window does not match eGHIS. Reconnect manually and retry.",
+        )
+        return False, "window process mismatch"
+
+    focused, message = _focus_and_confirm_window(
+        normalized_handle,
+        state,
+        settings,
+        allowed_window_handles={normalized_handle},
+    )
+    if not focused:
+        _CACHED_STATE = _manual_reconnect_required(
+            state,
+            "Application not focusable. Reconnect manually and retry.",
+        )
+    return focused, message
 
 
 def is_cached_window_still_valid(state: EghisConnectorState) -> bool:
@@ -474,8 +794,12 @@ def _get_window_owner_pid(window_handle: int | None) -> int | None:
 def _window_handle_is_valid(window_handle: int) -> bool:
     if window_handle is None:
         return False
-    windows = _windows_from_pygetwindow() + _windows_from_pywinauto()
-    return any(window.get("window_handle") == window_handle for window in windows)
+    try:
+        user32 = ctypes.windll.user32
+        return bool(user32.IsWindow(wintypes.HWND(window_handle)))
+    except Exception:
+        windows = _windows_from_pygetwindow() + _windows_from_pywinauto()
+        return any(window.get("window_handle") == window_handle for window in windows)
 
 
 def _focus_window_handle(window_handle: int) -> bool:
@@ -504,25 +828,500 @@ def _focus_window_handle(window_handle: int) -> bool:
         return False
 
 
+def _focus_window_handle_with_attached_input(window_handle: int) -> bool:
+    """Retry foreground activation from worker threads without sending input."""
+
+    attached_threads: list[tuple[int, int]] = []
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        target = wintypes.HWND(int(window_handle))
+        if not user32.IsWindow(target):
+            return False
+
+        current_thread_id = int(kernel32.GetCurrentThreadId())
+        foreground_handle = user32.GetForegroundWindow()
+        foreground_thread_id = (
+            int(user32.GetWindowThreadProcessId(foreground_handle, None))
+            if foreground_handle
+            else 0
+        )
+        target_thread_id = int(user32.GetWindowThreadProcessId(target, None))
+
+        for other_thread_id in dict.fromkeys(
+            (foreground_thread_id, target_thread_id)
+        ):
+            if not other_thread_id or other_thread_id == current_thread_id:
+                continue
+            if user32.AttachThreadInput(current_thread_id, other_thread_id, True):
+                attached_threads.append((current_thread_id, other_thread_id))
+
+        user32.ShowWindowAsync(target, 9)  # SW_RESTORE
+        user32.BringWindowToTop(target)
+        user32.SetForegroundWindow(target)
+        user32.SetActiveWindow(target)
+        user32.SetFocus(target)
+        return int(user32.GetForegroundWindow() or 0) == int(window_handle)
+    except Exception:
+        return False
+    finally:
+        if "user32" in locals():
+            for current_thread_id, other_thread_id in reversed(attached_threads):
+                try:
+                    user32.AttachThreadInput(
+                        current_thread_id,
+                        other_thread_id,
+                        False,
+                    )
+                except Exception:
+                    continue
+
+
 def _focus_and_confirm_window(
     window_handle: int,
     state: EghisConnectorState,
     settings: dict[str, str],
+    *,
+    allowed_window_handles: set[int | None] | None = None,
 ) -> tuple[bool, str]:
     if not _focus_window_handle(window_handle):
-        return False, "focus failed"
+        if not _focus_window_handle_with_attached_input(window_handle):
+            return False, "focus failed"
+
+    allowed_handles = (
+        {handle for handle in allowed_window_handles if handle is not None}
+        if allowed_window_handles is not None
+        else {
+            handle
+            for handle in (
+                window_handle,
+                state.window_handle,
+                state.main_window_handle,
+            )
+            if handle is not None
+        }
+    )
+    attached_focus_attempted = False
 
     for attempt in range(FOCUS_RETRY_ATTEMPTS):
         foreground = _get_foreground_window_info()
-        if foreground is not None and foreground.get("window_handle") == window_handle:
+        if (
+            foreground is not None
+            and foreground.get("window_handle") in allowed_handles
+        ):
             return True, "Connected and active"
         if _foreground_looks_like_modal(foreground, state, settings):
             return False, "modal/popup detected"
         if attempt < FOCUS_RETRY_ATTEMPTS - 1:
             time.sleep(FOCUS_RETRY_DELAY_SECONDS)
-            _focus_window_handle(window_handle)
+            if not attached_focus_attempted:
+                _focus_window_handle_with_attached_input(window_handle)
+                attached_focus_attempted = True
+            else:
+                _focus_window_handle(window_handle)
 
     return False, "foreground mismatch"
+
+
+def _refresh_cached_main_window_handle(
+    state: EghisConnectorState,
+    settings: dict[str, str],
+) -> int | None:
+    automation_id = (
+        settings.get("eghis_main_window_automation_id")
+        or state.main_window_automation_id
+        or ""
+    ).strip()
+    if not automation_id:
+        return None
+    return _resolve_main_window_handle(state.window_handle, automation_id)
+
+
+def _main_window_handle_for_state(
+    state: EghisConnectorState,
+    settings: dict[str, str],
+) -> int | None:
+    cached_handle = state.main_window_handle
+    if cached_handle is not None:
+        return cached_handle
+    return _refresh_cached_main_window_handle(state, settings)
+
+
+def _resolve_main_window_handle(
+    window_handle: int | None,
+    automation_id: str | None,
+) -> int | None:
+    if window_handle is None or not automation_id:
+        return None
+
+    # eGHIS exposes the treatment room as a native MDI child named 진료실.
+    # Resolve that HWND first; it avoids two potentially slow pywinauto tree
+    # searches while retaining the Automation-ID lookup as a fallback.
+    fallback_handle = _find_named_mdi_child_window_handle(window_handle, "진료실")
+    if fallback_handle is not None:
+        return fallback_handle
+
+    matches = find_uia_elements_by_automation_ids(
+        (automation_id,),
+        root_handle=window_handle,
+    )
+    target = _select_cached_anchor(matches.get(automation_id, []))
+    if target is not None:
+        handle = _valid_native_handle(target)
+        if handle is not None:
+            return handle
+
+    for backend in ("win32",):
+        try:
+            from pywinauto import Desktop
+
+            window = Desktop(backend=backend).window(handle=window_handle)
+            specification = window.child_window(auto_id=automation_id)
+            exists = getattr(specification, "exists", None)
+            if callable(exists) and not exists(timeout=0.2, retry_interval=0.04):
+                continue
+            target = specification.wrapper_object()
+            handle = getattr(target, "handle", None)
+            if handle is None:
+                handle = getattr(getattr(target, "element_info", None), "handle", None)
+            if handle is not None:
+                return int(handle)
+        except Exception:
+            continue
+    return None
+
+
+def _find_named_mdi_child_window_handle(
+    root_handle: int | None,
+    expected_title: str,
+) -> int | None:
+    if root_handle is None or not expected_title:
+        return None
+    try:
+        import win32gui
+    except Exception:
+        return None
+
+    normalized_expected = expected_title.strip()
+    if not normalized_expected:
+        return None
+
+    child_handles: list[int] = []
+    try:
+        win32gui.EnumChildWindows(
+            root_handle,
+            lambda child_handle, _param: child_handles.append(child_handle),
+            None,
+        )
+    except Exception:
+        return None
+
+    for child_handle in child_handles:
+        try:
+            class_name = win32gui.GetClassName(child_handle)
+        except Exception:
+            class_name = ""
+        if "MDICLIENT" not in class_name.upper():
+            continue
+
+        mdi_children: list[int] = []
+        try:
+            win32gui.EnumChildWindows(
+                child_handle,
+                lambda nested_handle, _param: mdi_children.append(nested_handle),
+                None,
+            )
+        except Exception:
+            continue
+
+        for nested_handle in mdi_children:
+            try:
+                window_title = win32gui.GetWindowText(nested_handle).strip()
+            except Exception:
+                window_title = ""
+            if window_title == normalized_expected:
+                return int(nested_handle)
+    return None
+
+
+def _resolve_cached_grid_handles(
+    scope_handle: int | None,
+    grid_automation_ids: tuple[str, ...],
+) -> dict[str, int] | None:
+    if scope_handle is None:
+        return None
+    handles: dict[str, int] = {}
+    # Grid IDs are UIA Automation IDs. A native property-condition query is
+    # both faster and more precise than a Win32 descendant walk.
+    for backend in ("uia", "win32"):
+        try:
+            backend_handles = _resolve_cached_grid_handles_for_backend(
+                scope_handle,
+                backend,
+                grid_automation_ids,
+            )
+        except Exception:
+            backend_handles = {}
+        for automation_id, handle in backend_handles.items():
+            handles.setdefault(automation_id, handle)
+        if all(
+            automation_id in handles
+            or _cached_grid_element_for_scope(scope_handle, automation_id) is not None
+            for automation_id in grid_automation_ids
+        ):
+            break
+    return handles or None
+
+
+def _resolve_cached_grid_handle(
+    scope_handle: int | None,
+    automation_id: str,
+) -> int | None:
+    if scope_handle is None:
+        return None
+    # These anchors originate from UIA Automation IDs. Try UIA first so a
+    # missing cache does not spend a full Win32 lookup timeout before repair.
+    for backend in ("uia", "win32"):
+        handle = _resolve_cached_grid_handle_for_backend(
+            scope_handle,
+            backend,
+            automation_id,
+        )
+        if handle is not None:
+            return handle
+    return None
+
+
+def _resolve_cached_grid_handle_for_backend(
+    scope_handle: int,
+    backend: str,
+    automation_id: str,
+) -> int | None:
+    if backend == "uia":
+        matches = find_uia_elements_by_automation_ids(
+            (automation_id,),
+            root_handle=scope_handle,
+        )
+        element = _select_cached_anchor(matches.get(automation_id, []))
+        if element is None:
+            return None
+        _remember_cached_grid_element(scope_handle, automation_id, element)
+        return _valid_native_handle(element)
+
+    try:
+        from pywinauto import Desktop
+
+        specification = Desktop(backend=backend).window(handle=scope_handle).child_window(
+            auto_id=automation_id
+        )
+        try:
+            if not specification.exists(timeout=0.75, retry_interval=0.05):
+                return None
+        except (AttributeError, TypeError):
+            pass
+        element = specification.wrapper_object()
+    except Exception:
+        return None
+
+    _remember_cached_grid_element(scope_handle, automation_id, element)
+
+    return _valid_native_handle(element)
+
+
+def _grid_handles_for_state(
+    state: EghisConnectorState,
+    settings: dict[str, str],
+    *,
+    scope_handle: int | None,
+) -> dict[str, int] | None:
+    configured_ids = _grid_automation_ids_from_settings(settings)
+    cached_handles = _valid_cached_grid_handles(
+        state.cached_grid_handles or {},
+        configured_ids,
+    )
+    if cached_handles:
+        return cached_handles
+    return None
+
+
+def _valid_cached_grid_handles(
+    cached_handles: dict[str, int],
+    required_ids: tuple[str, ...],
+) -> dict[str, int]:
+    if not cached_handles:
+        return {}
+    valid: dict[str, int] = {}
+    for automation_id in required_ids:
+        handle = cached_handles.get(automation_id)
+        if handle is not None and _window_handle_is_valid(handle):
+            valid[automation_id] = handle
+    return valid
+
+
+def _cached_grid_handles_cover_ids(
+    cached_handles: dict[str, int],
+    required_ids: tuple[str, ...],
+) -> bool:
+    if not cached_handles:
+        return False
+    for automation_id in required_ids:
+        handle = cached_handles.get(automation_id)
+        if handle is None or not _window_handle_is_valid(handle):
+            return False
+    return True
+
+
+def _resolve_cached_grid_handles_for_backend(
+    scope_handle: int,
+    backend: str,
+    grid_automation_ids: tuple[str, ...],
+) -> dict[str, int]:
+    if backend == "uia":
+        matches = find_uia_elements_by_automation_ids(
+            grid_automation_ids,
+            root_handle=scope_handle,
+        )
+        handles: dict[str, int] = {}
+        for automation_id in grid_automation_ids:
+            element = _select_cached_anchor(matches.get(automation_id, []))
+            if element is None:
+                continue
+            _remember_cached_grid_element(scope_handle, automation_id, element)
+            handle = _valid_native_handle(element)
+            if handle is not None:
+                handles[automation_id] = handle
+        return handles
+
+    try:
+        from pywinauto import Desktop
+
+        scope = Desktop(backend=backend).window(handle=scope_handle).wrapper_object()
+        elements = scope.descendants()
+    except Exception:
+        return {}
+
+    handles: dict[str, int] = {}
+    for element in elements:
+        automation_id = str(
+            getattr(getattr(element, "element_info", None), "automation_id", "") or ""
+        ).strip()
+        if automation_id not in grid_automation_ids or automation_id in handles:
+            continue
+        _remember_cached_grid_element(scope_handle, automation_id, element)
+        handle = getattr(element, "handle", None)
+        if handle is None:
+            handle = getattr(getattr(element, "element_info", None), "handle", None)
+        if handle is None:
+            continue
+        try:
+            handles[automation_id] = int(handle)
+        except Exception:
+            continue
+        if len(handles) == len(grid_automation_ids):
+            break
+    return handles
+
+
+def _remember_cached_grid_element(
+    scope_handle: int,
+    automation_id: str,
+    element: Any,
+) -> None:
+    key = (int(scope_handle), automation_id)
+    thread_id = threading.get_ident()
+    existing = _CACHED_GRID_ELEMENTS.get(key)
+    if (
+        isinstance(existing, tuple)
+        and len(existing) == 2
+        and existing[0] == thread_id
+    ):
+        return
+    _CACHED_GRID_ELEMENTS[key] = (thread_id, element)
+
+
+def _cached_grid_element_for_scope(
+    scope_handle: int,
+    automation_id: str,
+) -> Any | None:
+    entry = _CACHED_GRID_ELEMENTS.get((int(scope_handle), automation_id))
+    if isinstance(entry, tuple) and len(entry) == 2 and isinstance(entry[0], int):
+        return entry[1] if entry[0] == threading.get_ident() else None
+    # Compatibility for lightweight test doubles and cache state created by
+    # older in-process code during a hot reload.
+    return entry
+
+
+def _select_cached_anchor(elements: list[Any]) -> Any | None:
+    if len(elements) == 1:
+        return elements[0]
+    visible: list[Any] = []
+    for element in elements:
+        try:
+            if element.is_visible():
+                visible.append(element)
+        except Exception:
+            continue
+    return visible[0] if len(visible) == 1 else None
+
+
+def _valid_native_handle(element: Any) -> int | None:
+    handle = getattr(element, "handle", None)
+    if handle is None:
+        handle = getattr(getattr(element, "element_info", None), "handle", None)
+    try:
+        normalized_handle = int(handle)
+    except (TypeError, ValueError):
+        return None
+    if normalized_handle <= 0 or not _window_handle_is_valid(normalized_handle):
+        return None
+    return normalized_handle
+
+
+def _cached_grid_scope_handle(state: EghisConnectorState | None) -> int | None:
+    if state is None:
+        return None
+    handle = state.main_window_handle or state.window_handle
+    try:
+        return int(handle) if handle is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _same_cached_connection(
+    left: EghisConnectorState | None,
+    right: EghisConnectorState | None,
+) -> bool:
+    if left is None or right is None:
+        return False
+    return bool(
+        left.pid is not None
+        and left.pid == right.pid
+        and left.window_handle == right.window_handle
+        and _cached_grid_scope_handle(left) == _cached_grid_scope_handle(right)
+    )
+
+
+def _merge_valid_grid_handles(
+    previous: dict[str, int] | None,
+    current: dict[str, int] | None,
+) -> dict[str, int] | None:
+    merged = dict(current or {})
+    for automation_id, handle in (previous or {}).items():
+        if automation_id not in merged and _window_handle_is_valid(handle):
+            merged[automation_id] = handle
+    return merged or None
+
+
+def _grid_automation_ids_from_settings(settings: dict[str, str]) -> tuple[str, ...]:
+    configured_ids: list[str] = []
+    for key, default in GRID_SETTING_DEFAULTS.items():
+        value = (settings.get(key) or default).strip()
+        if value and value not in configured_ids:
+            configured_ids.append(value)
+    return tuple(configured_ids or GRID_AUTOMATION_IDS)
 
 
 def _has_blocking_modal_dialog(state: EghisConnectorState, settings: dict[str, str]) -> bool:
@@ -585,6 +1384,8 @@ def _manual_reconnect_required(
             window_title=None,
             window_handle=None,
             window_owner_pid=None,
+            main_window_automation_id=None,
+            main_window_handle=None,
             is_active=False,
             last_seen_at=None,
             message=message,

@@ -1,6 +1,6 @@
 # KaosEghis PACS
 
-Last updated: 2026-07-01
+Last updated: 2026-07-08
 
 Project name: `KaosEghis-pacs`  
 Panel title: `PACS Worklist`
@@ -16,9 +16,113 @@ Current scope:
 - local PACS audit
 - explicit KaosPACS API sync
 - explicit KaosPACS reconciliation
-- operator-facing PACS settings and worklist tools
+- read-only KaosPACS patient-context fallback API
+- operator-facing PACS settings and local worklist tools
+- embedded KaosPACS Web admin page
 
 This project does not implement direct DICOM behavior in KaosEghis itself.
+
+## Patient Context API
+
+Purpose:
+
+- KaosPACS Web may launch from EMR with only `m_patid=<chart_no>`
+- if launch URL and existing DICOM do not provide demographics, KaosPACS can call KaosEghis-pacs for minimal patient identity context
+- this endpoint is read-only and patient-context only
+- this endpoint does not expose orders, reports, diagnosis, phone, address, resident ID, insurance, or EMR notes
+
+Endpoint:
+
+- `GET /patients/context/<chart_no>`
+
+Default service URL:
+
+- `http://127.0.0.1:8765/patients/context/<chart_no>` for same-machine local use
+- for split deployment, bind KaosEghis-pacs on its LAN address and call:
+  - `http://192.168.0.100:8765/patients/context/<chart_no>`
+
+Transitional compatibility:
+
+- the deployed KaosPACS Web currently calls
+  `GET /api/kaospacs/patient-context?chart_no=<chart_no>`
+- that legacy route remains available temporarily and returns its original lowercase
+  field shape
+- new callers must use `/patients/context/<chart_no>`
+
+Success response:
+
+```json
+{
+  "PatientID": "2735",
+  "PatientName": "홍길동",
+  "PatientBirthDate": "19700101",
+  "PatientSex": "M",
+  "source": "egHis"
+}
+```
+
+Error responses:
+
+- `400` -> `{ "error": "invalid_patient_id" }`
+- `401` -> `{ "error": "unauthorized" }` when token auth is configured
+- `404` -> `{ "error": "not_found" }`
+- `409` -> `{ "error": "ambiguous" }`
+- `503` -> `{ "error": "source_unavailable" }`
+
+Authentication:
+
+- preferred environment variable: `KAOSEGHIS_PACS_API_TOKEN`
+- literal prompt spelling `KAOSEGHiS_PACS_API_TOKEN` and legacy
+  `KAOSPACS_INTEGRATION_TOKEN` remain accepted for compatibility
+- otherwise the service uses PACS setting `kaospacs_integration_token`
+- callers send `Authorization: Bearer <token>`
+- loopback-only binding may run without a token for local development
+- any non-loopback/LAN bind refuses to start unless a token is configured
+
+Runtime:
+
+- the KaosEghis desktop application starts the patient-context API after local
+  settings/database initialization and stops it when the application exits
+- an API bind/configuration failure does not prevent the desktop UI from opening
+- service module: `python -m KaosEghis.service.kaospacs_api`
+- the service module remains available for isolated diagnostics or service-hosted use
+- optional CLI override:
+  - `python -m KaosEghis.service.kaospacs_api --host 192.168.0.100 --port 8765`
+- the service reads KaosEghis settings locally and queries eGHIS read-only
+- when CLI host/port are omitted, the service reads:
+  - `kaospacs_patient_context_bind_host`
+  - `kaospacs_patient_context_port`
+- the request path itself does not initialize or migrate the local SQLite database
+
+Field rules:
+
+- `PatientID`: exact chart number string
+- `PatientName`: UTF-8 Korean-safe string
+- `PatientBirthDate`: `YYYYMMDD` or empty string
+- `PatientSex`: `M`, `F`, `O`, or empty string when unknown
+- `source`: `egHis`
+
+Privacy:
+
+- allowed returned fields only:
+  - `PatientID`
+  - `PatientName`
+  - `PatientBirthDate`
+  - `PatientSex`
+  - `source`
+- forbidden output:
+  - resident registration number
+  - phone
+  - address
+  - diagnosis
+  - EMR notes
+  - insurance details
+  - order details
+- logs should avoid patient values and full payloads
+- request logging is suppressed so chart numbers and returned demographics are not
+  written to the service log
+- this API is separate from MWL and order synchronization; it supplies demographics
+  context only when KaosPACS Web cannot obtain those fields from an existing DICOM study
 
 ## Architecture
 
@@ -100,7 +204,7 @@ Status ownership:
 - never deletes local rows
 - never infers local business cancellation from KaosPACS imaging state
 
-Gateway imaging states are shown as-is in the imaging view filters. `inactive` is not treated as `active` unless KaosPACS defines that compatibility explicitly in future.
+KaosEghis embeds KaosPACS Web `/imaging/worklist` on the KaosPACS Web service for admin imaging lifecycle and correction UI. KaosEghis does not render or own imaging completion correction locally.
 
 Local state transition model:
 
@@ -114,6 +218,8 @@ KaosPACS Expired -> Expired
 Only KaosEghis-pacs may produce `cancelled`.
 
 Only KaosPACS may produce `completed` and `expired`.
+
+KaosEghis does not mark imaging complete.
 
 ## Local Storage Model
 
@@ -198,6 +304,8 @@ Visible PACS actions:
 - `Previous day`
 - `Next day`
 - `Today`
+- `Reload Admin Page`
+- `Open in External Browser`
 - `Refresh`
 - `Check KaosPACS`
 - `Poll now`
@@ -211,6 +319,8 @@ Visible PACS actions:
 - `Copy audit summary`
 
 Current table columns:
+
+Local source worklist columns:
 
 - `Status`
 - `Patient`
@@ -231,6 +341,12 @@ Current worklist filters:
 - `Expired`
 - `Error`
 - `All`
+
+Admin correction UI:
+
+- KaosPACS Admin page is embedded in the PACS tab
+- if Qt WebEngine is unavailable, KaosEghis shows the configured admin URL and an external-browser fallback
+- KaosPACS Web owns correction actions such as manual Mark Complete or Mark Cancelled
 
 Selected-date behavior:
 
@@ -257,11 +373,12 @@ Editable PACS settings in the Settings tab:
 - `eghis_db_image_study_query`
 - `kaospacs_api_base_url`
 - `kaospacs_gateway_url`
+- `kaospacs_web_admin_url`
 - `kaospacs_gateway_api_token`
+- `kaospacs_patient_context_bind_host`
+- `kaospacs_patient_context_port`
+- `kaospacs_integration_token`
 - `kaospacs_api_timeout_seconds`
-- `kaospacs_patient_context_api_enabled`
-- `kaospacs_patient_context_api_host`
-- `kaospacs_patient_context_api_port`
 - `pacs_auto_poll_enabled`
 - `pacs_poll_interval_seconds`
 - `pacs_dry_run`
@@ -270,16 +387,31 @@ Rules:
 
 - connection string is hidden by default
 - gateway API token is hidden by default
+- patient-context integration token is hidden by default
 - production `kaospacs_api_base_url` should point to Gateway `:8060`, not MWL internal API `:8055`
+- `kaospacs_web_admin_url` points to KaosPACS Web at `:8070/imaging/worklist`, not the Gateway API
+- when KaosEghis-pacs and KaosPACS run on different machines, `kaospacs_patient_context_bind_host` should be the KaosEghis-pacs LAN IP such as `192.168.0.100`, not `127.0.0.1`
 - poll interval minimum is `15` seconds
 - auto poll is off by default
 - dry run is off by default
 - testing KaosPACS connection uses `GET /health` only
+- When enabled, the in-process auto-poll timer runs health checks, the read-only eGHIS
+  query, and KaosPACS synchronization on a background worker. Qt applies only the
+  completed status, table, and audit updates, preventing the polling cycle from
+  pausing the rest of the app.
 
-## KaosPACS Patient-Context API
+## Legacy Patient-Context API
 
-KaosEghis-PACS exposes a small read-only endpoint for KaosPACS Web patient
-demographic fallback:
+The older `core/kaospacs_patient_context_api.py` implementation is retained for
+compatibility, with its own tests. It is not started by the desktop application.
+The current desktop starts only `service/kaospacs_api.py`, using
+`kaospacs_patient_context_bind_host`, `kaospacs_patient_context_port`, and
+`kaospacs_integration_token`. This keeps the current loopback default and avoids
+starting two listeners on port 8765. The settings below apply only to callers
+that explicitly start the legacy implementation.
+
+The legacy API provides a read-only endpoint backed by the local PACS worklist
+for patient demographic fallback:
 
 ```text
 GET /api/kaospacs/patient-context?chart_no=<chart_no>
@@ -420,6 +552,7 @@ Diagnostic rules:
 - Reconciliation
 - PACS settings UI
 - Local audit
+- Embedded KaosPACS Web admin page
 
 ## Not In Scope
 

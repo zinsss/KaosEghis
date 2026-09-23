@@ -1,0 +1,1509 @@
+import os
+from types import SimpleNamespace
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+def _app():
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    return app if app is not None else QApplication([])
+
+
+def test_vaccine_tables_and_seed_types_are_created(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, list_vaccine_types
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        vaccine_types = list_vaccine_types(connection)
+        settings = get_settings(connection)
+
+    assert "vaccine_types" in tables
+    assert "vaccine_records" in tables
+    assert "vaccine_audit_events" in tables
+    assert [entry.name for entry in vaccine_types[:4]] == [
+        "Influenza",
+        "Influenza (general/private)",
+        "COVID-19 (Pfizer)",
+        "COVID-19 (Moderna)",
+    ]
+    assert [entry.code for entry in vaccine_types[:4]] == [
+        "flu",
+        "flu-general",
+        "covid-pfizer",
+        "covid-moderna",
+    ]
+    assert [entry.program_type for entry in vaccine_types[:4]] == [
+        "national_influenza",
+        "general_influenza",
+        "national_covid",
+        "national_covid",
+    ]
+    assert '"influenza"' in settings["vaccine_schedule_rules_json"]
+    assert '"elderly_75_plus"' in settings["vaccine_age_groups_json"]
+    assert settings["vaccine_label_printer_name"] == "4BARCODE 4B-2054L"
+    assert (
+        settings["vaccine_general_system_launch_url"]
+        == "https://ois.kdca.go.kr/iris/index_run.jsp"
+    )
+    assert settings["vaccine_general_system_window_title"] == "예방접종통합관리시스템"
+    assert settings["vaccine_general_system_window_class"] == "CyWindowClass"
+    assert settings["vaccine_general_system_resident_x"] == "448"
+    assert settings["vaccine_general_system_resident_y"] == "2074"
+    assert settings["vaccine_general_system_keepalive_x"] == "1154"
+    assert settings["vaccine_general_system_keepalive_y"] == "1968"
+    assert settings["vaccine_influenza_system_resident_automation_id"] == "edtPtntRrn1"
+    assert (
+        settings["vaccine_influenza_system_launch_url"]
+        == "https://ois.kdca.go.kr/iroi/indexWSP.jsp"
+    )
+    assert settings["vaccine_influenza_system_resident_x"] == "2924"
+    assert settings["vaccine_influenza_system_resident_y"] == "1415"
+    assert settings["vaccine_covid_system_window_title"] == "코로나19통합관리시스템"
+    assert settings["vaccine_covid_system_window_class"] == "CyWindowClass"
+    assert (
+        settings["vaccine_covid_system_launch_url"]
+        == "https://ois.kdca.go.kr/covr/index_run.jsp"
+    )
+    assert settings["vaccine_covid_system_keepalive_x"] == "2456"
+    assert settings["vaccine_covid_system_keepalive_y"] == "1982"
+    assert settings["vaccine_covid_system_resident_x"] == "1466"
+    assert settings["vaccine_covid_system_resident_y"] == "2107"
+
+
+def test_vaccine_system_launch_opens_only_the_configured_saved_url() -> None:
+    from KaosEghis.core.vaccine_system_launch import open_vaccine_system
+
+    opened_urls: list[str] = []
+
+    def open_browser(url: str, **_kwargs) -> bool:
+        opened_urls.append(url)
+        return True
+
+    result = open_vaccine_system(
+        {"vaccine_influenza_system_launch_url": "https://example.test/flu"},
+        "influenza",
+        opener=open_browser,
+        ready=lambda *_args: True,
+    )
+
+    assert result.success is True
+    assert opened_urls == ["https://example.test/flu"]
+    assert "Influenza vaccine system opened and detected." in result.message
+
+
+def test_vaccine_system_launch_rejects_missing_or_unsafe_urls() -> None:
+    from KaosEghis.core.vaccine_system_launch import open_vaccine_system
+
+    missing = open_vaccine_system({}, "general")
+    unsafe = open_vaccine_system(
+        {"vaccine_general_system_launch_url": "file:///C:/not-a-vaccine-system"},
+        "general",
+    )
+
+    assert missing.success is False
+    assert unsafe.success is False
+    assert "launch URL" in missing.message
+    assert "launch URL" in unsafe.message
+
+
+def _wait_for_kdca(panel):
+    assert panel._kdca_thread is not None
+    panel._kdca_thread.join(timeout=3)
+    assert not panel._kdca_thread.is_alive()
+    _app().processEvents()
+    assert panel._kdca_thread is None
+
+
+def test_kdca_worker_is_single_flight_and_defers_session_reset(tmp_path, monkeypatch):
+    import threading
+    import KaosEghis.ui.tabs.vaccine_tab as module
+
+    app = _app()
+    entered, release = threading.Event(), threading.Event()
+    main_thread = threading.get_ident()
+    calls = []
+
+    def authenticate(_settings, *, progress, cancelled):
+        assert threading.get_ident() != main_thread
+        calls.append(True)
+        entered.set()
+        progress("KDCA: waiting for certificate picker...")
+        assert release.wait(3)
+        return module.KdcaCertificateLoginResult(False, "stopped", "Stopped")
+
+    monkeypatch.setattr(module, "start_kdca_certificate_login", authenticate)
+    monkeypatch.setattr(module, "reset_vaccine_session", lambda *_args, **_kwargs: pytest.fail("reset during login"))
+    panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    try:
+        assert panel.open_vaccine_system("general")
+        assert entered.wait(2)
+        app.processEvents()
+        assert "certificate picker" in panel.status_label.text()
+        assert not panel.log_in_to_kdca()
+        assert not panel.open_covid_system_button.isEnabled()
+        assert not panel.fetch_button.isEnabled()
+        assert not panel.session_reset_now_button.isEnabled()
+        panel.session_reset_now_button.click()
+        assert panel.fetch_current_patient_from_emr() is False
+        panel.reset_vaccine_sessions_now()
+        timer = module.QTimer(panel)
+        timer.setSingleShot(True)
+        panel._session_keeper_targets["general"] = SimpleNamespace(key="general")
+        panel._session_keeper_timers["general"] = timer
+        panel._run_session_keeper("general")
+        assert timer.isActive()
+        timer.stop()
+        panel.kdca_stop_button.click()
+        assert panel._kdca_cancel.is_set()
+        assert panel._kdca_thread is not None
+    finally:
+        release.set()
+        _wait_for_kdca(panel)
+    assert len(calls) == 1
+    assert panel.kdca_login_button.isEnabled()
+    assert panel.fetch_button.isEnabled()
+    assert panel.session_reset_now_button.isEnabled()
+    assert panel.status_label.text() == "KDCA operation stopped."
+
+
+def test_kdca_worker_failure_restores_buttons_without_exposing_exception(tmp_path, monkeypatch):
+    import KaosEghis.ui.tabs.vaccine_tab as module
+
+    _app()
+
+    def authenticate(*_args, **_kwargs):
+        raise RuntimeError("fake-secret-do-not-display")
+
+    monkeypatch.setattr(module, "start_kdca_certificate_login", authenticate)
+    panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    assert panel.log_in_to_kdca()
+    _wait_for_kdca(panel)
+    assert panel.kdca_login_button.isEnabled()
+    assert "failed" in panel.status_label.text()
+    assert "fake-secret" not in panel.status_label.text()
+
+
+def test_vaccine_main_system_buttons_use_the_manual_launch_helper(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    launched_systems: list[str] = []
+
+    def fake_launch(_settings, system, **_kwargs):
+        launched_systems.append(system)
+        return SimpleNamespace(success=True, message=f"{system} opened.")
+
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "open_vaccine_system",
+        fake_launch,
+    )
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "start_kdca_certificate_login",
+        lambda _settings, **_kwargs: SimpleNamespace(success=True, message="KDCA signed in.", browser_handle=101),
+    )
+    panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+
+    panel.open_general_system_button.click()
+    _wait_for_kdca(panel)
+    panel.open_influenza_system_button.click()
+    _wait_for_kdca(panel)
+    panel.open_covid_system_button.click()
+    _wait_for_kdca(panel)
+
+    assert launched_systems == ["general", "influenza", "covid"]
+    assert panel.status_label.text() == "covid opened."
+
+
+def test_open_general_waits_for_signed_out_login_before_launch(tmp_path, monkeypatch) -> None:
+    _app()
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+    from KaosEghis.core import kdca_certificate_login as kdca
+
+    events = []
+    authenticated = {"value": False}
+
+    def authenticate(settings, **_kwargs):
+        events.append("sign_in")
+        assert settings["vaccine_kdca_portal_url"] == "https://is.kdca.go.kr/"
+        authenticated["value"] = True
+        return kdca.KdcaCertificateLoginResult(True, "authenticated", "KDCA sign-in confirmed.", 101)
+
+    def launch(settings, system, **_kwargs):
+        assert authenticated["value"] is True
+        assert system == "general"
+        assert _kwargs["browser_handle"] == 101
+        events.append(settings["vaccine_general_system_launch_url"])
+        return SimpleNamespace(success=True, message="General vaccine system opened.")
+
+    monkeypatch.setattr(vaccine_tab_module, "start_kdca_certificate_login", authenticate)
+    monkeypatch.setattr(vaccine_tab_module, "open_vaccine_system", launch)
+    panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    panel.open_general_system_button.click()
+    _wait_for_kdca(panel)
+
+    assert events == ["sign_in", "https://ois.kdca.go.kr/iris/index_run.jsp"]
+    assert panel.status_label.text() == "General vaccine system opened."
+
+
+def test_authenticated_system_buttons_use_portal_menu_in_verified_browser(tmp_path, monkeypatch):
+    from functools import partial
+    from unittest.mock import Mock
+    import pyautogui
+    import pytest
+
+    _app()
+    import KaosEghis.ui.tabs.vaccine_tab as module
+    from KaosEghis.core.kdca_certificate_login import KdcaCertificateLoginResult
+    from KaosEghis.core.vaccine_system_launch import open_vaccine_system
+    from KaosEghis.core import vaccine_system_launch
+
+    events = []
+
+    def authenticate(_settings, **_kwargs):
+        events.append("authenticated")
+        return KdcaCertificateLoginResult(True, "already_authenticated", "KDCA signed in.", 101)
+
+    class Portal:
+        phase = "portal_menu"
+        waiting_message = "waiting for menu"
+
+        def __init__(self, _settings, system, handle, **_kwargs):
+            assert events[-1] == "authenticated"
+            assert handle == 101
+            self.system = system
+
+        def advance(self):
+            events.append(("portal_menu", self.system))
+            self.phase = "system_window"
+
+    monkeypatch.setattr(module, "start_kdca_certificate_login", authenticate)
+    monkeypatch.setattr(vaccine_system_launch, "KdcaPortalLaunch", Portal)
+    monkeypatch.setattr(module, "open_vaccine_system", partial(
+        open_vaccine_system, opener=lambda *_args, **_kwargs: pytest.fail("direct URL launch"),
+        ready=lambda *_args: events[-1] != "authenticated",
+    ))
+    hotkey = Mock(side_effect=AssertionError("Launch must not send positioning shortcuts"))
+    monkeypatch.setattr(pyautogui, "hotkey", hotkey)
+    panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    panel.open_general_system_button.click()
+    _wait_for_kdca(panel)
+    panel.open_influenza_system_button.click()
+    _wait_for_kdca(panel)
+    panel.open_covid_system_button.click()
+    _wait_for_kdca(panel)
+
+    assert events == [
+        "authenticated", ("portal_menu", "general"),
+        "authenticated", ("portal_menu", "influenza"),
+        "authenticated", ("portal_menu", "covid"),
+    ]
+    hotkey.assert_not_called()
+    assert not hasattr(panel, "_system_position_timer")
+    assert panel.open_general_system_button.isEnabled()
+    assert panel.open_influenza_system_button.isEnabled()
+    assert panel.open_covid_system_button.isEnabled()
+    assert panel.kdca_login_button.isEnabled()
+    assert "COVID vaccine system opened and detected." in panel.status_label.text()
+
+
+def test_vaccine_system_open_stops_when_kdca_authentication_is_not_confirmed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "start_kdca_certificate_login",
+        lambda _settings, **_kwargs: SimpleNamespace(
+            success=False,
+            message="KDCA sign-in state could not be confirmed.",
+        ),
+    )
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "open_vaccine_system",
+        lambda _settings, system: calls.append(system),
+    )
+    panel = vaccine_tab_module.VaccineTab(tmp_path / "KaosEghis.sqlite")
+
+    assert panel.open_vaccine_system("influenza") is True
+    _wait_for_kdca(panel)
+    assert calls == []
+    assert "could not be confirmed" in panel.status_label.text()
+
+
+def test_vaccine_label_printer_reports_unavailable_printer_without_printing(
+    monkeypatch,
+) -> None:
+    from datetime import datetime
+
+    import KaosEghis.core.printer_service as printer_service
+
+    class _FakePrinter:
+        class PrinterMode:
+            HighResolution = object()
+
+        class OutputFormat:
+            NativeFormat = object()
+
+        class Unit:
+            DevicePixel = object()
+
+        def __init__(self, _mode) -> None:
+            self.begin_called = False
+
+        def setPrinterName(self, _name) -> None:
+            pass
+
+        def setOutputFormat(self, _format) -> None:
+            pass
+
+        def setFullPage(self, _full_page) -> None:
+            pass
+
+        def setPageSize(self, _page_size) -> None:
+            pass
+
+        def setPageMargins(self, _margins, _unit) -> None:
+            pass
+
+        def isValid(self) -> bool:
+            return False
+
+    monkeypatch.setattr(printer_service, "QPrinter", _FakePrinter)
+    content = printer_service.VaccineLabelContent(
+        vaccine_name="Test vaccine",
+        patient_name="Test patient",
+        chart_no="1",
+        resident_id="",
+        phone="",
+        printed_at=datetime(2026, 9, 8, 10, 0),
+    )
+
+    result = printer_service.print_vaccine_label(content, printer_name="Missing")
+
+    assert result.success is False
+    assert result.message == "Vaccine label printer is unavailable."
+
+
+def test_vaccine_label_printer_renders_to_an_available_native_printer(monkeypatch) -> None:
+    from datetime import datetime
+
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QImage
+
+    import KaosEghis.core.printer_service as printer_service
+
+    class _FakePrinter:
+        class PrinterMode:
+            HighResolution = object()
+
+        class OutputFormat:
+            NativeFormat = object()
+
+        class Unit:
+            DevicePixel = object()
+
+        def __init__(self, _mode) -> None:
+            self.printer_name = ""
+            self.page_size = None
+            self.page_margins = None
+
+        def setPrinterName(self, name) -> None:
+            self.printer_name = name
+
+        def setOutputFormat(self, _format) -> None:
+            pass
+
+        def setFullPage(self, _full_page) -> None:
+            pass
+
+        def setPageSize(self, page_size) -> None:
+            self.page_size = page_size
+
+        def setPageMargins(self, margins, unit) -> None:
+            self.page_margins = (margins, unit)
+
+        def isValid(self) -> bool:
+            return True
+
+        def pageRect(self, _unit):
+            return QRect(0, 0, 800, 400)
+
+        def logicalDpiX(self):
+            return 254
+
+        def logicalDpiY(self):
+            return 254
+
+    class _FakePainter:
+        began = False
+        ended = False
+        images = []
+
+        def begin(self, _printer) -> bool:
+            type(self).began = True
+            return True
+
+        def drawImage(self, target, image, source):
+            type(self).images.append((target, image, source))
+
+        def end(self) -> bool:
+            type(self).ended = True
+            return True
+
+    rendered = []
+    monkeypatch.setattr(printer_service, "QPrinter", _FakePrinter)
+    monkeypatch.setattr(printer_service, "QPainter", _FakePainter)
+    monkeypatch.setattr(
+        printer_service,
+        "render_vaccine_label_image",
+        lambda content, *, width, height, dpi_x, dpi_y: (
+            rendered.append((QRect(0, 0, width, height), content, dpi_x, dpi_y))
+            or QImage(width, height, QImage.Format.Format_RGB32)
+        ),
+    )
+    content = printer_service.VaccineLabelContent(
+        vaccine_name="Influenza",
+        patient_name="Test patient",
+        chart_no="1",
+        resident_id="000000-0000000",
+        phone="010-0000-0000",
+        printed_at=datetime(2026, 9, 8, 10, 0),
+    )
+
+    result = printer_service.print_vaccine_label(
+        content,
+        printer_name="4BARCODE 4B-2054L",
+    )
+
+    assert result.success is True
+    assert _FakePainter.began is True
+    assert _FakePainter.ended is True
+    assert rendered[0][0].width() == 800
+    assert rendered[0][0].height() == 400
+    assert rendered[0][1] == content
+    assert rendered[0][2:] == (254, 254)
+    assert len(_FakePainter.images) == 1
+    target, image, source = _FakePainter.images[0]
+    assert target.width() == image.width() == source.width() == 800
+    assert target.height() == image.height() == source.height() == 400
+
+
+def test_vaccine_label_fonts_use_painter_pixel_sizes() -> None:
+    from KaosEghis.core.printer_service import _label_font
+
+    title = _label_font(40.2)
+    vaccine_name = _label_font(81.6, bold=True)
+
+    assert title.pixelSize() == 40
+    assert title.pointSize() == -1
+    assert vaccine_name.pixelSize() == 82
+    assert vaccine_name.bold() is True
+
+
+def test_vaccine_label_layout_renders_korean_text() -> None:
+    from datetime import datetime
+
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from KaosEghis.core.printer_service import (
+        VaccineLabelContent,
+        _paint_vaccine_label,
+    )
+
+    _app()
+    image = QImage(800, 400, QImage.Format.Format_ARGB32)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    _paint_vaccine_label(
+        painter,
+        QRectF(0, 0, 800, 400),
+        VaccineLabelContent(
+            vaccine_name="인플루엔자",
+            patient_name="홍길동",
+            chart_no="2735",
+            resident_id="700101-1234567",
+            phone="010-0000-0000",
+            printed_at=datetime(2026, 9, 8, 10, 0),
+            count_summary="1/100",
+        ),
+    )
+    painter.end()
+
+    assert image.pixelColor(400, 190).alpha() == 255
+
+
+def test_legacy_vaccine_records_migrate_without_becoming_completed(tmp_path) -> None:
+    import sqlite3
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_today_vaccine_counts, list_vaccine_records
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    connection = sqlite3.connect(db_path)
+    connection.executescript(
+        """
+        CREATE TABLE vaccine_types (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            code TEXT,
+            chart_note_template TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE vaccine_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vaccine_type_id INTEGER,
+            vaccine_type_name TEXT NOT NULL,
+            patient_chart_no TEXT,
+            patient_resident_id TEXT,
+            patient_name TEXT,
+            patient_sex TEXT,
+            patient_age TEXT,
+            patient_phone TEXT,
+            patient_address TEXT,
+            status TEXT NOT NULL DEFAULT 'prepared',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO vaccine_types (name, code, sort_order)
+        VALUES ('Influenza', 'flu', 1);
+        INSERT INTO vaccine_records (
+            vaccine_type_id, vaccine_type_name, patient_name, status, created_at
+        )
+        VALUES (1, 'Influenza', 'Legacy Patient', 'prepared', '2026-09-08 09:00:00');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(vaccine_records)"
+            ).fetchall()
+        }
+        record = list_vaccine_records(connection)[0]
+        counts = get_today_vaccine_counts(connection, "2026-09-08")
+
+    assert {
+        "program_type",
+        "counts_toward_cap",
+        "counted_bucket",
+        "completed_on",
+        "completed_at",
+        "cancelled_at",
+    } <= columns
+    assert record.program_type == "national_influenza"
+    assert record.status == "prepared"
+    assert record.counts_toward_cap is False
+    assert counts == {"flu": 0, "covid": 0}
+
+
+def test_vaccine_type_and_record_crud(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_record,
+        create_vaccine_type,
+        delete_vaccine_record,
+        delete_vaccine_type,
+        get_vaccine_record,
+        list_vaccine_records,
+        list_vaccine_types,
+        reorder_vaccine_types,
+        update_vaccine_record,
+        update_vaccine_type,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        vaccine_type = create_vaccine_type(
+            connection,
+            name="Tdap",
+            code="tdap",
+            chart_note_template="Tdap 시행함.",
+        )
+        updated_type = update_vaccine_type(
+            connection,
+            vaccine_type.id,
+            name="Tdap Updated",
+            code="tdap2",
+            chart_note_template="Tdap updated.",
+            is_active=False,
+        )
+        ordered = reorder_vaccine_types(
+            connection,
+            [entry.id for entry in reversed(list_vaccine_types(connection))],
+        )
+        record = create_vaccine_record(
+            connection,
+            vaccine_type_id=vaccine_type.id,
+            vaccine_type_name="Tdap Updated",
+            patient_chart_no="2735",
+            patient_resident_id="700101-1234567",
+            patient_name="홍길동",
+            patient_sex="M",
+            patient_age="56",
+            patient_phone="010-1111-2222",
+            patient_address="Seoul",
+        )
+        updated_record = update_vaccine_record(
+            connection,
+            record.id,
+            vaccine_type_id=vaccine_type.id,
+            vaccine_type_name="Tdap Updated",
+            patient_chart_no="2735",
+            patient_resident_id="700101-1234567",
+            patient_name="김민수",
+            patient_sex="M",
+            patient_age="57",
+            patient_phone="010-3333-4444",
+            patient_address="Busan",
+            status="prepared",
+        )
+        listed_records = list_vaccine_records(connection)
+        fetched_record = get_vaccine_record(connection, record.id)
+        deleted_record = delete_vaccine_record(connection, record.id)
+        deleted_type = delete_vaccine_type(connection, vaccine_type.id)
+
+    assert updated_type is not None
+    assert updated_type.name == "Tdap Updated"
+    assert updated_type.is_active is False
+    assert ordered
+    assert updated_record is not None
+    assert updated_record.patient_name == "김민수"
+    assert fetched_record is not None
+    assert fetched_record.patient_phone == "010-3333-4444"
+    assert listed_records
+    assert deleted_record is True
+    assert deleted_type is True
+
+
+def test_vaccine_type_dialog_records_program_classification() -> None:
+    _app()
+
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTypeDialog
+
+    dialog = VaccineTypeDialog()
+    assert dialog.program_type_combo.currentData() == "general"
+
+    dialog.program_type_combo.setCurrentIndex(
+        dialog.program_type_combo.findData("national_influenza")
+    )
+
+    assert dialog.values()["program_type"] == "national_influenza"
+
+
+def test_vaccine_tab_fetches_patient_context_from_emr_targets(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from types import SimpleNamespace
+
+    from KaosEghis.core.vaccine_patient_context import (
+        VaccinePatientContext,
+        VaccinePatientFetchResult,
+    )
+    from KaosEghis.db.database import initialize_database
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    class _Profile:
+        id = 1
+        process_name = "eGhis.exe"
+        window_title_contains = "이지스 전자차트 2.0"
+        executable_path = r"C:\eghis\eGhis.exe"
+        main_window_automation_id = "MdiMain"
+        patient_status_tab_automation_id = "tabProc"
+        prescription_grid_automation_id = "tree처방"
+        symptom_grid_automation_id = "grdSymp"
+        diagnosis_grid_automation_id = "tree상병"
+        patient_list_grid_automation_id = "grdOpdList"
+
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "get_active_emr_target_profile",
+        lambda connection: _Profile(),
+    )
+    monkeypatch.setattr(vaccine_tab_module, "get_settings", lambda connection: {})
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "get_emr_ui_target_by_key",
+        lambda connection, profile_id, target_key: SimpleNamespace(
+            automation_id=f"id-{target_key}",
+        ),
+    )
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "fetch_vaccine_patient_context",
+        lambda settings, targets: VaccinePatientFetchResult(
+            success=True,
+            message="Loaded patient context from EMR.",
+            context=VaccinePatientContext(
+                chart_no="2735",
+                resident_id="700101-1234567",
+                patient_name="홍길동",
+                patient_sex="M",
+                patient_age="56",
+                patient_birth_date="1970-01-01",
+                patient_phone="010-1111-2222",
+                patient_address="Seoul",
+            ),
+        ),
+    )
+
+    page = vaccine_tab_module.VaccineTab(db_path)
+
+    assert page.fetch_current_patient_from_emr() is True
+    assert page.patient_name_input.text() == "홍길동"
+    assert page.patient_resident_id_input.text() == "700101-1234567"
+    assert "Resident No: 700101-1234567" in page.label_preview.toPlainText()
+    assert page.patient_birth_date_input.text() == "1970-01-01"
+    assert page.patient_phone_input.text() == "010-1111-2222"
+
+
+def test_today_vaccine_counts_use_only_today_rows(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_record,
+        get_today_vaccine_counts,
+        list_vaccine_types,
+        mark_vaccine_record_completed,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    with connect(db_path) as connection:
+        vaccine_types = {entry.name: entry for entry in list_vaccine_types(connection)}
+        flu_type = vaccine_types["Influenza"]
+        covid_type = vaccine_types["COVID-19 (Pfizer)"]
+        flu_record = create_vaccine_record(
+            connection,
+            vaccine_type_id=flu_type.id,
+            vaccine_type_name=flu_type.name,
+            patient_name="홍길동",
+        )
+        covid_record = create_vaccine_record(
+            connection,
+            vaccine_type_id=covid_type.id,
+            vaccine_type_name=covid_type.name,
+            patient_name="김민수",
+        )
+        mark_vaccine_record_completed(
+            connection,
+            flu_record.id,
+            completed_at="2026-08-09T08:00:00+09:00",
+        )
+        mark_vaccine_record_completed(
+            connection,
+            covid_record.id,
+            completed_at="2026-08-10T08:00:00+09:00",
+        )
+        counts = get_today_vaccine_counts(connection, "2026-08-10")
+
+    assert counts == {"flu": 0, "covid": 1}
+
+
+def test_only_completed_counted_national_records_increment_daily_count(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_record,
+        create_vaccine_type,
+        get_today_vaccine_counts,
+        list_vaccine_audit_events,
+        list_vaccine_types,
+        mark_vaccine_record_cancelled,
+        mark_vaccine_record_completed,
+        mark_vaccine_record_printed,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        vaccine_types = {entry.name: entry for entry in list_vaccine_types(connection)}
+        flu_type = vaccine_types["Influenza"]
+        covid_type = vaccine_types["COVID-19 (Pfizer)"]
+        moderna_type = vaccine_types["COVID-19 (Moderna)"]
+        private_flu_type = create_vaccine_type(
+            connection,
+            name="Private Influenza",
+            code="private-flu",
+            program_type="general_influenza",
+        )
+        prepared_flu = create_vaccine_record(
+            connection,
+            vaccine_type_id=flu_type.id,
+            vaccine_type_name=flu_type.name,
+            patient_name="Prepared Patient",
+        )
+        completed_flu = create_vaccine_record(
+            connection,
+            vaccine_type_id=flu_type.id,
+            vaccine_type_name=flu_type.name,
+            patient_name="Counted Patient",
+        )
+        private_flu = create_vaccine_record(
+            connection,
+            vaccine_type_id=private_flu_type.id,
+            vaccine_type_name=private_flu_type.name,
+            patient_name="Private Patient",
+        )
+        completed_covid = create_vaccine_record(
+            connection,
+            vaccine_type_id=covid_type.id,
+            vaccine_type_name=covid_type.name,
+            patient_name="COVID Patient",
+        )
+        completed_moderna = create_vaccine_record(
+            connection,
+            vaccine_type_id=moderna_type.id,
+            vaccine_type_name=moderna_type.name,
+            patient_name="Moderna Patient",
+        )
+
+        assert get_today_vaccine_counts(connection, "2026-09-08") == {
+            "flu": 0,
+            "covid": 0,
+        }
+        mark_vaccine_record_printed(connection, prepared_flu.id)
+        mark_vaccine_record_completed(
+            connection,
+            completed_flu.id,
+            completed_at="2026-09-08T09:00:00+09:00",
+        )
+        first_completion = mark_vaccine_record_completed(
+            connection,
+            completed_flu.id,
+            completed_at="2026-09-09T09:00:00+09:00",
+        )
+        mark_vaccine_record_completed(
+            connection,
+            private_flu.id,
+            completed_at="2026-09-08T09:05:00+09:00",
+        )
+        mark_vaccine_record_completed(
+            connection,
+            completed_covid.id,
+            completed_at="2026-09-08T09:10:00+09:00",
+        )
+        mark_vaccine_record_completed(
+            connection,
+            completed_moderna.id,
+            completed_at="2026-09-08T09:15:00+09:00",
+        )
+        counts_after_completion = get_today_vaccine_counts(connection, "2026-09-08")
+        mark_vaccine_record_cancelled(
+            connection,
+            completed_flu.id,
+            cancelled_at="2026-09-08T10:00:00+09:00",
+        )
+        counts_after_correction = get_today_vaccine_counts(connection, "2026-09-08")
+        audit_events = list_vaccine_audit_events(connection, limit=100)
+
+    assert first_completion is not None
+    assert first_completion.completed_on == "2026-09-08"
+    assert counts_after_completion == {"flu": 1, "covid": 2}
+    assert counts_after_correction == {"flu": 0, "covid": 2}
+    for patient_name in ("Prepared Patient", "Counted Patient", "Private Patient"):
+        assert all(patient_name not in event.summary for event in audit_events)
+    assert any(event.event_type == "completed" for event in audit_events)
+    assert any(event.event_type == "cancelled" for event in audit_events)
+
+
+def test_vaccine_db_actions_complete_and_cancel_explicitly(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_record,
+        get_today_vaccine_counts,
+        get_vaccine_record,
+        list_vaccine_types,
+    )
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        flu_type = next(
+            entry for entry in list_vaccine_types(connection) if entry.name == "Influenza"
+        )
+        record = create_vaccine_record(
+            connection,
+            vaccine_type_id=flu_type.id,
+            vaccine_type_name=flu_type.name,
+            patient_name="Test Patient",
+        )
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes,
+    )
+    page = VaccineTab(db_path)
+    page.flu_records_table.selectRow(0)
+    page.mark_selected_record_completed()
+
+    with connect(db_path) as connection:
+        completed = get_vaccine_record(connection, record.id)
+        completed_counts = get_today_vaccine_counts(
+            connection,
+            completed.completed_on,
+        )
+
+    assert completed is not None
+    assert completed.status == "completed"
+    assert completed_counts["flu"] == 1
+
+    page.flu_records_table.selectRow(0)
+    page.cancel_selected_record()
+
+    with connect(db_path) as connection:
+        cancelled = get_vaccine_record(connection, record.id)
+        cancelled_counts = get_today_vaccine_counts(
+            connection,
+            completed.completed_on,
+        )
+
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    assert cancelled_counts["flu"] == 0
+
+
+def test_successful_label_print_completes_record_once_and_reprint_does_not_count(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    from KaosEghis.core.printer_service import VaccineLabelPrintResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_type,
+        get_today_vaccine_counts,
+        list_vaccine_records,
+    )
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_vaccine_type(
+            connection,
+            name="Tdap",
+            code="tdap",
+            program_type="general",
+        )
+
+    printed = []
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "print_vaccine_label",
+        lambda content, *, printer_name: (
+            printed.append((content, printer_name))
+            or VaccineLabelPrintResult(True, "Vaccine label printed.")
+        ),
+    )
+    page = vaccine_tab_module.VaccineTab(db_path)
+    monkeypatch.setattr(page, "_begin_post_print_handoff", lambda _records: None)
+    page._select_vaccine_type(None, "Tdap")
+    page.patient_name_input.setText("Test patient")
+    page.patient_chart_no_input.setText("2735")
+    page.patient_resident_id_input.setText("700101-1234567")
+
+    page.print_label()
+
+    with connect(db_path) as connection:
+        record = list_vaccine_records(connection)[0]
+        counts_after_first_print = get_today_vaccine_counts(
+            connection, record.completed_on
+        )
+    assert record.status == "completed"
+    assert counts_after_first_print == {"flu": 0, "covid": 0}
+    assert len(printed) == 1
+
+    page.print_label()
+
+    with connect(db_path) as connection:
+        reprinted = list_vaccine_records(connection)[0]
+        counts_after_reprint = get_today_vaccine_counts(
+            connection, reprinted.completed_on
+        )
+    assert reprinted.status == "completed"
+    assert counts_after_reprint == {"flu": 0, "covid": 0}
+    assert len(printed) == 2
+
+
+def test_general_influenza_target_group_requires_operator_confirmation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from KaosEghis.core.printer_service import VaccineLabelPrintResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_today_vaccine_counts, get_vaccine_record, set_settings
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "vaccine_schedule_rules_json": (
+                    '{"influenza":{"season_name":"2026-2027",'
+                    '"program_enabled":true,"daily_cap":100,'
+                    '"elderly_75_plus_start":"1900-01-01",'
+                    '"elderly_program_end":"2999-12-31"}}'
+                ),
+                "vaccine_age_groups_json": (
+                    '[{"key":"elderly_75_plus","label":"Elderly 75+",'
+                    '"vaccine":"influenza","birth_date_from":"1900-01-01",'
+                    '"birth_date_to":"1951-12-31"}]'
+                ),
+            },
+        )
+
+    printed = []
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "print_vaccine_label",
+        lambda content, *, printer_name: (
+            printed.append((content, printer_name))
+            or VaccineLabelPrintResult(True, "Vaccine label printed.")
+        ),
+    )
+    prompts = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda _parent, title, detail, *_args: (
+            prompts.append((title, detail)) or QMessageBox.StandardButton.No
+        ),
+    )
+
+    page = vaccine_tab_module.VaccineTab(db_path)
+    monkeypatch.setattr(page, "_begin_post_print_handoff", lambda _records: None)
+    page._select_vaccine_type(None, "Influenza (general/private)")
+    page.patient_name_input.setText("Test patient")
+    page.patient_chart_no_input.setText("2735")
+    page.patient_resident_id_input.setText("500101-1234567")
+    page.print_label()
+
+    assert len(prompts) == 1
+    assert prompts[0][0] == "Confirm general/private influenza"
+    assert "Elderly 75+" in prompts[0][1]
+    assert printed == []
+    assert "cancelled by operator" in page.status_label.text()
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *_args: QMessageBox.StandardButton.Yes,
+    )
+    page.print_label()
+
+    with connect(db_path) as connection:
+        record = get_vaccine_record(connection, page._current_record_id)
+        assert record is not None
+        counts = get_today_vaccine_counts(connection, record.completed_on)
+
+    assert record.status == "completed"
+    assert record.program_type == "general_influenza"
+    assert counts == {"flu": 0, "covid": 0}
+    assert len(printed) == 1
+
+
+def test_failed_label_print_does_not_complete_or_count_record(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from KaosEghis.core.printer_service import VaccineLabelPrintResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_vaccine_type,
+        get_today_vaccine_counts,
+        list_vaccine_records,
+    )
+    import KaosEghis.ui.tabs.vaccine_tab as vaccine_tab_module
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_vaccine_type(
+            connection,
+            name="Tdap",
+            code="tdap",
+            program_type="general",
+        )
+    monkeypatch.setattr(
+        vaccine_tab_module,
+        "print_vaccine_label",
+        lambda *_args, **_kwargs: VaccineLabelPrintResult(
+            False, "Vaccine label printer is unavailable."
+        ),
+    )
+    page = vaccine_tab_module.VaccineTab(db_path)
+    page._select_vaccine_type(None, "Tdap")
+    page.patient_name_input.setText("Test patient")
+    page.patient_chart_no_input.setText("2735")
+
+    page.print_label()
+
+    with connect(db_path) as connection:
+        record = list_vaccine_records(connection)[0]
+        counts = get_today_vaccine_counts(connection, "2026-09-08")
+    assert record.status == "prepared"
+    assert counts == {"flu": 0, "covid": 0}
+    assert page.status_label.text() == "Vaccine label printer is unavailable."
+
+
+def test_vaccine_tab_uses_single_structured_program_settings(tmp_path) -> None:
+    _app()
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineTab(db_path)
+
+    settings_page = page.settings_page
+    assert settings_page.tabs.tabText(0) == "Influenza schedule"
+    assert settings_page.tabs.tabText(1) == "COVID schedule"
+    assert not hasattr(settings_page.influenza_editor, "season_combo")
+    assert not hasattr(settings_page.influenza_editor, "duplicate_button")
+
+
+def test_vaccine_tab_uses_three_internal_pages(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineTab(db_path)
+
+    assert page.TOP_PAGES == ["Main", "DB", "Settings"]
+    assert page.stacked_widget.count() == 3
+    assert set(page.nav_buttons) == {"Main", "DB", "Settings"}
+    assert page.print_button.text() == "Print label"
+    assert page.settings_page.printer_name_input.text() == "4BARCODE 4B-2054L"
+
+
+def test_new_vaccine_record_retains_patient_context_for_simultaneous_vaccinations(
+    tmp_path,
+) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import list_vaccine_records
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineTab(db_path)
+    page.patient_chart_no_input.setText("2735")
+    page.patient_resident_id_input.setText("700101-1234567")
+    page.patient_name_input.setText("Test Patient")
+    page.patient_sex_input.setText("M")
+    page.patient_age_input.setText("56")
+    page.patient_phone_input.setText("010-1111-2222")
+
+    page._select_vaccine_type(None, "Influenza")
+    first = page.save_record()
+
+    assert first is not None
+    assert page._current_record_id == first.id
+
+    page.start_new_vaccine_record()
+
+    assert page._current_record_id is None
+    assert page.patient_chart_no_input.text() == "2735"
+    assert page.patient_resident_id_input.text() == "700101-1234567"
+    assert page.patient_name_input.text() == "Test Patient"
+    assert page.vaccine_types_list.currentItem() is None
+
+    page._select_vaccine_type(None, "COVID-19 (Pfizer)")
+    second = page.save_record()
+
+    assert second is not None
+    assert second.id != first.id
+    with connect(db_path) as connection:
+        records = list_vaccine_records(connection)
+    assert [(record.vaccine_type_name, record.patient_chart_no) for record in records] == [
+        ("COVID-19 (Pfizer)", "2735"),
+        ("Influenza", "2735"),
+    ]
+
+
+def test_prepare_flu_and_covid_creates_two_separate_records_from_one_context(tmp_path) -> None:
+    _app()
+
+    from PySide6.QtCore import Qt
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import list_vaccine_records
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineTab(db_path)
+    page.patient_chart_no_input.setText("2735")
+    page.patient_resident_id_input.setText("500101-1234567")
+    page.patient_name_input.setText("Test Patient")
+
+    assert page.prepare_flu_and_covid() is None
+    assert "Select an active COVID product" in page.status_label.text()
+
+    moderna_items = page.vaccine_types_list.findItems(
+        "COVID-19 (Moderna)", Qt.MatchFlag.MatchExactly
+    )
+    assert len(moderna_items) == 1
+    page.vaccine_types_list.setCurrentItem(moderna_items[0])
+
+    pair = page.prepare_flu_and_covid()
+
+    assert pair is not None
+    assert [record.program_type for record in pair] == [
+        "national_influenza",
+        "national_covid",
+    ]
+    assert all(record.status == "prepared" for record in pair)
+    assert page._prepared_pair_ids == (pair[0].id, pair[1].id)
+    assert "Two separate records prepared" in page.prepared_pair_label.text()
+    assert page.prepare_flu_covid_button.text() == "Prepare Flu + COVID"
+    assert page.print_prepared_pair_button.text() == "Print prepared pair"
+    with connect(db_path) as connection:
+        records = list_vaccine_records(connection)
+    assert [record.vaccine_type_name for record in records] == [
+        "COVID-19 (Moderna)",
+        "Influenza",
+    ]
+
+
+def test_vaccine_tab_db_buckets_split_records_by_type(tmp_path) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import create_vaccine_record, create_vaccine_type
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        create_vaccine_record(
+            connection,
+            vaccine_type_id=None,
+            vaccine_type_name="Influenza",
+            patient_name="홍길동",
+        )
+        create_vaccine_record(
+            connection,
+            vaccine_type_id=None,
+            vaccine_type_name="COVID-19",
+            patient_name="김민수",
+        )
+        tdap = create_vaccine_type(connection, name="Tdap", code="tdap")
+        create_vaccine_record(
+            connection,
+            vaccine_type_id=tdap.id,
+            vaccine_type_name="Tdap",
+            patient_name="박지훈",
+        )
+
+    page = VaccineTab(db_path)
+
+    assert page.flu_records_table.rowCount() == 1
+    assert page.covid_records_table.rowCount() == 1
+    assert page.general_records_table.rowCount() == 1
+
+
+def test_session_keeper_is_opt_in_and_never_clicks_during_vaccine_tab_startup(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _app()
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+    from KaosEghis.ui.tabs import vaccine_tab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(connection, {"vaccine_session_keeper_enabled": "true"})
+
+    reset_calls = []
+    monkeypatch.setattr(
+        vaccine_tab,
+        "reset_vaccine_session",
+        lambda target: reset_calls.append(target),
+    )
+    page = vaccine_tab.VaccineTab(db_path)
+
+    assert reset_calls == []
+    assert set(page._session_keeper_timers) == {"general", "covid"}
+    assert all(timer.isActive() for timer in page._session_keeper_timers.values())
+    assert "first check in 90 minutes" in (
+        page.settings_page.system_targets_editor.session_keeper_status_label.text()
+    )
+    assert "Next reset in" in (
+        page.settings_page.system_targets_editor.session_keeper_progress_bar.format()
+    )
+
+
+@pytest.mark.parametrize("surface", ["main", "settings"])
+def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
+    tmp_path,
+    monkeypatch,
+    surface,
+) -> None:
+    _app()
+
+    from types import SimpleNamespace
+
+    from KaosEghis.core.vaccine_session_keeper import VaccineSessionResetTarget
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs import vaccine_tab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    targets = (
+        VaccineSessionResetTarget("general", "General", "General", "Class", 1, 2),
+        VaccineSessionResetTarget("covid", "COVID", "COVID", "Class", 3, 4),
+    )
+    reset_calls = []
+    monkeypatch.setattr(
+        vaccine_tab,
+        "configured_session_reset_targets",
+        lambda _settings: targets,
+    )
+    monkeypatch.setattr(
+        vaccine_tab,
+        "reset_vaccine_session",
+        lambda target: reset_calls.append(target.key)
+        or SimpleNamespace(message="Session reset sent.", clicked=True),
+    )
+
+    page = vaccine_tab.VaccineTab(db_path)
+    if surface == "main":
+        button = page.session_reset_now_button
+        row = button.parentWidget().layout()
+        assert button.parentWidget().title() == "KDCA systems"
+        assert row.itemAt(row.count() - 2).widget() is button
+        assert button.text() == "Reset Now"
+    else:
+        button = page.settings_page.system_targets_editor.session_reset_now_button
+    button.click()
+
+    assert reset_calls == ["general", "covid"]
+    assert "Reset now: General: Session reset sent.; COVID: Session reset sent." in (
+        page.settings_page.system_targets_editor.session_keeper_status_label.text()
+    )
+    assert page._session_keeper_timers == {}
+    assert (
+        page.settings_page.system_targets_editor.session_keeper_progress_bar.format()
+        == "Next reset: off"
+    )
+
+
+@pytest.mark.parametrize("state", ["printing", "pending_handoff", "active_handoff"])
+def test_main_session_reset_is_disabled_during_print_and_handoff(tmp_path, monkeypatch, state):
+    _app()
+    from KaosEghis.ui.tabs import vaccine_tab
+
+    monkeypatch.setattr(
+        vaccine_tab, "reset_vaccine_session",
+        lambda *_args, **_kwargs: pytest.fail("reset during print or handoff"),
+    )
+    page = vaccine_tab.VaccineTab(tmp_path / "KaosEghis.sqlite")
+    page._print_in_progress = state == "printing"
+    page._pending_handoffs = [object()] if state == "pending_handoff" else []
+    page._handoff_thread = object() if state == "active_handoff" else None
+    page._update_handoff_controls()
+    for button in (
+        page.session_reset_now_button,
+        page.settings_page.system_targets_editor.session_reset_now_button,
+    ):
+        assert not button.isEnabled()
+        button.click()
+    page._print_in_progress = False
+    page._pending_handoffs = []
+    page._handoff_thread = None
+    page._update_handoff_controls()
+    assert page.session_reset_now_button.isEnabled()
+    assert page.settings_page.system_targets_editor.session_reset_now_button.isEnabled()
+
+
+def test_kdca_login_is_explicit_and_uses_vaccine_settings(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from KaosEghis.core.kdca_certificate_login import KdcaCertificateLoginResult
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+    from KaosEghis.ui.tabs import vaccine_tab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(connection, {"vaccine_kdca_certificate_name": "Test certificate"})
+
+    calls: list[dict[str, str]] = []
+    monkeypatch.setattr(
+        vaccine_tab,
+        "start_kdca_certificate_login",
+        lambda settings, **_kwargs: calls.append(settings)
+        or KdcaCertificateLoginResult(
+            True,
+            "submitted",
+            "KDCA certificate login was submitted. Verify the portal completed sign-in.",
+        ),
+    )
+
+    page = vaccine_tab.VaccineTab(db_path)
+
+    assert page.kdca_login_button.text() == "Log in to KDCA"
+    assert calls == []
+    assert page.log_in_to_kdca() is True
+    _wait_for_kdca(page)
+    assert calls[0]["vaccine_kdca_certificate_name"] == "Test certificate"
+    assert "submitted" in page.status_label.text()

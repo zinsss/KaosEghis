@@ -12,6 +12,7 @@ def test_pacs_docs_reference_current_architecture() -> None:
     assert "KaosEghis-pacs never writes directly to DICOM." in pacs_doc
     assert "KaosEghis-pacs never writes directly into Orthanc." in pacs_doc
     assert "Eghis DB access is read-only." in pacs_doc
+    assert "KaosEghis does not mark imaging complete." in pacs_doc
     assert "resident registration number" in pacs_doc
     assert "audit logs intentionally exclude sensitive patient information" in pacs_doc.lower()
     assert "Plugins UI" in readiness_doc

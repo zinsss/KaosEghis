@@ -1,4 +1,7 @@
+from PySide6.QtCore import QEvent, QPoint, QMimeData, Qt, Signal
+from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -178,7 +181,7 @@ class MacrosTab(QWidget):
         macros_title = QLabel("Macros")
         self.macros_table = QTableWidget(0, 4)
         self.macros_table.setHorizontalHeaderLabels(
-            ["id", "name", "EMR profile", "enabled"]
+            ["id", "name", "EMR profile", "executable"]
         )
         self.macros_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.macros_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -538,6 +541,7 @@ class MacrosTab(QWidget):
                 "macro",
                 values["is_enabled"],
                 values["emr_target_profile_id"],
+                is_launcher_exposed=values["is_launcher_exposed"],
             )
             for step in values["steps"]:
                 create_macro_step(connection, item.id, **step)
@@ -568,6 +572,7 @@ class MacrosTab(QWidget):
                 "macro",
                 values["is_enabled"],
                 values["emr_target_profile_id"],
+                is_launcher_exposed=values["is_launcher_exposed"],
             )
             delete_macro_steps_for_item(connection, item_id)
             for step in values["steps"]:
@@ -658,17 +663,30 @@ def _value_or_empty(value: object | None) -> str:
 def _dry_run_step_line(step: MacroStepRecord) -> str:
     target = f" target_id={step.target_id}" if step.target_id else ""
     value = f" value={step.value}" if step.value else ""
+    enter_after = (
+        " enter_after=yes"
+        if step.action in {"type_text", "type_text_keyboard"}
+        and step.press_enter_after
+        else ""
+    )
+    timing_parts = []
+    if step.wait_before_enabled:
+        timing_parts.append(f"wait_before={step.wait_before_ms}ms")
+    timing = f" {' '.join(timing_parts)}" if timing_parts else ""
     if step.action == "wait_for_target":
         return (
             f"{step.step_order}. wait_for_target{target} "
-            f"timeout={step.timeout_seconds} retries={step.retries} (dry run only)"
+            f"timeout={step.timeout_seconds} retries={step.retries}{timing} "
+            "(dry run only)"
         )
     if step.action == "wait_ms":
         duration = step.value or ""
         duration_text = f" duration_ms={duration}" if duration else ""
-        return f"{step.step_order}. wait_ms{duration_text} (dry run only)"
+        return (
+            f"{step.step_order}. wait_ms{duration_text}{timing} (dry run only)"
+        )
     return (
-        f"{step.step_order}. {step.action}{target}{value} "
+        f"{step.step_order}. {step.action}{target}{value}{enter_after}{timing} "
         f"timeout={step.timeout_seconds} retries={step.retries}"
     )
 
@@ -754,17 +772,135 @@ class UiTargetDialog(QDialog):
         }
 
 
+class ReorderableStepsTable(QTableWidget):
+    rows_reordered = Signal()
+    MIME_TYPE = "application/x-kaoseghis-step-row"
+
+    def __init__(self, rows: int, columns: int, parent: QWidget | None = None) -> None:
+        super().__init__(rows, columns, parent)
+        self._drag_start_pos: QPoint | None = None
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
+        self.setDragDropOverwriteMode(False)
+        self.viewport().installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._drag_start_pos = event.position().toPoint()
+            elif event.type() == QEvent.Type.MouseMove:
+                if (
+                    self._drag_start_pos is not None
+                    and event.buttons() & Qt.MouseButton.LeftButton
+                    and (
+                        event.position().toPoint() - self._drag_start_pos
+                    ).manhattanLength()
+                    >= QApplication.startDragDistance()
+                ):
+                    self._begin_drag()
+                    return True
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                self._drag_start_pos = None
+        return super().eventFilter(watched, event)
+
+    def _begin_drag(self) -> None:
+        source_row = self.currentRow()
+        if source_row < 0:
+            source_row = self.rowAt((self._drag_start_pos or QPoint()).y())
+        if source_row < 0:
+            self._drag_start_pos = None
+            return
+
+        self.selectRow(source_row)
+        mime_data = QMimeData()
+        mime_data.setData(self.MIME_TYPE, str(source_row).encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        drag.exec(Qt.DropAction.CopyAction)
+        self._drag_start_pos = None
+
+    def dragEnterEvent(self, event) -> None:
+        if event.source() is self and event.mimeData().hasFormat(self.MIME_TYPE):
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.source() is self and event.mimeData().hasFormat(self.MIME_TYPE):
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        if event.source() is not self or not event.mimeData().hasFormat(self.MIME_TYPE):
+            super().dropEvent(event)
+            return
+
+        try:
+            source_row = int(bytes(event.mimeData().data(self.MIME_TYPE)).decode("utf-8"))
+        except Exception:
+            event.ignore()
+            return
+        if source_row < 0:
+            event.ignore()
+            return
+
+        target_index = self.indexAt(event.position().toPoint())
+        if target_index.isValid():
+            insertion_row = target_index.row()
+            if (
+                self.dropIndicatorPosition()
+                == QAbstractItemView.DropIndicatorPosition.BelowItem
+            ):
+                insertion_row += 1
+        else:
+            insertion_row = self.rowCount()
+
+        final_row = insertion_row - (1 if insertion_row > source_row else 0)
+        self.move_row(source_row, final_row)
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+
+    def move_row(self, source_row: int, destination_row: int) -> None:
+        if not 0 <= source_row < self.rowCount():
+            return
+        destination_row = max(0, min(destination_row, self.rowCount() - 1))
+        if source_row == destination_row:
+            return
+
+        row_values = [
+            self.item(source_row, column).text()
+            if self.item(source_row, column) is not None
+            else ""
+            for column in range(self.columnCount())
+        ]
+        self.removeRow(source_row)
+        self.insertRow(destination_row)
+        for column, value in enumerate(row_values):
+            self.setItem(destination_row, column, QTableWidgetItem(value))
+        self.selectRow(destination_row)
+        self.rows_reordered.emit()
+
+
 class MacroEditorDialog(QDialog):
     def __init__(
         self,
         parent: QWidget,
         item: ItemRecord | None = None,
         steps: list[MacroStepRecord] | None = None,
+        db_path=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Macro")
-        initialize_database()
-        with connect() as connection:
+        self._db_path = db_path
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
             self._profiles = list_emr_target_profiles(connection)
             default_profile = get_default_emr_target_profile(connection)
 
@@ -773,6 +909,10 @@ class MacroEditorDialog(QDialog):
         self.name = QLineEdit(item.name if item else "")
         self.enabled = QCheckBox()
         self.enabled.setChecked(item.is_enabled if item else True)
+        self.launcher_exposed = QCheckBox()
+        self.launcher_exposed.setChecked(
+            getattr(item, "is_launcher_exposed", True) if item else True
+        )
         self.emr_profile = QComboBox()
         self.emr_profile.addItem(
             self._default_profile_label(default_profile.name if default_profile else None),
@@ -786,13 +926,27 @@ class MacroEditorDialog(QDialog):
             self.emr_profile.setCurrentIndex(profile_index)
         self.emr_profile.currentIndexChanged.connect(self._on_profile_changed)
 
-        self.steps_table = QTableWidget(0, 6)
+        self.steps_table = ReorderableStepsTable(0, 10)
         self.steps_table.setHorizontalHeaderLabels(
-            ["step_order", "action", "target_id", "value", "timeout_seconds", "retries"]
+            [
+                "order",
+                "action",
+                "target_id",
+                "value",
+                "timeout_seconds",
+                "retries",
+                "press_enter_before",
+                "press_enter_after",
+                "wait_before_enabled",
+                "wait_before_ms",
+            ]
         )
+        for column in range(6, 10):
+            self.steps_table.setColumnHidden(column, True)
         self.steps_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.steps_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.steps_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.steps_table.rows_reordered.connect(self._renumber_steps)
 
         add_step_button = QPushButton("Add Step")
         add_step_button.clicked.connect(self.add_step)
@@ -811,7 +965,8 @@ class MacroEditorDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("Macro name", self.name)
-        form.addRow("Enabled", self.enabled)
+        form.addRow("Executable", self.enabled)
+        form.addRow("Show in Launcher", self.launcher_exposed)
         form.addRow("Application preset", self.emr_profile)
 
         buttons = QDialogButtonBox(
@@ -836,6 +991,10 @@ class MacroEditorDialog(QDialog):
                     "value": step.value or "",
                     "timeout_seconds": step.timeout_seconds,
                     "retries": step.retries,
+                    "press_enter_before": getattr(step, "press_enter_before", False),
+                    "press_enter_after": step.press_enter_after,
+                    "wait_before_enabled": step.wait_before_enabled,
+                    "wait_before_ms": step.wait_before_ms,
                 }
             )
         if item is None and not steps:
@@ -847,13 +1006,19 @@ class MacroEditorDialog(QDialog):
                     "value": "",
                     "timeout_seconds": 5.0,
                     "retries": 0,
+                    "press_enter_before": False,
+                    "press_enter_after": False,
+                    "wait_before_enabled": False,
+                    "wait_before_ms": 100,
                 }
             )
+        self._renumber_steps()
 
     def values(self) -> dict:
         return {
             "name": self.name.text().strip(),
             "is_enabled": self.enabled.isChecked(),
+            "is_launcher_exposed": self.launcher_exposed.isChecked(),
             "emr_target_profile_id": self.current_profile_id(),
             "steps": self._steps(),
         }
@@ -863,6 +1028,7 @@ class MacroEditorDialog(QDialog):
             self,
             next_order=self.steps_table.rowCount() + 1,
             profile_id=self.effective_profile_id(),
+            db_path=self._db_path,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -876,6 +1042,7 @@ class MacroEditorDialog(QDialog):
             self,
             self._step_at_row(row),
             profile_id=self.effective_profile_id(),
+            db_path=self._db_path,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -901,6 +1068,10 @@ class MacroEditorDialog(QDialog):
             step.get("value", ""),
             str(step["timeout_seconds"]),
             str(step["retries"]),
+            "1" if step.get("press_enter_before", False) else "0",
+            "1" if step.get("press_enter_after", False) else "0",
+            "1" if step.get("wait_before_enabled", False) else "0",
+            str(step.get("wait_before_ms", 100)),
         ]
         for column, value in enumerate(values):
             self.steps_table.setItem(row, column, QTableWidgetItem(value))
@@ -920,6 +1091,10 @@ class MacroEditorDialog(QDialog):
             "value": self.steps_table.item(row, 3).text(),
             "timeout_seconds": float(self.steps_table.item(row, 4).text()),
             "retries": int(self.steps_table.item(row, 5).text()),
+            "press_enter_before": self.steps_table.item(row, 6).text() == "1",
+            "press_enter_after": self.steps_table.item(row, 7).text() == "1",
+            "wait_before_enabled": self.steps_table.item(row, 8).text() == "1",
+            "wait_before_ms": int(self.steps_table.item(row, 9).text()),
         }
 
     def _steps(self) -> list[dict]:
@@ -952,15 +1127,13 @@ class MacroStepDialog(QDialog):
         step: dict | None = None,
         next_order: int = 1,
         profile_id: int | None = None,
+        db_path=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Macro Step")
         self._profile_id = profile_id
-
-        self.step_order = QSpinBox()
-        self.step_order.setMinimum(1)
-        self.step_order.setMaximum(9999)
-        self.step_order.setValue(step["step_order"] if step else next_order)
+        self._db_path = db_path
+        self._step_order = step["step_order"] if step else next_order
 
         self.action = QComboBox()
         self.action.addItems(sorted(ALLOWED_MACRO_ACTIONS))
@@ -975,6 +1148,13 @@ class MacroStepDialog(QDialog):
         if step and step.get("target_id", ""):
             self.target_id.setCurrentText(step.get("target_id", ""))
         self.value = QLineEdit(step.get("value", "") if step else "")
+        self.value.setPlaceholderText(
+            "{ENTER},{ENTER} or {ALT}{1} for hotkeys."
+            if self.action.currentText() in {"hotkey", "key"}
+            else ""
+        )
+        self.preset_text = QComboBox()
+        self._load_preset_options(step.get("value", "") if step else "")
 
         self.timeout_seconds = QDoubleSpinBox()
         self.timeout_seconds.setMinimum(0.0)
@@ -987,13 +1167,45 @@ class MacroStepDialog(QDialog):
         self.retries.setMaximum(100)
         self.retries.setValue(int(step["retries"]) if step else 0)
 
+        self.press_enter_before = QCheckBox("Send {ENTER} before text")
+        self.press_enter_before.setChecked(
+            bool(step.get("press_enter_before", False)) if step else False
+        )
+        self.press_enter_after = QCheckBox("Send {ENTER} after text")
+        self.press_enter_after.setChecked(
+            bool(step.get("press_enter_after", False)) if step else False
+        )
+        self.action.currentTextChanged.connect(self._update_press_enter_option)
+        self.action.currentTextChanged.connect(self._update_value_option)
+        self.action.currentTextChanged.connect(self._update_value_hint)
+        self._update_press_enter_option(self.action.currentText())
+
+        self.wait_before_enabled = QCheckBox("Wait before action")
+        self.wait_before_enabled.setChecked(
+            bool(step.get("wait_before_enabled", False)) if step else False
+        )
+        self.wait_before_ms = self._create_wait_spin_box(
+            int(step.get("wait_before_ms", 100)) if step else 100
+        )
+        self.wait_before_enabled.toggled.connect(self.wait_before_ms.setEnabled)
+        self.wait_before_ms.setEnabled(self.wait_before_enabled.isChecked())
+
+        wait_before_row = QHBoxLayout()
+        wait_before_row.addWidget(self.wait_before_enabled)
+        wait_before_row.addWidget(self.wait_before_ms)
+        wait_before_row.addStretch()
+
         form = QFormLayout()
-        form.addRow("step_order", self.step_order)
+        form.addRow("Wait before", wait_before_row)
+        form.addRow("Enter before", self.press_enter_before)
         form.addRow("action", self.action)
         form.addRow("target_id", self.target_id)
         form.addRow("value", self.value)
+        form.addRow("MacroText", self.preset_text)
         form.addRow("timeout_seconds", self.timeout_seconds)
         form.addRow("retries", self.retries)
+        form.addRow("Enter after", self.press_enter_after)
+        self._form = form
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -1004,27 +1216,111 @@ class MacroStepDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(buttons)
+        self._update_value_option(self.action.currentText())
 
     def values(self) -> dict:
+        value = self.value.text().strip()
+        if self.action.currentText() == "preset_text":
+            preset_id = self.preset_text.currentData()
+            value = (
+                str(preset_id)
+                if preset_id is not None
+                else self.preset_text.currentText().strip()
+            )
         return {
-            "step_order": self.step_order.value(),
+            "step_order": self._step_order,
             "action": self.action.currentText(),
             "target_id": self.target_id.currentText().strip(),
-            "value": self.value.text().strip(),
+            "value": value,
             "timeout_seconds": self.timeout_seconds.value(),
             "retries": self.retries.value(),
+            "press_enter_before": (
+                self.press_enter_before.isChecked()
+                if self.action.currentText()
+                in {"type_text", "type_text_keyboard", "paste_text", "type_text_clipboard", "preset_text", "legacy_symptom_paste"}
+                else False
+            ),
+            "press_enter_after": (
+                self.press_enter_after.isChecked()
+                if self.action.currentText()
+                in {"type_text", "type_text_keyboard", "paste_text", "type_text_clipboard", "preset_text", "legacy_symptom_paste"}
+                else False
+            ),
+            "wait_before_enabled": self.wait_before_enabled.isChecked(),
+            "wait_before_ms": self.wait_before_ms.value(),
         }
+
+    @staticmethod
+    def _create_wait_spin_box(value: int) -> QSpinBox:
+        spin_box = QSpinBox()
+        spin_box.setRange(0, 600_000)
+        spin_box.setSuffix(" ms")
+        spin_box.setValue(value)
+        return spin_box
+
+    def _update_press_enter_option(self, action: str) -> None:
+        enabled = action in {
+            "type_text",
+            "type_text_keyboard",
+            "paste_text",
+            "type_text_clipboard",
+            "preset_text",
+            "legacy_symptom_paste",
+        }
+        self.press_enter_before.setEnabled(enabled)
+        self.press_enter_after.setEnabled(enabled)
+
+    def _update_value_option(self, action: str) -> None:
+        uses_macrotext = action in {"preset_text", "legacy_symptom_paste"}
+        self.value.setVisible(not uses_macrotext)
+        self.preset_text.setVisible(uses_macrotext)
+        value_label = self._form.labelForField(self.value)
+        preset_label = self._form.labelForField(self.preset_text)
+        if value_label is not None:
+            value_label.setVisible(not uses_macrotext)
+        if preset_label is not None:
+            preset_label.setVisible(uses_macrotext)
+
+    def _update_value_hint(self, action: str) -> None:
+        if action in {"hotkey", "key"}:
+            self.value.setPlaceholderText("{ENTER},{ENTER} or {ALT}{1}")
+            return
+        self.value.setPlaceholderText("")
 
     def _load_target_options(self) -> None:
         self.target_id.clear()
         self.target_id.addItem("")
         if self._profile_id is None:
             return
-        initialize_database()
-        with connect() as connection:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
             targets = list_emr_ui_targets(connection, self._profile_id)
         for target in targets:
             self.target_id.addItem(target.target_key)
+
+    def _load_preset_options(self, current_value: str) -> None:
+        initialize_database(self._db_path)
+        with connect(self._db_path) as connection:
+            presets = []
+            for item_type in ("clipboard", "randomized_clipboard"):
+                presets.extend(list_items(connection, item_type))
+        presets.sort(key=lambda item: item.name.casefold())
+        self.preset_text.addItem("Select MacroText", None)
+        for preset in presets:
+            mode = "random" if preset.item_type == "randomized_clipboard" else "copy"
+            self.preset_text.addItem(f"{preset.name} ({mode})", preset.id)
+
+        if not current_value:
+            return
+        index = self.preset_text.findData(
+            int(current_value) if current_value.isdigit() else current_value
+        )
+        if index < 0:
+            index = self.preset_text.findText(current_value)
+        if index < 0:
+            self.preset_text.addItem(f"Missing MacroText: {current_value}", current_value)
+            index = self.preset_text.count() - 1
+        self.preset_text.setCurrentIndex(index)
 
 
 EghisAssistTab = MacrosTab

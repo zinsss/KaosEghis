@@ -1,6 +1,11 @@
 # KaosEghis Macro
 
-Last updated: 2026-06-30
+The Builder groups saved macros by their operator-facing launcher state: `Shown in
+Launcher` and `Not shown in Launcher`. The editor's `Show in Launcher` checkbox controls
+that visibility. `Executable` remains a separate safety gate; a non-executable macro is
+never offered as a runnable launcher item even when its launcher visibility flag is set.
+
+Last updated: 2026-08-03
 
 ## Purpose
 
@@ -48,6 +53,23 @@ Supported item types:
 - `macro`
 - `workflow`
 
+`clipboard` and `randomized_clipboard` items are presented as **MacroTexts**.
+They share one source of truth:
+
+- a `clipboard` MacroText stores one fixed body
+- a `randomized_clipboard` MacroText stores multiple options separated by `---` on
+  its own line; each option may span multiple lines and one complete option is chosen
+  per use
+- the Launcher `Comments` column copies the resolved body to the clipboard
+- a macro `preset_text` step selects the same item by its stable item ID and pastes
+  the resolved body through the guarded macro runner
+- macro and MacroText editors include an **Exposed in Launcher** checkbox; existing
+  items migrate as exposed so upgrades do not unexpectedly hide them
+- clearing **Exposed in Launcher** keeps the saved item available to the Builder and
+  macro references while removing it from Launcher and any Launcher collection
+- exposed MacroTexts can be grouped into Comments collections from the MacroTexts
+  page; collections support member reorder/removal and unpacking
+
 ## Macro Definition Structure
 
 Current step fields:
@@ -63,6 +85,7 @@ Current target binding behavior:
 
 - `target_id` remains the stored step field name
 - for profile-bound macros, the editor now offers `emr_ui_targets.target_key` values from the selected EMR profile
+- EMR UI targets may store a dedicated scope anchor such as `grdOpdList` to narrow lookup before the final target match
 - legacy `ui_targets` are still tolerated for compatibility during dry-run validation and current execution
 
 Allowed stored actions in the model:
@@ -76,6 +99,32 @@ Allowed stored actions in the model:
 - `mouse_click`
 - `wait_ms`
 
+Current real runner support also includes:
+
+- `read_text_uia`
+  - reads target text through read-only UIA inspection
+  - when the step `value` is non-empty, the step succeeds only if the target text
+    contains that value
+  - example: `read_text_uia target_id=symptom_text value=non-covered`
+
+`type_text`/`type_text_keyboard` steps can optionally send one `{ENTER}` after the
+configured text. The option is off by default, including for existing saved macros.
+
+Every macro step also has an optional **Wait before action** timing toggle with an
+editable millisecond value. It is off by default for existing and new steps; an
+enabled wait is cancellation-aware and appears in dry-run output. There is no
+automatic post-action delay.
+
+Step order is managed directly in the Macro Builder table. Drag a complete row to a
+new position; the order display renumbers automatically and is persisted when the
+macro is saved. The Add/Edit Step dialog does not expose manual order numbering.
+
+The manual EMR connection remains cached between macro runs. Before each real run,
+KaosEghis revalidates the cached PID, executable identity, window handle, and owning
+PID, then focuses the cached window if it is no longer foreground. Elapsed time or a
+previous run alone does not invalidate a healthy manual connection; a dead,
+mismatched, blocked, or unfocusable application still requires manual reconnection.
+
 Important:
 
 - the storage model is intentionally broader than the currently allowed real execution engine
@@ -86,20 +135,39 @@ Important:
 Daily-use macro access:
 
 - [KaosEghis/ui/tabs/kaoseghis_tab.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/kaoseghis_tab.py)
-- shows macro list
-- supports dry run and manual run
+- shows saved executable macros in the three Launcher columns as direct launcher
+  items unless they belong to a launcher collection
+- direct launcher macros still run immediately on double-click
+- launcher collections open a chooser dialog on double-click and may contain either
+  executable macros or, in the Comments section, exposed MacroTexts
+- right-clicking a launcher collection shows its member macros directly for fast run
+- shows `Running '<macro name>'...` while the macro is executing
+- does not show a per-run confirmation in Launcher; the EMR connection and runtime
+  safety gates still block stale, mismatched, or unavailable targets
+- supports dry run
 - shows the resolved EMR profile name for each macro
+- uses the three columns `Favorite`, `Macro`, and `Comments`; new macros default to
+  `Macro`, favorite macros can be dragged into `Favorite`, and `Comments` can contain
+  both macros and directly copied MacroTexts
+- launcher collections now exist in first-version form; see
+  `docs/kaoseghis-launcher-plan.md`
+
+The Builder remains the configuration/testing surface and keeps confirmation before
+its explicit real-run action.
 
 EMR targeting foundation:
 
 - [KaosEghis/ui/tabs/emr_targets_page.py](/E:/Kaos/KaosEghis/KaosEghis/ui/tabs/emr_targets_page.py)
 - lives under `KaosEghis -> EMR`
 - stores profile-level process/window identity and a profile-scoped UI target library
+- keeps Inspector paste available as a helper/fallback, while explicit scope anchors are preferred for fast known-good EMR grids and panes
 
 Editor behavior:
 
 - the macro editor exposes an EMR profile selector
 - the step editor exposes a target selector populated from the selected profile's EMR UI target keys
+- the `preset_text` step exposes a MacroText selector instead of requiring the
+  operator to remember an item ID
 
 Configuration/editing surfaces:
 
@@ -157,6 +225,7 @@ Current non-negotiables:
 - guarded runner skeleton
 - cancellation handling
 - EMR target profile and EMR UI target local persistence
+- EMR UI target ancestor-path persistence from pasted Inspector parent chains
 
 ## Not Done
 
@@ -164,6 +233,8 @@ Current non-negotiables:
 - recorder
 - scheduler-driven macro execution
 - broad UIA/mouse-driven step support
+- advanced launcher collection features such as multi-collection membership and
+  nested collections remain planned, not implemented
 
 ## Maintenance Triggers
 

@@ -1,14 +1,102 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+import json
 import os
 import sqlite3
 from pathlib import Path
 
-from KaosEghis.db.repositories import get_settings
+from KaosEghis.db.repositories import DEFAULT_SETTINGS, get_settings
 
 
 APP_DIR_NAME = "KaosEghis"
 DATA_DIR_ENV_VAR = "KAOSEGHIS_DATA_DIR"
+
+VACCINE_EMR_TARGET_DEFAULTS = (
+    (
+        "vaccine.patient_chart_no",
+        "Vaccine patient chart No",
+        "txt환자번호",
+    ),
+    (
+        "vaccine.patient_resident_id",
+        "Vaccine patient resident No",
+        "txt주민번호",
+    ),
+    (
+        "vaccine.patient_name",
+        "Vaccine patient name",
+        "txt환자명",
+    ),
+    (
+        "vaccine.patient_sex_age",
+        "Vaccine patient sex and age",
+        "lblSexAge",
+    ),
+    (
+        "vaccine.patient_birth_date",
+        "Vaccine patient date of birth",
+        "dateEdit1",
+    ),
+    (
+        "vaccine.patient_phone",
+        "Vaccine patient telephone",
+        "txt휴대폰",
+    ),
+    (
+        "vaccine.patient_telephone",
+        "Vaccine patient secondary telephone",
+        "txt전화",
+    ),
+    (
+        "vaccine.patient_address",
+        "Vaccine patient address",
+        "txt주소",
+    ),
+)
+
+EGHIS_SHUTDOWN_TARGET_DEFAULTS = (
+    {
+        "target_key": "shutdown.lock_password",
+        "label": "eGHIS inactivity-lock password",
+        "description": "Password-only field for the verified eGHIS inactivity lock.",
+        "automation_id": "TxtPW",
+        "control_type": "Edit",
+        "name_match": None,
+        "ancestor_path": (
+            '[{"name":"로그인 안내","control_type":"Window"},'
+            '{"name":"이지스 전자차트 2.0","control_type":"Window"}]'
+        ),
+    },
+    {
+        "target_key": "shutdown.close_yes",
+        "label": "eGHIS close confirmation",
+        "description": "First Yes button that confirms closing eGHIS.",
+        "automation_id": None,
+        "control_type": "Button",
+        "name_match": "예(Y)",
+        # The close prompt is a top-level modal owned by the connected eGHIS PID,
+        # not a descendant of the main eGHIS window.
+        "ancestor_path": '[{"name":"확인","control_type":"Window"}]',
+    },
+    {
+        "target_key": "shutdown.backup_yes",
+        "label": "eGHIS database backup confirmation",
+        "description": "Second Yes button that confirms the eGHIS database backup.",
+        "automation_id": None,
+        "control_type": "Button",
+        "name_match": "예(Y)",
+        "ancestor_path": '[{"name":"확인","control_type":"Window"}]',
+    },
+    {
+        "target_key": "shutdown.power_off_after_backup",
+        "label": "Power off after eGHIS backup",
+        "description": "Checkbox that powers off the workstation after backup completes.",
+        "automation_id": "chkShutDown",
+        "control_type": "CheckBox",
+        "name_match": "백업 완료 후 PC를 자동 종료 합니다.",
+        "ancestor_path": '[{"name":"이지스 백업","control_type":"Window"}]',
+    },
+)
 
 
 def get_data_dir() -> Path:
@@ -31,9 +119,13 @@ def describe_database_path(path: Path | None = None) -> str:
 
 
 @contextmanager
-def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
+def connect(
+    path: Path | None = None,
+    *,
+    timeout: float = 5.0,
+) -> Iterator[sqlite3.Connection]:
     db_path = path or get_database_path()
-    connection = sqlite3.connect(db_path)
+    connection = sqlite3.connect(db_path, timeout=timeout)
     try:
         yield connection
     finally:
@@ -45,12 +137,26 @@ def initialize_database(path: Path | None = None) -> None:
     with connect(path) as connection:
         connection.executescript(schema_path.read_text(encoding="utf-8"))
         _migrate_items(connection)
+        _migrate_launcher_collections(connection)
+        _migrate_macro_steps(connection)
         _migrate_ui_targets_columns(connection)
         _migrate_pacs_worklist(connection)
         _migrate_pacs_audit_events(connection)
         _migrate_emr_target_profiles(connection)
         _migrate_emr_ui_targets(connection)
+        _migrate_eghis_shutdown_confirmation_targets(connection)
+        _migrate_unstable_patient_number_selectors(connection)
+        _migrate_vaccine_tables(connection)
+        _migrate_unconfigured_covid_schedule(connection)
+        _migrate_rural_exception_defaults(connection)
+        _migrate_vaccine_september_2026_schedule_revision(connection)
+        _migrate_vaccine_external_system_coordinates(connection)
+        _migrate_vaccine_portal_launch_defaults(connection)
         _seed_default_emr_target_profile(connection)
+        _seed_vaccine_emr_targets(connection)
+        _seed_eghis_shutdown_targets(connection)
+        _seed_default_socl_vocabulary(connection)
+        _seed_default_vaccine_types(connection)
         connection.commit()
 
 
@@ -80,6 +186,133 @@ def _migrate_items(connection: sqlite3.Connection) -> None:
     }
     if "emr_target_profile_id" not in columns:
         connection.execute("ALTER TABLE items ADD COLUMN emr_target_profile_id INTEGER")
+    if "launcher_section" not in columns:
+        connection.execute(
+            "ALTER TABLE items ADD COLUMN launcher_section TEXT NOT NULL DEFAULT 'Macro'"
+        )
+    if "launcher_position" not in columns:
+        connection.execute(
+            "ALTER TABLE items ADD COLUMN launcher_position INTEGER NOT NULL DEFAULT 0"
+        )
+    if "is_launcher_exposed" not in columns:
+        connection.execute(
+            "ALTER TABLE items "
+            "ADD COLUMN is_launcher_exposed INTEGER NOT NULL DEFAULT 1"
+        )
+    connection.execute(
+        """
+        UPDATE items
+        SET launcher_section = CASE
+            WHEN item_type IN ('clipboard', 'randomized_clipboard') THEN 'Comments'
+            WHEN launcher_section = 'Medical Documents' THEN 'Comments'
+            WHEN launcher_section = 'Eghis' THEN 'Macro'
+            WHEN item_type = 'macro' AND launcher_section IN ('ETC', 'Favorite') THEN 'Macro'
+            WHEN launcher_section IN ('ETC', 'Favorite') THEN 'Actions'
+            WHEN item_type = 'macro' AND launcher_section = 'Actions' THEN 'Macro'
+            ELSE launcher_section
+        END
+        WHERE item_type IN ('clipboard', 'randomized_clipboard')
+           OR launcher_section IN ('Medical Documents', 'Eghis', 'ETC', 'Favorite', 'Actions')
+        """
+    )
+    _normalize_launcher_positions(connection)
+
+
+def _migrate_launcher_collections(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS launcher_collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            launcher_section TEXT NOT NULL DEFAULT 'Macro',
+            launcher_position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS launcher_collection_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            collection_id INTEGER NOT NULL,
+            macro_item_id INTEGER NOT NULL UNIQUE,
+            sort_order INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (collection_id) REFERENCES launcher_collections(id),
+            FOREIGN KEY (macro_item_id) REFERENCES items(id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        UPDATE launcher_collections
+        SET launcher_section = CASE
+            WHEN launcher_section = 'Medical Documents' THEN 'Comments'
+            WHEN launcher_section = 'Eghis' THEN 'Macro'
+            WHEN launcher_section IN ('ETC', 'Favorite', 'Actions') THEN 'Macro'
+            ELSE launcher_section
+        END
+        WHERE launcher_section IN ('Medical Documents', 'Eghis', 'ETC', 'Favorite', 'Actions')
+        """
+    )
+
+
+def _migrate_macro_steps(connection: sqlite3.Connection) -> None:
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(macro_steps)").fetchall()
+    }
+    if "press_enter_before" not in columns:
+        connection.execute(
+            "ALTER TABLE macro_steps "
+            "ADD COLUMN press_enter_before INTEGER NOT NULL DEFAULT 0"
+        )
+    if "press_enter_after" not in columns:
+        connection.execute(
+            "ALTER TABLE macro_steps "
+            "ADD COLUMN press_enter_after INTEGER NOT NULL DEFAULT 0"
+        )
+    if "wait_before_enabled" not in columns:
+        connection.execute(
+            "ALTER TABLE macro_steps "
+            "ADD COLUMN wait_before_enabled INTEGER NOT NULL DEFAULT 0"
+        )
+    if "wait_before_ms" not in columns:
+        connection.execute(
+            "ALTER TABLE macro_steps "
+            "ADD COLUMN wait_before_ms INTEGER NOT NULL DEFAULT 100"
+        )
+    connection.execute(
+        """
+        UPDATE macro_steps
+        SET action = 'click'
+        WHERE action = 'mouse_click'
+        """
+    )
+
+
+def _normalize_launcher_positions(connection: sqlite3.Connection) -> None:
+    rows = connection.execute(
+        """
+        SELECT id, COALESCE(launcher_section, 'Macro')
+        FROM items
+        WHERE item_type IN ('macro', 'clipboard', 'randomized_clipboard')
+        ORDER BY COALESCE(launcher_section, 'Macro'), launcher_position, id
+        """
+    ).fetchall()
+    positions_by_section: dict[str, int] = {}
+    for item_id, launcher_section in rows:
+        section = launcher_section or "Macro"
+        positions_by_section[section] = positions_by_section.get(section, 0) + 1
+        connection.execute(
+            """
+            UPDATE items
+            SET launcher_section = ?,
+                launcher_position = ?
+            WHERE id = ?
+            """,
+            (section, positions_by_section[section], item_id),
+        )
 
 
 def _migrate_pacs_worklist(connection: sqlite3.Connection) -> None:
@@ -283,8 +516,13 @@ def _migrate_emr_target_profiles(connection: sqlite3.Connection) -> None:
         "window_class",
         "root_automation_id",
         "main_window_automation_id",
+        "patient_status_tab_automation_id",
         "login_window_automation_id",
         "patient_search_automation_id",
+        "prescription_grid_automation_id",
+        "symptom_grid_automation_id",
+        "diagnosis_grid_automation_id",
+        "patient_list_grid_automation_id",
     ):
         if name not in columns:
             connection.execute(
@@ -299,6 +537,472 @@ def _migrate_emr_target_profiles(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_vaccine_tables(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vaccine_types (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            code TEXT,
+            chart_note_template TEXT,
+            program_type TEXT NOT NULL DEFAULT 'general',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vaccine_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vaccine_type_id INTEGER,
+            vaccine_type_name TEXT NOT NULL,
+            program_type TEXT NOT NULL DEFAULT 'general',
+            patient_chart_no TEXT,
+            patient_resident_id TEXT,
+            patient_name TEXT,
+            patient_sex TEXT,
+            patient_age TEXT,
+            patient_phone TEXT,
+            patient_address TEXT,
+            status TEXT NOT NULL DEFAULT 'prepared',
+            counts_toward_cap INTEGER NOT NULL DEFAULT 0,
+            counted_bucket TEXT,
+            completed_on TEXT,
+            completed_at TEXT,
+            cancelled_at TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (vaccine_type_id) REFERENCES vaccine_types(id)
+        )
+        """
+    )
+    type_columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(vaccine_types)").fetchall()
+    }
+    type_program_column_added = "program_type" not in type_columns
+    if type_program_column_added:
+        connection.execute(
+            "ALTER TABLE vaccine_types "
+            "ADD COLUMN program_type TEXT NOT NULL DEFAULT 'general'"
+        )
+
+    record_columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(vaccine_records)").fetchall()
+    }
+    record_migrations = {
+        "program_type": "TEXT NOT NULL DEFAULT 'general'",
+        "counts_toward_cap": "INTEGER NOT NULL DEFAULT 0",
+        "counted_bucket": "TEXT",
+        "completed_on": "TEXT",
+        "completed_at": "TEXT",
+        "cancelled_at": "TEXT",
+    }
+    record_program_column_added = "program_type" not in record_columns
+    for column, declaration in record_migrations.items():
+        if column not in record_columns:
+            connection.execute(
+                f"ALTER TABLE vaccine_records ADD COLUMN {column} {declaration}"
+            )
+
+    if type_program_column_added:
+        connection.execute(
+            """
+            UPDATE vaccine_types
+            SET program_type = 'national_influenza'
+            WHERE name = 'Influenza' AND LOWER(COALESCE(code, '')) = 'flu'
+            """
+        )
+        connection.execute(
+            """
+            UPDATE vaccine_types
+            SET program_type = 'national_covid'
+            WHERE name = 'COVID-19' AND LOWER(COALESCE(code, '')) = 'covid'
+            """
+        )
+    if record_program_column_added:
+        connection.execute(
+            """
+            UPDATE vaccine_records
+            SET program_type = COALESCE(
+                (
+                    SELECT vt.program_type
+                    FROM vaccine_types vt
+                    WHERE vt.id = vaccine_records.vaccine_type_id
+                ),
+                'general'
+            )
+            WHERE status = 'prepared'
+              AND counts_toward_cap = 0
+              AND completed_at IS NULL
+            """
+        )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_vaccine_records_daily_count
+        ON vaccine_records(status, counts_toward_cap, counted_bucket, completed_on)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vaccine_audit_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vaccine_record_id INTEGER,
+            event_type TEXT NOT NULL,
+            status_before TEXT,
+            status_after TEXT,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def _migrate_unconfigured_covid_schedule(connection: sqlite3.Connection) -> None:
+    """Seed published 2026-2027 COVID 65+ data without enabling it."""
+
+    schedule_row = connection.execute(
+        "SELECT value FROM app_settings WHERE key = 'vaccine_schedule_rules_json'"
+    ).fetchone()
+    groups_row = connection.execute(
+        "SELECT value FROM app_settings WHERE key = 'vaccine_age_groups_json'"
+    ).fetchone()
+    if schedule_row is None or groups_row is None:
+        return
+    try:
+        schedule_data = json.loads(str(schedule_row[0] or "{}"))
+        age_groups = json.loads(str(groups_row[0] or "[]"))
+    except (TypeError, json.JSONDecodeError):
+        return
+    if not isinstance(schedule_data, dict) or not isinstance(age_groups, list):
+        return
+    covid = schedule_data.get("covid")
+    if not isinstance(covid, dict):
+        return
+    season_name = str(covid.get("season_name", "")).strip()
+    if season_name and season_name != "2026-2027":
+        return
+
+    staged_keys = {
+        "elderly_75_plus_start",
+        "elderly_70_74_start",
+        "elderly_65_69_start",
+        "elderly_program_end",
+    }
+    if any(str(covid.get(key, "")).strip() for key in staged_keys):
+        return
+    if any(str(covid.get(key, "")).strip() for key in ("program_start", "program_end")):
+        return
+    if any(
+        isinstance(group, dict)
+        and str(group.get("vaccine", "")).lower() == "covid"
+        and (
+            str(group.get("birth_date_from", "")).strip()
+            or str(group.get("birth_date_to", "")).strip()
+        )
+        for group in age_groups
+    ):
+        return
+
+    updated_covid = dict(covid)
+    updated_covid.update(
+        {
+            "season_name": "2026-2027",
+            "schedule_notice_revision": "2026-09-17",
+            "program_enabled": False,
+            "elderly_75_plus_start": "2026-10-12",
+            "elderly_70_74_start": "2026-10-12",
+            "elderly_65_69_start": "2026-10-15",
+            "elderly_program_end": "2027-06-30",
+        }
+    )
+    schedule_data["covid"] = updated_covid
+    age_groups = [
+        group
+        for group in age_groups
+        if not (
+            isinstance(group, dict)
+            and str(group.get("key", "")) == "national_covid"
+        )
+    ]
+    age_groups.extend(
+        (
+            {
+                "key": "covid_elderly_75_plus",
+                "label": "COVID 75+",
+                "vaccine": "covid",
+                "birth_date_from": "1800-01-01",
+                "birth_date_to": "1951-12-31",
+            },
+            {
+                "key": "covid_elderly_70_74",
+                "label": "COVID 70-74",
+                "vaccine": "covid",
+                "birth_date_from": "1952-01-01",
+                "birth_date_to": "1956-12-31",
+            },
+            {
+                "key": "covid_elderly_65_69",
+                "label": "COVID 65-69",
+                "vaccine": "covid",
+                "birth_date_from": "1957-01-01",
+                "birth_date_to": "1961-12-31",
+            },
+        )
+    )
+    connection.execute(
+        "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+        (json.dumps(schedule_data, ensure_ascii=False, indent=2), "vaccine_schedule_rules_json"),
+    )
+    connection.execute(
+        "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+        (json.dumps(age_groups, ensure_ascii=False, indent=2), "vaccine_age_groups_json"),
+    )
+
+
+def _migrate_vaccine_september_2026_schedule_revision(connection: sqlite3.Connection) -> None:
+    """Amend known old dates once, preserving custom settings and requiring review."""
+    row = connection.execute(
+        "SELECT value FROM app_settings WHERE key = 'vaccine_schedule_rules_json'"
+    ).fetchone()
+    if row is None:
+        return
+    try:
+        schedules = json.loads(row[0])
+    except (TypeError, json.JSONDecodeError):
+        return
+    if not isinstance(schedules, dict):
+        return
+    revisions = {
+        "influenza": ("2026-09-16", {
+            "elderly_75_plus_start": ("2026-10-12", "2026-10-06"),
+            "elderly_70_74_start": ("2026-10-15", "2026-10-12"),
+            "elderly_65_69_start": ("2026-10-19", "2026-10-15"),
+            "child_one_dose_start": ("2026-09-28", "2026-09-21"),
+        }),
+        "covid": ("2026-09-17", {
+            "elderly_70_74_start": ("2026-10-15", "2026-10-12"),
+            "elderly_65_69_start": ("2026-10-19", "2026-10-15"),
+        }),
+    }
+    changed = False
+    for program, (revision, dates) in revisions.items():
+        schedule = schedules.get(program)
+        if not isinstance(schedule, dict):
+            continue
+        if str(schedule.get("season_name", "")).strip() != "2026-2027":
+            continue
+        if schedule.get("schedule_notice_revision"):
+            continue
+        updates = {
+            key: new for key, (old, new) in dates.items()
+            if str(schedule.get(key, "")).strip() in {old, old.replace("-", "")}
+        }
+        if not updates:
+            continue
+        if "allow_rural_exception" not in schedule:
+            # Disabling an active schedule must not opt it into the draft-only default.
+            schedule["allow_rural_exception"] = str(
+                schedule.get("allow_elderly_exception", False)
+            ).strip().lower() in {"1", "true", "yes", "on"}
+        schedule.update(updates)
+        schedule["schedule_notice_revision"] = revision
+        schedule["program_enabled"] = False
+        changed = True
+    if changed:
+        connection.execute(
+            "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+            (json.dumps(schedules, ensure_ascii=False, indent=2), "vaccine_schedule_rules_json"),
+        )
+
+
+def _migrate_rural_exception_defaults(connection: sqlite3.Connection) -> None:
+    """Enable the local rural-exception option only for disabled schedule drafts."""
+
+    row = connection.execute(
+        "SELECT value FROM app_settings WHERE key = 'vaccine_schedule_rules_json'"
+    ).fetchone()
+    if row is None:
+        return
+    try:
+        schedule_data = json.loads(str(row[0] or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        return
+    if not isinstance(schedule_data, dict):
+        return
+
+    changed = False
+    for program in ("influenza", "covid"):
+        schedule = schedule_data.get(program)
+        if not isinstance(schedule, dict):
+            continue
+        if "allow_rural_exception" in schedule:
+            continue
+        if str(schedule.get("program_enabled", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            continue
+        schedule["allow_rural_exception"] = True
+        changed = True
+    if changed:
+        connection.execute(
+            "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+            (
+                json.dumps(schedule_data, ensure_ascii=False, indent=2),
+                "vaccine_schedule_rules_json",
+            ),
+        )
+
+
+def _migrate_vaccine_external_system_coordinates(connection: sqlite3.Connection) -> None:
+    """Correct only the short-lived seed coordinates captured before final review."""
+
+    coordinate_updates = (
+        (
+            "vaccine_general_system_resident_x",
+            "vaccine_general_system_resident_y",
+            ("443", "2076"),
+            ("448", "2074"),
+        ),
+        (
+            "vaccine_covid_system_resident_x",
+            "vaccine_covid_system_resident_y",
+            ("0", "0"),
+            ("1466", "2107"),
+        ),
+    )
+    for x_key, y_key, old_values, new_values in coordinate_updates:
+        rows = dict(
+            connection.execute(
+                "SELECT key, value FROM app_settings WHERE key IN (?, ?)",
+                (x_key, y_key),
+            ).fetchall()
+        )
+        if (rows.get(x_key), rows.get(y_key)) != old_values:
+            continue
+        connection.execute(
+            "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+            (new_values[0], x_key),
+        )
+        connection.execute(
+            "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+            (new_values[1], y_key),
+        )
+
+
+def _migrate_vaccine_portal_launch_defaults(connection: sqlite3.Connection) -> None:
+    """Complete only the original KDCA routes, preserving custom selectors/URLs."""
+    marker = "vaccine_portal_routes_v2_migrated"
+    if connection.execute(
+        "SELECT 1 FROM app_settings WHERE key = ? AND value = 'true'", (marker,),
+    ).fetchone():
+        return
+    old_paths = {
+        "general": "예방접종관리",
+        "influenza": "예방접종관리",
+        "covid": "코로나19 예방접종관리 > 등록시스템 > 예방접종등록시스템",
+    }
+    for system, old_path in old_paths.items():
+        prefix = f"vaccine_{system}_system_"
+        rows = dict(connection.execute(
+            "SELECT key, value FROM app_settings WHERE key IN (?, ?, ?)",
+            (prefix + "portal_menu_name", prefix + "launch_url", prefix + "launch_control_name"),
+        ))
+        if rows.get(prefix + "launch_url", DEFAULT_SETTINGS[prefix + "launch_url"]) != DEFAULT_SETTINGS[prefix + "launch_url"]:
+            continue
+        if rows.get(prefix + "portal_menu_name", old_path) not in {old_path, DEFAULT_SETTINGS[prefix + "portal_menu_name"]}:
+            continue
+        if rows.get(prefix + "portal_menu_name") == old_path:
+            connection.execute(
+                "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ? AND value = ?",
+                (DEFAULT_SETTINGS[prefix + "portal_menu_name"], prefix + "portal_menu_name", old_path),
+            )
+        if system == "general" and rows.get(prefix + "launch_control_name") == "":
+            connection.execute(
+                "UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ? AND value = ''",
+                (DEFAULT_SETTINGS[prefix + "launch_control_name"], prefix + "launch_control_name"),
+            )
+    connection.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?, 'true') "
+        "ON CONFLICT(key) DO UPDATE SET value = 'true', updated_at = CURRENT_TIMESTAMP",
+        (marker,),
+    )
+
+
+def _seed_default_vaccine_types(connection: sqlite3.Connection) -> None:
+    """Ensure the current product catalog without changing legacy type records."""
+
+    defaults = (
+        (
+            "Influenza",
+            "flu",
+            "인플루엔자 예방접종 시행함.",
+            "national_influenza",
+            1,
+        ),
+        (
+            "Influenza (general/private)",
+            "flu-general",
+            "인플루엔자 예방접종 시행함.",
+            "general_influenza",
+            2,
+        ),
+        (
+            "COVID-19 (Pfizer)",
+            "covid-pfizer",
+            "코로나19 예방접종(화이자) 시행함.",
+            "national_covid",
+            3,
+        ),
+        (
+            "COVID-19 (Moderna)",
+            "covid-moderna",
+            "코로나19 예방접종(모더나) 시행함.",
+            "national_covid",
+            4,
+        ),
+    )
+    existing_codes = {
+        str(row[0]).strip().casefold()
+        for row in connection.execute(
+            "SELECT code FROM vaccine_types WHERE COALESCE(code, '') <> ''"
+        ).fetchall()
+    }
+    next_sort_order = int(
+        connection.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM vaccine_types"
+        ).fetchone()[0]
+        or 0
+    )
+
+    for name, code, chart_note, program_type, default_sort_order in defaults:
+        if code.casefold() in existing_codes:
+            continue
+        sort_order = (
+            default_sort_order
+            if next_sort_order == 0
+            else next_sort_order + 1
+        )
+        connection.execute(
+            """
+            INSERT INTO vaccine_types (
+                name, code, chart_note_template, program_type, is_active, sort_order
+            )
+            VALUES (?, ?, ?, ?, 1, ?)
+            """,
+            (name, code, chart_note, program_type, sort_order),
+        )
+        existing_codes.add(code.casefold())
+        next_sort_order = max(next_sort_order, sort_order)
+
+
 def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:
     columns = {
         row[1]
@@ -308,11 +1012,13 @@ def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:
         return
     for name in (
         "description",
+        "scope_automation_id",
         "automation_id",
         "control_type",
         "class_name",
         "name_match",
         "parent_target_key",
+        "ancestor_path",
     ):
         if name not in columns:
             connection.execute(f"ALTER TABLE emr_ui_targets ADD COLUMN {name} TEXT")
@@ -325,15 +1031,81 @@ def _migrate_emr_ui_targets(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_eghis_shutdown_confirmation_targets(
+    connection: sqlite3.Connection,
+) -> None:
+    """Repair the original close-dialog path without replacing custom targets."""
+
+    connection.execute(
+        """
+        UPDATE emr_ui_targets
+        SET ancestor_path = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE target_key = 'shutdown.close_yes'
+          AND automation_id IS NULL
+          AND name_match = '예(Y)'
+          AND control_type = 'Button'
+          AND scope_automation_id IS NULL
+          AND parent_target_key IS NULL
+          AND ancestor_path = ?
+        """,
+        (
+            '[{"name":"확인","control_type":"Window"}]',
+            (
+                '[{"name":"확인","control_type":"Window"},'
+                '{"name":"이지스 전자차트 2.0","control_type":"Window"}]'
+            ),
+        ),
+    )
+
+
+def _migrate_unstable_patient_number_selectors(
+    connection: sqlite3.Connection,
+) -> None:
+    for key in (
+        "eghis_patient_alert_chart_automation_id",
+        "eghis_patient_alert_chart_name",
+    ):
+        row = connection.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (key,),
+        ).fetchone()
+        if row is not None and str(row[0] or "").strip().isdigit():
+            connection.execute(
+                "UPDATE app_settings SET value = '', updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+                (key,),
+            )
+
+    rows = connection.execute(
+        """
+        SELECT id, automation_id, name_match
+        FROM emr_ui_targets
+        WHERE target_key = 'vaccine.patient_chart_no'
+        """
+    ).fetchall()
+    for target_id, automation_id, name_match in rows:
+        updates: list[str] = []
+        if str(automation_id or "").strip().isdigit():
+            updates.append("automation_id = NULL")
+        if str(name_match or "").strip().isdigit():
+            updates.append("name_match = NULL")
+        if updates:
+            connection.execute(
+                f"UPDATE emr_ui_targets SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (target_id,),
+            )
+
+
 def _seed_default_emr_target_profile(connection: sqlite3.Connection) -> None:
     existing = connection.execute(
         "SELECT COUNT(*) FROM emr_target_profiles"
     ).fetchone()
-    if existing is None or existing[0] > 0:
+    if existing is None:
+        return
+    if existing[0] > 0:
         return
 
     settings = get_settings(connection)
-    connection.execute(
+    cursor = connection.execute(
         """
         INSERT INTO emr_target_profiles (
             name,
@@ -342,9 +1114,14 @@ def _seed_default_emr_target_profile(connection: sqlite3.Connection) -> None:
             is_default,
             process_name,
             executable_path,
-            window_title_contains
+            window_title_contains,
+            patient_status_tab_automation_id,
+            prescription_grid_automation_id,
+            symptom_grid_automation_id,
+            diagnosis_grid_automation_id,
+            patient_list_grid_automation_id
         )
-        VALUES (?, ?, 1, 1, ?, ?, ?)
+        VALUES (?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "eGHIS Production",
@@ -352,5 +1129,133 @@ def _seed_default_emr_target_profile(connection: sqlite3.Connection) -> None:
             settings.get("eghis_process_name", "").strip() or None,
             settings.get("eghis_executable_path", "").strip() or None,
             settings.get("eghis_window_title_contains", "").strip() or None,
+            settings.get("eghis_patient_status_tab_automation_id", "").strip() or "tabProc",
+            "tree처방",
+            "grdSymp",
+            "tree상병",
+            "grdOpdList",
         ),
+    )
+
+
+def _seed_vaccine_emr_targets(connection: sqlite3.Connection) -> None:
+    profile_ids = connection.execute(
+        "SELECT id FROM emr_target_profiles ORDER BY id"
+    ).fetchall()
+    for (profile_id,) in profile_ids:
+        connection.executemany(
+            """
+            INSERT INTO emr_ui_targets (
+                profile_id,
+                target_key,
+                label,
+                automation_id
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(profile_id, target_key) DO UPDATE SET
+                automation_id = excluded.automation_id,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE emr_ui_targets.automation_id IS NULL
+              AND emr_ui_targets.name_match IS NULL
+              AND emr_ui_targets.scope_automation_id IS NULL
+              AND emr_ui_targets.parent_target_key IS NULL
+              AND emr_ui_targets.ancestor_path IS NULL
+            """,
+            (
+                (profile_id, target_key, label, automation_id)
+                for target_key, label, automation_id in VACCINE_EMR_TARGET_DEFAULTS
+            ),
+        )
+
+
+def _seed_eghis_shutdown_targets(connection: sqlite3.Connection) -> None:
+    profile_ids = connection.execute(
+        "SELECT id FROM emr_target_profiles ORDER BY id"
+    ).fetchall()
+    for (profile_id,) in profile_ids:
+        connection.executemany(
+            """
+            INSERT INTO emr_ui_targets (
+                profile_id,
+                target_key,
+                label,
+                description,
+                automation_id,
+                control_type,
+                name_match,
+                ancestor_path
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(profile_id, target_key) DO UPDATE SET
+                automation_id = excluded.automation_id,
+                control_type = excluded.control_type,
+                name_match = excluded.name_match,
+                ancestor_path = excluded.ancestor_path,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE emr_ui_targets.automation_id IS NULL
+              AND emr_ui_targets.name_match IS NULL
+              AND emr_ui_targets.scope_automation_id IS NULL
+              AND emr_ui_targets.parent_target_key IS NULL
+              AND emr_ui_targets.ancestor_path IS NULL
+              AND emr_ui_targets.control_type IS NULL
+              AND emr_ui_targets.class_name IS NULL
+            """,
+            (
+                (
+                    profile_id,
+                    target["target_key"],
+                    target["label"],
+                    target["description"],
+                    target["automation_id"],
+                    target["control_type"],
+                    target["name_match"],
+                    target["ancestor_path"],
+                )
+                for target in EGHIS_SHUTDOWN_TARGET_DEFAULTS
+            ),
+        )
+
+
+def _seed_default_socl_vocabulary(connection: sqlite3.Connection) -> None:
+    from KaosEghis.db.socl_defaults import (
+        SOCL_CATALOG_VERSION,
+        SOCL_DEFAULT_COLLECTIONS,
+    )
+
+    marker = connection.execute(
+        "SELECT value FROM socl_metadata WHERE key = 'default_catalog_version'"
+    ).fetchone()
+    if marker is not None:
+        return
+
+    count_row = connection.execute("SELECT COUNT(*) FROM socl_collections").fetchone()
+    if count_row is not None and int(count_row[0]) == 0:
+        for collection_order, (domain, name, findings) in enumerate(
+            SOCL_DEFAULT_COLLECTIONS,
+            start=1,
+        ):
+            cursor = connection.execute(
+                """
+                INSERT INTO socl_collections (domain, name, sort_order)
+                VALUES (?, ?, ?)
+                """,
+                (domain, name, collection_order),
+            )
+            for finding_order, label in enumerate(findings, start=1):
+                connection.execute(
+                    """
+                    INSERT INTO socl_findings (
+                        collection_id, label, render_text, sort_order
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (cursor.lastrowid, label, label, finding_order),
+                )
+
+    connection.execute(
+        """
+        INSERT INTO socl_metadata (key, value)
+        VALUES ('default_catalog_version', ?)
+        """,
+        (SOCL_CATALOG_VERSION,),
     )

@@ -28,6 +28,41 @@ def test_emr_profile_tables_are_created(tmp_path) -> None:
     assert "emr_ui_targets" in tables
 
 
+def test_emr_ui_targets_migration_adds_scope_and_ancestor_path(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE emr_ui_targets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                target_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                description TEXT,
+                automation_id TEXT,
+                control_type TEXT,
+                class_name TEXT,
+                name_match TEXT,
+                parent_target_key TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(emr_ui_targets)").fetchall()
+        }
+
+    assert "scope_automation_id" in columns
+    assert "ancestor_path" in columns
+
+
 def test_default_profile_is_seeded_from_existing_settings(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import get_default_emr_target_profile
@@ -72,7 +107,321 @@ def test_default_profile_is_seeded_from_existing_settings(tmp_path) -> None:
     assert profile.name == "eGHIS Production"
     assert profile.process_name == "SeededEghis.exe"
     assert profile.window_title_contains == "Seeded Eghis"
+    assert profile.prescription_grid_automation_id == "tree처방"
+    assert profile.symptom_grid_automation_id == "grdSymp"
+    assert profile.diagnosis_grid_automation_id == "tree상병"
+    assert profile.patient_list_grid_automation_id == "grdOpdList"
+    assert profile.patient_status_tab_automation_id == "tabProc"
     assert "super-secret-ref" not in row
+
+
+def test_vaccine_patient_targets_are_seeded_for_emr_profiles(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_emr_target_profile,
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        default_profile = get_default_emr_target_profile(connection)
+        assert default_profile is not None
+        second_profile = create_emr_target_profile(
+            connection,
+            name="Second EMR",
+            is_enabled=True,
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        expected_targets = {
+            "vaccine.patient_chart_no": "txt환자번호",
+            "vaccine.patient_resident_id": "txt주민번호",
+            "vaccine.patient_name": "txt환자명",
+            "vaccine.patient_sex_age": "lblSexAge",
+            "vaccine.patient_birth_date": "dateEdit1",
+            "vaccine.patient_phone": "txt휴대폰",
+            "vaccine.patient_telephone": "txt전화",
+            "vaccine.patient_address": "txt주소",
+        }
+        for profile_id in (default_profile.id, second_profile.id):
+            targets = {
+                key: get_emr_ui_target_by_key(connection, profile_id, key)
+                for key in expected_targets
+            }
+            assert all(target is not None for target in targets.values())
+            assert {
+                key: target.automation_id
+                for key, target in targets.items()
+                if target is not None
+            } == expected_targets
+
+
+def test_vaccine_target_seed_preserves_configured_selectors(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+        update_emr_ui_target,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = get_default_emr_target_profile(connection)
+        assert profile is not None
+        target = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "vaccine.patient_phone",
+        )
+        assert target is not None
+        update_emr_ui_target(
+            connection,
+            target.id,
+            target_key=target.target_key,
+            label=target.label,
+            automation_id="verified-phone-id",
+            control_type="Edit",
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        preserved = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "vaccine.patient_phone",
+        )
+
+    assert preserved is not None
+    assert preserved.automation_id == "verified-phone-id"
+    assert preserved.control_type == "Edit"
+
+
+def test_eghis_shutdown_targets_are_seeded_for_emr_profiles(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        create_emr_target_profile,
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        default_profile = get_default_emr_target_profile(connection)
+        assert default_profile is not None
+        second_profile = create_emr_target_profile(
+            connection,
+            name="Second EMR",
+            is_enabled=True,
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        for profile_id in (default_profile.id, second_profile.id):
+            lock_target = get_emr_ui_target_by_key(
+                connection, profile_id, "shutdown.lock_password"
+            )
+            confirm_target = get_emr_ui_target_by_key(
+                connection, profile_id, "shutdown.close_yes"
+            )
+            backup_target = get_emr_ui_target_by_key(
+                connection, profile_id, "shutdown.backup_yes"
+            )
+            power_target = get_emr_ui_target_by_key(
+                connection, profile_id, "shutdown.power_off_after_backup"
+            )
+
+            assert lock_target is not None
+            assert lock_target.automation_id == "TxtPW"
+            assert lock_target.control_type == "Edit"
+            assert "로그인 안내" in (lock_target.ancestor_path or "")
+
+            assert confirm_target is not None
+            assert confirm_target.automation_id is None
+            assert confirm_target.name_match == "예(Y)"
+            assert confirm_target.control_type == "Button"
+            assert "확인" in (confirm_target.ancestor_path or "")
+            assert "이지스 전자차트 2.0" not in (confirm_target.ancestor_path or "")
+
+            assert backup_target is not None
+            assert backup_target.automation_id is None
+            assert backup_target.name_match == "예(Y)"
+            assert backup_target.control_type == "Button"
+            assert "확인" in (backup_target.ancestor_path or "")
+
+            assert power_target is not None
+            assert power_target.automation_id == "chkShutDown"
+            assert power_target.control_type == "CheckBox"
+            assert "이지스 백업" in (power_target.ancestor_path or "")
+
+
+def test_shutdown_target_seed_preserves_configured_selectors(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+        update_emr_ui_target,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = get_default_emr_target_profile(connection)
+        assert profile is not None
+        target = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "shutdown.close_yes",
+        )
+        assert target is not None
+        update_emr_ui_target(
+            connection,
+            target.id,
+            target_key=target.target_key,
+            label=target.label,
+            automation_id="verified-close-button",
+            control_type="Button",
+            name_match="Updated Yes",
+            ancestor_path='[{"name":"Updated confirmation","control_type":"Window"}]',
+        )
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        preserved = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "shutdown.close_yes",
+        )
+
+    assert preserved is not None
+    assert preserved.automation_id == "verified-close-button"
+    assert preserved.name_match == "Updated Yes"
+    assert "Updated confirmation" in (preserved.ancestor_path or "")
+
+
+def test_stock_close_confirmation_target_is_migrated_to_modal_scope(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    legacy_path = (
+        '[{"name":"확인","control_type":"Window"},'
+        '{"name":"이지스 전자차트 2.0","control_type":"Window"}]'
+    )
+    with connect(db_path) as connection:
+        profile = get_default_emr_target_profile(connection)
+        assert profile is not None
+        connection.execute(
+            """
+            UPDATE emr_ui_targets
+            SET ancestor_path = ?
+            WHERE profile_id = ? AND target_key = 'shutdown.close_yes'
+            """,
+            (legacy_path, profile.id),
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        migrated = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "shutdown.close_yes",
+        )
+
+    assert migrated is not None
+    assert migrated.ancestor_path == '[{"name":"확인","control_type":"Window"}]'
+
+
+def test_numeric_vaccine_chart_selector_is_replaced_on_startup(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import (
+        get_default_emr_target_profile,
+        get_emr_ui_target_by_key,
+    )
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        profile = get_default_emr_target_profile(connection)
+        assert profile is not None
+        target = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "vaccine.patient_chart_no",
+        )
+        assert target is not None
+        connection.execute(
+            """
+            UPDATE emr_ui_targets
+            SET automation_id = ?, name_match = ?
+            WHERE id = ?
+            """,
+            ("724506", "724506", target.id),
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        migrated = get_emr_ui_target_by_key(
+            connection,
+            profile.id,
+            "vaccine.patient_chart_no",
+        )
+
+    assert migrated is not None
+    assert migrated.automation_id == "txt환자번호"
+    assert migrated.name_match is None
+
+
+def test_emr_target_profile_migration_adds_grid_automation_columns(tmp_path) -> None:
+    from KaosEghis.db.database import connect, initialize_database
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE emr_target_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                is_enabled INTEGER NOT NULL DEFAULT 1,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                process_name TEXT,
+                executable_path TEXT,
+                window_title_contains TEXT,
+                window_class TEXT,
+                root_automation_id TEXT,
+                main_window_automation_id TEXT,
+                patient_status_tab_automation_id TEXT,
+                login_window_automation_id TEXT,
+                patient_search_automation_id TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(emr_target_profiles)").fetchall()
+        }
+
+    assert "prescription_grid_automation_id" in columns
+    assert "symptom_grid_automation_id" in columns
+    assert "diagnosis_grid_automation_id" in columns
+    assert "patient_list_grid_automation_id" in columns
+    assert "patient_status_tab_automation_id" in columns
 
 
 def test_emr_target_profile_crud_and_single_default(tmp_path) -> None:
@@ -100,6 +449,11 @@ def test_emr_target_profile_crud_and_single_default(tmp_path) -> None:
             is_default=True,
             process_name="Training.exe",
             window_title_contains="Training Window",
+            patient_status_tab_automation_id="tabProc_new",
+            prescription_grid_automation_id="tree처방_new",
+            symptom_grid_automation_id="grdSymp_new",
+            diagnosis_grid_automation_id="tree상병_new",
+            patient_list_grid_automation_id="grdOpdList_new",
         )
         updated = update_emr_target_profile(
             connection,
@@ -110,6 +464,11 @@ def test_emr_target_profile_crud_and_single_default(tmp_path) -> None:
             is_default=True,
             process_name="TrainingUpdated.exe",
             window_title_contains="Training Updated",
+            patient_status_tab_automation_id="tabProc_v2",
+            prescription_grid_automation_id="tree처방_v2",
+            symptom_grid_automation_id="grdSymp_v2",
+            diagnosis_grid_automation_id="tree상병_v2",
+            patient_list_grid_automation_id="grdOpdList_v2",
         )
         set_default_emr_target_profile(connection, seeded.id)
         profiles = list_emr_target_profiles(connection)
@@ -119,6 +478,11 @@ def test_emr_target_profile_crud_and_single_default(tmp_path) -> None:
     assert updated is not None
     assert updated.name == "Training EMR Updated"
     assert updated.process_name == "TrainingUpdated.exe"
+    assert updated.patient_status_tab_automation_id == "tabProc_v2"
+    assert updated.prescription_grid_automation_id == "tree처방_v2"
+    assert updated.symptom_grid_automation_id == "grdSymp_v2"
+    assert updated.diagnosis_grid_automation_id == "tree상병_v2"
+    assert updated.patient_list_grid_automation_id == "grdOpdList_v2"
     assert fetched is not None
     assert fetched.name == "Training EMR Updated"
     assert len(defaults) == 1
@@ -193,19 +557,23 @@ def test_emr_ui_target_crud(tmp_path) -> None:
             profile_id=profile.id,
             target_key="patient.search",
             label="Patient Search",
+            scope_automation_id="grdOpdList",
             automation_id="SearchBox",
             control_type="Edit",
             parent_target_key="main.window",
+            ancestor_path='[{"name":"진료실","control_type":"Window"}]',
         )
         updated = update_emr_ui_target(
             connection,
             target.id,
             target_key="patient.search",
             label="Patient Search Updated",
+            scope_automation_id="grdOpdListV2",
             automation_id="SearchBoxUpdated",
             control_type="Edit",
             class_name="WindowsForms10.Edit",
             parent_target_key="main.window",
+            ancestor_path='[{"name":"진료실","control_type":"Window"},{"name":"Tools","control_type":"ToolBar"}]',
         )
         listed = list_emr_ui_targets(connection, profile.id)
         deleted = delete_emr_ui_target(connection, target.id)
@@ -213,9 +581,25 @@ def test_emr_ui_target_crud(tmp_path) -> None:
 
     assert updated is not None
     assert updated.label == "Patient Search Updated"
+    assert updated.scope_automation_id == "grdOpdListV2"
     assert listed[0].automation_id == "SearchBoxUpdated"
+    assert listed[0].ancestor_path is not None
+    assert "Tools" in listed[0].ancestor_path
     assert deleted is True
-    assert after_delete == []
+    assert {target.target_key for target in after_delete} == {
+        "shutdown.lock_password",
+        "shutdown.close_yes",
+        "shutdown.backup_yes",
+        "shutdown.power_off_after_backup",
+        "vaccine.patient_chart_no",
+        "vaccine.patient_resident_id",
+        "vaccine.patient_name",
+        "vaccine.patient_sex_age",
+        "vaccine.patient_birth_date",
+        "vaccine.patient_phone",
+        "vaccine.patient_telephone",
+        "vaccine.patient_address",
+    }
 
 
 def test_emr_targets_page_instantiates_and_shows_default_profile(tmp_path, monkeypatch) -> None:
@@ -227,12 +611,48 @@ def test_emr_targets_page_instantiates_and_shows_default_profile(tmp_path, monke
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: False,
+    )
 
     page = EmrTargetsPage(db_path)
 
     assert page.profile_list.count() >= 1
     assert page.name_input.text() == "eGHIS Production"
     assert page.default_status_label.text() == "[default]"
+    assert page.prescription_grid_automation_id_input.text() == "tree처방"
+    assert page.symptom_grid_automation_id_input.text() == "grdSymp"
+    assert page.diagnosis_grid_automation_id_input.text() == "tree상병"
+    assert page.patient_list_grid_automation_id_input.text() == "grdOpdList"
+    assert page.patient_status_tab_automation_id_input.text() == "tabProc"
+
+
+def test_emr_targets_page_uses_two_column_layout(tmp_path, monkeypatch) -> None:
+    _app()
+
+    from PySide6.QtWidgets import QGridLayout
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: False,
+    )
+
+    page = EmrTargetsPage(db_path)
+    grid_layouts = page.findChildren(QGridLayout)
+
+    assert grid_layouts
+    content_grid = grid_layouts[0]
+    assert content_grid.itemAtPosition(0, 0) is not None
+    assert content_grid.itemAtPosition(0, 1) is not None
+    assert page.profile_list.parentWidget() is page
+    assert page.ui_targets_table.parentWidget() is page
 
 
 def test_emr_targets_page_connection_toggle_updates_status(
@@ -256,6 +676,10 @@ def test_emr_targets_page_connection_toggle_updates_status(
     initialize_database(db_path)
     clear_cached_eghis_state()
     monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: False,
+    )
+    monkeypatch.setattr(
         "KaosEghis.ui.tabs.emr_targets_page.refresh_cached_eghis_state",
         lambda _settings: FakeState(),
     )
@@ -269,3 +693,340 @@ def test_emr_targets_page_connection_toggle_updates_status(
 
     assert page.connection_toggle.isChecked() is True
     assert "Connected and active" in page.connection_status_label.text()
+
+
+def test_emr_targets_page_starts_capture_hotkey_on_init(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+    calls: list[str] = []
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: calls.append("started") or True,
+    )
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = EmrTargetsPage(db_path)
+
+    assert calls == ["started"]
+    assert page.capture_hotkey_label.text() == "Global capture hotkey: Ctrl+Shift+F9"
+
+
+def test_emr_targets_page_shows_capture_result_and_copies_details(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+
+    from KaosEghis.core.ui_capture import PointInspectionResult
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+    copied: list[str] = []
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: False,
+    )
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.copy_text",
+        lambda text: copied.append(text),
+    )
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = EmrTargetsPage(db_path)
+    page._handle_capture_ready(
+        PointInspectionResult(
+            success=True,
+            x=120,
+            y=340,
+            backend="uia",
+            handle=100,
+            name="환자명",
+            automation_id="grdOpdList",
+            control_type="DataItem",
+            class_name="WindowsForms10.Window",
+            text_value="홍길동",
+            ancestor_summary="진료실 (Window)",
+            message="UI control captured.",
+        )
+    )
+
+    assert "Coordinate: (120, 340)" in page.capture_result.toPlainText()
+    assert "Value: 홍길동" in page.capture_result.toPlainText()
+    assert copied == ["홍길동"]
+    assert page.capture_button.text() == "Captured and copied"
+    assert "value copied to clipboard" in page.capture_status_label.text().casefold()
+
+
+def test_emr_targets_page_arm_capture_retries_hotkey_listener(
+    tmp_path, monkeypatch
+) -> None:
+    _app()
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.emr_targets_page import EmrTargetsPage
+
+    calls: list[str] = []
+
+    monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.start_hotkey_listener",
+        lambda self: calls.append("started") or True,
+    )
+    monkeypatch.setattr(
+        "KaosEghis.ui.tabs.emr_targets_page.GlobalClickCaptureController.arm_capture",
+        lambda self: True,
+    )
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+
+    page = EmrTargetsPage(db_path)
+    page.arm_capture()
+
+    assert calls == ["started"]
+    assert page.capture_hotkey_label.text() == "Global capture hotkey: Ctrl+Shift+F9"
+    assert "capture armed" in page.capture_status_label.text().casefold()
+
+
+def test_global_capture_controller_defers_inspection_to_qt_signal() -> None:
+    _app()
+
+    from KaosEghis.core.ui_capture import GlobalClickCaptureController
+
+    controller = GlobalClickCaptureController()
+    events: list[object] = []
+    controller.capture_ready.connect(events.append)
+    controller.capture_failed.connect(events.append)
+
+    import KaosEghis.core.ui_capture as ui_capture
+
+    original = ui_capture.inspect_ui_at_point
+    try:
+        ui_capture.inspect_ui_at_point = lambda x, y: ("captured", x, y)
+        controller._inspect_captured_point(120, 340)
+    finally:
+        ui_capture.inspect_ui_at_point = original
+
+    assert events == [("captured", 120, 340)]
+
+
+def test_global_capture_controller_windows_hotkey_listener_start_stop(monkeypatch) -> None:
+    _app()
+
+    import KaosEghis.core.ui_capture as ui_capture
+
+    events: list[str] = []
+
+    class FakeListener:
+        def __init__(self, callback) -> None:
+            self.callback = callback
+
+        def start(self) -> bool:
+            events.append("start")
+            return True
+
+        def stop(self) -> None:
+            events.append("stop")
+
+    monkeypatch.setattr(ui_capture, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(ui_capture, "_WindowsGlobalHotkeyListener", FakeListener)
+
+    controller = ui_capture.GlobalClickCaptureController()
+
+    assert controller.start_hotkey_listener() is True
+    controller.stop()
+
+    assert events == ["start", "stop"]
+
+
+def test_windows_hotkey_listener_uses_qt_native_dispatcher() -> None:
+    _app()
+
+    import ctypes
+    import ctypes.wintypes
+
+    from KaosEghis.core.ui_capture import _WindowsGlobalHotkeyListener
+
+    events: list[str] = []
+
+    class FakeApplication:
+        def __init__(self) -> None:
+            self.installed = []
+            self.removed = []
+
+        def installNativeEventFilter(self, event_filter) -> None:
+            self.installed.append(event_filter)
+
+        def removeNativeEventFilter(self, event_filter) -> None:
+            self.removed.append(event_filter)
+
+    class FakeUser32:
+        def __init__(self) -> None:
+            self.registered = []
+            self.unregistered = []
+
+        def RegisterHotKey(self, hwnd, hotkey_id, modifiers, virtual_key) -> bool:
+            self.registered.append((hwnd, hotkey_id, modifiers, virtual_key))
+            return True
+
+        def UnregisterHotKey(self, hwnd, hotkey_id) -> bool:
+            self.unregistered.append((hwnd, hotkey_id))
+            return True
+
+    application = FakeApplication()
+    user32 = FakeUser32()
+    listener = _WindowsGlobalHotkeyListener(
+        lambda: events.append("hotkey"),
+        application=application,
+        user32=user32,
+    )
+
+    assert listener.start() is True
+    assert application.installed == [listener]
+    assert user32.registered == [
+        (
+            None,
+            listener.HOTKEY_ID,
+            listener.MOD_CONTROL | listener.MOD_SHIFT | listener.MOD_NOREPEAT,
+            listener.VK_F9,
+        )
+    ]
+
+    message = ctypes.wintypes.MSG()
+    message.message = listener.WM_HOTKEY
+    message.wParam = listener.HOTKEY_ID
+    handled, result = listener.nativeEventFilter(
+        b"windows_dispatcher_MSG", ctypes.addressof(message)
+    )
+
+    assert handled is True
+    assert result == 0
+    assert events == ["hotkey"]
+
+    listener.stop()
+    assert user32.unregistered == [(None, listener.HOTKEY_ID)]
+    assert application.removed == [listener]
+
+
+def test_parse_inspector_dump_maps_basic_fields() -> None:
+    from KaosEghis.ui.tabs.emr_targets_page import parse_inspector_dump
+
+    parsed = parse_inspector_dump(
+        """
+Name: "PACS"
+AutomationId: "MidMain"
+ClassName: "WindowsForms10.Window.8.app.0.2bf8098_r6_ad1"
+ControlType: UIA_ButtonControlTypeId
+"""
+    )
+
+    assert parsed["label"] == "PACS"
+    assert parsed["name_match"] == "PACS"
+    assert parsed["automation_id"] == "MidMain"
+    assert parsed["class_name"] == "WindowsForms10.Window.8.app.0.2bf8098_r6_ad1"
+    assert parsed["control_type"] == "Button"
+    assert parsed["target_key"] == "mid_main"
+
+
+def test_parse_inspector_dump_can_match_parent_target_from_ancestors() -> None:
+    from KaosEghis.db.repositories import EmrUiTargetRecord
+    from KaosEghis.ui.tabs.emr_targets_page import parse_inspector_dump
+
+    existing_targets = [
+        EmrUiTargetRecord(
+            id=1,
+            profile_id=1,
+            target_key="tools.toolbar",
+            label="Tools",
+            description=None,
+            scope_automation_id=None,
+            automation_id="toolsToolbar",
+            control_type="ToolBar",
+            class_name=None,
+            name_match="Tools",
+            parent_target_key=None,
+            created_at="now",
+            updated_at="now",
+            ancestor_path=None,
+        )
+    ]
+
+    parsed = parse_inspector_dump(
+        """
+Name: "PACS"
+ControlType: UIA_ButtonControlTypeId
+Ancestors:
+    "Tools" 도구 모음
+    "진료실" 창
+    "이지스 전자차트 2.0" 창
+""",
+        existing_targets,
+    )
+
+    assert parsed["label"] == "PACS"
+    assert parsed["control_type"] == "Button"
+    assert parsed["scope_automation_id"] == "Tools"
+    assert parsed["parent_target_key"] == "tools.toolbar"
+    assert '"name": "Tools"' in parsed["ancestor_path"]
+    assert "Ancestors: Tools > 진료실 > 이지스 전자차트 2.0" == parsed["ancestor_summary"]
+
+
+def test_emr_ui_target_dialog_can_apply_inspector_dump(monkeypatch) -> None:
+    _app()
+
+    from KaosEghis.db.repositories import EmrUiTargetRecord
+    from KaosEghis.ui.tabs.emr_targets_page import EmrUiTargetDialog
+
+    existing_targets = [
+        EmrUiTargetRecord(
+            id=1,
+            profile_id=1,
+            target_key="tools.toolbar",
+            label="Tools",
+            description=None,
+            scope_automation_id=None,
+            automation_id="toolsToolbar",
+            control_type="ToolBar",
+            class_name=None,
+            name_match="Tools",
+            parent_target_key=None,
+            created_at="now",
+            updated_at="now",
+            ancestor_path=None,
+        )
+    ]
+
+    dialog = EmrUiTargetDialog(existing_targets=existing_targets)
+    dialog.inspector_dump_input.setPlainText(
+        """
+Name: "PACS"
+AutomationId: "MidMain"
+ControlType: UIA_ButtonControlTypeId
+ClassName: "WindowsForms10.Window.8.app.0.2bf8098_r6_ad1"
+Ancestors:
+    "Tools" 도구 모음
+    "진료실" 창
+"""
+    )
+
+    dialog._apply_inspector_dump()
+
+    assert dialog.target_key_input.text() == "mid_main"
+    assert dialog.label_input.text() == "PACS"
+    assert dialog.scope_automation_id_input.text() == "Tools"
+    assert dialog.automation_id_input.text() == "MidMain"
+    assert dialog.control_type_input.text() == "Button"
+    assert dialog.class_name_input.text() == "WindowsForms10.Window.8.app.0.2bf8098_r6_ad1"
+    assert dialog.name_match_input.text() == "PACS"
+    assert dialog.parent_target_key_input.text() == "tools.toolbar"
+    assert "Ancestors: Tools > 진료실" in dialog.ancestor_path_preview.toPlainText()
+    assert "Inspector fields applied." in dialog.parse_status_label.text()

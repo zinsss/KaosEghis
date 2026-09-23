@@ -1,0 +1,544 @@
+import json
+import os
+from datetime import date
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+def _schedule(*, enabled=True, cap=100, allow_exception=False):
+    # Deliberately custom dates exercise editable schedules independently of defaults.
+    return {
+        "program_enabled": enabled,
+        "allow_elderly_exception": allow_exception,
+        "elderly_75_plus_start": "2026-10-11",
+        "elderly_70_74_start": "2026-10-15",
+        "elderly_65_69_start": "2026-10-18",
+        "elderly_program_end": "2027-04-30",
+        "child_two_dose_start": "2026-09-20",
+        "child_two_dose_end": "2027-04-30",
+        "child_one_dose_start": "2026-10-05",
+        "child_one_dose_end": "2027-04-30",
+        "daily_cap": cap,
+    }
+
+
+def _age_groups():
+    return [
+        {
+            "key": "elderly_75_plus",
+            "label": "Elderly 75+",
+            "vaccine": "influenza",
+            "birth_date_from": "19000101",
+            "birth_date_to": "19511231",
+        },
+        {
+            "key": "elderly_70_74",
+            "label": "Elderly 70-74",
+            "vaccine": "influenza",
+            "birth_date_from": "19520101",
+            "birth_date_to": "19561231",
+        },
+        {
+            "key": "elderly_65_69",
+            "label": "Elderly 65-69",
+            "vaccine": "influenza",
+            "birth_date_from": "19570101",
+            "birth_date_to": "19611231",
+        },
+    ]
+
+
+def _settings(*, enabled=True, cap=100, allow_exception=False):
+    return {
+        "vaccine_schedule_rules_json": json.dumps(
+            {
+                "influenza": _schedule(
+                    enabled=enabled,
+                    cap=cap,
+                    allow_exception=allow_exception,
+                )
+            }
+        ),
+        "vaccine_age_groups_json": json.dumps(_age_groups()),
+    }
+
+
+def _covid_schedule(*, enabled=True, cap=100):
+    return {
+        "program_enabled": enabled,
+        "elderly_75_plus_start": "2026-10-12",
+        "elderly_70_74_start": "2026-10-12",
+        "elderly_65_69_start": "2026-10-15",
+        "elderly_program_end": "2027-06-30",
+        "daily_cap": cap,
+    }
+
+
+def _covid_groups():
+    return [
+        {
+            "key": "covid_elderly_75_plus",
+            "label": "COVID 75+",
+            "vaccine": "covid",
+            "birth_date_from": "18000101",
+            "birth_date_to": "19511231",
+        },
+        {
+            "key": "covid_elderly_70_74",
+            "label": "COVID 70-74",
+            "vaccine": "covid",
+            "birth_date_from": "19520101",
+            "birth_date_to": "19561231",
+        },
+        {
+            "key": "covid_elderly_65_69",
+            "label": "COVID 65-69",
+            "vaccine": "covid",
+            "birth_date_from": "19570101",
+            "birth_date_to": "19611231",
+        },
+    ]
+
+
+def _covid_settings(*, enabled=True, cap=100):
+    return {
+        "vaccine_schedule_rules_json": json.dumps(
+            {"covid": _covid_schedule(enabled=enabled, cap=cap)}
+        ),
+        "vaccine_age_groups_json": json.dumps(_covid_groups()),
+    }
+
+
+def test_resident_id_birth_date_is_extracted_without_retaining_id() -> None:
+    from KaosEghis.core.vaccine_eligibility import birth_date_from_resident_id
+
+    assert birth_date_from_resident_id("500101-1234567") == date(1950, 1, 1)
+    assert birth_date_from_resident_id("010101-3123456") == date(2001, 1, 1)
+    assert birth_date_from_resident_id("not-a-resident-id") is None
+
+
+def test_influenza_gate_includes_exact_birth_and_schedule_boundaries() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    start = evaluate_influenza_program_for_birth_date(
+        _schedule(),
+        _age_groups(),
+        date(1951, 12, 31),
+        on_date=date(2026, 10, 11),
+        counted_today=99,
+    )
+    end = evaluate_influenza_program_for_birth_date(
+        _schedule(),
+        _age_groups(),
+        date(1900, 1, 1),
+        on_date=date(2027, 4, 30),
+        counted_today=0,
+    )
+
+    assert start.allowed is True
+    assert start.group_key == "elderly_75_plus"
+    assert start.remaining == 1
+    assert end.allowed is True
+
+
+def test_influenza_gate_blocks_before_group_window_and_after_end() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    before = evaluate_influenza_program_for_birth_date(
+        _schedule(),
+        _age_groups(),
+        date(1953, 1, 1),
+        on_date=date(2026, 10, 14),
+    )
+    after = evaluate_influenza_program_for_birth_date(
+        _schedule(),
+        _age_groups(),
+        date(1950, 1, 1),
+        on_date=date(2027, 5, 1),
+    )
+
+    assert before.status == "blocked"
+    assert after.status == "blocked"
+
+
+def test_influenza_exception_requires_patient_specific_confirmation() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    result = evaluate_influenza_program_for_birth_date(
+        _schedule(allow_exception=True),
+        _age_groups(),
+        date(1953, 1, 1),
+        on_date=date(2026, 10, 12),
+    )
+
+    assert result.status == "review_required"
+    assert result.allowed is False
+    assert result.counted is False
+    assert result.requires_operator_confirmation is True
+
+
+def test_influenza_gate_blocks_at_daily_cap() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    result = evaluate_influenza_program_for_birth_date(
+        _schedule(cap=100),
+        _age_groups(),
+        date(1950, 1, 1),
+        on_date=date(2026, 10, 20),
+        counted_today=100,
+    )
+
+    assert result.status == "cap_reached"
+    assert result.allowed is False
+    assert result.remaining == 0
+
+
+def test_influenza_program_is_disabled_until_configuration_review() -> None:
+    from KaosEghis.core.vaccine_eligibility import evaluate_influenza_program
+
+    result = evaluate_influenza_program(
+        _settings(enabled=False),
+        "500101-1234567",
+        on_date=date(2026, 10, 20),
+    )
+
+    assert result.status == "configuration_required"
+    assert result.allowed is False
+
+
+def test_covid_65_plus_groups_open_on_published_2026_dates() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_covid_program_for_birth_date,
+    )
+
+    schedule = _covid_schedule()
+    at_75_start = evaluate_covid_program_for_birth_date(
+        schedule, _covid_groups(), date(1951, 12, 31), on_date=date(2026, 10, 12)
+    )
+    before_70_start = evaluate_covid_program_for_birth_date(
+        schedule, _covid_groups(), date(1952, 1, 1), on_date=date(2026, 10, 11)
+    )
+    at_65_start = evaluate_covid_program_for_birth_date(
+        schedule, _covid_groups(), date(1961, 12, 31), on_date=date(2026, 10, 15)
+    )
+
+    assert at_75_start.allowed is True
+    assert at_75_start.group_key == "covid_elderly_75_plus"
+    assert before_70_start.status == "blocked"
+    assert at_65_start.allowed is True
+
+
+def test_covid_blocks_disabled_schedule_and_unconfigured_high_risk_path() -> None:
+    from KaosEghis.core.vaccine_eligibility import evaluate_covid_program
+
+    disabled = evaluate_covid_program(
+        _covid_settings(enabled=False), "500101-1234567", on_date=date(2026, 10, 20)
+    )
+    under_65 = evaluate_covid_program(
+        _covid_settings(), "700101-1234567", on_date=date(2026, 10, 20)
+    )
+
+    assert disabled.status == "configuration_required"
+    assert under_65.status == "manual_verification_required"
+    assert under_65.allowed is False
+
+
+def test_covid_daily_cap_is_independent_and_enforced() -> None:
+    from KaosEghis.core.vaccine_eligibility import evaluate_covid_program
+
+    result = evaluate_covid_program(
+        _covid_settings(cap=100),
+        "500101-1234567",
+        on_date=date(2026, 10, 20),
+        counted_today=100,
+    )
+
+    assert result.status == "cap_reached"
+    assert result.counted is True
+    assert result.remaining == 0
+
+
+def test_rural_exception_requires_checked_confirmation_for_flu_and_covid() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_covid_program_for_birth_date,
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    flu_schedule = _schedule(allow_exception=True)
+    flu_checked = evaluate_influenza_program_for_birth_date(
+        flu_schedule,
+        _age_groups(),
+        date(1953, 1, 1),
+        on_date=date(2026, 10, 12),
+        rural_exception_checked=True,
+    )
+    flu_unchecked = evaluate_influenza_program_for_birth_date(
+        flu_schedule,
+        _age_groups(),
+        date(1953, 1, 1),
+        on_date=date(2026, 10, 12),
+        rural_exception_checked=False,
+    )
+    covid_schedule = _covid_schedule()
+    covid_schedule["allow_rural_exception"] = True
+    covid_checked = evaluate_covid_program_for_birth_date(
+        covid_schedule,
+        _covid_groups(),
+        date(1958, 1, 1),
+        on_date=date(2026, 10, 12),
+        rural_exception_checked=True,
+    )
+    covid_unchecked = evaluate_covid_program_for_birth_date(
+        covid_schedule,
+        _covid_groups(),
+        date(1958, 1, 1),
+        on_date=date(2026, 10, 12),
+        rural_exception_checked=False,
+    )
+
+    assert flu_checked.status == covid_checked.status == "review_required"
+    assert flu_checked.counted is covid_checked.counted is False
+    assert flu_checked.requires_operator_confirmation is True
+    assert covid_checked.requires_operator_confirmation is True
+    assert flu_unchecked.status == covid_unchecked.status == "blocked"
+
+
+def test_invalid_influenza_cap_blocks_as_configuration_error() -> None:
+    from KaosEghis.core.vaccine_eligibility import evaluate_influenza_program
+
+    settings = _settings()
+    payload = json.loads(settings["vaccine_schedule_rules_json"])
+    payload["influenza"]["daily_cap"] = "invalid"
+    settings["vaccine_schedule_rules_json"] = json.dumps(payload)
+
+    result = evaluate_influenza_program(
+        settings,
+        "500101-1234567",
+        on_date=date(2026, 10, 20),
+    )
+
+    assert result.status == "configuration_error"
+    assert result.allowed is False
+
+
+def _child_groups():
+    return [
+        {
+            "key": key,
+            "label": "Eligible child",
+            "vaccine": "influenza",
+            "birth_date_from": "20200101",
+            "birth_date_to": "20260831",
+        }
+        for key in ("child_two_dose", "child_one_dose")
+    ]
+
+
+def test_early_child_window_requires_manual_two_dose_check() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    result = evaluate_influenza_program_for_birth_date(
+        _schedule(),
+        _child_groups(),
+        date(2022, 1, 1),
+        on_date=date(2026, 9, 25),
+    )
+
+    assert result.status == "review_required"
+    assert result.counted is True
+    assert result.requires_operator_confirmation is True
+    assert "check the vaccination system manually" in result.message
+    assert "Before label printing" in result.message
+
+
+def test_child_window_is_open_without_dose_alert_after_one_dose_start() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    result = evaluate_influenza_program_for_birth_date(
+        _schedule(),
+        _child_groups(),
+        date(2022, 1, 1),
+        on_date=date(2026, 10, 5),
+        counted_today=99,
+    )
+
+    assert result.status == "eligible"
+    assert result.allowed is True
+    assert result.counted is True
+    assert result.requires_operator_confirmation is False
+
+
+def test_elderly_and_child_vaccinations_share_one_influenza_cap() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    schedule = _schedule(cap=100)
+    child_at_shared_cap = evaluate_influenza_program_for_birth_date(
+        schedule,
+        _child_groups(),
+        date(2022, 1, 1),
+        on_date=date(2026, 10, 20),
+        counted_today=100,
+    )
+    elderly_at_shared_cap = evaluate_influenza_program_for_birth_date(
+        schedule,
+        _age_groups(),
+        date(1950, 1, 1),
+        on_date=date(2026, 10, 20),
+        counted_today=100,
+    )
+
+    assert child_at_shared_cap.status == "cap_reached"
+    assert elderly_at_shared_cap.status == "cap_reached"
+    assert child_at_shared_cap.daily_cap == elderly_at_shared_cap.daily_cap == 100
+    assert child_at_shared_cap.today_count == elderly_at_shared_cap.today_count == 100
+
+
+def test_rural_exception_stages_cap_by_elderly_opening_group() -> None:
+    from KaosEghis.core.vaccine_eligibility import (
+        evaluate_influenza_program_for_birth_date,
+    )
+
+    schedule = _schedule(allow_exception=True)
+
+    at_first_open = {
+        "75_plus": evaluate_influenza_program_for_birth_date(
+            schedule, _age_groups(), date(1950, 1, 1),
+            on_date=date(2026, 10, 11), counted_today=100,
+        ),
+        "70_74": evaluate_influenza_program_for_birth_date(
+            schedule, _age_groups(), date(1953, 1, 1),
+            on_date=date(2026, 10, 11), counted_today=100,
+        ),
+        "65_69": evaluate_influenza_program_for_birth_date(
+            schedule, _age_groups(), date(1958, 1, 1),
+            on_date=date(2026, 10, 11), counted_today=100,
+        ),
+    }
+    assert at_first_open["75_plus"].status == "cap_reached"
+    assert at_first_open["75_plus"].counted is True
+    assert at_first_open["70_74"].status == "review_required"
+    assert at_first_open["70_74"].allowed is False
+    assert at_first_open["70_74"].counted is False
+    assert at_first_open["65_69"].status == "review_required"
+    assert at_first_open["65_69"].allowed is False
+    assert at_first_open["65_69"].counted is False
+
+    at_second_open_70 = evaluate_influenza_program_for_birth_date(
+        schedule, _age_groups(), date(1953, 1, 1),
+        on_date=date(2026, 10, 15), counted_today=100,
+    )
+    at_second_open_65 = evaluate_influenza_program_for_birth_date(
+        schedule, _age_groups(), date(1958, 1, 1),
+        on_date=date(2026, 10, 15), counted_today=100,
+    )
+    assert at_second_open_70.status == "cap_reached"
+    assert at_second_open_70.counted is True
+    assert at_second_open_65.status == "review_required"
+    assert at_second_open_65.allowed is False
+    assert at_second_open_65.counted is False
+
+    at_last_open = evaluate_influenza_program_for_birth_date(
+        schedule, _age_groups(), date(1958, 1, 1),
+        on_date=date(2026, 10, 18), counted_today=100,
+    )
+    assert at_last_open.status == "cap_reached"
+    assert at_last_open.counted is True
+
+
+def test_vaccine_page_can_preview_configured_influenza_gate(tmp_path) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    schedule = _schedule()
+    schedule["elderly_75_plus_start"] = "2000-01-01"
+    schedule["elderly_program_end"] = "2100-12-31"
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "vaccine_schedule_rules_json": json.dumps({"influenza": schedule}),
+                "vaccine_age_groups_json": json.dumps(_age_groups()),
+            },
+        )
+
+    page = VaccineTab(db_path)
+    page.patient_resident_id_input.setText("500101-1234567")
+
+    result = page.check_influenza_program()
+
+    assert result.allowed is True
+    assert "Eligible by configured rules" in page.influenza_check_result.text()
+    assert page.influenza_check_result.property("resultState") == "success"
+    assert "500101" not in page.influenza_check_result.text()
+
+
+def test_vaccine_page_can_preview_configured_covid_gate(tmp_path) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import set_settings
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    schedule = _covid_schedule()
+    schedule["elderly_75_plus_start"] = "2000-01-01"
+    schedule["elderly_program_end"] = "2100-12-31"
+    with connect(db_path) as connection:
+        set_settings(
+            connection,
+            {
+                "vaccine_schedule_rules_json": json.dumps({"covid": schedule}),
+                "vaccine_age_groups_json": json.dumps(_covid_groups()),
+            },
+        )
+
+    page = VaccineTab(db_path)
+    page.patient_resident_id_input.setText("500101-1234567")
+    result = page.check_covid_program()
+
+    assert result.allowed is True
+    assert "Eligible by configured rules" in page.covid_check_result.text()
+    assert page.covid_check_result.property("resultState") == "success"
+    assert "500101" not in page.covid_check_result.text()
+
+
+def test_vaccine_page_defaults_rural_exception_check_to_checked(tmp_path) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+
+    from KaosEghis.db.database import initialize_database
+    from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    page = VaccineTab(db_path)
+
+    assert page.rural_exception_check.isChecked() is True
