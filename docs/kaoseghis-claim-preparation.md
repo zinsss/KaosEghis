@@ -73,8 +73,18 @@ in the treatment room.
 ## Read Safety and Limitations
 
 - Reads are explicit, off the Qt UI thread, scoped to the connected process and
-  claim window, with native UIA conditions. No broad desktop UIA enumeration and
+  claim window, with native UIA conditions. The worker initializes COM as MTA;
+  the GUI thread's STA mode is unchanged. No broad desktop UIA enumeration and
   no treatment-grid cache mutation are used.
+- Claim-window lookup checks both native top-level and child HWNDs in the connected
+  EMR process. An MDI claim page is wrapped directly by HWND instead of searching
+  the entire EMR UIA descendant tree. Multiple visible matches still block the read.
+- If no native claim window exists, the UIA fallback searches layout containers
+  only. Query/history pane, table, and data-panel discovery use immediate-child
+  queries, with a 128-container/16-level bound, and never expand Tables/DataGrids
+  to find sibling layout targets. Patient rows and patient cell values are not
+  searched. Only after the exact claim-history table is found are its direct rows
+  enumerated; month/week cells are looked up as direct children of each claim row.
 - The table's GridPattern row count must equal the exposed Data Panel rows.
   Maximum 128 rows. A missing GridPattern or a virtualized/incomplete list is
   rejected, not silently accepted. This provider behavior still needs checking
@@ -87,12 +97,28 @@ in the treatment room.
 - The read budget is 8 seconds between native calls; after 10 seconds the UI
   discards the request. An in-flight COM call cannot be forcibly interrupted:
   no second worker starts until it returns, and its late result is ignored.
+  Reader timeouts identify the stage (window, query panel, weekly mode, history
+  grid, or month/week rows) using fixed messages without native/provider contents.
 - Previews live only in memory, expire after five minutes, and are cleared on
   claim-date change, connection change, or closing the dialog. They are planning
   snapshots, not authorization to run aggregation later without re-reading.
 - Select each month manually. The preview does not change EMR filters and does
   not infer that an empty-looking screen has finished loading without operator
   confirmation. No automatic claim-day/Radicale integration is included.
+
+### First Live Preview Timeout
+
+On 2026-09-23 the operator's read-only preview timed out before inferring a week.
+The previous implementation searched only native top-level windows, so an MDI
+claim page forced a full EMR UIA descendant search; it also used descendant searches
+to locate panes near large patient grids. These are plausible timeout contributors,
+not a measured attribution of the original timeout to one exact call.
+
+A read-only native-window check found one enabled claim child window and no
+top-level claim window, in approximately 3 ms. It did not read patient fields,
+change focus/selections, or run aggregation. The narrowed lookup now uses that
+child-window path. Full live month/week reading still needs another preview run;
+the deadline, row-count checks, and two-snapshot requirement have not been relaxed.
 
 ## Next Execution Stage (Not Implemented)
 
