@@ -406,8 +406,8 @@ class VaccineSystemTargetsEditor(QWidget):
             "Resident input class",
             self.influenza_resident_class_input,
         )
-        influenza_form.addRow("Fallback input X", self.influenza_resident_x_input)
-        influenza_form.addRow("Fallback input Y", self.influenza_resident_y_input)
+        influenza_form.addRow("Resident input X", self.influenza_resident_x_input)
+        influenza_form.addRow("Resident input Y", self.influenza_resident_y_input)
 
         covid_group = QGroupBox("COVID system")
         covid_form = QFormLayout(covid_group)

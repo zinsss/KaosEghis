@@ -368,29 +368,27 @@ The captured targets are used only after explicit post-print consent:
   `CyWindowClass`, with resident-number input coordinate `(448, 2074)` because the
   input does not expose a distinct UIA control. Its configured non-clinical
   session-reset coordinate is `(1154, 1968)`.
-- Influenza browser system: the resident-number field exposes Automation ID
-  `edtPtntRrn1` (`Edit`, `w2input`). Resolution is scoped to the visible document at
-  the configured OIS origin and application directory. It checks all matching
-  visible browser documents/frames, not only the first OIS document. Exact-ID
-  native UIA queries are scoped to those documents; duplicate references to the
-  same field are collapsed by runtime identity. Two distinct matching fields
-  still stop the handoff. The field's nearest containing document must remain
-  within the configured influenza application, including when nested in a frame.
-  Focus and URL scope are rechecked. Browser focus and the final value readback
-  may settle for up to 750 ms each, within the existing overall deadline, without
-  retyping. The full entered value must read back correctly before Enter.
-  If the field's focus flag is false, an exact runtime-ID/type/Automation-ID match
-  against UIA's current focused element can confirm focus instead. Neither a
-  matching field name nor browser foreground alone authorizes typing. If UIA
-  SetFocus does not take, one click may be attempted at the live input rectangle,
-  after verifying that the point hits the same field in the correct foreground
-  browser. Covered/moved fields stop; the saved screen coordinate is not used as
-  an unchecked fallback. Focus must still be independently confirmed after the
-  click. Timeout, input interruption, desktop change, and field-focus failures
-  during activation have separate status messages; they retain the form and send
-  no digits. A later interruption can leave a partial entry, but never sends Enter.
-  UIA's focused-element API is documented by
-  [Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation-getfocusedelement).
+- Influenza browser system: click the configured resident-number input coordinate
+  (default capture `(2924, 1415)`), select existing contents with Ctrl+A, type all
+  13 digits without the hyphen using ordinary digit-key events
+  (`vk_packet=False`, not Unicode packets or clipboard paste), then send one Enter.
+  The `Resident input X/Y` settings are the primary entry target, not a fallback.
+  `edtPtntRrn1` remains available for system-launch readiness checks but is not
+  required for this coordinate handoff.
+  Resolution requires one matching browser window and a visible document/frame at
+  the configured OIS origin/application directory containing the saved point.
+  A configured window/tab title also filters the browser. Before clicking, the
+  point's nearest UIA Document must be one of those trusted documents; no exact
+  Edit control, Automation ID, or UIA keyboard-focus flag is required.
+  Browser foreground, document identity/URL/bounds, point ownership, desktop, and
+  unchanged native keyboard focus are rechecked during entry. A failed check
+  stops without Enter and retains the form. No field-value readback is required,
+  so success confirms key dispatch only, not that the website accepted all digits
+  or found the intended patient. Review the resulting lookup manually.
+  Keep the input coordinates calibrated: these guards do not prove that the point
+  is still the resident field after an in-page layout change. A blocking native
+  popup, wrong document, invalid coordinate, or multiple matching browser windows
+  stops the handoff; no popup is dismissed automatically.
 - COVID system: top-level window name `코로나19통합관리시스템`, class
   `CyWindowClass`. Its configured non-clinical session-reset coordinate is
   `(2456, 1982)` and its resident-number input coordinate is `(1466, 2107)`.
@@ -407,7 +405,7 @@ Resident numbers remain available only to the selected workflow's transient inpu
 they must not appear in automation logs or status messages.
 
 `Vaccine -> Settings -> System targets` stores these editable window titles, classes,
-stable UIA automation IDs, and coordinate fallbacks. It intentionally does not store
+stable UIA automation IDs, and input coordinates. It intentionally does not store
 numeric Windows/UIA Handle values because the operating system recreates them every
 application launch.
 

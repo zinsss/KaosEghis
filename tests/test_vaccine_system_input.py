@@ -5,11 +5,6 @@ import pytest
 from KaosEghis.core import vaccine_system_input as handoff
 
 
-@pytest.fixture(autouse=True)
-def no_live_browser_focus(monkeypatch):
-    monkeypatch.setattr(handoff, "focused_element", lambda: None, raising=False)
-
-
 @pytest.fixture
 def input_target(monkeypatch):
     state = {"focused": True, "typed": "", "keys": [], "activated": 0}
@@ -33,6 +28,7 @@ def input_target(monkeypatch):
         return True
 
     monkeypatch.setattr(handoff, "_send_unicode_text", type_digit)
+    monkeypatch.setattr(handoff, "_send_digit_key", type_digit)
     return state
 
 
@@ -87,7 +83,8 @@ def test_handoff_fails_closed_before_input(input_target, monkeypatch, guard):
 
 
 @pytest.mark.parametrize("change", ["focus", "desktop", "cancelled", "timeout"])
-def test_interrupted_typing_never_sends_enter(input_target, monkeypatch, change):
+@pytest.mark.parametrize("system", ["general", "covid", "influenza"])
+def test_interrupted_typing_never_sends_enter(input_target, monkeypatch, change, system):
     def write(digit):
         input_target["typed"] += digit
         if change == "focus":
@@ -99,8 +96,9 @@ def test_interrupted_typing_never_sends_enter(input_target, monkeypatch, change)
         return True
 
     monkeypatch.setattr(handoff, "_send_unicode_text", write)
+    monkeypatch.setattr(handoff, "_send_digit_key", write)
     result = handoff.enter_vaccine_resident(
-        {}, handoff.VaccineHandoffRequest("general", "700101-1000000"),
+        {}, handoff.VaccineHandoffRequest(system, "700101-1000000"),
         cancelled=lambda: change == "cancelled" and bool(input_target["typed"]),
     )
     assert not result.success
@@ -116,12 +114,14 @@ def test_readback_mismatch_does_not_submit(input_target, monkeypatch):
     assert input_target["keys"] == ["^a"]
 
 
-def test_provider_exception_does_not_expose_resident(input_target, monkeypatch):
+@pytest.mark.parametrize("system", ["general", "influenza"])
+def test_provider_exception_does_not_expose_resident(input_target, monkeypatch, system):
     def explode(_digit):
         raise RuntimeError("patient 700101-1000000")
 
     monkeypatch.setattr(handoff, "_send_unicode_text", explode)
-    result = handoff.enter_vaccine_resident({}, handoff.VaccineHandoffRequest("general", "700101-1000000"))
+    monkeypatch.setattr(handoff, "_send_digit_key", explode)
+    result = handoff.enter_vaccine_resident({}, handoff.VaccineHandoffRequest(system, "700101-1000000"))
     assert not result.success
     assert "700101" not in result.message
     assert "{ENTER}" not in input_target["keys"]
@@ -170,192 +170,6 @@ def test_native_target_rechecks_point_focus_and_window(input_target, monkeypatch
     assert handoff._native_input_target(settings, "general") is None
 
 
-def test_browser_target_is_scoped_and_rechecks_origin(monkeypatch):
-    import sys
-
-    state = {"url": "https://ois.kdca.go.kr/iroi/main", "focus": True}
-    control = SimpleNamespace(
-        element_info=SimpleNamespace(automation_id="edtPtntRrn1", runtime_id=(42, 1)),
-        is_visible=lambda: True, is_enabled=lambda: True, set_focus=lambda: None,
-        get_value=lambda: "7001011000000",
-        parent=lambda: document,
-    )
-    document = SimpleNamespace(
-        element_info=SimpleNamespace(control_type="Document", runtime_id=(42, 2)),
-        descendants=lambda **_kwargs: [control], is_visible=lambda: True,
-        get_value=lambda: state["url"],
-    )
-    window = SimpleNamespace(
-        handle=10, element_info=SimpleNamespace(class_name="Chrome_WidgetWin_1"),
-        set_focus=lambda: None, is_enabled=lambda: True,
-        descendants=lambda **kwargs: [document],
-    )
-    windows = [window]
-    monkeypatch.setitem(sys.modules, "pywinauto", SimpleNamespace(
-        Desktop=lambda **_kw: SimpleNamespace(windows=lambda: windows)
-    ))
-    monkeypatch.setattr(handoff, "find_uia_elements_by_automation_ids", lambda *_args, **kwargs: {
-        "edtPtntRrn1": [control],
-    })
-    monkeypatch.setattr(handoff, "foreground_handle", lambda: 10)
-    monkeypatch.setattr(handoff, "has_keyboard_focus", lambda _c: state["focus"])
-    settings = {
-        "vaccine_influenza_system_launch_url": "https://ois.kdca.go.kr/iroi/indexWSP.jsp",
-        "vaccine_influenza_system_resident_automation_id": "edtPtntRrn1",
-    }
-    target = handoff._browser_input_target(settings)
-    assert target.activate(lambda: True)
-    assert target.ready()
-    state["url"] = "https://example.test/"
-    assert not target.ready()
-    assert handoff._browser_input_target(settings) is None
-    state["url"] = "https://ois.kdca.go.kr/covr/main"
-    assert not target.ready()
-    assert handoff._browser_input_target(settings) is None
-    state["url"] = "https://ois.kdca.go.kr/iroi/main"
-    windows.append(SimpleNamespace(**{**vars(window), "handle": 11}))
-    assert handoff._browser_input_target(settings) is None
-
-
-class _BrowserControl:
-    def __init__(self, identity=(42, 1)):
-        self.element_info = SimpleNamespace(
-            automation_id="edtPtntRrn1", control_type="Edit", runtime_id=identity,
-        )
-        self.document = None
-
-    def is_visible(self):
-        return True
-
-    def is_enabled(self):
-        return True
-
-    def parent(self):
-        return self.document
-
-    def set_focus(self):
-        pass
-
-    def get_value(self):
-        return "7001011000000"
-
-
-class _BrowserDocument:
-    def __init__(self, url, controls=()):
-        self.url = url
-        self.controls = controls
-        self.element_info = SimpleNamespace(control_type="Document", runtime_id=(42, id(self)))
-        for control in controls:
-            control.document = self
-
-    def is_visible(self):
-        return True
-
-    def get_value(self):
-        return self.url
-
-    def descendants(self, **kwargs):
-        assert kwargs == {"auto_id": "edtPtntRrn1", "control_type": "Edit"}
-        return self.controls
-
-
-def _browser_with_documents(monkeypatch, documents):
-    import pywinauto
-
-    window = SimpleNamespace(
-        handle=10, element_info=SimpleNamespace(class_name="Chrome_WidgetWin_1"),
-        set_focus=lambda: None, is_enabled=lambda: True,
-        descendants=lambda **kwargs: documents,
-    )
-    monkeypatch.setattr(pywinauto, "Desktop", lambda **kwargs: SimpleNamespace(windows=lambda: [window]))
-    monkeypatch.setattr(handoff, "foreground_handle", lambda: 10)
-    monkeypatch.setattr(handoff, "has_keyboard_focus", lambda control: True)
-    # Test the scoping contract, without touching a real UIA provider.
-    monkeypatch.setattr(handoff, "find_uia_elements_by_automation_ids", lambda ids, **kwargs: {
-        ids[0]: kwargs["root_element"].controls,
-    }, raising=False)
-    return {
-        "vaccine_influenza_system_launch_url": "https://ois.kdca.go.kr/iroi/indexWSP.jsp",
-        "vaccine_influenza_system_resident_automation_id": "edtPtntRrn1",
-    }
-
-
-def test_flu_input_is_found_after_other_ois_document(monkeypatch):
-    control = _BrowserControl()
-    settings = _browser_with_documents(monkeypatch, [
-        _BrowserDocument("https://ois.kdca.go.kr/iris/index_run.jsp"),
-        _BrowserDocument("https://ois.kdca.go.kr/iroi/main", [control]),
-    ])
-    target = handoff._browser_input_target(settings)
-    assert target is not None
-    assert target.activate(lambda: True)
-    assert target.ready()
-
-
-def test_flu_input_is_found_in_later_application_frame(monkeypatch):
-    control = _BrowserControl()
-    settings = _browser_with_documents(monkeypatch, [
-        _BrowserDocument("https://ois.kdca.go.kr/iroi/indexWSP.jsp"),
-        _BrowserDocument("https://ois.kdca.go.kr/iroi/patient", [control]),
-    ])
-    assert handoff._browser_input_target(settings) is not None
-
-
-def test_flu_input_seen_through_nested_documents_is_not_ambiguous(monkeypatch):
-    control = _BrowserControl()
-    outer = _BrowserDocument("https://ois.kdca.go.kr/iroi/indexWSP.jsp", [control])
-    inner = _BrowserDocument("https://ois.kdca.go.kr/iroi/patient", [control])
-    settings = _browser_with_documents(monkeypatch, [outer, inner])
-    target = handoff._browser_input_target(settings)
-    assert target is not None
-    assert target.ready()
-
-
-@pytest.mark.parametrize("owner_url", [
-    "https://example.test/iroi/patient",
-    "http://ois.kdca.go.kr/iroi/patient",
-    "https://ois.kdca.go.kr/covr/patient",
-    "https://ois.kdca.go.kr/iroi-elsewhere/patient",
-])
-def test_flu_input_in_untrusted_nested_document_is_rejected(monkeypatch, owner_url):
-    control = _BrowserControl()
-    outer = _BrowserDocument("https://ois.kdca.go.kr/iroi/indexWSP.jsp", [control])
-    inner = _BrowserDocument(owner_url, [control])
-    settings = _browser_with_documents(monkeypatch, [outer, inner])
-    assert handoff._browser_input_target(settings) is None
-
-
-def test_two_distinct_flu_fields_remain_ambiguous(monkeypatch):
-    document = _BrowserDocument("https://ois.kdca.go.kr/iroi/main", [
-        _BrowserControl((42, 1)), _BrowserControl((42, 2)),
-    ])
-    settings = _browser_with_documents(monkeypatch, [document])
-    assert handoff._browser_input_target(settings) is None
-
-
-def test_browser_focus_can_settle_before_typing(monkeypatch):
-    control = _BrowserControl()
-    settings = _browser_with_documents(monkeypatch, [
-        _BrowserDocument("https://ois.kdca.go.kr/iroi/main", [control]),
-    ])
-    focused = [False]
-    monkeypatch.setattr(handoff, "has_keyboard_focus", lambda _c: focused[0])
-    monkeypatch.setattr(handoff, "sleep", lambda _seconds: focused.__setitem__(0, True))
-    target = handoff._browser_input_target(settings)
-    assert target.activate(lambda: True)
-    assert target.ready()
-
-
-def test_navigation_during_focus_wait_aborts(monkeypatch):
-    control = _BrowserControl()
-    document = _BrowserDocument("https://ois.kdca.go.kr/iroi/main", [control])
-    settings = _browser_with_documents(monkeypatch, [document])
-    monkeypatch.setattr(handoff, "has_keyboard_focus", lambda _c: False)
-    monkeypatch.setattr(handoff, "sleep", lambda _s: setattr(document, "url", "https://example.test"))
-    target = handoff._browser_input_target(settings)
-    assert not target.activate(lambda: True)
-
-
 def test_readback_can_settle_without_retyping(input_target, monkeypatch):
     visible = [False]
     target = handoff._InputTarget(
@@ -379,121 +193,6 @@ def test_readback_wait_never_submits_after_focus_loss(input_target, monkeypatch)
     result = handoff.enter_vaccine_resident({}, handoff.VaccineHandoffRequest("influenza", "700101-1000000"))
     assert not result.success
     assert input_target["keys"] == ["^a"]
-
-
-def test_browser_accepts_exact_global_focus_when_field_flag_is_false(monkeypatch):
-    control = _BrowserControl()
-    settings = _browser_with_documents(monkeypatch, [
-        _BrowserDocument("https://ois.kdca.go.kr/iroi/main", [control]),
-    ])
-    monkeypatch.setattr(handoff, "has_keyboard_focus", lambda _c: False)
-    focused = [control]
-    monkeypatch.setattr(handoff, "focused_element", lambda: focused[0])
-    target = handoff._browser_input_target(settings)
-    assert target.activate(lambda: True)
-    assert target.ready()
-    focused[0] = _BrowserControl((42, 999))
-    assert not target.ready()
-
-
-def test_browser_uses_one_verified_click_when_uia_focus_does_not_take(monkeypatch):
-    control = _BrowserControl()
-    settings = _browser_with_documents(monkeypatch, [
-        _BrowserDocument("https://ois.kdca.go.kr/iroi/main", [control]),
-    ])
-    clock = [0.0]
-    monkeypatch.setattr(handoff, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(handoff, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
-    focused = [False]
-    clicks = []
-    monkeypatch.setattr(handoff, "has_keyboard_focus", lambda _c: focused[0])
-
-    def click(window, field, guard):
-        assert guard() and field is control
-        clicks.append(field)
-        focused[0] = True
-        return True
-
-    monkeypatch.setattr(handoff, "_click_verified_browser_input", click, raising=False)
-    target = handoff._browser_input_target(settings)
-    assert target.activate(lambda: True)
-    assert target.ready()
-    assert clicks == [control]
-
-
-@pytest.mark.parametrize("wrong", ["runtime", "automation_id", "control_type", "missing", "provider_error"])
-def test_global_focus_fallback_never_accepts_another_field(monkeypatch, wrong):
-    control = _BrowserControl()
-    focused = _BrowserControl()
-    monkeypatch.setattr(handoff, "has_keyboard_focus", lambda _c: False)
-    if wrong == "runtime":
-        focused.element_info.runtime_id = (42, 999)
-    elif wrong == "automation_id":
-        focused.element_info.automation_id = "other"
-    elif wrong == "control_type":
-        focused.element_info.control_type = "Document"
-    elif wrong == "missing":
-        focused.element_info.runtime_id = None
-    monkeypatch.setattr(handoff, "focused_element", lambda: focused)
-    if wrong == "provider_error":
-        monkeypatch.setattr(handoff, "focused_element", lambda: 1 / 0)
-    assert not handoff._browser_input_has_focus(control)
-
-
-@pytest.mark.parametrize("failure", ["", "covered", "other_window", "moved", "stopped", "lost_focus", "late_focus_loss"])
-def test_browser_click_is_bound_to_current_field_rectangle(monkeypatch, failure):
-    import pywinauto
-    import pyautogui
-
-    control = _BrowserControl()
-    rectangle = SimpleNamespace(left=100, top=200, right=200, bottom=240)
-    control.rectangle = lambda: rectangle
-    focused_window = [10]
-    monkeypatch.setattr(handoff, "foreground_handle", lambda: focused_window[0])
-    monkeypatch.setattr(handoff, "_screen_point_belongs_to_window", lambda *_args: failure != "other_window")
-    hits = []
-
-    def from_point(x, y):
-        hits.append((x, y))
-        if failure == "moved":
-            control.rectangle = lambda: SimpleNamespace(left=400, top=200, right=500, bottom=240)
-        if failure == "lost_focus":
-            focused_window[0] = 11
-        if failure == "late_focus_loss":
-            def rect():
-                focused_window[0] = 11
-                return rectangle
-            control.rectangle = rect
-        return _BrowserControl((42, 999)) if failure == "covered" else control
-
-    monkeypatch.setattr(pywinauto, "Desktop", lambda **_kw: SimpleNamespace(from_point=from_point))
-    clicks = []
-    monkeypatch.setattr(pyautogui, "click", lambda **kwargs: clicks.append(kwargs))
-    result = handoff._click_verified_browser_input(
-        SimpleNamespace(handle=10), control, lambda: failure != "stopped",
-    )
-    assert result is (not failure)
-    assert clicks == ([] if failure else [{"x": 150, "y": 220, "duration": 0}])
-    if not failure:
-        assert hits == [(150, 220)]
-
-
-def test_successful_click_alone_does_not_authorize_typing(monkeypatch):
-    control = _BrowserControl()
-    settings = _browser_with_documents(monkeypatch, [
-        _BrowserDocument("https://ois.kdca.go.kr/iroi/main", [control]),
-    ])
-    clock = [0.0]
-    monkeypatch.setattr(handoff, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(handoff, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
-    monkeypatch.setattr(handoff, "has_keyboard_focus", lambda _c: False)
-    clicks = []
-    monkeypatch.setattr(handoff, "_click_verified_browser_input", lambda *args: clicks.append(1) or True)
-    target = handoff._browser_input_target(settings)
-    assert not target.activate(lambda: True)
-    assert not target.ready()
-    assert "after clicking" in target.activation_error()
-    assert clicks == [1]
 
 
 @pytest.mark.parametrize("change,expected", [
@@ -524,19 +223,3 @@ def test_activation_reports_guard_failure_not_focus_failure(input_target, monkey
     assert expected in result.message
     assert "Wrong diagnosis" not in result.message
     assert input_target["typed"] == "" and input_target["keys"] == []
-
-
-def test_verified_global_focus_allows_digits_without_reprint(input_target, monkeypatch):
-    control = _BrowserControl()
-    settings = _browser_with_documents(monkeypatch, [
-        _BrowserDocument("https://ois.kdca.go.kr/iroi/main", [control]),
-    ])
-    control.get_value = lambda: input_target["typed"]
-    monkeypatch.setattr(handoff, "has_keyboard_focus", lambda _c: False)
-    monkeypatch.setattr(handoff, "focused_element", lambda: control)
-    target = handoff._browser_input_target(settings)
-    monkeypatch.setattr(handoff, "_resolve_input_target", lambda *_args: target)
-    result = handoff.enter_vaccine_resident(settings, handoff.VaccineHandoffRequest("influenza", "700101-1000000"))
-    assert result.success
-    assert input_target["typed"] == "7001011000000"
-    assert input_target["keys"] == ["^a", "{ENTER}"]

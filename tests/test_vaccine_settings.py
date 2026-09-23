@@ -245,6 +245,9 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     )
     assert targets.influenza_resident_x_input.value() == 2924
     assert targets.influenza_resident_y_input.value() == 1415
+    influenza_form = targets.influenza_resident_x_input.parentWidget().layout()
+    assert influenza_form.labelForField(targets.influenza_resident_x_input).text() == "Resident input X"
+    assert influenza_form.labelForField(targets.influenza_resident_y_input).text() == "Resident input Y"
     assert targets.covid_window_title_input.text() == "코로나19통합관리시스템"
     assert (
         targets.covid_launch_url_input.text()
