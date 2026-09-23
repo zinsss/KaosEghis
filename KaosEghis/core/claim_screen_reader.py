@@ -13,6 +13,7 @@ from KaosEghis.core.eghis_connector import get_cached_eghis_state
 
 
 CLAIM_WINDOW = "[청구] 청구내역집계"
+IDLE_BUILD_CAPTIONS = {"청구 집계 (F7)", "청구 집계 (F7) [집계 대기]"}
 MAX_ROWS = 128
 READ_SECONDS = 8.0
 MAX_LAYOUT_NODES = 128
@@ -215,6 +216,21 @@ class _ClaimReader:
             raise ClaimPreviewError("Claim history exceeds the bounded preview read.")
         return count
 
+    def check_query_ready(self, scope: Any, weekly: Any, build: Any) -> None:
+        self.check_time()
+        if not scope.is_visible() or not scope.is_enabled():
+            raise ClaimPreviewError("Claim screen is not ready.")
+        if not weekly.iface_selection_item.CurrentIsSelected:
+            raise ClaimPreviewError("Select 주단위 in EMR before reading.")
+        if not build.is_visible() or not build.is_enabled():
+            raise ClaimPreviewError("Wait until claim aggregation is idle before reading.")
+        # Both captured captions are allowed for a read-only preview. Do not
+        # accept a busy/unknown suffix just because it contains an idle phrase.
+        caption = " ".join((build.element_info.name or "").split())
+        if caption not in IDLE_BUILD_CAPTIONS:
+            raise ClaimPreviewError("Claim aggregation button state is not recognized as idle. No week was inferred.")
+        self.check_time()
+
     def snapshot(self, scope: Any) -> tuple:
         self.stage = "checking the claim window"
         self.check_time()
@@ -224,11 +240,8 @@ class _ClaimReader:
         filters = self.one(scope, "Pane", name="조회구분")
         self.stage = "checking weekly mode and aggregation status"
         weekly = self.one(filters, "RadioButton", name="rdoWeek")
-        if not weekly.iface_selection_item.CurrentIsSelected:
-            raise ClaimPreviewError("Select 주단위 in EMR before reading.")
         build = self.one(filters, "Button", automation_id="btnBuild")
-        if not build.is_enabled() or "[집계 대기]" not in build.element_info.name:
-            raise ClaimPreviewError("Wait until claim aggregation is idle before reading.")
+        self.check_query_ready(scope, weekly, build)
         self.stage = "reading the selected month and week selectors"
         month_control = self.one(filters, "ComboBox", automation_id="mpDemandYm")
         month = parse_claim_month(self.value(month_control))
@@ -267,5 +280,7 @@ class _ClaimReader:
             raise ClaimPreviewError("Claim list is incomplete or changed during the read.")
         if parse_claim_month(self.value(month_control)) != month:
             raise ClaimPreviewError("Selected claim month changed during the read.")
+        self.stage = "rechecking weekly mode and aggregation status"
+        self.check_query_ready(scope, weekly, build)
         self.check_time()
         return month, tuple(sorted(weeks)), available

@@ -64,11 +64,15 @@ Native handles and screen coordinates are intentionally not persisted.
 | Row month | Name `진료년월 row N`, DataItem | Row N |
 | Row week | Name `청구단위 row N`, DataItem | Row N |
 
-`rdoWeek` is not an Automation ID. `btnBuild` has the same idle caption
-`청구 집계 (F7) [집계 대기]` before and after an aggregation, so that caption
-cannot prove success. This version reads the caption only to reject busy states.
-It never clicks the button or sends F7, which has unrelated order-send behavior
-in the treatment room.
+`rdoWeek` is not an Automation ID. The read-only preview allows either known
+`btnBuild` caption: `청구 집계 (F7)` or `청구 집계 (F7) [집계 대기]`, with
+whitespace normalized. The button must also be visible and enabled. A busy or
+unrecognized caption blocks the read; merely containing `[집계 대기]` is not enough.
+The claim window, weekly-mode selection, and button state are checked before
+and after each snapshot. A permitted caption is not proof that loading or a
+previous aggregation finished; two matching complete snapshots are still required.
+The reader never clicks the button or sends F7, which has unrelated order-send
+behavior in the treatment room.
 
 ## Read Safety and Limitations
 
@@ -119,6 +123,12 @@ top-level claim window, in approximately 3 ms. It did not read patient fields,
 change focus/selections, or run aggregation. The narrowed lookup now uses that
 child-window path. Full live month/week reading still needs another preview run;
 the deadline, row-count checks, and two-snapshot requirement have not been relaxed.
+
+The next operator test reached the idle guard instead of timing out. The original
+guard required `[집계 대기]`, while the supplied claim-screen screenshots show the
+plain `청구 집계 (F7)` button. The reader now accepts that exact caption too, without
+bypassing disabled/hidden buttons or accepting arbitrary states. Live preview
+verification of the remaining month/week read is still required.
 
 ## Next Execution Stage (Not Implemented)
 

@@ -77,6 +77,70 @@ def test_reads_only_month_and_week_values():
     assert all(name.startswith("Row ") and children for name, children in setup.cell_scopes)
 
 
+@pytest.mark.parametrize("caption", [
+    "청구 집계 (F7)", "청구 집계 (F7) [집계 대기]",
+    "  청구   집계 (F7) \n [집계 대기]  ",
+])
+def test_supported_idle_captions_allow_read_only_preview(caption):
+    setup = make_reader(weeks=(3, 3, 2, 2, 1, 1))
+    setup.build.element_info.name = caption
+    assert setup.reader.snapshot(setup.scope)[1] == (1, 1, 2, 2, 3, 3)
+
+
+@pytest.mark.parametrize("caption", [
+    "", None, "청구 집계 (F7) [집계 중]", "청구 집계 (F7) [집계 대기] [진행 중]",
+    "PRIVATE UNRECOGNIZED CONTENT",
+])
+def test_unknown_or_busy_caption_blocks_before_reading_history(caption):
+    setup = make_reader()
+    setup.build.element_info.name = caption
+    with pytest.raises(ClaimPreviewError, match="not recognized as idle") as error:
+        setup.reader.snapshot(setup.scope)
+    assert "PRIVATE" not in str(error.value)
+    assert not setup.cell_scopes
+
+
+@pytest.mark.parametrize("caption", ["청구 집계 (F7)", "청구 집계 (F7) [집계 대기]"])
+@pytest.mark.parametrize("state", ["disabled", "hidden"])
+def test_supported_caption_does_not_override_disabled_or_hidden_button(caption, state):
+    setup = make_reader()
+    setup.build.element_info.name = caption
+    if state == "disabled":
+        setup.build.enabled = False
+    else:
+        setup.build.visible = False
+    with pytest.raises(ClaimPreviewError, match="Wait until claim aggregation is idle"):
+        setup.reader.snapshot(setup.scope)
+    assert not setup.cell_scopes
+
+
+@pytest.mark.parametrize("change", ["disabled", "hidden", "busy_caption", "monthly", "modal"])
+def test_readiness_change_during_row_read_discards_snapshot(change):
+    setup = make_reader()
+    original_value = setup.reader.value
+    last_week = setup.panel.nodes[-1].nodes[1]
+
+    def value(element):
+        result = original_value(element)
+        if element is last_week:
+            if change == "disabled":
+                setup.build.enabled = False
+            elif change == "hidden":
+                setup.build.visible = False
+            elif change == "busy_caption":
+                setup.build.element_info.name = "청구 집계 (F7) [집계 중]"
+            elif change == "monthly":
+                setup.mode.iface_selection_item.CurrentIsSelected = False
+            else:
+                setup.scope.enabled = False
+        return result
+
+    setup.reader.value = value
+    with pytest.raises(ClaimPreviewError):
+        setup.reader.snapshot(setup.scope)
+    assert setup.cell_scopes
+
+
 def test_confirmed_zero_rows_distinct_from_missing_table():
     setup = make_reader(())
     assert setup.reader.snapshot(setup.scope)[1] == ()
