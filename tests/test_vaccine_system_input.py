@@ -7,10 +7,11 @@ from KaosEghis.core import vaccine_system_input as handoff
 
 @pytest.fixture
 def input_target(monkeypatch):
-    state = {"focused": True, "typed": "", "keys": [], "activated": 0}
+    state = {"focused": True, "typed": "", "keys": [], "activated": 0, "events": []}
 
     def activate(guard):
         state["activated"] += 1
+        state["events"].append("activate")
         return guard() and state["focused"]
 
     target = handoff._InputTarget(
@@ -21,10 +22,18 @@ def input_target(monkeypatch):
     monkeypatch.setattr(handoff, "ensure_first_virtual_desktop", lambda: SimpleNamespace(success=True))
     monkeypatch.setattr(handoff, "first_virtual_desktop_is_active", lambda: True)
     monkeypatch.setattr(handoff, "_resolve_input_target", lambda *_args: target)
-    monkeypatch.setattr(handoff, "_send_keys", state["keys"].append)
+
+    def send_keys(keys):
+        state["keys"].append(keys)
+        state["events"].append(keys)
+        if keys == "{DELETE}":
+            state["typed"] = ""
+
+    monkeypatch.setattr(handoff, "_send_keys", send_keys)
 
     def type_digit(digit):
         state["typed"] += digit
+        state["events"].append(digit)
         return True
 
     monkeypatch.setattr(handoff, "_send_unicode_text", type_digit)
@@ -56,10 +65,14 @@ def test_handoff_charting_snapshot_is_transient_and_excluded_from_repr():
 
 @pytest.mark.parametrize("system", ["general", "covid", "influenza"])
 def test_handoff_sends_digits_and_exactly_one_enter(input_target, system):
+    input_target["typed"] = "previous field contents"
     result = handoff.enter_vaccine_resident({}, handoff.VaccineHandoffRequest(system, "700101-1000000"))
     assert result.success
     assert input_target["typed"] == "7001011000000"
-    assert input_target["keys"] == ["^a", "{ENTER}"]
+    assert input_target["keys"] == ["^a", "{DELETE}", "{ENTER}"]
+    assert input_target["events"] == [
+        "activate", "^a", "{DELETE}", *"7001011000000", "{ENTER}",
+    ]
     assert "700101" not in result.message
 
 
@@ -92,6 +105,37 @@ def test_handoff_fails_closed_before_input(input_target, monkeypatch, guard):
     assert input_target["keys"] == []
 
 
+@pytest.mark.parametrize("system", ["general", "covid", "influenza"])
+@pytest.mark.parametrize("after_key", ["^a", "{DELETE}"])
+@pytest.mark.parametrize("change", ["focus", "desktop", "cancelled", "busy", "timeout"])
+def test_interrupted_clearing_stops_before_next_input(input_target, monkeypatch, system, after_key, change):
+    stopped = [False]
+
+    def send_keys(keys):
+        input_target["keys"].append(keys)
+        if keys != after_key:
+            return
+        if change == "focus":
+            input_target["focused"] = False
+        elif change == "desktop":
+            monkeypatch.setattr(handoff, "first_virtual_desktop_is_active", lambda: False)
+        elif change == "cancelled":
+            stopped[0] = True
+        elif change == "busy":
+            monkeypatch.setattr(handoff, "_input_is_idle", lambda _ms: False)
+        elif change == "timeout":
+            monkeypatch.setattr(handoff, "monotonic", lambda: float("inf"))
+
+    monkeypatch.setattr(handoff, "_send_keys", send_keys)
+    result = handoff.enter_vaccine_resident(
+        {}, handoff.VaccineHandoffRequest(system, "700101-1000000"),
+        cancelled=lambda: stopped[0],
+    )
+    assert not result.success
+    assert input_target["typed"] == ""
+    assert input_target["keys"] == (["^a"] if after_key == "^a" else ["^a", "{DELETE}"])
+
+
 @pytest.mark.parametrize("change", ["focus", "desktop", "cancelled", "timeout"])
 @pytest.mark.parametrize("system", ["general", "covid", "influenza"])
 def test_interrupted_typing_never_sends_enter(input_target, monkeypatch, change, system):
@@ -113,7 +157,7 @@ def test_interrupted_typing_never_sends_enter(input_target, monkeypatch, change,
     )
     assert not result.success
     assert len(input_target["typed"]) == 1
-    assert input_target["keys"] == ["^a"]
+    assert input_target["keys"] == ["^a", "{DELETE}"]
 
 
 def test_readback_mismatch_does_not_submit(input_target, monkeypatch):
@@ -121,7 +165,7 @@ def test_readback_mismatch_does_not_submit(input_target, monkeypatch):
     monkeypatch.setattr(handoff, "_resolve_input_target", lambda *_args: target)
     result = handoff.enter_vaccine_resident({}, handoff.VaccineHandoffRequest("influenza", "700101-1000000"))
     assert not result.success
-    assert input_target["keys"] == ["^a"]
+    assert input_target["keys"] == ["^a", "{DELETE}"]
 
 
 @pytest.mark.parametrize("system", ["general", "influenza"])
@@ -137,7 +181,8 @@ def test_provider_exception_does_not_expose_resident(input_target, monkeypatch, 
     assert "{ENTER}" not in input_target["keys"]
 
 
-def test_native_target_rechecks_point_focus_and_window(input_target, monkeypatch):
+@pytest.mark.parametrize("system", ["general", "covid"])
+def test_native_target_rechecks_point_focus_and_window(input_target, monkeypatch, system):
     import sys
 
     state = {"title": "Test System", "focus": 20, "point": True, "clicks": []}
@@ -156,14 +201,14 @@ def test_native_target_rechecks_point_focus_and_window(input_target, monkeypatch
     monkeypatch.setattr(handoff, "_focused_native_handle", lambda: state["focus"])
     monkeypatch.setattr(handoff, "_focus_belongs_to_window", lambda *_args: True)
     settings = {
-        "vaccine_general_system_window_title": "Test System",
-        "vaccine_general_system_window_class": "TestClass",
-        "vaccine_general_system_resident_x": "40",
-        "vaccine_general_system_resident_y": "50",
+        f"vaccine_{system}_system_window_title": "Test System",
+        f"vaccine_{system}_system_window_class": "TestClass",
+        f"vaccine_{system}_system_resident_x": "40",
+        f"vaccine_{system}_system_resident_y": "50",
     }
-    target = handoff._native_input_target(settings, "general")
+    target = handoff._native_input_target(settings, system)
     assert target.activate(lambda: True)
-    assert state["clicks"] == [{"x": 40, "y": 50, "duration": 0}]
+    assert state["clicks"] == [{"x": 40, "y": 50, "clicks": 2, "interval": 0.1, "duration": 0}]
     assert target.ready()
     state["focus"] = 21
     assert not target.ready()
@@ -177,7 +222,7 @@ def test_native_target_rechecks_point_focus_and_window(input_target, monkeypatch
     assert not target.activate(lambda: False)
     assert len(state["clicks"]) == 1
     monkeypatch.setattr(handoff, "find_native_vaccine_windows", lambda *_args: [10, 11])
-    assert handoff._native_input_target(settings, "general") is None
+    assert handoff._native_input_target(settings, system) is None
 
 
 def test_readback_can_settle_without_retyping(input_target, monkeypatch):
@@ -191,7 +236,7 @@ def test_readback_can_settle_without_retyping(input_target, monkeypatch):
     result = handoff.enter_vaccine_resident({}, handoff.VaccineHandoffRequest("influenza", "700101-1000000"))
     assert result.success
     assert input_target["typed"] == "7001011000000"
-    assert input_target["keys"] == ["^a", "{ENTER}"]
+    assert input_target["keys"] == ["^a", "{DELETE}", "{ENTER}"]
 
 
 def test_readback_wait_never_submits_after_focus_loss(input_target, monkeypatch):
@@ -202,7 +247,7 @@ def test_readback_wait_never_submits_after_focus_loss(input_target, monkeypatch)
     monkeypatch.setattr(handoff, "sleep", lambda _s: input_target.__setitem__("focused", False))
     result = handoff.enter_vaccine_resident({}, handoff.VaccineHandoffRequest("influenza", "700101-1000000"))
     assert not result.success
-    assert input_target["keys"] == ["^a"]
+    assert input_target["keys"] == ["^a", "{DELETE}"]
 
 
 @pytest.mark.parametrize("change,expected", [

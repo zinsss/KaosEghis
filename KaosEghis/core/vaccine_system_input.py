@@ -136,7 +136,11 @@ def enter_vaccine_resident(
 
         if not ready():
             return VaccineHandoffResult(False, "Input focus was not confirmed. No number was typed.")
+        # Select all after the double-click so a formatted value is fully cleared.
         _send_keys("^a")
+        if not ready():
+            return VaccineHandoffResult(False, "Input focus changed before clearing. No number was typed.")
+        _send_keys("{DELETE}")
         type_digit = _send_digit_key if request.system == "influenza" else _send_unicode_text
         for digit in digits:
             if not ready() or not type_digit(digit):
@@ -222,7 +226,7 @@ def _native_input_target(settings: dict[str, str], system: str) -> _InputTarget 
 
         if not guard() or not _focus_native_window(handle) or not guard() or not window_ready():
             return False
-        pyautogui.click(x=x, y=y, duration=0)
+        pyautogui.click(x=x, y=y, clicks=2, interval=0.1, duration=0)
         focused = _focused_native_handle()
         return bool(focused) and window_ready() and _focus_belongs_to_window(focused, handle)
 
@@ -358,7 +362,7 @@ def _browser_input_target(settings: dict[str, str]) -> _InputTarget | None:
             return False
         if not guard() or not page_ready():
             return False
-        pyautogui.click(x=x, y=y, duration=0)
+        pyautogui.click(x=x, y=y, clicks=2, interval=0.1, duration=0)
 
         def capture_focus() -> bool:
             nonlocal focused

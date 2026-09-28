@@ -322,8 +322,10 @@ The post-print handoff uses the printed vaccine's configured external system,
 then the manually connected EMR:
 
 1. Verify and focus the expected system window.
-2. Resolve or click its configured resident-number input.
-3. Type the resident number with its hyphen removed.
+2. Double-click its configured resident-number input coordinate, select all with
+   `Ctrl+A` (including any formatting separators), then send `Delete`.
+3. Type all 13 resident-number digits with the hyphen removed. Recheck the target
+   before clearing and before each digit; stop if focus or desktop changes.
 4. Send one `Enter` to request that system's patient lookup.
 5. After confirmed input dispatch, copy the corresponding charting text to the clipboard.
 6. Once all requested lookups have been dispatched, focus EMR and send `F1`,
@@ -399,8 +401,8 @@ The captured targets are used only after explicit post-print consent:
   `CyWindowClass`, with resident-number input coordinate `(448, 2074)` because the
   input does not expose a distinct UIA control. Its configured non-clinical
   session-reset coordinate is `(1154, 1968)`.
-- Influenza browser system: click the configured resident-number input coordinate
-  (default capture `(2924, 1415)`), select existing contents with Ctrl+A, type all
+- Influenza browser system: double-click the configured resident-number input coordinate
+  (default capture `(2924, 1415)`), select existing contents with Ctrl+A, send Delete, type all
   13 digits without the hyphen using ordinary digit-key events
   (`vk_packet=False`, not Unicode packets or clipboard paste), then send one Enter.
   The `Resident input X/Y` settings are the primary entry target, not a fallback.
