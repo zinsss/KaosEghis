@@ -17,7 +17,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from KaosEghis.core.eghis_connector import get_cached_eghis_state
 from KaosEghis.core.emr_activation_probe import UiaActivationListener
 from KaosEghis.core.emr_chart_probe import ChartFieldObservation, ChartTarget, UiaChartListener
-from KaosEghis.core.emr_refresh_probe import ClearRefreshDryRun, F1CaretProbe
+from KaosEghis.core.emr_refresh_probe import ClearRefreshDryRun
 from KaosEghis.core.ui_capture import _best_text_value
 from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
@@ -85,7 +85,7 @@ class ChartClearObservation:
 
     def status_text(self) -> str:
         detail = (
-            f"Chart {self.chart_no} -> waiting for F1 caret "
+            f"Chart {self.chart_no} -> waiting {ClearRefreshDryRun.SETTLE_SECONDS:g} s before refresh "
             f"(dry run; previous snapshot {self.age_ms} ms)"
             if self.chart_no else
             "Refresh skipped (previous chart snapshot not fresh; dry run)"
@@ -170,24 +170,6 @@ class Win32SignalReader:
 
     def modifiers_down(self) -> bool:
         return any(self.api.GetAsyncKeyState(key) & 0x8000 for key in (16, 17, 18, 91, 92))
-
-    def caret_context(self, scope: SignalScope) -> tuple[int, int] | None:
-        if not self.keyboard_context(scope):
-            return None
-        info = _GuiThreadInfo(cbSize=ctypes.sizeof(_GuiThreadInfo))
-        if not self.user32.GetGUIThreadInfo(0, ctypes.byref(info)):
-            return None
-        focus, caret = int(info.hwndFocus or 0), int(info.hwndCaret or 0)
-        if (info.flags & 0x1E or int(info.hwndActive or 0) != scope.root
-                or info.rcCaret.bottom <= info.rcCaret.top
-                or not self._belongs(focus, caret)):
-            return None
-        for handle in (focus, caret):
-            if (not self._belongs(scope.treatment, handle)
-                    or self.process.GetWindowThreadProcessId(handle)[1] != scope.pid
-                    or not self.gui.IsWindowVisible(handle) or not self.gui.IsWindowEnabled(handle)):
-                return None
-        return (focus, caret) if self.keyboard_context(scope) else None
 
     def button_at(self, snapshot: SignalSnapshot, point: tuple[int, int]) -> str | None:
         if not self._live(snapshot.scope, require_foreground=False):
@@ -645,15 +627,13 @@ class EmrSignalProbeRuntime(QObject):
 
     def __init__(self, parent=None, *, reader_factory=Win32SignalReader,
                  listener_factory=_listeners, state_provider=get_cached_eghis_state,
-                 activation_factory=UiaActivationListener, chart_factory=UiaChartListener,
-                 readiness_factory=F1CaretProbe):
+                 activation_factory=UiaActivationListener, chart_factory=UiaChartListener):
         super().__init__(parent)
         self.reader_factory = reader_factory
         self.listener_factory = listener_factory
         self.state_provider = state_provider
         self.activation_factory = activation_factory
         self.chart_factory = chart_factory
-        self.readiness_factory = readiness_factory
         self._output = queue.Queue(maxsize=64)
         self._stop = threading.Event()
         self._thread = None
@@ -708,7 +688,6 @@ class EmrSignalProbeRuntime(QObject):
             reader = self.reader_factory()
             sampler = EmrSignalSampler(reader, self.state_provider)
             capture = EmrSignalCapture(reader, self._output, self.state_provider)
-            readiness = self.readiness_factory(reader)
             self._capture = capture
             self._listeners = self.listener_factory(capture)
             for listener in self._listeners:
@@ -733,8 +712,7 @@ class EmrSignalProbeRuntime(QObject):
                 except Exception:
                     capture.update_snapshot(None)
                 capture.refresh_probe.tick(
-                    lambda: connected_scope(self.state_provider()) if capture.enabled and not self._stop.is_set() else None,
-                    readiness.check,
+                    connected_scope(self.state_provider()) if capture.enabled and not self._stop.is_set() else None,
                 )
                 if activation is not None:
                     try:

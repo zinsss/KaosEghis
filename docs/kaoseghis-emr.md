@@ -6,7 +6,7 @@ Status: the shared DB manager is still a design. F6/F7 observations write to the
 existing Launcher status area without changing DB polling or EMR data. The shared
 chart observer now also schedules the read-only `***` patient-memo alert, replacing
 that alert's separate polling loop. Confirmed chart clears additionally report a
-dry-run PACS/Orders refresh candidate that waits for passive F1 caret readiness;
+dry-run PACS/Orders refresh candidate that waits for a two-second settling delay;
 they do not enqueue database work.
 
 ## Observation-Only Probe
@@ -187,11 +187,15 @@ than F6/F7 key/button input. The previous patient's status and orders would be
 read after clearing; a clear is not itself proof of completed/saved orders.
 Switching patients can clear the field too.
 
+The first caret-gated dry run was replaced after live use confirmed that F6/F7
+does not automatically return the caret to F1. Refresh observation must not depend
+on opening another patient or moving keyboard focus.
+
 The existing Launcher status area now shows a separate diagnostic, for example:
 
 ```text
-EMR probe | Chart cleared (UIA Name) | Chart 1234 -> waiting for F1 caret (dry run; previous snapshot 100 ms)
-EMR probe | Chart 1234 | F1 caret ready -> would query PACS/Orders for this previous patient; waited 2.0 s; DB commit unverified (dry run)
+EMR probe | Chart cleared (UIA Name) | Chart 1234 -> waiting 2 s before refresh (dry run; previous snapshot 100 ms)
+EMR probe | Chart 1234 | 2 s delay elapsed -> would query PACS/Orders for this previous patient; waited 2.0 s; DB commit unverified (dry run)
 ```
 
 - A verified sampled patient context must exist before the clear. Numeric event
@@ -209,28 +213,21 @@ EMR probe | Chart 1234 | F1 caret ready -> would query PACS/Orders for this prev
   disconnection, and EMR restart are not clear triggers. A different unverified
   patient cannot inherit the old patient's refresh candidate.
 - Each fresh clear retains the departing patient independently of the next patient.
-  Readiness does not substitute the currently displayed chart or require the old
+  Dispatch does not substitute the currently displayed chart or require the old
   chart to remain visible. The 750-ms rule applies at capture, not after waiting.
-- `core/emr_refresh_probe.py` observes a native caret in focused, visible, enabled
-  treatment entry. A bounded UIA ancestor walk must identify the active profile's
-  configured `sx` field, its explicit scope (currently `TreatmentSymp`), and the
-  connected treatment HWND/Automation ID. A generic RichTextBox alone is not enough.
-  Claim screens, other editors, menus, modals, wrong processes and changed focus
-  cannot satisfy the check. No F1 keypress, click, focus change, or text read is used.
-- Require two fresh ready samples after the clear, at least 500 ms apart. Reads
-  lasting over one second are rejected. A caret indicates UI usability only, not
-  completed loading, successful saving, or committed DB changes. Some controls may
-  not expose a native caret at all; this dry run intentionally reports unavailable
-  instead of accepting a weaker signal. Live verification is still required.
-- While tickets exist, passive checks run at most twice per second in the existing
-  MTA worker, never in hooks or the GUI thread. The local KaosEghis SQLite settings
-  connection is read-only and closed immediately; the F1 target is loaded lazily
-  once per EMR scope. Restart KaosEghis after editing `sx` settings. No EMR database
-  connection is opened. No descendant tree scans or symptom Name/Value reads occur.
-- After 15 seconds, report deferred waiting once and reduce checks to every two
-  seconds. A ticket can still become ready. At 120 seconds, explicitly expire the
-  diagnostic with no query; no indefinite extra UIA polling. Disconnect/restart
-  cancels pending tickets, and stopping the probe discards them and late results.
+- `core/emr_refresh_probe.py` uses a monotonic two-second delay per clear. A new
+  patient or duplicate observation cannot restart another patient's timer. Reloads
+  have distinct context revisions. No caret, F1 target configuration, text read,
+  foreground focus or new-patient load is required after a candidate is captured.
+- The existing MTA worker checks due times during its normal loop. It does not
+  sleep for each ticket, create a new timer/thread, inspect extra UIA controls, load
+  local settings, or open any DB connection. It never presses F1, types or clicks.
+  Scheduling may make the diagnostic later than two seconds, but not earlier; the
+  message includes actual elapsed time. The delay does not prove UI readiness,
+  completed loading, successful saving, or committed DB changes.
+- Disconnect/restart cancels pending candidates. Stopping the probe discards them
+  and late results. A candidate held for 120 seconds (for example during a worker
+  stall) explicitly expires without a query; invalid timing also cancels it.
   Pending diagnostics are bounded to 32; overflow is reported, never treated as
   success. This temporary in-memory queue is not the planned durable DB work queue.
 - Chart numbers stay in memory and the existing bounded status area, not files or
@@ -243,16 +240,18 @@ EMR probe | Chart 1234 | F1 caret ready -> would query PACS/Orders for this prev
 
 After restarting, observe normal F6, F7, and both button workflows, patient
 switching, and same-patient reloads. Expect a waiting line, then at most one
-`F1 caret ready -> would query` line per load/clear cycle, with the patient who just
+`2 s delay elapsed -> would query` line per load/clear cycle, with the patient who just
 left, not the next patient. Note skipped, missing, duplicate, or wrong-patient
-candidates, especially across print/confirmation dialogs. Check whether the last
-patient of the day ever gets F1 readiness without another patient loading. Send
-the waiting/ready/deferred lines for evaluation. Do not send clinical orders solely
+candidates, especially across print/confirmation dialogs. Include the last patient
+without loading another patient or pressing F1. Send the waiting/due/cancelled
+lines for evaluation. Do not send clinical orders solely
 to test this observer. PACS remains on its existing polling path throughout.
 
 Only after live validation should this feed the planned single-connection read-only
 manager, with a settling period, bounded reconciliation, and explicit reads of
-completed/held/cancelled reception status and orders. Removing F6/F7 listeners or
+completed/held/cancelled reception status and orders. That future source read must
+establish actual status and use bounded retries when needed; a delay alone must
+not justify downstream cancellation or completion. Removing F6/F7 listeners or
 replacing PACS polling is a later change; clears may not cover edits that leave a
 chart open or changes made on other workstations.
 
@@ -288,8 +287,8 @@ Automation ID remains `TreatmentPtntMemo`.
 The UIA activation and chart listeners add no chart polling or database calls.
 They reuse the existing two button handles and roughly 250-ms chart sampling.
 That sampling still has UIA/provider cost: the whole diagnostic is not event-only.
-Pending clear diagnostics additionally inspect F1 caret/focus with the bounded
-rates above; there are no extra F1 checks when no clear is pending.
+Pending clear diagnostics only check in-memory deadlines and cached connection
+identity. The earlier F1 caret/focus probe and local target lookup have been removed.
 Subscriptions are element-scoped, never desktop-wide. Event handlers use a bounded
 queue and perform no synchronous UI update. No resource benchmark against EMR's
 30-second PACS DB polling has been claimed. A future event-triggered DB queue may
@@ -312,8 +311,10 @@ KaosOrders, on-demand flu reporting, and patient-context database lookups.
 - Observe F6/F7 and the verified BtnF6/BtnF7 controls without suppressing, replaying,
   or generating those inputs. Signals indicate intent, not successful order saves.
 - Capture verified chart identity before the EMR action opens another window.
-- Use the fixed per-chart 20-second reconciliation delay in
-  [KaosOrders signal capture](kaosorders.md); a different chart has its own timer.
+- Validate the clear-triggered two-second candidate delay above before DB cutover.
+  The earlier per-chart 20-second F7 proposal in
+  [KaosOrders signal capture](kaosorders.md) is not the current clear-triggered dry
+  run, and neither proposal has enabled the shared DB queue yet.
 - Reconcile actual source states before delivering minimal data to the PACS and
   KaosOrders adapters. These adapters retain their own domain and delivery logic.
 - Run flu reporting only on explicit request. Prefer small source reads and local

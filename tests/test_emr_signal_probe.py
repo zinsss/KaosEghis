@@ -184,7 +184,7 @@ def test_confirmed_clear_reports_previous_chart_once_across_all_sources(capture,
     assert observation.source == ("sampled" if first_source == "sample" else "UIA Name")
     assert observation.chart_no == "001234"
     assert observation.age_ms == 100
-    assert "waiting for F1 caret" in observation.status_text()
+    assert "waiting 2 s before refresh" in observation.status_text()
     assert "dry run" in observation.status_text()
     assert "001234" not in repr(observation)
     assert capture.patient_context is None
@@ -297,7 +297,7 @@ def test_clear_callback_does_not_read_live_chart_or_scan(capture):
     assert len(clear_observations(capture)) == 1
 
 
-def test_f1_readiness_after_new_patient_load_still_targets_departing_patient(capture):
+def test_settle_delay_after_new_patient_load_still_targets_departing_patient(capture):
     snapshot = capture.snapshot
     capture.update_snapshot(snapshot)
     capture.chart_property_event(snapshot.scope, "Name", "")
@@ -307,16 +307,16 @@ def test_f1_readiness_after_new_patient_load_still_targets_departing_patient(cap
     capture.update_snapshot(replace(snapshot, chart_no="000456", sampled_at=10.4))
     assert capture.patient_context.chart_no == "000456"
     clear_observations(capture)
-    for at in (10.5, 11.0):
+    for at in (10.5, 12.1):
         capture.test_clock[0] = at
-        capture.refresh_probe.tick(lambda: snapshot.scope, lambda scope: (True, "F1 caret ready"))
+        capture.refresh_probe.tick(snapshot.scope)
     message = capture.output.get_nowait()
     assert "Chart 001234" in message and "would query PACS/Orders" in message
     assert "000456" not in message
     assert capture.output.empty()
 
 
-def test_dropped_status_does_not_drop_pending_readiness_check(capture):
+def test_dropped_status_does_not_drop_pending_delayed_candidate(capture):
     snapshot = capture.snapshot
     capture.update_snapshot(snapshot)
     clear_observations(capture)
@@ -324,9 +324,9 @@ def test_dropped_status_does_not_drop_pending_readiness_check(capture):
         capture.output.put_nowait("diagnostic")
     capture.chart_property_event(snapshot.scope, "Name", "")
     clear_observations(capture)
-    for at in (10.5, 11.0):
+    for at in (10.5, 12.1):
         capture.test_clock[0] = at
-        capture.refresh_probe.tick(lambda: snapshot.scope, lambda scope: (True, "F1 caret ready"))
+        capture.refresh_probe.tick(snapshot.scope)
     assert "would query PACS/Orders" in capture.output.get_nowait()
 
 
@@ -385,7 +385,7 @@ def test_runtime_displays_clear_candidate_as_text_and_still_clears_patient(captu
         capture.chart_property_event(snapshot.scope, "Name", "")
         runtime._drain()
         assert contexts == [context, None]
-        assert len([line for line in messages if "waiting for F1 caret" in line]) == 1
+        assert len([line for line in messages if "waiting 2 s before refresh" in line]) == 1
         assert any("Chart 001234" in line and "dry run" in line for line in messages)
     finally:
         runtime.stop()
@@ -799,23 +799,22 @@ def test_runtime_starts_once_stops_and_discards_late_signals():
     assert application is not None
 
 
-def test_runtime_checks_f1_only_for_pending_clear_on_existing_background_worker():
+def test_runtime_delays_clear_without_caret_or_focus_on_existing_background_worker(monkeypatch):
     application = app()
     listeners = (Listener(), Listener())
-    checked = []
-    ready = threading.Event()
+    dispatched = []
 
-    def check(scope):
-        checked.append(threading.get_ident())
-        if len(checked) >= 2:
-            ready.set()
-        return True, "F1 caret ready"
+    class TrackingDryRun(probe.ClearRefreshDryRun):
+        def _message(self, ticket, detail):
+            dispatched.append((threading.get_ident(), time.monotonic()))
+            super()._message(ticket, detail)
+
+    monkeypatch.setattr(probe, "ClearRefreshDryRun", TrackingDryRun)
 
     runtime = probe.EmrSignalProbeRuntime(
         reader_factory=Reader, listener_factory=lambda capture: listeners, state_provider=state,
         activation_factory=lambda *args: SimpleNamespace(sync=lambda *args: None, close=lambda: None),
         chart_factory=lambda *args: SimpleNamespace(sync=lambda *args: None, close=lambda: None),
-        readiness_factory=lambda reader: SimpleNamespace(check=check),
     )
     messages = []
     runtime.status_message.connect(messages.append)
@@ -825,15 +824,18 @@ def test_runtime_checks_f1_only_for_pending_clear_on_existing_background_worker(
         while runtime._capture is None or runtime._capture.patient_context is None:
             assert time.monotonic() < deadline
             time.sleep(0.01)
-        assert not checked
+        assert not dispatched
+        cleared_at = time.monotonic()
         runtime._capture.chart_property_event(probe.connected_scope(state()), "Name", "")
-        assert ready.wait(3)
-        deadline = time.monotonic() + 3
+        runtime._capture.reader.active = False
+        deadline = time.monotonic() + 5
         while not any("would query PACS/Orders" in message for message in messages):
             assert time.monotonic() < deadline
             runtime._drain()
             time.sleep(0.01)
-        assert {ident for ident in checked} == {runtime._thread.ident}
+        assert len(dispatched) == 1
+        assert dispatched[0][0] == runtime._thread.ident
+        assert dispatched[0][1] - cleared_at >= 2.0
         assert runtime._thread.ident != threading.get_ident()
     finally:
         runtime.stop()
