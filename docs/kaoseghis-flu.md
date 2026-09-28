@@ -1,6 +1,6 @@
 # KaosEghis Flu
 
-Last updated: 2026-09-22
+Last updated: 2026-09-28
 
 Project name: `KaosEghis-flu`
 
@@ -112,6 +112,51 @@ connection closure, and left zero probe sessions in `pg_stat_activity`. This val
 cleanup/timeout behavior only; it does not reproduce or resolve the EMR slowdown.
 
 Reference: [PostgreSQL 9.2 statement timeout](https://www.postgresql.org/docs/9.2/runtime-config-client.html).
+
+### Prescription-Loading Timeout (2026-09-28)
+
+The operator reported the error beginning with the second patient after running
+flu-report. Prescription loading fails, then succeeds on retry. The provided EMR
+dialog reports `System.TimeoutException` in this call path:
+
+```text
+PipeConnector.ReplyFrom32dll -> PipeConnector.Request32dll
+DrugPriceCalcWrap.ExpPharmFee -> DrugPriceCalcService.GetDrugPriceResult
+DrugPriceCalcService.CalcDrugFeeByInOutGb -> PrintSlipPresenter.CalcDrugFeeByInOutGb
+PrintSlip.SetAmt -> PrintSlip_Load
+```
+
+This identifies the timed-out operation as EMR's interop reply during drug-fee
+calculation. It does not identify why that reply was late, prove a PostgreSQL
+timeout, or prove that flu-report is unrelated. No patient information from the
+screenshot is retained here.
+
+The existing local diagnostic for the 17:10:02 KST week-39 report records:
+
+- outcome `loaded`; total worker/report elapsed time 0.1013 s
+- DB connected at 0.0734 s; query began after timeout setup at 0.0740 s
+- query finished and rows fetched at 0.0981 s (about 24 ms after timeout setup)
+- cursor closed at 0.0981 s; connection close returned at 0.0982 s
+
+These are cumulative client-side timings, not a server-side activity trace. They
+argue against a long-running or retained flu connection in this occurrence, but
+cannot rule out transient overlap or indirect effects. The code runs one query,
+closes its connection, emits aggregate results and returns; no continuing flu
+poller or call to the displayed EMR helper was found. PACS is still an independent
+polling path; the proposed serialized DB owner has not been activated.
+
+A later passive OS snapshot found an EMR-owned `ClientProxy.exe`, but its role in
+this calculation is unconfirmed. Its name alone must not be used to identify,
+terminate or restart the failing helper. Current resource snapshots cannot
+reconstruct conditions at the earlier timeout.
+
+No report was rerun, source DB query issued, EMR input sent, or process restarted
+for this investigation. No runtime fix is claimed. The next useful isolation is
+operator-approved observation across several normal patients with KaosEghis
+temporarily closed, leaving EMR open. This suspends Kaos automations and PACS sync;
+it must not happen automatically. A single successful retry is not a useful
+comparison because retry success is already part of the reported symptom. Pair
+the timing evidence with the sanitized stack for vendor-side helper diagnostics.
 
 ## Relation to Practice-Count Reporting
 
