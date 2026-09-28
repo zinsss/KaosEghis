@@ -1,12 +1,13 @@
 # KaosEghis-emr
 
-Last updated: 2026-09-23
+Last updated: 2026-09-28
 
 Status: the shared DB manager is still a design. F6/F7 observations write to the
 existing Launcher status area without changing DB polling or EMR data. The shared
 chart observer now also schedules the read-only `***` patient-memo alert, replacing
 that alert's separate polling loop. Confirmed chart clears additionally report a
-dry-run PACS/Orders refresh candidate; they do not yet enqueue database work.
+dry-run PACS/Orders refresh candidate that waits for passive F1 caret readiness;
+they do not enqueue database work.
 
 ## Observation-Only Probe
 
@@ -189,7 +190,8 @@ Switching patients can clear the field too.
 The existing Launcher status area now shows a separate diagnostic, for example:
 
 ```text
-EMR probe | Chart cleared (UIA Name) | Chart 1234 -> would refresh PACS/Orders (dry run; previous snapshot 100 ms)
+EMR probe | Chart cleared (UIA Name) | Chart 1234 -> waiting for F1 caret (dry run; previous snapshot 100 ms)
+EMR probe | Chart 1234 | F1 caret ready -> would query PACS/Orders for this previous patient; waited 2.0 s; DB commit unverified (dry run)
 ```
 
 - A verified sampled patient context must exist before the clear. Numeric event
@@ -206,20 +208,47 @@ EMR probe | Chart cleared (UIA Name) | Chart 1234 -> would refresh PACS/Orders (
 - Missing/non-text/non-numeric payloads, unreadable samples, focus loss,
   disconnection, and EMR restart are not clear triggers. A different unverified
   patient cannot inherit the old patient's refresh candidate.
-- This uses existing observations only: no extra UIA reads, timers, input, DB
-  queries, actual refresh queue, or downstream delivery. Chart numbers stay in
-  memory and the existing bounded status area, not logs/files/network traffic.
-  Queue overload still reports dropped observations; it is not reliable job delivery.
+- Each fresh clear retains the departing patient independently of the next patient.
+  Readiness does not substitute the currently displayed chart or require the old
+  chart to remain visible. The 750-ms rule applies at capture, not after waiting.
+- `core/emr_refresh_probe.py` observes a native caret in focused, visible, enabled
+  treatment entry. A bounded UIA ancestor walk must identify the active profile's
+  configured `sx` field, its explicit scope (currently `TreatmentSymp`), and the
+  connected treatment HWND/Automation ID. A generic RichTextBox alone is not enough.
+  Claim screens, other editors, menus, modals, wrong processes and changed focus
+  cannot satisfy the check. No F1 keypress, click, focus change, or text read is used.
+- Require two fresh ready samples after the clear, at least 500 ms apart. Reads
+  lasting over one second are rejected. A caret indicates UI usability only, not
+  completed loading, successful saving, or committed DB changes. Some controls may
+  not expose a native caret at all; this dry run intentionally reports unavailable
+  instead of accepting a weaker signal. Live verification is still required.
+- While tickets exist, passive checks run at most twice per second in the existing
+  MTA worker, never in hooks or the GUI thread. The local KaosEghis SQLite settings
+  connection is read-only and closed immediately; the F1 target is loaded lazily
+  once per EMR scope. Restart KaosEghis after editing `sx` settings. No EMR database
+  connection is opened. No descendant tree scans or symptom Name/Value reads occur.
+- After 15 seconds, report deferred waiting once and reduce checks to every two
+  seconds. A ticket can still become ready. At 120 seconds, explicitly expire the
+  diagnostic with no query; no indefinite extra UIA polling. Disconnect/restart
+  cancels pending tickets, and stopping the probe discards them and late results.
+  Pending diagnostics are bounded to 32; overflow is reported, never treated as
+  success. This temporary in-memory queue is not the planned durable DB work queue.
+- Chart numbers stay in memory and the existing bounded status area, not files or
+  network traffic. The existing status queue can drop lines under overload and
+  reports its count, but dropping a clear line does not drop the pending ticket.
 - Memo cancellation still happens on clear, even if the diagnostic candidate is
   skipped or its status queue is full. F6/F7 diagnostics and existing PACS polling
   remain unchanged for comparison. The five-second memo delay is also unchanged;
   caret/readiness-based memo triggering has not been implemented.
 
 After restarting, observe normal F6, F7, and both button workflows, patient
-switching, and same-patient reloads. Expect at most one dry-run refresh line per
-load/clear cycle, with the patient who just left, not the next patient. Note skipped,
-missing, duplicate, or wrong-patient candidates, especially across print/confirmation
-dialogs. Do not send clinical orders solely to test this observer.
+switching, and same-patient reloads. Expect a waiting line, then at most one
+`F1 caret ready -> would query` line per load/clear cycle, with the patient who just
+left, not the next patient. Note skipped, missing, duplicate, or wrong-patient
+candidates, especially across print/confirmation dialogs. Check whether the last
+patient of the day ever gets F1 readiness without another patient loading. Send
+the waiting/ready/deferred lines for evaluation. Do not send clinical orders solely
+to test this observer. PACS remains on its existing polling path throughout.
 
 Only after live validation should this feed the planned single-connection read-only
 manager, with a settling period, bounded reconciliation, and explicit reads of
@@ -259,6 +288,8 @@ Automation ID remains `TreatmentPtntMemo`.
 The UIA activation and chart listeners add no chart polling or database calls.
 They reuse the existing two button handles and roughly 250-ms chart sampling.
 That sampling still has UIA/provider cost: the whole diagnostic is not event-only.
+Pending clear diagnostics additionally inspect F1 caret/focus with the bounded
+rates above; there are no extra F1 checks when no clear is pending.
 Subscriptions are element-scoped, never desktop-wide. Event handlers use a bounded
 queue and perform no synchronous UI update. No resource benchmark against EMR's
 30-second PACS DB polling has been claimed. A future event-triggered DB queue may
