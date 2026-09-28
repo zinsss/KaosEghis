@@ -114,12 +114,29 @@ while preparing/saving separate records before printing; it clears the record
 reference and vaccine selection. Once post-print system entry succeeds or is skipped,
 the form is cleared and another fetch is needed for a separate preparation.
 
-After a successful fetch, KaosEghis keeps only the transient Patient Information scope
-handle in memory for the connected eGHIS PID. The next explicit fetch tries that handle
-first, avoiding process/window enumeration when eGHIS has kept the view alive. If the
-handle is stale because `{ESC}` destroyed or recreated the view, it is discarded and the
-newly opened form is resolved once and replaces the cache. No patient values, UIA
-wrappers, or handles are written to SQLite.
+The first successful explicit fetch discovers and caches the Patient Information scope
+and its available native field controls. Nothing opens or preloads this window at app
+startup. The cache retains only handles and identity metadata, never patient values or
+UIA wrappers, and is not written to SQLite. Each fetch still opens the view normally.
+
+On a repeat fetch, fresh UIA wrappers are acquired directly from the cached handles.
+The connected window, process creation times, scope/control runtime IDs, Automation IDs,
+control types, visibility, and native child ownership must still match. Valid cached
+fields avoid another descendant search and always read current values. A missing or
+replaced control, changed settings, recreated popup, or restarted EMR invalidates the
+cache and uses normal discovery to rebuild it. No COM objects are shared across threads.
+
+Missing fields are searched again rather than treating their absence as permanent.
+Controls without verifiable native handles retain the existing lookup path; a scope
+without a native handle cannot use the field cache. For a cacheable fetch, the chart
+number is reread after the other values: if it changes or clears, no patient context is
+accepted and the cache is discarded. This verifies consistency during the read, not
+completion of all EMR background loading.
+
+Regression tests demonstrate two descendant searches on first fetch and none on a
+fully cached repeat fetch, including a switch to a different patient's fresh values.
+Live elapsed-time improvement remains to be measured on the operator's EMR. Fetch is
+still synchronous; moving it off the GUI thread is a separate change.
 
 The opened window is a resolved pywinauto UIA wrapper, so target lookup indexes its
 descendants by exact Automation ID. All configured patient fields are read from one

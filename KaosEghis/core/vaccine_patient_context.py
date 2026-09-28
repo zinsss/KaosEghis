@@ -10,6 +10,7 @@ from typing import Any, Callable
 from KaosEghis.core.eghis_connector import ensure_cached_connection_ready
 from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 from KaosEghis.core.vaccine_eligibility import birth_date_from_resident_id
+from KaosEghis.core.vaccine_patient_control_cache import PatientControlCache
 
 
 DEFAULT_PATIENT_INFO_OPEN_COORDINATES = (210, 115)
@@ -45,6 +46,8 @@ class VaccinePatientFetchResult:
 class _PatientInformationResolution:
     scope: Any
     chart_value: str
+    chart_element: Any | None = None
+    cached_elements: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,7 @@ class _PatientInformationScopeCache:
     root_pid: int
     chart_automation_id: str
     scope_handle: int
+    controls: PatientControlCache | None = None
 
 
 _PATIENT_INFORMATION_SCOPE_CACHE: dict[
@@ -151,6 +155,13 @@ def fetch_vaccine_patient_context(
             None,
         )
 
+    field_automation_ids = {
+        field_name: _field_automation_id_candidates(field_name, automation_id)
+        for field_name, automation_id in target_automation_ids.items()
+        if field_name != "chart_no"
+    }
+    selectors = {"chart_no": (chart_automation_id,), **field_automation_ids}
+    root_handle = getattr(state, "window_handle", None)
     deadline = clock() + max(float(timeout_seconds), 0.1)
     patient_resolution = None
     while clock() <= deadline:
@@ -158,6 +169,8 @@ def fetch_vaccine_patient_context(
             desktop,
             int(state.pid),
             chart_automation_id,
+            root_handle=root_handle,
+            selectors=selectors,
         )
         if patient_resolution is not None:
             break
@@ -188,21 +201,19 @@ def fetch_vaccine_patient_context(
             None,
         )
 
-    field_automation_ids = {
-        field_name: _field_automation_id_candidates(field_name, automation_id)
-        for field_name, automation_id in target_automation_ids.items()
-        if field_name != "chart_no"
-    }
+    elements_by_id = dict(patient_resolution.cached_elements or {})
     configured_ids = {
         automation_id
         for candidates in field_automation_ids.values()
+        if not any(candidate in elements_by_id for candidate in candidates)
         for automation_id in candidates
         if automation_id != chart_automation_id
     }
-    elements_by_id = _find_elements_by_automation_id(
-        patient_resolution.scope,
-        configured_ids,
-    )
+    if configured_ids:
+        elements_by_id.update(_find_elements_by_automation_id(
+            patient_resolution.scope,
+            configured_ids,
+        ))
     # Keep the exact control that established popup readiness. A second tree
     # pass can omit or ambiguously expose this WinForms edit even though its
     # ValuePattern was available during the process-scoped lookup.
@@ -211,11 +222,38 @@ def fetch_vaccine_patient_context(
         for field_name, automation_ids in field_automation_ids.items()
     }
     values["chart_no"] = patient_resolution.chart_value
+    control_cache = None
+    if patient_resolution.cached_elements is None or configured_ids:
+        control_cache = PatientControlCache.create(
+            int(state.pid), root_handle, patient_resolution.scope,
+            {**elements_by_id, chart_automation_id: patient_resolution.chart_element},
+            selectors,
+        )
+    # A cached address is not a patient identity. Reject a switch during the read.
+    chart_changed = (
+        (control_cache is not None or patient_resolution.cached_elements is not None)
+        and _read_element_value(patient_resolution.chart_element) != patient_resolution.chart_value
+    )
+    if chart_changed:
+        with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
+            _PATIENT_INFORMATION_SCOPE_CACHE.pop((int(state.pid), chart_automation_id), None)
+    elif control_cache is not None:
+        with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
+            _PATIENT_INFORMATION_SCOPE_CACHE[(int(state.pid), chart_automation_id)] = (
+                _PatientInformationScopeCache(
+                    int(state.pid), chart_automation_id, control_cache.scope.handle, control_cache,
+                )
+            )
     close_succeeded = True
     try:
         closer()
     except Exception:
         close_succeeded = False
+
+    if chart_changed:
+        return VaccinePatientFetchResult(
+            False, "Patient changed while reading EMR information. Fetch again.", None,
+        )
 
     chart_no = values.get("chart_no", "").strip()
     if not chart_no:
@@ -376,6 +414,9 @@ def _find_cached_patient_information_scope(
     desktop: Any,
     root_pid: int,
     chart_automation_id: str,
+    *,
+    root_handle: int | None = None,
+    selectors: dict[str, tuple[str, ...]] | None = None,
 ) -> _PatientInformationResolution | None:
     """Reuse a validated Patient Information scope only while its handle survives."""
 
@@ -383,6 +424,18 @@ def _find_cached_patient_information_scope(
     with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
         cached = _PATIENT_INFORMATION_SCOPE_CACHE.get(key)
     if cached is None:
+        return None
+
+    if cached.controls is not None:
+        resolved = cached.controls.resolve(desktop, root_pid, root_handle, selectors or {})
+        if resolved is not None:
+            scope, elements = resolved
+            chart_element = elements[chart_automation_id]
+            chart_value = _read_element_value(chart_element)
+            if chart_value:
+                return _PatientInformationResolution(scope, chart_value, chart_element, elements)
+        with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
+            _PATIENT_INFORMATION_SCOPE_CACHE.pop(key, None)
         return None
 
     scope = None
@@ -487,7 +540,7 @@ def _patient_information_resolution(
     scope = _nearest_patient_information_scope(chart_element)
     if scope is None:
         scope = fallback_scope or _top_level_scope(chart_element)
-    return _PatientInformationResolution(scope, chart_value)
+    return _PatientInformationResolution(scope, chart_value, chart_element)
 
 
 def _nearest_patient_information_scope(element: Any) -> Any | None:
