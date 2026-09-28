@@ -93,10 +93,23 @@ Information view. Escape is never sent when that view could not be resolved.
 
 Each successful `Fetch from EMR` starts a new unsaved vaccine record, even when
 fetching the same patient again. It detaches any previously loaded/saved record and
-prepared Flu + COVID pair, and resets both program checks. The selected vaccine type
-is retained. Existing records are unchanged; a new database record is created only
+prepared Flu + COVID pair, resets both program checks, and clears the vaccine selection
+and charting previews. The operator must select a vaccine for each successful fetch,
+even for the same patient. Existing records are unchanged; a new database record is created only
 by Save, Print, or explicit pair preparation. A failed fetch preserves the current
 form and record references.
+
+The catalog has no default selection on startup, after Clear form/New vaccine record,
+or when the selected type disappears during refresh. An ordinary refresh preserves an
+explicit existing selection, and explicitly loading a saved record restores its type.
+Keyboard focus/current row alone is not accepted as a selection. Without a selected
+vaccine, Save/Print and pair preparation are disabled and their handlers also reject
+the action. Flu + COVID preparation still requires an explicitly selected COVID product.
+
+The selected row uses a high-contrast background, bold name, and accent border, including
+when the list loses focus. A separate Selected vaccine label repeats the full name.
+Printing a loaded record is blocked if its vaccine ID/name differs from the visible
+selection, so changing the list cannot silently print the previously saved vaccine.
 
 When the current chart number has records for today, `Edit today's record` appears
 beside Save/Print. Its menu lists each record's ID, vaccine, and status, including
@@ -326,8 +339,8 @@ engine remains compatible.
 9. Yes focuses that system, enters the printed record's resident number without
    its hyphen, and sends one `Enter`. No skips system entry.
 10. Successful input or an explicit skip clears patient fields, record/pair
-    references, previews of patient information, and program-check results. The
-    selected vaccine type and saved records remain. The operator reviews the
+    references, vaccine selection, previews of patient information, and program-check
+    results. Saved records remain. The operator reviews the
     external lookup result and performs vaccination registration manually.
 
 KaosEghis must never submit the final vaccination record without an explicit operator

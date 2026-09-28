@@ -59,6 +59,8 @@ def fetched_page(tmp_path, monkeypatch):
     page = vaccine_tab.VaccineTab(db_path)
     page._select_vaccine_type(None, "Influenza")
     assert page.fetch_current_patient_from_emr()
+    assert page.vaccine_types_list.currentItem() is None
+    page._select_vaccine_type(None, "Influenza")
     yield page, context
     page.close()
     page.deleteLater()
@@ -94,7 +96,12 @@ def test_successful_fetch_starts_new_record_without_changing_previous(
 
     assert page._current_record_id is None
     assert page._prepared_pair_ids is None
-    assert page.vaccine_types_list.currentItem().text() == "Influenza"
+    assert page.vaccine_types_list.currentItem() is None
+    assert page.vaccine_types_list.selectedItems() == []
+    assert page.chart_note_preview.toPlainText() == ""
+    assert page.charting_text_preview.toPlainText() == ""
+    assert not page.save_button.isEnabled()
+    assert not page.print_button.isEnabled()
     assert page.patient_chart_no_input.text() == context.chart_no
     assert f"Patient: {context.patient_name}" in page.label_preview.toPlainText()
     assert page.influenza_check_result.text() == "Influenza program: Not checked."
@@ -103,6 +110,8 @@ def test_successful_fetch_starts_new_record_without_changing_previous(
     with connect(page._db_path) as connection:
         assert list_vaccine_records(connection) == before
 
+    assert getattr(page, save_method)() is None
+    page._select_vaccine_type(None, "Influenza")
     second = getattr(page, save_method)()
     assert second is not None
     assert second.id != first.id

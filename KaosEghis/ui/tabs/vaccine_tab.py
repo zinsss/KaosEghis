@@ -6,7 +6,7 @@ from time import monotonic
 import threading
 import logging
 
-from PySide6.QtCore import QCoreApplication, Qt, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -256,14 +256,21 @@ class VaccineTab(QWidget):
         self.record_state_label = QLabel("New vaccine record")
 
         self.vaccine_types_list = QListWidget()
+        self.vaccine_types_list.setObjectName("vaccineTypesList")
+        self.vaccine_types_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.vaccine_types_list.setWordWrap(True)
+        self.vaccine_types_list.setTextElideMode(Qt.TextElideMode.ElideNone)
         self.vaccine_types_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.vaccine_types_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.vaccine_types_list.model().rowsMoved.connect(
             lambda *_args: self.persist_vaccine_type_order()
         )
-        self.vaccine_types_list.currentItemChanged.connect(
+        self.vaccine_types_list.itemSelectionChanged.connect(
             self._refresh_chart_note_preview
         )
+        self.selected_vaccine_label = QLabel("No vaccine selected")
+        self.selected_vaccine_label.setObjectName("selectedVaccineLabel")
+        self.selected_vaccine_label.setWordWrap(True)
 
         self.add_type_button = QPushButton("Add type")
         self.add_type_button.clicked.connect(self.add_vaccine_type)
@@ -491,6 +498,7 @@ class VaccineTab(QWidget):
         self._current_record_id = None
         self._prepared_pair_ids = None
         self.prepared_pair_label.setText("Flu + COVID: Not prepared.")
+        self._clear_vaccine_selection()
         self.patient_chart_no_input.setText(context.chart_no)
         self.patient_resident_id_input.setText(context.resident_id)
         self.patient_name_input.setText(context.patient_name)
@@ -633,7 +641,7 @@ class VaccineTab(QWidget):
     def save_record(self):
         if self._pending_handoffs or self._handoff_thread is not None:
             return None
-        selected = self.vaccine_types_list.currentItem()
+        selected = self._selected_vaccine_item()
         if selected is None:
             self.status_label.setText("Select a vaccine type first.")
             return None
@@ -690,7 +698,7 @@ class VaccineTab(QWidget):
         ):
             self.status_label.setText("Load or enter patient context first.")
             return None
-        selected = self.vaccine_types_list.currentItem()
+        selected = self._selected_vaccine_item()
         selected_type_id = (
             selected.data(Qt.ItemDataRole.UserRole) if selected is not None else None
         )
@@ -1046,6 +1054,14 @@ class VaccineTab(QWidget):
             self.settings_page.system_targets_editor.session_reset_now_button,
         ):
             widget.setEnabled(not blocked)
+        selected = self._selected_vaccine_item()
+        self.save_button.setEnabled(not blocked and selected is not None)
+        self.print_button.setEnabled(not blocked and selected is not None)
+        self.prepare_flu_covid_button.setEnabled(
+            not blocked and selected is not None
+            and selected.data(Qt.ItemDataRole.UserRole + 1) == "national_covid"
+        )
+        self.print_prepared_pair_button.setEnabled(not blocked and self._prepared_pair_ids is not None)
         self.retry_handoff_button.setVisible(pending)
         self.skip_handoff_button.setVisible(pending)
         self.retry_handoff_button.setEnabled(pending and not active)
@@ -1235,6 +1251,7 @@ class VaccineTab(QWidget):
         self._current_record_id = None
         self._prepared_pair_ids = None
         self.prepared_pair_label.setText("Flu + COVID: Not prepared.")
+        self._clear_vaccine_selection()
         for widget in (
             self.patient_chart_no_input,
             self.patient_resident_id_input,
@@ -1260,9 +1277,7 @@ class VaccineTab(QWidget):
         self._current_record_id = None
         self._prepared_pair_ids = None
         self.prepared_pair_label.setText("Flu + COVID: Not prepared.")
-        self.vaccine_types_list.clearSelection()
-        self.vaccine_types_list.setCurrentItem(None)
-        self.chart_note_preview.clear()
+        self._clear_vaccine_selection()
         self._reset_influenza_check()
         self._refresh_previews()
         self.status_label.setText(
@@ -1458,7 +1473,7 @@ class VaccineTab(QWidget):
         self.status_label.setText("Vaccine type added.")
 
     def edit_vaccine_type(self) -> None:
-        item = self.vaccine_types_list.currentItem()
+        item = self._selected_vaccine_item()
         if item is None:
             self.status_label.setText("Select a vaccine type to edit.")
             return
@@ -1484,7 +1499,7 @@ class VaccineTab(QWidget):
         self.status_label.setText("Vaccine type updated.")
 
     def delete_vaccine_type(self) -> None:
-        item = self.vaccine_types_list.currentItem()
+        item = self._selected_vaccine_item()
         if item is None:
             self.status_label.setText("Select a vaccine type to delete.")
             return
@@ -1525,21 +1540,22 @@ class VaccineTab(QWidget):
 
     def _populate_vaccine_types(self, vaccine_types: list) -> None:
         selected_id = None
-        current = self.vaccine_types_list.currentItem()
+        current = self._selected_vaccine_item()
         if current is not None:
             value = current.data(Qt.ItemDataRole.UserRole)
             if isinstance(value, int):
                 selected_id = value
-        self.vaccine_types_list.clear()
-        for vaccine_type in vaccine_types:
-            item = QListWidgetItem(vaccine_type.name)
-            item.setData(Qt.ItemDataRole.UserRole, vaccine_type.id)
-            item.setToolTip(vaccine_type.code or "")
-            self.vaccine_types_list.addItem(item)
-            if selected_id == vaccine_type.id:
-                self.vaccine_types_list.setCurrentItem(item)
-        if self.vaccine_types_list.currentItem() is None and self.vaccine_types_list.count():
-            self.vaccine_types_list.setCurrentRow(0)
+        with QSignalBlocker(self.vaccine_types_list):
+            self.vaccine_types_list.clear()
+            for vaccine_type in vaccine_types:
+                item = QListWidgetItem(vaccine_type.name)
+                item.setData(Qt.ItemDataRole.UserRole, vaccine_type.id)
+                item.setData(Qt.ItemDataRole.UserRole + 1, vaccine_type.program_type)
+                item.setToolTip(vaccine_type.code or "")
+                self.vaccine_types_list.addItem(item)
+                if selected_id == vaccine_type.id:
+                    self.vaccine_types_list.setCurrentItem(item)
+        self._refresh_chart_note_preview()
 
     def _populate_records(self, table: QTableWidget, records: list) -> None:
         table.setRowCount(len(records))
@@ -1584,24 +1600,42 @@ class VaccineTab(QWidget):
             if vaccine_type_name and item.text() == vaccine_type_name:
                 self.vaccine_types_list.setCurrentItem(item)
                 return
+        self._clear_vaccine_selection()
+
+    def _selected_vaccine_item(self) -> QListWidgetItem | None:
+        # Keyboard focus can assign a current row without the operator selecting it.
+        selected = self.vaccine_types_list.selectedItems()
+        return selected[0] if len(selected) == 1 else None
+
+    def _clear_vaccine_selection(self) -> None:
+        with QSignalBlocker(self.vaccine_types_list):
+            self.vaccine_types_list.clearSelection()
+            self.vaccine_types_list.setCurrentItem(None)
+        self._refresh_chart_note_preview()
 
     def _refresh_chart_note_preview(self) -> None:
-        item = self.vaccine_types_list.currentItem()
-        if item is None:
-            self.chart_note_preview.clear()
-            return
-        vaccine_type_id = item.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(vaccine_type_id, int):
-            self.chart_note_preview.clear()
-            return
-        with connect(self._db_path) as connection:
-            vaccine_type = get_vaccine_type(connection, vaccine_type_id)
+        item = self._selected_vaccine_item()
+        for index in range(self.vaccine_types_list.count()):
+            row = self.vaccine_types_list.item(index)
+            font = row.font()
+            font.setBold(row is item)
+            row.setFont(font)
+        self.selected_vaccine_label.setText(
+            f"Selected vaccine: {item.text()}" if item is not None else "No vaccine selected"
+        )
+        self.selected_vaccine_label.setProperty("hasSelection", item is not None)
+        self.selected_vaccine_label.style().unpolish(self.selected_vaccine_label)
+        self.selected_vaccine_label.style().polish(self.selected_vaccine_label)
+        vaccine_type_id = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        vaccine_type = None
+        if isinstance(vaccine_type_id, int):
+            with connect(self._db_path) as connection:
+                vaccine_type = get_vaccine_type(connection, vaccine_type_id)
         self.chart_note_preview.setPlainText(
-            vaccine_type.chart_note_template
-            if vaccine_type is not None and vaccine_type.chart_note_template
-            else ""
+            (vaccine_type.chart_note_template or "") if vaccine_type is not None else ""
         )
         self._refresh_previews()
+        self._update_handoff_controls()
 
     def _update_today_counts(
         self,
@@ -1705,6 +1739,10 @@ class VaccineTab(QWidget):
         self.covid_check_result.style().polish(self.covid_check_result)
 
     def _record_for_label_print(self):
+        selected = self._selected_vaccine_item()
+        if selected is None:
+            self.status_label.setText("Select a vaccine type first.")
+            return None
         if self._current_record_id is None:
             return self.save_record()
         initialize_database(self._db_path)
@@ -1713,6 +1751,17 @@ class VaccineTab(QWidget):
         if record is None:
             self._current_record_id = None
             self.status_label.setText("Save the vaccine record before printing.")
+            return None
+        if (
+            record.vaccine_type_name != selected.text()
+            or (record.vaccine_type_id is not None
+                and record.vaccine_type_id != selected.data(Qt.ItemDataRole.UserRole))
+        ):
+            self.status_label.setText(
+                "Selected vaccine does not match the loaded record. "
+                "Load the matching record or start a new vaccine record."
+            )
+            return None
         return record
 
     def _confirm_program_printing(
@@ -1959,6 +2008,7 @@ class VaccineTab(QWidget):
 
         vaccine_group = QGroupBox("Vaccine")
         vaccine_layout = QVBoxLayout(vaccine_group)
+        vaccine_layout.addWidget(self.selected_vaccine_label)
         vaccine_layout.addWidget(self.vaccine_types_list, 1)
         vaccine_layout.addLayout(vaccine_type_controls)
 
@@ -2083,7 +2133,7 @@ class VaccineTab(QWidget):
             if self._current_record_id is None
             else f"Vaccine record #{self._current_record_id}"
         )
-        selected_item = self.vaccine_types_list.currentItem()
+        selected_item = self._selected_vaccine_item()
         vaccine_name = selected_item.text() if selected_item is not None else "(no vaccine selected)"
         patient_name = self.patient_name_input.text().strip() or "(no patient name)"
         patient_chart_no = self.patient_chart_no_input.text().strip() or "-"
@@ -2108,7 +2158,7 @@ class VaccineTab(QWidget):
             )
         )
         self.charting_text_preview.setPlainText(
-            _charting_text(vaccine_name, chart_note)
+            _charting_text(vaccine_name, chart_note) if selected_item is not None else ""
         )
 
     @staticmethod

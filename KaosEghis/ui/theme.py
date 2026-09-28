@@ -401,6 +401,34 @@ QListView::item:hover {
     background-color: #434c5e;
 }
 
+QListWidget#vaccineTypesList::item {
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-left: 6px solid transparent;
+    min-height: 24px;
+}
+
+QListWidget#vaccineTypesList::item:selected,
+QListWidget#vaccineTypesList::item:selected:!active,
+QListWidget#vaccineTypesList::item:selected:hover {
+    background-color: #88c0d0;
+    color: #202630;
+    border: 1px solid #eceff4;
+    border-left: 6px solid #ebcb8b;
+}
+
+QLabel#selectedVaccineLabel {
+    color: #ebcb8b;
+    padding: 8px 10px;
+    border-left: 6px solid #ebcb8b;
+}
+
+QLabel#selectedVaccineLabel[hasSelection="true"] {
+    background-color: #88c0d0;
+    color: #202630;
+    font-weight: bold;
+}
+
 QHeaderView::section {
     background-color: #3b4252;
     color: #e5e9f0;
