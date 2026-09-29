@@ -292,3 +292,19 @@ def test_primary_actions_have_scoped_highlights(page):
     assert page.fetch_button.objectName() == "vaccineFetchButton"
     assert page.print_button.objectName() == "vaccinePrintButton"
     assert page.vaccine_types_combo.objectName() == "vaccineTypesCombo"
+
+
+def test_primary_action_highlights_are_text_only_in_all_states():
+    button_rules = [
+        rule for rule in NORD_QSS.split("}")
+        if "QPushButton#vaccineFetchButton" in rule or "QPushButton#vaccinePrintButton" in rule
+    ]
+    assert any("background-color: transparent" in rule for rule in button_rules)
+    for rule in button_rules:
+        assert "background-color:" not in rule or "background-color: transparent" in rule
+    for name, color in (("vaccineFetchButton", "#88c0d0"), ("vaccinePrintButton", "#a3be8c")):
+        style = next(
+            rule.split("{", 1)[1] for rule in button_rules
+            if rule.split("{", 1)[0].strip() == f"QPushButton#{name}"
+        )
+        assert f"color: {color}" in style

@@ -113,8 +113,9 @@ the action. Flu + COVID preparation still requires an explicitly selected COVID 
 The dropdown has a solid amber background with dark text and a `Select vaccine`
 placeholder, including while hovered or focused. It displays the selection without a
 duplicate label below; its tooltip provides the full name for longer entries. Fetch
-from EMR is highlighted in cyan; Print label is green when enabled. Disabled controls
-are muted. Up/down arrow controls reorder the selected type while preserving its ID
+from EMR uses cyan text; Print label uses green text when enabled. Both buttons keep
+transparent backgrounds, including on hover and press; disabled controls are muted.
+Up/down arrow controls reorder the selected type while preserving its ID
 and selection.
 Printing a loaded record is blocked if its vaccine ID/name differs from the visible
 selection, so changing the dropdown cannot silently print the previously saved vaccine.

@@ -443,7 +443,7 @@ QComboBox#vaccineTypesCombo QAbstractItemView::item:selected {
 
 QPushButton#vaccineFetchButton,
 QPushButton#vaccinePrintButton {
-    color: #202630;
+    background-color: transparent;
     border: 2px solid transparent;
     border-radius: 4px;
     padding: 5px 12px;
@@ -452,28 +452,34 @@ QPushButton#vaccinePrintButton {
 }
 
 QPushButton#vaccineFetchButton {
-    background-color: #88c0d0;
+    color: #88c0d0;
 }
 
 QPushButton#vaccinePrintButton {
-    background-color: #a3be8c;
+    color: #a3be8c;
 }
 
 QPushButton#vaccineFetchButton:hover,
-QPushButton#vaccineFetchButton:focus,
+QPushButton#vaccineFetchButton:focus {
+    color: #a6d9e6;
+}
+
 QPushButton#vaccinePrintButton:hover,
 QPushButton#vaccinePrintButton:focus {
-    border: 2px solid #eceff4;
+    color: #bdd8a6;
 }
 
 QPushButton#vaccineFetchButton:pressed,
 QPushButton#vaccinePrintButton:pressed {
-    background-color: #ebcb8b;
+    color: #ebcb8b;
 }
 
-QComboBox#vaccineTypesCombo:disabled,
 QPushButton#vaccineFetchButton:disabled,
 QPushButton#vaccinePrintButton:disabled {
+    color: #4c566a;
+}
+
+QComboBox#vaccineTypesCombo:disabled {
     background-color: #3b4252;
     color: #a0a8b6;
     border: 2px solid #4c566a;
