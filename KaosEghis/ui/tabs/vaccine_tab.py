@@ -295,9 +295,6 @@ class VaccineTab(QWidget):
         self.vaccine_types_combo.currentIndexChanged.connect(
             self._refresh_chart_note_preview
         )
-        self.selected_vaccine_label = QLabel("No vaccine selected")
-        self.selected_vaccine_label.setObjectName("selectedVaccineLabel")
-        self.selected_vaccine_label.setWordWrap(True)
 
         self.add_type_button = QPushButton("Add type")
         self.add_type_button.clicked.connect(self.add_vaccine_type)
@@ -1675,12 +1672,7 @@ class VaccineTab(QWidget):
             font = row.font()
             font.setBold(row is item)
             row.setFont(font)
-        self.selected_vaccine_label.setText(
-            f"Selected vaccine: {item.text()}" if item is not None else "No vaccine selected"
-        )
-        self.selected_vaccine_label.setProperty("hasSelection", item is not None)
-        self.selected_vaccine_label.style().unpolish(self.selected_vaccine_label)
-        self.selected_vaccine_label.style().polish(self.selected_vaccine_label)
+        self.vaccine_types_combo.setToolTip(item.text() if item is not None else "")
         vaccine_type_id = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
         vaccine_type = None
         if isinstance(vaccine_type_id, int):
@@ -2064,7 +2056,6 @@ class VaccineTab(QWidget):
         vaccine_group = QGroupBox("Vaccine")
         vaccine_layout = QVBoxLayout(vaccine_group)
         vaccine_layout.addWidget(self.vaccine_types_combo)
-        vaccine_layout.addWidget(self.selected_vaccine_label)
         vaccine_layout.addLayout(vaccine_type_controls)
 
         preparation_group = QGroupBox("Prepare and print")

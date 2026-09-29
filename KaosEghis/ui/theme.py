@@ -402,8 +402,8 @@ QListView::item:hover {
 }
 
 QComboBox#vaccineTypesCombo {
-    background-color: #3b4252;
-    color: #eceff4;
+    background-color: #ebcb8b;
+    color: #202630;
     border: 2px solid #ebcb8b;
     border-radius: 4px;
     padding: 6px 10px;
@@ -412,7 +412,7 @@ QComboBox#vaccineTypesCombo {
 
 QComboBox#vaccineTypesCombo:hover,
 QComboBox#vaccineTypesCombo:focus {
-    background-color: #434c5e;
+    background-color: #ebcb8b;
     border: 2px solid #eceff4;
 }
 
@@ -477,18 +477,6 @@ QPushButton#vaccinePrintButton:disabled {
     background-color: #3b4252;
     color: #a0a8b6;
     border: 2px solid #4c566a;
-}
-
-QLabel#selectedVaccineLabel {
-    color: #ebcb8b;
-    padding: 8px 10px;
-    border-left: 6px solid #ebcb8b;
-}
-
-QLabel#selectedVaccineLabel[hasSelection="true"] {
-    background-color: #88c0d0;
-    color: #202630;
-    font-weight: bold;
 }
 
 QHeaderView::section {

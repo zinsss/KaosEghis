@@ -32,8 +32,7 @@ def assert_unselected(page):
     assert page.vaccine_types_combo.currentIndex() == -1
     assert page.vaccine_types_combo.currentData() is None
     assert page.vaccine_types_combo.currentText() == ""
-    assert page.selected_vaccine_label.text() == "No vaccine selected"
-    assert page.selected_vaccine_label.property("hasSelection") is False
+    assert page.vaccine_types_combo.toolTip() == ""
     assert page.chart_note_preview.toPlainText() == ""
     assert page.charting_text_preview.toPlainText() == ""
     assert "(no vaccine selected)" in page.label_preview.toPlainText()
@@ -76,8 +75,8 @@ def test_explicit_selection_is_highlighted_and_survives_ordinary_refresh(page):
     page._select_vaccine_type(None, "COVID-19 (Moderna)")
     selected = page._selected_vaccine_item()
     assert selected.font().bold()
-    assert page.selected_vaccine_label.text() == "Selected vaccine: COVID-19 (Moderna)"
-    assert page.selected_vaccine_label.property("hasSelection") is True
+    assert page.vaccine_types_combo.currentText() == "COVID-19 (Moderna)"
+    assert page.vaccine_types_combo.toolTip() == "COVID-19 (Moderna)"
     assert page.save_button.isEnabled()
     assert page.print_button.isEnabled()
     assert page.prepare_flu_covid_button.isEnabled()
@@ -87,7 +86,7 @@ def test_explicit_selection_is_highlighted_and_survives_ordinary_refresh(page):
     page.refresh_view()
     assert page._selected_vaccine_item().text() == "COVID-19 (Moderna)"
     page._select_vaccine_type(None, "Influenza")
-    assert page.selected_vaccine_label.text() == "Selected vaccine: Influenza"
+    assert page.vaccine_types_combo.currentText() == "Influenza"
     assert not page.prepare_flu_covid_button.isEnabled()
 
 
@@ -115,7 +114,7 @@ def test_explicit_record_load_restores_its_type_but_missing_type_clears_choice(p
     page.clear_form()
     page._load_record_into_form(record)
     assert page._selected_vaccine_item().text() == "Influenza"
-    assert page.selected_vaccine_label.text() == "Selected vaccine: Influenza"
+    assert page.vaccine_types_combo.currentText() == "Influenza"
     page._select_vaccine_type(-1, "Unavailable vaccine")
     assert_unselected(page)
     page.print_label()
@@ -151,12 +150,20 @@ def test_busy_controls_do_not_override_selection_requirement(page):
 
 
 def test_selection_style_remains_high_contrast_without_focus():
-    assert "QComboBox#vaccineTypesCombo {" in NORD_QSS
-    assert "border: 2px solid #ebcb8b" in NORD_QSS
-    assert 'QLabel#selectedVaccineLabel[hasSelection="true"]' in NORD_QSS
+    base_style = NORD_QSS.split("QComboBox#vaccineTypesCombo {", 1)[1].split("}", 1)[0]
+    focus_style = NORD_QSS.split("QComboBox#vaccineTypesCombo:focus {", 1)[1].split("}", 1)[0]
+    assert "background-color: #ebcb8b" in base_style
+    assert "color: #202630" in base_style
+    assert "background-color: #ebcb8b" in focus_style
+    assert "selectedVaccineLabel" not in NORD_QSS
     for name in ("vaccineFetchButton", "vaccinePrintButton"):
         assert f"QPushButton#{name} {{" in NORD_QSS
         assert f"QPushButton#{name}:disabled" in NORD_QSS
+
+
+def test_dropdown_is_the_only_selection_display(page):
+    assert page.findChild(vaccine_tab.QLabel, "selectedVaccineLabel") is None
+    assert not hasattr(page, "selected_vaccine_label")
 
 
 @pytest.mark.parametrize("selected", [False, True])
