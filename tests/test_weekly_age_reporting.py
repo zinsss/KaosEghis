@@ -219,7 +219,7 @@ def test_run_readonly_query_closes_cursor_and_connection_on_error(monkeypatch) -
             events.append("connection_close")
 
     class FakePsycopg2Module:
-        def connect(self, connection_string: str):
+        def connect(self, connection_string: str, **kwargs):
             events.append("connect")
             return FakeConnection()
 

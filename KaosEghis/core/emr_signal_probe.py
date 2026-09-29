@@ -17,7 +17,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from KaosEghis.core.eghis_connector import get_cached_eghis_state
 from KaosEghis.core.emr_activation_probe import UiaActivationListener
 from KaosEghis.core.emr_chart_probe import ChartFieldObservation, ChartTarget, UiaChartListener
-from KaosEghis.core.emr_refresh_probe import ClearRefreshDryRun
+from KaosEghis.core.emr_refresh_probe import ClearRefreshTrigger
 from KaosEghis.core.ui_capture import _best_text_value
 from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
@@ -85,10 +85,10 @@ class ChartClearObservation:
 
     def status_text(self) -> str:
         detail = (
-            f"Chart {self.chart_no} -> waiting {ClearRefreshDryRun.SETTLE_SECONDS:g} s before refresh "
-            f"(dry run; previous snapshot {self.age_ms} ms)"
+            f"Chart {self.chart_no} -> waiting {ClearRefreshTrigger.SETTLE_SECONDS:g} s before refresh "
+            f"(day-wide PACS; previous snapshot {self.age_ms} ms)"
             if self.chart_no else
-            "Refresh skipped (previous chart snapshot not fresh; dry run)"
+            "Waiting 2 s before day-wide PACS refresh (departing chart identity not required)"
         )
         return f"{self.clock_text} | EMR probe | Chart cleared ({self.source}) | {detail}"
 
@@ -398,7 +398,7 @@ class EmrSignalCapture:
         self._patient_last_sample = None
         self._patient_revision = 0
         self._patient_invalidated_at = float("-inf")
-        self.refresh_probe = ClearRefreshDryRun(self._emit, clock=clock)
+        self.refresh_probe = ClearRefreshTrigger(self._emit, clock=clock)
 
     @property
     def patient_context(self):
@@ -458,8 +458,7 @@ class EmrSignalCapture:
             round(age * 1000) if fresh else None,
             datetime.now().strftime("%H:%M:%S"),
         ))
-        if fresh:
-            self.refresh_probe.enqueue(context)
+        self.refresh_probe.enqueue(context)
 
     def update_snapshot(self, snapshot) -> None:
         self.snapshot = snapshot
@@ -624,6 +623,8 @@ def _listeners(capture):
 class EmrSignalProbeRuntime(QObject):
     status_message = Signal(str)
     patient_changed = Signal(object)
+    refresh_requested = Signal(object)
+    connection_changed = Signal(object)
 
     def __init__(self, parent=None, *, reader_factory=Win32SignalReader,
                  listener_factory=_listeners, state_provider=get_cached_eghis_state,
@@ -642,6 +643,8 @@ class EmrSignalProbeRuntime(QObject):
         self._running = False
         self._reported_drops = 0
         self._published_patient = None
+        self._published_connection = None
+        self._connection_reported = False
         self._timer = QTimer(self)
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._drain)
@@ -772,6 +775,15 @@ class EmrSignalProbeRuntime(QObject):
                 pythoncom.CoUninitialize()
 
     def _drain(self) -> None:
+        scope = connected_scope(self.state_provider()) if self._running and self._capture and self._capture.enabled else None
+        connection = (scope.pid, scope.root) if scope else None
+        if not self._connection_reported or connection != self._published_connection:
+            self._connection_reported = True
+            self._published_connection = connection
+            self.connection_changed.emit(connection)
+        if self._running and self._capture:
+            for request in self._capture.refresh_probe.take_ready(scope):
+                self.refresh_requested.emit(request)
         context = self._capture.patient_context if self._running and self._capture and self._capture.enabled else None
         if context is not None and connected_scope(self.state_provider()) != context.scope:
             context = None

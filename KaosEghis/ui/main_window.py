@@ -126,6 +126,9 @@ class MainWindow(QMainWindow):
         self.workspace_tab = WorkspaceTab()
         tabs.addTab(self.workspace_tab, "Workspace")
         self.pacs_panel = PacsPanel()
+        self.emr_signal_probe.refresh_requested.connect(self.pacs_panel.handle_chart_clear)
+        self.emr_signal_probe.connection_changed.connect(self.pacs_panel.handle_emr_connection)
+        self.pacs_panel.refresh_status.connect(self.kaoseghis_tab.launcher_page.show_emr_signal_status)
         self.pacs_tab_index = tabs.addTab(self.pacs_panel, "PACS")
         self.macros_tab = MacrosTab(scheduler_runtime=self.scheduler_runtime)
         tabs.addTab(self.macros_tab, "Macros")
@@ -133,6 +136,7 @@ class MainWindow(QMainWindow):
         self.settings_tab.general_settings_saved.connect(
             self._reload_patient_alert_configuration
         )
+        self.settings_tab.pacs_settings_saved.connect(self.pacs_panel._load_polling_settings)
         tabs.addTab(self.settings_tab, "Settings")
         self._file_hover_tab_filter = TabBarFileHoverFilter(tabs.setCurrentIndex)
         tabs.tabBar().setAcceptDrops(True)
@@ -165,6 +169,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setTabToolTip(self.pacs_tab_index, reason)
 
     def closeEvent(self, event) -> None:
+        self.pacs_panel.stop_refresh_runtime()
         self.emr_signal_probe.stop()
         self.patient_alert_monitor.stop()
         self.patient_alert_popup.close()
@@ -189,6 +194,7 @@ class MainWindow(QMainWindow):
         self.pw_runtime.start()
         self.patient_alert_monitor.start()
         self.emr_signal_probe.start()
+        self.pacs_panel.start_refresh_runtime()
 
     def _handle_launcher_hotkey(self) -> None:
         self.tabs.setCurrentWidget(self.kaoseghis_tab)

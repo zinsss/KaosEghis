@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 import re
 import threading
+import time
 import webbrowser
 
 from PySide6.QtCore import QDate, QTimer, QUrl, Qt, Signal
@@ -77,9 +78,19 @@ class _PollOperationResult:
     error_message: str | None = None
 
 
+@dataclass(frozen=True)
+class _RefreshJob:
+    day: date
+    reason: str
+    automatic: bool
+    follow_up: bool = False
+
+
 class PacsPanel(QWidget):
     health_state_changed = Signal(bool, str)
     auto_poll_finished = Signal(object)
+    refresh_status = Signal(str)
+    FOLLOW_UP_SECONDS = 8.0
     DEFAULT_POLL_INTERVAL_SECONDS = 60
     MIN_POLL_INTERVAL_SECONDS = 15
     ADMIN_REFRESH_DELAY_MS = 350
@@ -116,6 +127,17 @@ class PacsPanel(QWidget):
         self._active_filter = "all"
         self._poll_in_progress = False
         self._poll_worker_thread: threading.Thread | None = None
+        self._pending_refreshes = {}
+        self._active_job = None
+        self._runtime_started = False
+        self._stopped = False
+        self._emr_connection = None
+        self._connection_seen = False
+        self._auto_refresh_enabled = False
+        self._refresh_mode = "chart_clear"
+        self._dispatch_timer = QTimer(self)
+        self._dispatch_timer.setSingleShot(True)
+        self._dispatch_timer.timeout.connect(self._dispatch_refresh)
         self._selected_date = date.today()
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._handle_poll_timer_tick)
@@ -213,7 +235,7 @@ class PacsPanel(QWidget):
         self.eghis_db_status = QLabel("Eghis DB: not connected")
         self.pacs_server_status = QLabel("KaosPACS server: not checked")
         self.polling_status = QLabel("Polling status: stopped")
-        self.last_poll_time_label = QLabel("Last poll time: never")
+        self.last_poll_time_label = QLabel("Last successful read: never")
         self.last_poll_result_label = QLabel("Last poll result: none")
 
         status_row = QHBoxLayout()
@@ -249,16 +271,23 @@ class PacsPanel(QWidget):
         date_row.addWidget(self.today_button)
         date_row.addStretch()
 
-        self.auto_poll_checkbox = QCheckBox("Auto poll")
+        self.auto_poll_checkbox = QCheckBox("Automatic refresh")
+        self.refresh_mode_combo = QComboBox()
+        self.refresh_mode_combo.addItem("Chart clear", "chart_clear")
+        self.refresh_mode_combo.addItem("Timer (legacy)", "timer")
         self.interval_spinbox = QSpinBox()
         self.interval_spinbox.setMinimum(self.MIN_POLL_INTERVAL_SECONDS)
         self.interval_spinbox.setMaximum(86400)
         self.interval_spinbox.setValue(self.DEFAULT_POLL_INTERVAL_SECONDS)
+        self.refresh_mode_combo.currentIndexChanged.connect(
+            lambda: self.interval_spinbox.setEnabled(self.refresh_mode_combo.currentData() == "timer")
+        )
         self.apply_polling_settings_button = QPushButton("Apply polling settings")
         self.apply_polling_settings_button.clicked.connect(self.apply_polling_settings)
 
         polling_settings_row = QHBoxLayout()
         polling_settings_row.addWidget(self.auto_poll_checkbox)
+        polling_settings_row.addWidget(self.refresh_mode_combo)
         polling_settings_row.addWidget(QLabel("Interval seconds"))
         polling_settings_row.addWidget(self.interval_spinbox)
         polling_settings_row.addWidget(self.apply_polling_settings_button)
@@ -294,7 +323,7 @@ class PacsPanel(QWidget):
         self.refresh_button.clicked.connect(self.refresh_rows)
         self.check_kaospacs_button = QPushButton("Check KaosPACS")
         self.check_kaospacs_button.clicked.connect(self.check_kaospacs_connection)
-        self.poll_button = QPushButton("Load from eGHIS")
+        self.poll_button = QPushButton("Poll Now")
         self.poll_button.clicked.connect(self.poll_now)
         self.sync_button = QPushButton("Sync to KaosPACS")
         self.sync_button.clicked.connect(self.sync_to_kaospacs)
@@ -317,10 +346,6 @@ class PacsPanel(QWidget):
         action_row.addWidget(self.edit_button)
         action_row.addWidget(self.delete_button)
         action_row.addStretch()
-
-        footer = QLabel(
-            "Local PACS worklist. Poll from Eghis DB and sync to KaosPACS are manual only."
-        )
 
         self.audit_filter_combo = QComboBox()
         self.audit_filter_combo.addItems(
@@ -359,7 +384,6 @@ class PacsPanel(QWidget):
         layout.addWidget(self.worklist_table)
         layout.addLayout(self.filter_bar)
         layout.addLayout(action_row)
-        layout.addWidget(footer)
         layout.addSpacing(12)
         layout.addLayout(controls)
         layout.addWidget(self.audit_table)
@@ -550,7 +574,7 @@ class PacsPanel(QWidget):
         self._refresh_startup_connection_statuses()
 
     def poll_now(self) -> None:
-        self._run_poll(refresh_admin=True)
+        self._queue_refresh(self._selected_date, "Poll Now", automatic=False)
 
     def sync_to_kaospacs(self) -> None:
         initialize_database(self._db_path)
@@ -719,12 +743,14 @@ class PacsPanel(QWidget):
                 {
                     "pacs_auto_poll_enabled": enabled_value,
                     "pacs_poll_interval_seconds": str(interval_seconds),
+                    "pacs_refresh_mode": self.refresh_mode_combo.currentData(),
                 },
             )
 
+        self._refresh_mode = self.refresh_mode_combo.currentData()
         self._apply_polling_state(enabled_value == "true", interval_seconds)
         self.polling_status.setText(
-            f"Polling settings applied: enabled={enabled_value}, interval={interval_seconds}s"
+            f"Refresh settings applied: enabled={enabled_value}, mode={self._refresh_mode}"
         )
         self._refresh_settings_diagnostics()
 
@@ -734,7 +760,7 @@ class PacsPanel(QWidget):
             "cancelled_pending_rows": sum(
                 1
                 for item in items
-                if item.status == "cancelled" and item.kaospacs_mwl_status == "sent"
+                if item.status == "cancelled" and item.kaospacs_mwl_status in {"sent", "error"}
             ),
         }
 
@@ -775,75 +801,125 @@ class PacsPanel(QWidget):
             settings.get("pacs_poll_interval_seconds")
         )
         self.auto_poll_checkbox.setChecked(enabled)
+        self._refresh_mode = "timer" if settings.get("pacs_refresh_mode") == "timer" else "chart_clear"
+        self.refresh_mode_combo.setCurrentIndex(self.refresh_mode_combo.findData(self._refresh_mode))
         self.interval_spinbox.setValue(interval_seconds)
         self._apply_polling_state(enabled, interval_seconds)
 
     def _apply_polling_state(self, enabled: bool, interval_seconds: int) -> None:
-        if enabled:
+        self._auto_refresh_enabled = enabled
+        self.interval_spinbox.setEnabled(self._refresh_mode == "timer")
+        self._pending_refreshes = {day: pending for day, pending in self._pending_refreshes.items() if not pending[1].automatic}
+        if enabled and self._refresh_mode == "timer":
             self._poll_timer.start(interval_seconds * 1000)
         else:
             self._poll_timer.stop()
+        if enabled and self._refresh_mode == "chart_clear" and self._runtime_started:
+            self._queue_refresh(date.today(), "Settings enabled", automatic=True, follow_up=True)
 
     def _handle_poll_timer_tick(self) -> None:
-        if self._poll_in_progress:
-            self._show_poll_overlap()
+        self._queue_refresh(self._selected_date, "Timer", automatic=True)
+
+    def start_refresh_runtime(self) -> None:
+        if self._runtime_started:
             return
+        self._runtime_started = True
+        self._stopped = False
+        if self._auto_refresh_enabled and self._refresh_mode == "chart_clear":
+            self._queue_refresh(date.today(), "Startup", automatic=True, follow_up=True)
 
-        initialize_database(self._db_path)
-        with connect(self._db_path) as connection:
-            settings = get_settings(connection)
+    def stop_refresh_runtime(self) -> None:
+        self._stopped = True
+        self._runtime_started = False
+        self._pending_refreshes.clear()
+        self._dispatch_timer.stop()
+        self._poll_timer.stop()
 
+    def closeEvent(self, event) -> None:
+        self.stop_refresh_runtime()
+        super().closeEvent(event)
+
+    def handle_emr_connection(self, connection) -> None:
+        previous = self._emr_connection
+        seen = self._connection_seen
+        self._emr_connection = connection
+        self._connection_seen = True
+        if connection is not None and connection != previous and seen and self._event_refresh_active():
+            self._queue_refresh(date.today(), "EMR reconnected", automatic=True, follow_up=True)
+
+    def handle_chart_clear(self, request) -> None:
+        if self._event_refresh_active():
+            self._queue_refresh(request.day, "Chart cleared", automatic=True, follow_up=True)
+
+    def _event_refresh_active(self) -> bool:
+        return self._runtime_started and not self._stopped and self._auto_refresh_enabled and self._refresh_mode == "chart_clear"
+
+    def _queue_refresh(self, day, reason, *, automatic, follow_up=False, delay=0.0) -> None:
+        if self._stopped:
+            return
+        due = time.monotonic() + delay
+        job = _RefreshJob(day, reason, automatic, follow_up)
+        previous = self._pending_refreshes.get(day)
+        if previous is not None:
+            old_due, old = previous
+            due = min(due, old_due)
+            job = _RefreshJob(day, old.reason if reason == "Follow-up" else reason,
+                              automatic and old.automatic, follow_up or old.follow_up)
+        self._pending_refreshes[day] = (due, job)
+        self._dispatch_refresh()
+
+    def _dispatch_refresh(self) -> None:
+        if self._stopped or self._poll_in_progress or not self._pending_refreshes:
+            return
+        due, job = min(self._pending_refreshes.values(), key=lambda item: item[0])
+        remaining = due - time.monotonic()
+        if remaining > 0:
+            self._dispatch_timer.start(max(1, int(remaining * 1000) + 1))
+            return
+        self._dispatch_timer.stop()
+        del self._pending_refreshes[job.day]
+        self._active_job = job
         self._poll_in_progress = True
-        selected_date = self._selected_date
+        self._poll_started_at = time.monotonic()
+        self.polling_status.setText(f"PACS refresh: {job.reason} ({job.day:%Y-%m-%d})")
 
-        def worker() -> None:
-            result = self._perform_poll_operation(
-                settings,
-                selected_date=selected_date,
-                is_auto_poll=True,
-            )
-            self.auto_poll_finished.emit(result)
+        def worker():
+            try:
+                with connect(self._db_path) as connection:
+                    settings = get_settings(connection)
+                result = self._perform_poll_operation(settings, selected_date=job.day, is_auto_poll=job.automatic)
+            except Exception:
+                result = _PollOperationResult(False, False, True, error_message="refresh failed")
+            try:
+                self.auto_poll_finished.emit(result)
+            except RuntimeError:
+                pass  # The window was destroyed while a bounded read finished.
 
-        self._poll_worker_thread = threading.Thread(
-            target=worker,
-            name="KaosEghis PACS auto poll",
-            daemon=True,
-        )
+        self._poll_worker_thread = threading.Thread(target=worker, name="KaosEghis PACS refresh", daemon=True)
         self._poll_worker_thread.start()
 
-    def _run_poll(self, *, refresh_admin: bool = False, is_auto_poll: bool = False) -> None:
-        if self._poll_in_progress:
-            self._show_poll_overlap()
-            return
-
-        self._poll_in_progress = True
-        try:
-            initialize_database(self._db_path)
-            with connect(self._db_path) as connection:
-                settings = get_settings(connection)
-            result = self._perform_poll_operation(
-                settings,
-                selected_date=self._selected_date,
-                is_auto_poll=is_auto_poll,
-            )
-            self._apply_poll_operation_result(
-                result,
-                refresh_admin=refresh_admin,
-                is_auto_poll=is_auto_poll,
-            )
-        finally:
-            self._poll_in_progress = False
-
     def _finish_auto_poll(self, result: _PollOperationResult) -> None:
+        job = self._active_job
         try:
+            if self._stopped or job is None:
+                return
             self._apply_poll_operation_result(
                 result,
                 refresh_admin=True,
-                is_auto_poll=True,
+                is_auto_poll=job.automatic,
+            )
+            elapsed = time.monotonic() - self._poll_started_at
+            self.refresh_status.emit(
+                f"{datetime.now():%H:%M:%S} | PACS refresh | {job.reason} | {job.day:%Y-%m-%d} | "
+                f"{self.polling_status.text()} ({elapsed:.2f} s)"
             )
         finally:
             self._poll_in_progress = False
             self._poll_worker_thread = None
+            self._active_job = None
+            if job is not None and job.follow_up and self._event_refresh_active():
+                self._queue_refresh(job.day, "Follow-up", automatic=True, delay=self.FOLLOW_UP_SECONDS)
+            self._dispatch_refresh()
 
     def _perform_poll_operation(
         self,
@@ -924,15 +1000,12 @@ class PacsPanel(QWidget):
 
         if is_auto_poll and not self.is_healthy:
             self._poll_timer.stop()
-            self.polling_status.setText(f"Auto poll stopped: {self._health_reason}")
+            self.polling_status.setText(f"Auto poll stopped: {self._health_reason}" if self._refresh_mode == "timer" else f"PACS refresh failed: {self._health_reason}; Poll Now available")
             self.last_poll_result_label.setText(
-                f"Last poll result: auto poll stopped - {self._health_reason}"
+                f"Last poll result: refresh failed - {self._health_reason}"
             )
             return
 
-        self.last_poll_time_label.setText(
-            f"Last poll time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
         if operation.error_message is not None:
             self.polling_status.setText("Polling status: unknown error")
             self.last_poll_result_label.setText("Last poll result: unknown error")
@@ -957,6 +1030,8 @@ class PacsPanel(QWidget):
         poll_summary = (
             f"inserted={result.inserted}, updated={result.updated}, skipped={result.skipped}"
         )
+        if operation.eghis_db_available:
+            self.last_poll_time_label.setText(f"Last successful read: {datetime.now():%Y-%m-%d %H:%M:%S}")
         self.last_poll_result_label.setText(f"Last poll result: {poll_summary}")
         self._log_audit_aggregate(event_type="poll", summary=poll_summary)
 
@@ -987,12 +1062,6 @@ class PacsPanel(QWidget):
         self.refresh_audit()
         if refresh_admin:
             self._schedule_admin_reload()
-
-    def _show_poll_overlap(self) -> None:
-        self.last_poll_result_label.setText("Last poll result: skipped overlap")
-        self.polling_status.setText("Polling status: skipped overlap")
-        self._log_audit_aggregate(event_type="poll", summary="skipped overlap")
-        self.refresh_audit()
 
     def _schedule_admin_reload(self) -> None:
         self.admin_status_label.setText(
@@ -1054,6 +1123,7 @@ class PacsPanel(QWidget):
             "Startup readiness: sqlite=ok, settings=ok, "
             f"db={describe_database_path(self._db_path)}, "
             f"auto_poll={'on' if auto_poll_enabled else 'off'}, "
+            f"mode={self._refresh_mode}, "
             f"interval={interval_seconds}s, dry_run={'on' if dry_run_enabled else 'off'}"
         )
 

@@ -119,7 +119,9 @@ def sync_local_worklist_to_kaospacs(
             # Business cancellation originates on the KaosEghis side. KaosPACS
             # receives that truth through the explicit cancel endpoint and must
             # not infer it from downstream imaging lifecycle state.
-            if item.kaospacs_mwl_status == "sent":
+            # A failed delivery may already have reached the server. Keep an
+            # explicit source cancellation retryable until acknowledged.
+            if item.kaospacs_mwl_status in {"sent", "error"}:
                 cancelled_items.append(item)
             else:
                 skipped += 1

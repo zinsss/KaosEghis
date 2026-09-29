@@ -192,7 +192,7 @@ def test_operator_mode_contains_local_orders_controls(monkeypatch, tmp_path) -> 
     panel.page_buttons["operator_mode"].click()
 
     assert panel.refresh_button.text() == "Load from KaosEghis"
-    assert panel.poll_button.text() == "Load from eGHIS"
+    assert panel.poll_button.text() == "Poll Now"
     assert panel.sync_button.text() == "Sync to KaosPACS"
     assert panel.reconcile_button.text() == "Sync from KaosPACS"
     assert panel.manual_insert_button.text() == "Manual insert"
@@ -497,6 +497,7 @@ def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
     panel = pacs_panel_module.PacsPanel(db_path=tmp_path / "KaosEghis.sqlite")
     panel.page_buttons["operator_mode"].click()
     panel.poll_button.click()
+    _wait_for_auto_poll(panel)
 
     assert calls == {"health": 2, "poll": 1, "sync": 1}
     assert (
@@ -511,6 +512,8 @@ def test_pacs_panel_manual_poll_schedules_deferred_admin_reload(monkeypatch, tmp
     import KaosEghis.ui.plugins.pacs_panel as pacs_panel_module
     from KaosEghis.core.kaospacs_client import KaosPacsSyncResult
     from KaosEghis.core.pacs_polling import PollResult
+
+    monkeypatch.setattr(pacs_panel_module, "check_kaospacs_health", lambda settings: True)
 
     monkeypatch.setattr(
         pacs_panel_module,
@@ -529,6 +532,7 @@ def test_pacs_panel_manual_poll_schedules_deferred_admin_reload(monkeypatch, tmp
     monkeypatch.setattr(panel, "_schedule_admin_reload", lambda: scheduled.append(True))
 
     panel.poll_now()
+    _wait_for_auto_poll(panel)
 
     assert scheduled == [True]
 
@@ -692,7 +696,7 @@ def test_pacs_panel_auto_poll_stops_when_kaospacs_unavailable(monkeypatch, tmp_p
 
     assert poll_calls == []
     assert panel._poll_timer.isActive() is False
-    assert panel.polling_status.text() == "Auto poll stopped: KaosPACS unavailable"
+    assert "KaosPACS unavailable" in panel.polling_status.text()
 
 
 def test_pacs_panel_auto_poll_stops_when_eghis_db_unavailable(monkeypatch, tmp_path) -> None:
@@ -729,7 +733,7 @@ def test_pacs_panel_auto_poll_stops_when_eghis_db_unavailable(monkeypatch, tmp_p
 
     assert poll_calls == []
     assert panel._poll_timer.isActive() is False
-    assert panel.polling_status.text() == "Auto poll stopped: Eghis DB unavailable"
+    assert "Eghis DB unavailable" in panel.polling_status.text()
 
 
 def test_pacs_panel_sync_schedules_deferred_admin_reload(monkeypatch, tmp_path) -> None:

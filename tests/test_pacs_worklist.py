@@ -370,6 +370,13 @@ def test_pacs_panel_poll_status_remains_visible_after_poll_now(
     panel = pacs_panel.PacsPanel(db_path=db_path)
     panel.poll_now()
 
+    import time
+    deadline = time.monotonic() + 3
+    while panel._poll_in_progress and time.monotonic() < deadline:
+        QApplication.instance().processEvents()
+        time.sleep(0.005)
+    assert not panel._poll_in_progress
+
     assert (
         panel.polling_status.text()
         == "Polling status: inserted=0, updated=1, skipped=2 | KaosPACS sync: sent=0, cancelled=0, errors=0, skipped=0"
@@ -403,5 +410,12 @@ def test_pacs_panel_poll_now_handles_adapter_unavailable(
     db_path = Path(tmp_path / "KaosEghis.sqlite")
     panel = pacs_panel.PacsPanel(db_path=db_path)
     panel.poll_now()
+
+    import time
+    deadline = time.monotonic() + 3
+    while panel._poll_in_progress and time.monotonic() < deadline:
+        QApplication.instance().processEvents()
+        time.sleep(0.005)
+    assert not panel._poll_in_progress
 
     assert panel.polling_status.text() == "Polling status: unavailable"

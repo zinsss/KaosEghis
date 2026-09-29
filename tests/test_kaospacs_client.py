@@ -538,6 +538,35 @@ def test_cancelled_previously_sent_row_calls_cancel(tmp_path, monkeypatch) -> No
     assert loaded.kaospacs_mwl_status == "cancelled"
 
 
+def test_failed_cancellation_is_retried_until_acknowledged(tmp_path, monkeypatch) -> None:
+    from KaosEghis.core import kaospacs_client as client
+    from KaosEghis.db.repositories import update_pacs_worklist_sync_state
+
+    db_path = tmp_path / "test.sqlite"
+    initialize_database(db_path)
+    with connect(db_path) as connection:
+        item = create_pacs_worklist_item(connection, status="cancelled", accession_or_order_id="TEST-CANCEL")
+        update_pacs_worklist_sync_state(connection, item.id, kaospacs_mwl_status="sent")
+    calls = []
+
+    def cancel(settings, accession):
+        calls.append(accession)
+        if len(calls) == 1:
+            raise RuntimeError("simulated delivery failure")
+        return {"ok": True}
+
+    monkeypatch.setattr(client, "cancel_kaospacs_order", cancel)
+    first = client.sync_local_worklist_to_kaospacs({}, db_path)
+    assert first.errors == 1
+    with connect(db_path) as connection:
+        assert get_pacs_worklist_item(connection, item.id).kaospacs_mwl_status == "error"
+    second = client.sync_local_worklist_to_kaospacs({}, db_path)
+    assert second.cancelled == 1 and second.errors == 0
+    third = client.sync_local_worklist_to_kaospacs({}, db_path)
+    assert third.cancelled == 0
+    assert calls == ["TEST-CANCEL", "TEST-CANCEL"]
+
+
 def test_cancelled_never_sent_row_is_not_sent(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)

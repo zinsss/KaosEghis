@@ -2,6 +2,7 @@ from pathlib import Path
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
@@ -22,6 +23,7 @@ from KaosEghis.core.kaospacs_client import check_kaospacs_health
 
 class SettingsTab(QWidget):
     general_settings_saved = Signal()
+    pacs_settings_saved = Signal()
 
     TOP_PAGES = ["General", "PACS"]
     PACS_DEFAULTS = {
@@ -37,6 +39,7 @@ class SettingsTab(QWidget):
         "kaospacs_integration_token": DEFAULT_SETTINGS["kaospacs_integration_token"],
         "kaospacs_api_timeout_seconds": DEFAULT_SETTINGS["kaospacs_api_timeout_seconds"],
         "pacs_auto_poll_enabled": DEFAULT_SETTINGS["pacs_auto_poll_enabled"],
+        "pacs_refresh_mode": DEFAULT_SETTINGS["pacs_refresh_mode"],
         "pacs_poll_interval_seconds": DEFAULT_SETTINGS["pacs_poll_interval_seconds"],
         "pacs_dry_run": DEFAULT_SETTINGS["pacs_dry_run"],
     }
@@ -93,19 +96,23 @@ class SettingsTab(QWidget):
         self.kaospacs_integration_token = QLineEdit()
         self.kaospacs_integration_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.kaospacs_api_timeout_seconds = QLineEdit()
-        self.pacs_auto_poll_enabled = QCheckBox("Enable PACS auto poll")
+        self.pacs_auto_poll_enabled = QCheckBox("Enable automatic PACS refresh")
+        self.pacs_refresh_mode = QComboBox()
+        self.pacs_refresh_mode.addItem("Chart clear", "chart_clear")
+        self.pacs_refresh_mode.addItem("Timer (legacy)", "timer")
         self.pacs_dry_run = QCheckBox("Enable PACS dry run")
         self.pacs_poll_interval_seconds = QSpinBox()
         self.pacs_poll_interval_seconds.setMinimum(15)
         self.pacs_poll_interval_seconds.setMaximum(86400)
+        self.pacs_refresh_mode.currentIndexChanged.connect(
+            lambda: self.pacs_poll_interval_seconds.setEnabled(self.pacs_refresh_mode.currentData() == "timer")
+        )
         self.general_status = QLabel()
         self.pacs_status = QLabel()
         self.sqlite_path_label = QLabel()
         self.pacs_info = QLabel(
             "PACS settings control Eghis DB polling, KaosPACS API access, and "
             "KaosPACS Web admin access. "
-            "Sync remains manual unless auto-poll is enabled; auto-poll only polls "
-            "Eghis into local SQLite and never syncs to KaosPACS. "
             "PACS dry run keeps polling live but simulates sync and reconcile. "
             "Patient-context API host/port are for KaosPACS fallback demographic lookup."
         )
@@ -177,6 +184,7 @@ class SettingsTab(QWidget):
         pacs_form.addRow("Patient-context integration token", self.kaospacs_integration_token)
         pacs_form.addRow("KaosPACS API timeout seconds", self.kaospacs_api_timeout_seconds)
         pacs_form.addRow(self.pacs_auto_poll_enabled)
+        pacs_form.addRow("Refresh trigger", self.pacs_refresh_mode)
         pacs_form.addRow(self.pacs_dry_run)
         pacs_form.addRow("PACS poll interval seconds", self.pacs_poll_interval_seconds)
 
@@ -297,6 +305,8 @@ class SettingsTab(QWidget):
         self.pacs_auto_poll_enabled.setChecked(
             settings["pacs_auto_poll_enabled"].strip().lower() == "true"
         )
+        self.pacs_refresh_mode.setCurrentIndex(1 if settings.get("pacs_refresh_mode") == "timer" else 0)
+        self.pacs_poll_interval_seconds.setEnabled(self.pacs_refresh_mode.currentData() == "timer")
         self.pacs_dry_run.setChecked(
             settings["pacs_dry_run"].strip().lower() == "true"
         )
@@ -360,6 +370,7 @@ class SettingsTab(QWidget):
         with connect(self._db_path) as connection:
             set_settings(connection, values)
         self.pacs_status.setText("PACS settings saved.")
+        self.pacs_settings_saved.emit()
 
     def reset_pacs_settings_to_defaults(self) -> None:
         self.eghis_db_connection_string.setText(
@@ -382,6 +393,7 @@ class SettingsTab(QWidget):
             self.PACS_DEFAULTS["kaospacs_api_timeout_seconds"]
         )
         self.pacs_auto_poll_enabled.setChecked(False)
+        self.pacs_refresh_mode.setCurrentIndex(0)
         self.pacs_dry_run.setChecked(False)
         self.pacs_poll_interval_seconds.setValue(
             self._normalize_poll_interval(
@@ -392,6 +404,7 @@ class SettingsTab(QWidget):
         with connect(self._db_path) as connection:
             set_settings(connection, self._current_pacs_settings())
         self.pacs_status.setText("PACS settings reset to defaults.")
+        self.pacs_settings_saved.emit()
 
     def test_kaospacs_connection(self) -> None:
         validation_error = self._validate_pacs_settings()
@@ -432,6 +445,7 @@ class SettingsTab(QWidget):
             "kaospacs_integration_token": self.kaospacs_integration_token.text().strip(),
             "kaospacs_api_timeout_seconds": normalized_timeout,
             "pacs_auto_poll_enabled": "true" if self.pacs_auto_poll_enabled.isChecked() else "false",
+            "pacs_refresh_mode": self.pacs_refresh_mode.currentData(),
             "pacs_dry_run": "true" if self.pacs_dry_run.isChecked() else "false",
             "pacs_poll_interval_seconds": str(
                 self._normalize_poll_interval(self.pacs_poll_interval_seconds.value())

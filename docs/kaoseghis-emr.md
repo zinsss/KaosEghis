@@ -1,13 +1,14 @@
 # KaosEghis-emr
 
-Last updated: 2026-09-28
+Last updated: 2026-09-29
 
-Status: the shared DB manager is still a design. F6/F7 observations write to the
-existing Launcher status area without changing DB polling or EMR data. The shared
-chart observer now also schedules the read-only `***` patient-memo alert, replacing
-that alert's separate polling loop. Confirmed chart clears additionally report a
-dry-run PACS/Orders refresh candidate that waits for a two-second settling delay;
-they do not enqueue database work.
+Status: the first shared-read stage is implemented. Verified chart clears can now
+refresh the existing whole-day PACS query; Poll Now remains a manual fallback.
+PACS, flu-report, health, and patient-context reads share one FIFO worker per
+process and a Windows machine-wide mutex. Each source connection is read-only and
+closed before the next read or any downstream delivery. This is not yet a separate
+broker executable or an all-orders/reception-status reader for KaosOrders.
+F6/F7 observations remain diagnostic only. The patient-memo alert is unchanged.
 
 ## Observation-Only Probe
 
@@ -88,9 +89,8 @@ Chart-field UIA events and sampled chart changes also appear here as distinct so
 - Observations remain only in memory and the bounded existing status text area.
   No chart numbers are written to files, databases, or network destinations.
   Queue overload is reported, rather than silently implying complete coverage.
-- No 20-second reconciliation timer or DB queue is enabled in this probe. Each
-  separate physical press/click remains visible for diagnosis. PACS polling and
-  flu reports are untouched.
+- F6/F7 input observations do not request DB work. Each physical press/click
+  remains visible for diagnosis; only verified clears feed the refresh path below.
 
 After restarting KaosEghis, connect EMR and verify the four inputs during normal
 work. Compare every displayed chart number with the patient on screen, including
@@ -173,87 +173,73 @@ During normal patient changes, compare UIA lines with sampled lines. A value set
 before the first subscription may have only a sampled baseline. Same-patient
 reloads may not change any chart property. Neither kind of line proves that all
 patient fields/orders have finished loading, and property events do not overwrite
-F6/F7 snapshots or trigger DB work. Clear/change events invalidate pending memo
+F6/F7 snapshots. Verified clears can request a day-wide PACS refresh; numeric
+changes alone do not. Clear/change events invalidate pending memo
 checks; subsequent sampled chart identity schedules a delayed alert check as
 described below. Live logs now confirm eGHIS Name-change event delivery, including clear
 and numeric transitions, but not complete coverage or patient-load completion.
 A real property change on an isolated, hidden Windows test field also verified
 the callback path. Button activation-event delivery remains unverified.
 
-### Clear-Triggered Refresh Dry Run
+### Clear-Triggered PACS Refresh
 
-The proposed primary refresh trigger is a confirmed chart-number clear, rather
-than F6/F7 key/button input. The previous patient's status and orders would be
-read after clearing; a clear is not itself proof of completed/saved orders.
-Switching patients can clear the field too.
+- A previously verified numeric chart changing to a verified empty field requests
+  refresh. UIA properties and sampled clears are deduplicated under the patient
+  lock. Missing/unreadable text, focus loss, and initial empty fields are not clears.
+- A fresh numeric sample rearms the observer, including same-patient reloads.
+  Patient identity still uses the 750-ms freshness rule, but day-wide refresh does
+  not: no departing chart number is passed to the database reader.
+- Wait two seconds after the latest clear in a burst, then emit a separate Qt
+  request. No F1, caret readiness, focus, typing, or mouse input is needed.
+  A new patient loading cannot redirect the request to another patient's query.
+- The request retains the clear's date across midnight. Automatic refresh does
+  not use an operator's currently selected historical worklist date. Poll Now does.
+- The PACS worker uses the existing imaging query and cancellation reconciliation,
+  then existing KaosPACS delivery. It does not infer completion/cancellation from
+  a clear and does not yet read all orders or reception statuses.
+- One follow-up is scheduled eight seconds after the initial operation finishes,
+  even after a failure. Follow-ups do not recursively schedule retries. Neither
+  delay proves that EMR has committed; Poll Now remains necessary for unusually
+  delayed changes, edits without a clear, or a missed signal.
+- Only one PACS operation runs at a time. Further requests coalesce by day and
+  remain pending rather than being dropped during an active refresh.
+- Chart-clear mode performs startup and detected EMR-reconnection refreshes.
+  There is no periodic DB reconnect probe: a backend recovering silently is read
+  on the next clear, bounded follow-up, or Poll Now.
+- Clear requests are independent of the bounded diagnostic queue. Disconnects,
+  changed EMR scope, stop, invalid timing, or a 120-second UIA worker stall discard
+  pending trigger candidates. Startup/reconnection reads reconcile missed work.
+- Existing automatic-refresh enable/disable and PACS dry-run settings are honored.
+  The default `pacs_refresh_mode=chart_clear` disables the regular polling timer.
+  `timer` is an explicit rollback option in PACS Operator Mode or Settings > PACS.
+- Launcher status shows each refresh's reason, date, outcome and total elapsed
+  time (including queue wait and delivery). PACS shows the last successful source
+  read time; failures do not advance it. Memo timing remains unchanged.
 
-The first caret-gated dry run was replaced after live use confirmed that F6/F7
-does not automatically return the caret to F1. Refresh observation must not depend
-on opening another patient or moving keyboard focus.
+Before relying on this during normal work, verify F6/F7 keys and buttons, the last
+patient of the day, fast patient switches, edits/deletions, and offline recovery.
+Compare PACS after the follow-up with Poll Now. Do not create clinical orders just
+for testing. No production DB or UI input was exercised during implementation.
 
-The existing Launcher status area now shows a separate diagnostic, for example:
+### Shared Read Queue (Stage One)
 
-```text
-EMR probe | Chart cleared (UIA Name) | Chart 1234 -> waiting 2 s before refresh (dry run; previous snapshot 100 ms)
-EMR probe | Chart 1234 | 2 s delay elapsed -> would query PACS/Orders for this previous patient; waited 2.0 s; DB commit unverified (dry run)
-```
+`core/eghis_db.py` routes every existing reader through `core/emr_read_queue.py`.
+The one-worker FIFO covers PACS, flu-report, SELECT 1 health checks, patient-context
+API calls, and the diagnostic tool. A named Windows mutex additionally excludes
+connections from other updated Kaos processes on the machine. It does not block
+eGHIS's own connections, or coordinate older versions that bypass this helper.
 
-- A verified sampled patient context must exist before the clear. Numeric event
-  text alone does not establish the previous patient's identity.
-- Both a scoped UIA empty-string event and a verified sampled empty field can
-  produce the candidate. Consuming the previous context under the same lock
-  deduplicates the UIA properties and sampled clear, including simultaneous delivery.
-- A fresh subsequent numeric sample rearms the observer, including a reload of
-  the same chart. A sample started before a clear cannot rearm it.
-- The previous numeric sample must be no more than 750 ms old. Otherwise the
-  line says `Refresh skipped (previous chart snapshot not fresh; dry run)` and
-  omits the chart number. In particular, a long modal/focus gap may skip a candidate;
-  diagnostic evidence is needed before changing this safety limit.
-- Missing/non-text/non-numeric payloads, unreadable samples, focus loss,
-  disconnection, and EMR restart are not clear triggers. A different unverified
-  patient cannot inherit the old patient's refresh candidate.
-- Each fresh clear retains the departing patient independently of the next patient.
-  Dispatch does not substitute the currently displayed chart or require the old
-  chart to remain visible. The 750-ms rule applies at capture, not after waiting.
-- `core/emr_refresh_probe.py` uses a monotonic two-second delay per clear. A new
-  patient or duplicate observation cannot restart another patient's timer. Reloads
-  have distinct context revisions. No caret, F1 target configuration, text read,
-  foreground focus or new-patient load is required after a candidate is captured.
-- The existing MTA worker checks due times during its normal loop. It does not
-  sleep for each ticket, create a new timer/thread, inspect extra UIA controls, load
-  local settings, or open any DB connection. It never presses F1, types or clicks.
-  Scheduling may make the diagnostic later than two seconds, but not earlier; the
-  message includes actual elapsed time. The delay does not prove UI readiness,
-  completed loading, successful saving, or committed DB changes.
-- Disconnect/restart cancels pending candidates. Stopping the probe discards them
-  and late results. A candidate held for 120 seconds (for example during a worker
-  stall) explicitly expires without a query; invalid timing also cancels it.
-  Pending diagnostics are bounded to 32; overflow is reported, never treated as
-  success. This temporary in-memory queue is not the planned durable DB work queue.
-- Chart numbers stay in memory and the existing bounded status area, not files or
-  network traffic. The existing status queue can drop lines under overload and
-  reports its count, but dropping a clear line does not drop the pending ticket.
-- Memo cancellation still happens on clear, even if the diagnostic candidate is
-  skipped or its status queue is full. F6/F7 diagnostics and existing PACS polling
-  remain unchanged for comparison. The five-second memo delay is also unchanged;
-  caret/readiness-based memo triggering has not been implemented.
+No connection pool is used. Cursor/connection cleanup is inside the exclusive
+operation, on success and failure, before local SQLite work or HTTP delivery.
+Read-only session setup must succeed. Default connect and statement limits are
+five seconds; flu-report retains its existing shorter three-second statement limit.
+The in-process queue is bounded to 64 callers; mutex waiting is bounded to 60 seconds.
+Neither SQL nor connection strings nor patient data are logged by the queue.
 
-After restarting, observe normal F6, F7, and both button workflows, patient
-switching, and same-patient reloads. Expect a waiting line, then at most one
-`2 s delay elapsed -> would query` line per load/clear cycle, with the patient who just
-left, not the next patient. Note skipped, missing, duplicate, or wrong-patient
-candidates, especially across print/confirmation dialogs. Include the last patient
-without loading another patient or pressing F1. Send the waiting/due/cancelled
-lines for evaluation. Do not send clinical orders solely
-to test this observer. PACS remains on its existing polling path throughout.
-
-Only after live validation should this feed the planned single-connection read-only
-manager, with a settling period, bounded reconciliation, and explicit reads of
-completed/held/cancelled reception status and orders. That future source read must
-establish actual status and use bounded retries when needed; a delay alone must
-not justify downstream cancellation or completion. Removing F6/F7 listeners or
-replacing PACS polling is a later change; clears may not cover edits that leave a
-chart open or changes made on other workstations.
+This is the foundation, not the full future broker below. Pending work is in memory;
+durable delivery, all-orders snapshots and reception status semantics remain future
+work. Serialization may reduce contention but does not prove the flu-report/EMR
+timeout issue is resolved.
 
 ### Delayed Patient-Memo Alert
 
@@ -291,8 +277,8 @@ Pending clear diagnostics only check in-memory deadlines and cached connection
 identity. The earlier F1 caret/focus probe and local target lookup have been removed.
 Subscriptions are element-scoped, never desktop-wide. Event handlers use a bounded
 queue and perform no synchronous UI update. No resource benchmark against EMR's
-30-second PACS DB polling has been claimed. A future event-triggered DB queue may
-avoid idle queries but could issue more, narrower queries during busy work.
+30-second PACS DB polling has been claimed. Chart-clear mode avoids idle periodic
+reads, but its initial/follow-up whole-day reads can still be frequent during busy work.
 
 The input-hook constraints follow Microsoft's
 [low-level hook guidance](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)
@@ -303,7 +289,10 @@ and [UIA threading requirements](https://learn.microsoft.com/en-us/windows/win32
 Chart events use the
 [property-change callback](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationpropertychangedeventhandler-handlepropertychangedevent).
 
-## Purpose and Ownership
+## Future Broker Scope
+
+The following sections describe the full target architecture, beyond the PACS-only
+stage above; they are not a claim that all acceptance gates are implemented.
 
 KaosEghis-emr will be the shared eGHIS read adapter for KaosEghis-pacs,
 KaosOrders, on-demand flu reporting, and patient-context database lookups.
@@ -311,10 +300,9 @@ KaosOrders, on-demand flu reporting, and patient-context database lookups.
 - Observe F6/F7 and the verified BtnF6/BtnF7 controls without suppressing, replaying,
   or generating those inputs. Signals indicate intent, not successful order saves.
 - Capture verified chart identity before the EMR action opens another window.
-- Validate the clear-triggered two-second candidate delay above before DB cutover.
-  The earlier per-chart 20-second F7 proposal in
-  [KaosOrders signal capture](kaosorders.md) is not the current clear-triggered dry
-  run, and neither proposal has enabled the shared DB queue yet.
+- Validate the initial and follow-up timing during normal clinical work. The
+  earlier per-chart 20-second F7 proposal in [KaosOrders signal capture](kaosorders.md)
+  is superseded by day-wide chart-clear refreshes.
 - Reconcile actual source states before delivering minimal data to the PACS and
   KaosOrders adapters. These adapters retain their own domain and delivery logic.
 - Run flu reporting only on explicit request. Prefer small source reads and local

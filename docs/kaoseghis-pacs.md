@@ -380,6 +380,7 @@ Editable PACS settings in the Settings tab:
 - `kaospacs_integration_token`
 - `kaospacs_api_timeout_seconds`
 - `pacs_auto_poll_enabled`
+- `pacs_refresh_mode` (`chart_clear` by default; `timer` for rollback)
 - `pacs_poll_interval_seconds`
 - `pacs_dry_run`
 
@@ -395,10 +396,24 @@ Rules:
 - auto poll is off by default
 - dry run is off by default
 - testing KaosPACS connection uses `GET /health` only
-- When enabled, the in-process auto-poll timer runs health checks, the read-only eGHIS
-  query, and KaosPACS synchronization on a background worker. Qt applies only the
-  completed status, table, and audit updates, preventing the polling cycle from
-  pausing the rest of the app.
+- When enabled, chart-clear mode waits two seconds after a verified clear, refreshes
+  that day's PACS orders, then performs one follow-up eight seconds after completion.
+  There is no regular polling timer in this mode. Startup and detected EMR reconnect
+  also refresh. The selected historical date affects Poll Now, not chart-clear jobs.
+- Poll Now remains available with automatic refresh disabled. It also runs on the
+  background worker. Requests received during a refresh coalesce by date rather than
+  being discarded. Failed reads do not advance the last-successful-read timestamp.
+- The legacy timer is retained as an explicit rollback option. Existing automatic
+  enable/disable and dry-run settings are preserved. Restart the desktop after updating.
+- All existing eGHIS database readers now use the shared serialized read queue.
+  Connections are read-only, bounded, and closed before local work or HTTP delivery.
+  See [KaosEghis-emr](kaoseghis-emr.md) for concurrency boundaries and live checks.
+- This stage does not change the imaging query into an all-orders/status snapshot,
+  nor guarantee detection of changes after the bounded follow-up. Use Poll Now for
+  unusually delayed saves or changes that do not clear the chart.
+- Explicit source cancellations whose previous delivery failed remain eligible
+  for the next sync, including the bounded follow-up, until PACS acknowledges them.
+  Source read success and delivery success remain separate; no clear implies cancellation.
 
 ## Legacy Patient-Context API
 

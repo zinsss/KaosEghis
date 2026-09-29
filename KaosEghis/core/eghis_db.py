@@ -6,6 +6,8 @@ import math
 import re
 from time import perf_counter
 
+from KaosEghis.core.emr_read_queue import run_serialized_read
+
 _WRITE_SQL_PATTERN = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|MERGE|EXEC|CALL)\b",
     re.IGNORECASE,
@@ -24,11 +26,23 @@ def run_readonly_query(
     connection_string: str,
     query: str,
     *,
-    connect_timeout_seconds: float | None = None,
-    statement_timeout_seconds: float | None = None,
+    connect_timeout_seconds: float | None = 5.0,
+    statement_timeout_seconds: float | None = 5.0,
     application_name: str | None = None,
     timings: dict[str, float] | None = None,
 ) -> tuple[list[str], list[tuple | list | object]]:
+    return run_serialized_read(lambda: _read_and_close(
+        connection_string, query,
+        connect_timeout_seconds=5.0 if connect_timeout_seconds is None else connect_timeout_seconds,
+        statement_timeout_seconds=5.0 if statement_timeout_seconds is None else statement_timeout_seconds,
+        application_name=application_name or "KaosEghis-emr", timings=timings,
+    ))
+
+
+def _read_and_close(
+    connection_string, query, *, connect_timeout_seconds,
+    statement_timeout_seconds, application_name, timings,
+):
     started = perf_counter()
 
     def record_stage(name: str) -> None:

@@ -65,7 +65,7 @@ def test_poll_image_orders_uses_default_postgres_query_when_query_blank(
             return None
 
     class FakePsycopg2Module:
-        def connect(self, connection_string: str):
+        def connect(self, connection_string: str, **kwargs):
             self.connection_string = connection_string
             return FakeConnection()
 
@@ -92,6 +92,7 @@ def test_poll_image_orders_uses_default_postgres_query_when_query_blank(
             "source": "eghis-db",
         }
     ]
+    assert executed_queries.pop(0) == "SET statement_timeout = 5000"
     assert executed_queries == [_DEFAULT_IMAGE_ORDER_QUERY]
     assert "public.mwl" in executed_queries[0]
     assert "public.h2opd_doct_ord" in executed_queries[0]
@@ -136,7 +137,7 @@ def test_poll_image_orders_selected_date_is_applied_to_default_query(
             return None
 
     class FakePsycopg2Module:
-        def connect(self, connection_string: str):
+        def connect(self, connection_string: str, **kwargs):
             return FakeConnection()
 
     monkeypatch.setitem(sys.modules, "psycopg2", FakePsycopg2Module())
@@ -149,6 +150,7 @@ def test_poll_image_orders_selected_date_is_applied_to_default_query(
         selected_date=date(2026, 6, 30),
     )
 
+    assert executed_queries.pop(0) == "SET statement_timeout = 5000"
     assert "20260630" in executed_queries[0]
     assert "regexp_replace" in executed_queries[0]
 

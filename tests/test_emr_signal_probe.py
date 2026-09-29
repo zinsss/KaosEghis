@@ -185,7 +185,7 @@ def test_confirmed_clear_reports_previous_chart_once_across_all_sources(capture,
     assert observation.chart_no == "001234"
     assert observation.age_ms == 100
     assert "waiting 2 s before refresh" in observation.status_text()
-    assert "dry run" in observation.status_text()
+    assert "day-wide PACS" in observation.status_text()
     assert "001234" not in repr(observation)
     assert capture.patient_context is None
 
@@ -207,7 +207,7 @@ def test_same_patient_reload_can_produce_another_clear_candidate(capture, source
 
 
 @pytest.mark.parametrize("age", [0.751, 5.0, -0.1])
-def test_clear_with_stale_or_invalid_previous_sample_skips_candidate(capture, age):
+def test_clear_with_stale_previous_identity_still_requests_whole_day(capture, age):
     snapshot = capture.snapshot
     capture.update_snapshot(snapshot)
     capture.test_clock[0] = snapshot.sampled_at + age
@@ -215,9 +215,12 @@ def test_clear_with_stale_or_invalid_previous_sample_skips_candidate(capture, ag
     observations = clear_observations(capture)
     assert len(observations) == 1
     assert not observations[0].chart_no
-    assert "Refresh skipped" in observations[0].status_text()
+    assert "departing chart identity not required" in observations[0].status_text()
     assert "001234" not in observations[0].status_text()
     assert capture.patient_context is None
+    capture.test_clock[0] += 2
+    capture.refresh_probe.tick(snapshot.scope)
+    assert capture.refresh_probe.take_ready(snapshot.scope)
 
 
 def test_clear_uses_latest_verified_sample_not_first_patient_sample(capture):
@@ -297,7 +300,7 @@ def test_clear_callback_does_not_read_live_chart_or_scan(capture):
     assert len(clear_observations(capture)) == 1
 
 
-def test_settle_delay_after_new_patient_load_still_targets_departing_patient(capture):
+def test_settle_delay_after_new_patient_load_targets_day_not_patient(capture):
     snapshot = capture.snapshot
     capture.update_snapshot(snapshot)
     capture.chart_property_event(snapshot.scope, "Name", "")
@@ -311,7 +314,8 @@ def test_settle_delay_after_new_patient_load_still_targets_departing_patient(cap
         capture.test_clock[0] = at
         capture.refresh_probe.tick(snapshot.scope)
     message = capture.output.get_nowait()
-    assert "Chart 001234" in message and "would query PACS/Orders" in message
+    assert "PACS day refresh queued" in message
+    assert "001234" not in message
     assert "000456" not in message
     assert capture.output.empty()
 
@@ -327,7 +331,7 @@ def test_dropped_status_does_not_drop_pending_delayed_candidate(capture):
     for at in (10.5, 12.1):
         capture.test_clock[0] = at
         capture.refresh_probe.tick(snapshot.scope)
-    assert "would query PACS/Orders" in capture.output.get_nowait()
+    assert capture.refresh_probe.take_ready(snapshot.scope)
 
 
 def test_dropped_clear_diagnostic_still_invalidates_patient_and_does_not_replay(capture):
@@ -386,7 +390,7 @@ def test_runtime_displays_clear_candidate_as_text_and_still_clears_patient(captu
         runtime._drain()
         assert contexts == [context, None]
         assert len([line for line in messages if "waiting 2 s before refresh" in line]) == 1
-        assert any("Chart 001234" in line and "dry run" in line for line in messages)
+        assert any("Chart 001234" in line and "day-wide PACS" in line for line in messages)
     finally:
         runtime.stop()
 
@@ -804,12 +808,14 @@ def test_runtime_delays_clear_without_caret_or_focus_on_existing_background_work
     listeners = (Listener(), Listener())
     dispatched = []
 
-    class TrackingDryRun(probe.ClearRefreshDryRun):
-        def _message(self, ticket, detail):
-            dispatched.append((threading.get_ident(), time.monotonic()))
-            super()._message(ticket, detail)
+    class TrackingTrigger(probe.ClearRefreshTrigger):
+        def tick(self, scope):
+            before = bool(self._ready)
+            super().tick(scope)
+            if self._ready and not before:
+                dispatched.append((threading.get_ident(), time.monotonic()))
 
-    monkeypatch.setattr(probe, "ClearRefreshDryRun", TrackingDryRun)
+    monkeypatch.setattr(probe, "ClearRefreshTrigger", TrackingTrigger)
 
     runtime = probe.EmrSignalProbeRuntime(
         reader_factory=Reader, listener_factory=lambda capture: listeners, state_provider=state,
@@ -829,7 +835,7 @@ def test_runtime_delays_clear_without_caret_or_focus_on_existing_background_work
         runtime._capture.chart_property_event(probe.connected_scope(state()), "Name", "")
         runtime._capture.reader.active = False
         deadline = time.monotonic() + 5
-        while not any("would query PACS/Orders" in message for message in messages):
+        while not any("PACS day refresh queued" in message for message in messages):
             assert time.monotonic() < deadline
             runtime._drain()
             time.sleep(0.01)
@@ -1329,8 +1335,12 @@ def test_main_window_runtime_lifecycle_includes_probe():
             "patient_alert_monitor", "emr_signal_probe",
         )
     })
+    window.pacs_panel = SimpleNamespace(
+        start_refresh_runtime=lambda: calls.append(("pacs", "start")),
+        stop_refresh_runtime=lambda: calls.append(("pacs", "stop")),
+    )
     MainWindow.initialize_runtime_services(window)
-    assert calls[-1] == ("emr_signal_probe", "start")
+    assert calls[-2:] == [("emr_signal_probe", "start"), ("pacs", "start")]
     # Use a real MainWindow type without constructing integrations or connecting EMR.
     from PySide6.QtWidgets import QMainWindow
     shell = MainWindow.__new__(MainWindow)

@@ -62,6 +62,7 @@ DEFAULT_SETTINGS = {
     "kaospacs_patient_context_api_port": "8765",
     "kaospacs_patient_context_api_allow_loopback_without_token": "true",
     "pacs_auto_poll_enabled": "false",
+    "pacs_refresh_mode": "chart_clear",
     "pacs_poll_interval_seconds": "60",
     "pacs_dry_run": "false",
     "vaccine_influenza_daily_cap": "100",
