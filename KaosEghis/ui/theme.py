@@ -401,20 +401,82 @@ QListView::item:hover {
     background-color: #434c5e;
 }
 
-QListWidget#vaccineTypesList::item {
+QComboBox#vaccineTypesCombo {
+    background-color: #3b4252;
+    color: #eceff4;
+    border: 2px solid #ebcb8b;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-weight: bold;
+}
+
+QComboBox#vaccineTypesCombo:hover,
+QComboBox#vaccineTypesCombo:focus {
+    background-color: #434c5e;
+    border: 2px solid #eceff4;
+}
+
+QComboBox#vaccineTypesCombo::drop-down {
+    background-color: #ebcb8b;
+    width: 28px;
+    border-left: 1px solid #ebcb8b;
+}
+
+QComboBox#vaccineTypesCombo::drop-down:disabled {
+    background-color: #4c566a;
+    border-left: 1px solid #4c566a;
+}
+
+QComboBox#vaccineTypesCombo::down-arrow {
+    image: none;
+}
+
+QComboBox#vaccineTypesCombo QAbstractItemView::item {
     padding: 8px 10px;
-    border: 1px solid transparent;
-    border-left: 6px solid transparent;
     min-height: 24px;
 }
 
-QListWidget#vaccineTypesList::item:selected,
-QListWidget#vaccineTypesList::item:selected:!active,
-QListWidget#vaccineTypesList::item:selected:hover {
+QComboBox#vaccineTypesCombo QAbstractItemView::item:selected {
     background-color: #88c0d0;
     color: #202630;
-    border: 1px solid #eceff4;
-    border-left: 6px solid #ebcb8b;
+}
+
+QPushButton#vaccineFetchButton,
+QPushButton#vaccinePrintButton {
+    color: #202630;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    padding: 5px 12px;
+    min-height: 20px;
+    font-weight: bold;
+}
+
+QPushButton#vaccineFetchButton {
+    background-color: #88c0d0;
+}
+
+QPushButton#vaccinePrintButton {
+    background-color: #a3be8c;
+}
+
+QPushButton#vaccineFetchButton:hover,
+QPushButton#vaccineFetchButton:focus,
+QPushButton#vaccinePrintButton:hover,
+QPushButton#vaccinePrintButton:focus {
+    border: 2px solid #eceff4;
+}
+
+QPushButton#vaccineFetchButton:pressed,
+QPushButton#vaccinePrintButton:pressed {
+    background-color: #ebcb8b;
+}
+
+QComboBox#vaccineTypesCombo:disabled,
+QPushButton#vaccineFetchButton:disabled,
+QPushButton#vaccinePrintButton:disabled {
+    background-color: #3b4252;
+    color: #a0a8b6;
+    border: 2px solid #4c566a;
 }
 
 QLabel#selectedVaccineLabel {

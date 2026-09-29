@@ -22,7 +22,7 @@ Current implemented pieces:
 - explicit prepared/printed/completed/cancelled/error record lifecycle
 - operator-confirmed completion and cancellation corrections
 - sanitized lifecycle audit without patient values
-- drag/drop ordering for vaccine types
+- vaccine dropdown ordering with up/down arrow controls
 - EMR-target-based patient context fetch into the Vaccine page
 - one fetched patient context can create separate simultaneous-vaccination records
 - visible same-day `Influenza` and `COVID-19` counts
@@ -99,17 +99,23 @@ even for the same patient. Existing records are unchanged; a new database record
 by Save, Print, or explicit pair preparation. A failed fetch preserves the current
 form and record references.
 
-The catalog has no default selection on startup, after Clear form/New vaccine record,
-or when the selected type disappears during refresh. An ordinary refresh preserves an
-explicit existing selection, and explicitly loading a saved record restores its type.
-Keyboard focus/current row alone is not accepted as a selection. Without a selected
+The non-editable vaccine dropdown has no default selection on startup, after a new EMR
+fetch or Clear form/New vaccine record, or when the selected type disappears during
+refresh. Add/Edit/Delete refresh the dropdown immediately. An ordinary refresh preserves
+an explicit existing selection by ID only while its name, code, program, chart note and
+enabled state remain unchanged; a material edit requires reselection. Explicitly loading
+a saved record restores its type by ID (a missing ID never falls back to a matching name).
+The closed dropdown ignores mouse-wheel changes, and focusing or highlighting a popup
+row alone is not accepted as a selection. Without a selected
 vaccine, Save/Print and pair preparation are disabled and their handlers also reject
 the action. Flu + COVID preparation still requires an explicitly selected COVID product.
 
-The selected row uses a high-contrast background, bold name, and accent border, including
-when the list loses focus. A separate Selected vaccine label repeats the full name.
+The dropdown has an amber border and a `Select vaccine` placeholder. Fetch from EMR is
+highlighted in cyan; Print label is green when enabled and muted while disabled. A
+separate high-contrast Selected vaccine label repeats the full name. Up/down arrow
+controls reorder the selected type while preserving its ID and selection.
 Printing a loaded record is blocked if its vaccine ID/name differs from the visible
-selection, so changing the list cannot silently print the previously saved vaccine.
+selection, so changing the dropdown cannot silently print the previously saved vaccine.
 
 When the current chart number has records for today, `Edit today's record` appears
 beside Save/Print. Its menu lists each record's ID, vaccine, and status, including
@@ -189,7 +195,7 @@ code change.
 The current `Vaccine` page now exposes:
 
 - patient-context fetch from configured EMR targets
-- editable vaccine type list and chart-note preview
+- managed vaccine type dropdown and chart-note preview
 - saved local preparation records
 - today's `Influenza` count with configured cap
 - today's `COVID-19` count with configured cap
@@ -738,7 +744,7 @@ must therefore support preparing both vaccinations in one guarded patient workfl
 
 Current implementation: `Prepare Flu + COVID` reuses the loaded patient context to
 create two separate local preparation records. The operator selects the COVID product
-(Pfizer or Moderna) in the normal Vaccine list before preparing the pair. `Print prepared
+(Pfizer or Moderna) in the Vaccine dropdown before preparing the pair. `Print prepared
 pair` first requires one explicit operator confirmation, then runs each label's own
 eligibility gate and print checkpoint. It stops and reports the affected vaccine if either label cannot
 be printed; it never treats a partial pair as fully completed.

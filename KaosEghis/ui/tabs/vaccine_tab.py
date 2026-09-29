@@ -7,6 +7,7 @@ import threading
 import logging
 
 from PySide6.QtCore import QCoreApplication, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtGui import QIcon, QPainter, QStandardItem, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -19,16 +20,17 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QStackedWidget,
+    QStyle,
+    QStyleOptionComboBox,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -172,6 +174,30 @@ class VaccineTypeDialog(QDialog):
         }
 
 
+class _VaccineTypeComboBox(QComboBox):
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        arrow_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox, option,
+            QStyle.SubControl.SC_ComboBoxArrow, self,
+        )
+        painter = QPainter(self)
+        icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown)
+        icon.paint(
+            painter, arrow_rect.adjusted(6, 6, -6, -6), Qt.AlignmentFlag.AlignCenter,
+            QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled,
+        )
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        # Scrolling the page must not silently switch the selected vaccine.
+        if self.view().isVisible():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
 class VaccineTab(QWidget):
     TOP_PAGES = ["Main", "DB", "Settings"]
     kdca_progress = Signal(str)
@@ -255,17 +281,18 @@ class VaccineTab(QWidget):
         self.prepared_pair_label.setWordWrap(True)
         self.record_state_label = QLabel("New vaccine record")
 
-        self.vaccine_types_list = QListWidget()
-        self.vaccine_types_list.setObjectName("vaccineTypesList")
-        self.vaccine_types_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.vaccine_types_list.setWordWrap(True)
-        self.vaccine_types_list.setTextElideMode(Qt.TextElideMode.ElideNone)
-        self.vaccine_types_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.vaccine_types_list.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.vaccine_types_list.model().rowsMoved.connect(
-            lambda *_args: self.persist_vaccine_type_order()
+        self.vaccine_types_combo = _VaccineTypeComboBox()
+        self.vaccine_types_combo.setObjectName("vaccineTypesCombo")
+        self.vaccine_types_combo.setEditable(False)
+        self.vaccine_types_combo.setPlaceholderText("Select vaccine")
+        self.vaccine_types_combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.vaccine_types_combo.setMinimumHeight(36)
+        self.vaccine_types_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
-        self.vaccine_types_list.itemSelectionChanged.connect(
+        self.vaccine_types_combo.setMinimumContentsLength(24)
+        self.vaccine_types_combo.setMaxVisibleItems(12)
+        self.vaccine_types_combo.currentIndexChanged.connect(
             self._refresh_chart_note_preview
         )
         self.selected_vaccine_label = QLabel("No vaccine selected")
@@ -278,12 +305,26 @@ class VaccineTab(QWidget):
         self.edit_type_button.clicked.connect(self.edit_vaccine_type)
         self.delete_type_button = QPushButton("Delete type")
         self.delete_type_button.clicked.connect(self.delete_vaccine_type)
+        self.move_type_up_button = QToolButton()
+        self.move_type_up_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp))
+        self.move_type_up_button.setToolTip("Move selected vaccine up")
+        self.move_type_up_button.setAccessibleName("Move selected vaccine up")
+        self.move_type_up_button.clicked.connect(lambda: self.move_vaccine_type(-1))
+        self.move_type_down_button = QToolButton()
+        self.move_type_down_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown))
+        self.move_type_down_button.setToolTip("Move selected vaccine down")
+        self.move_type_down_button.setAccessibleName("Move selected vaccine down")
+        self.move_type_down_button.clicked.connect(lambda: self.move_vaccine_type(1))
+        for button in (self.move_type_up_button, self.move_type_down_button):
+            button.setFixedSize(28, 28)
 
         vaccine_type_controls = QHBoxLayout()
         vaccine_type_controls.addWidget(self.add_type_button)
         vaccine_type_controls.addWidget(self.edit_type_button)
         vaccine_type_controls.addWidget(self.delete_type_button)
         vaccine_type_controls.addStretch()
+        vaccine_type_controls.addWidget(self.move_type_up_button)
+        vaccine_type_controls.addWidget(self.move_type_down_button)
 
         self.chart_note_preview = QPlainTextEdit()
         self.chart_note_preview.setReadOnly(True)
@@ -317,6 +358,8 @@ class VaccineTab(QWidget):
         self.covid_records_table = self._create_records_table()
 
         self.fetch_button = QPushButton("Fetch from EMR")
+        self.fetch_button.setObjectName("vaccineFetchButton")
+        self.fetch_button.setMinimumHeight(34)
         self.fetch_button.clicked.connect(self.fetch_current_patient_from_emr)
         self.kdca_login_button = QPushButton("Log in to KDCA")
         self.kdca_login_button.clicked.connect(self.log_in_to_kdca)
@@ -350,6 +393,8 @@ class VaccineTab(QWidget):
         self.prepare_flu_covid_button = QPushButton("Prepare Flu + COVID")
         self.prepare_flu_covid_button.clicked.connect(self.prepare_flu_and_covid)
         self.print_button = QPushButton("Print label")
+        self.print_button.setObjectName("vaccinePrintButton")
+        self.print_button.setMinimumHeight(34)
         self.print_button.clicked.connect(self.print_label)
         self.retry_handoff_button = QPushButton("Retry entry")
         self.retry_handoff_button.clicked.connect(self._start_handoff)
@@ -721,7 +766,7 @@ class VaccineTab(QWidget):
             )
             if len(flu_types) != 1 or covid_type is None:
                 self.status_label.setText(
-                    "Select an active COVID product in the Vaccine list before preparing Flu + COVID."
+                    "Select an active COVID product in the Vaccine dropdown before preparing Flu + COVID."
                 )
                 return None
             flu_type = flu_types[0]
@@ -1045,7 +1090,7 @@ class VaccineTab(QWidget):
             self.fetch_button, self.new_record_button, self.clear_button, self.save_button,
             self.print_button, self.prepare_flu_covid_button, self.print_prepared_pair_button,
             self.edit_today_record_button, self.load_button, self.delete_button,
-            self.complete_button, self.cancel_record_button, self.vaccine_types_list,
+            self.complete_button, self.cancel_record_button, self.vaccine_types_combo,
             self.patient_chart_no_input, self.patient_resident_id_input, self.patient_name_input,
             self.patient_sex_input, self.patient_age_input, self.patient_birth_date_input,
             self.patient_phone_input, self.patient_address_input,
@@ -1055,6 +1100,11 @@ class VaccineTab(QWidget):
         ):
             widget.setEnabled(not blocked)
         selected = self._selected_vaccine_item()
+        index = self.vaccine_types_combo.currentIndex()
+        self.move_type_up_button.setEnabled(not blocked and index > 0)
+        self.move_type_down_button.setEnabled(
+            not blocked and 0 <= index < self.vaccine_types_combo.count() - 1
+        )
         self.save_button.setEnabled(not blocked and selected is not None)
         self.print_button.setEnabled(not blocked and selected is not None)
         self.prepare_flu_covid_button.setEnabled(
@@ -1525,36 +1575,43 @@ class VaccineTab(QWidget):
             "Vaccine type deleted." if deleted else "Vaccine type not found."
         )
 
-    def persist_vaccine_type_order(self) -> None:
-        ordered_ids: list[int] = []
-        for index in range(self.vaccine_types_list.count()):
-            item = self.vaccine_types_list.item(index)
-            value = item.data(Qt.ItemDataRole.UserRole)
-            if isinstance(value, int):
-                ordered_ids.append(value)
-        if not ordered_ids:
+    def move_vaccine_type(self, offset: int) -> None:
+        combo = self.vaccine_types_combo
+        index = combo.currentIndex()
+        destination = index + offset
+        if (
+            not combo.isEnabled() or offset not in (-1, 1)
+            or index < 0 or not 0 <= destination < combo.count()
+        ):
             return
-        initialize_database(self._db_path)
+        ordered_ids = [combo.itemData(row) for row in range(combo.count())]
+        ordered_ids[index], ordered_ids[destination] = ordered_ids[destination], ordered_ids[index]
         with connect(self._db_path) as connection:
             reorder_vaccine_types(connection, ordered_ids)
+        self.refresh_view()
 
     def _populate_vaccine_types(self, vaccine_types: list) -> None:
-        selected_id = None
         current = self._selected_vaccine_item()
-        if current is not None:
-            value = current.data(Qt.ItemDataRole.UserRole)
-            if isinstance(value, int):
-                selected_id = value
-        with QSignalBlocker(self.vaccine_types_list):
-            self.vaccine_types_list.clear()
+        selected_id = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
+        selected_details = current.data(Qt.ItemDataRole.UserRole + 2) if current is not None else None
+        combo = self.vaccine_types_combo
+        with QSignalBlocker(combo):
+            combo.clear()
+            selected_index = -1
             for vaccine_type in vaccine_types:
-                item = QListWidgetItem(vaccine_type.name)
-                item.setData(Qt.ItemDataRole.UserRole, vaccine_type.id)
-                item.setData(Qt.ItemDataRole.UserRole + 1, vaccine_type.program_type)
-                item.setToolTip(vaccine_type.code or "")
-                self.vaccine_types_list.addItem(item)
-                if selected_id == vaccine_type.id:
-                    self.vaccine_types_list.setCurrentItem(item)
+                details = [
+                    vaccine_type.name, vaccine_type.code, vaccine_type.chart_note_template,
+                    vaccine_type.program_type, vaccine_type.is_active,
+                ]
+                combo.addItem(vaccine_type.name, vaccine_type.id)
+                index = combo.count() - 1
+                combo.setItemData(index, vaccine_type.program_type, Qt.ItemDataRole.UserRole + 1)
+                combo.setItemData(index, details, Qt.ItemDataRole.UserRole + 2)
+                combo.setItemData(index, vaccine_type.code or "", Qt.ItemDataRole.ToolTipRole)
+                if selected_id == vaccine_type.id and selected_details == details:
+                    selected_index = index
+            # Adding the first item auto-selects it; only restore an unchanged choice.
+            combo.setCurrentIndex(selected_index)
         self._refresh_chart_note_preview()
 
     def _populate_records(self, table: QTableWidget, records: list) -> None:
@@ -1592,31 +1649,29 @@ class VaccineTab(QWidget):
     def _select_vaccine_type(
         self, vaccine_type_id: int | None, vaccine_type_name: str | None
     ) -> None:
-        for index in range(self.vaccine_types_list.count()):
-            item = self.vaccine_types_list.item(index)
-            if vaccine_type_id is not None and item.data(Qt.ItemDataRole.UserRole) == vaccine_type_id:
-                self.vaccine_types_list.setCurrentItem(item)
-                return
-            if vaccine_type_name and item.text() == vaccine_type_name:
-                self.vaccine_types_list.setCurrentItem(item)
-                return
-        self._clear_vaccine_selection()
+        combo = self.vaccine_types_combo
+        if vaccine_type_id is not None:
+            index = combo.findData(vaccine_type_id)
+        else:
+            index = combo.findText(vaccine_type_name or "", Qt.MatchFlag.MatchExactly)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        else:
+            self._clear_vaccine_selection()
 
-    def _selected_vaccine_item(self) -> QListWidgetItem | None:
-        # Keyboard focus can assign a current row without the operator selecting it.
-        selected = self.vaccine_types_list.selectedItems()
-        return selected[0] if len(selected) == 1 else None
+    def _selected_vaccine_item(self) -> QStandardItem | None:
+        index = self.vaccine_types_combo.currentIndex()
+        return self.vaccine_types_combo.model().item(index) if index >= 0 else None
 
     def _clear_vaccine_selection(self) -> None:
-        with QSignalBlocker(self.vaccine_types_list):
-            self.vaccine_types_list.clearSelection()
-            self.vaccine_types_list.setCurrentItem(None)
+        with QSignalBlocker(self.vaccine_types_combo):
+            self.vaccine_types_combo.setCurrentIndex(-1)
         self._refresh_chart_note_preview()
 
     def _refresh_chart_note_preview(self) -> None:
         item = self._selected_vaccine_item()
-        for index in range(self.vaccine_types_list.count()):
-            row = self.vaccine_types_list.item(index)
+        for index in range(self.vaccine_types_combo.count()):
+            row = self.vaccine_types_combo.model().item(index)
             font = row.font()
             font.setBold(row is item)
             row.setFont(font)
@@ -2008,8 +2063,8 @@ class VaccineTab(QWidget):
 
         vaccine_group = QGroupBox("Vaccine")
         vaccine_layout = QVBoxLayout(vaccine_group)
+        vaccine_layout.addWidget(self.vaccine_types_combo)
         vaccine_layout.addWidget(self.selected_vaccine_label)
-        vaccine_layout.addWidget(self.vaccine_types_list, 1)
         vaccine_layout.addLayout(vaccine_type_controls)
 
         preparation_group = QGroupBox("Prepare and print")
@@ -2056,7 +2111,7 @@ class VaccineTab(QWidget):
         content.setVerticalSpacing(12)
         content.addWidget(patient_group, 0, 0)
         content.addWidget(program_group, 0, 1)
-        content.addWidget(vaccine_group, 1, 0)
+        content.addWidget(vaccine_group, 1, 0, alignment=Qt.AlignmentFlag.AlignTop)
         content.addWidget(preparation_group, 1, 1)
         content.setColumnStretch(0, 1)
         content.setColumnStretch(1, 1)

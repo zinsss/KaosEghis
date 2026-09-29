@@ -1260,7 +1260,7 @@ def test_new_vaccine_record_retains_patient_context_for_simultaneous_vaccination
     assert page.patient_chart_no_input.text() == "2735"
     assert page.patient_resident_id_input.text() == "700101-1234567"
     assert page.patient_name_input.text() == "Test Patient"
-    assert page.vaccine_types_list.currentItem() is None
+    assert page.vaccine_types_combo.currentIndex() == -1
 
     page._select_vaccine_type(None, "COVID-19 (Pfizer)")
     second = page.save_record()
@@ -1294,11 +1294,11 @@ def test_prepare_flu_and_covid_creates_two_separate_records_from_one_context(tmp
     assert page.prepare_flu_and_covid() is None
     assert "Select an active COVID product" in page.status_label.text()
 
-    moderna_items = page.vaccine_types_list.findItems(
+    moderna_index = page.vaccine_types_combo.findText(
         "COVID-19 (Moderna)", Qt.MatchFlag.MatchExactly
     )
-    assert len(moderna_items) == 1
-    page.vaccine_types_list.setCurrentItem(moderna_items[0])
+    assert moderna_index >= 0
+    page.vaccine_types_combo.setCurrentIndex(moderna_index)
 
     pair = page.prepare_flu_and_covid()
 

@@ -107,8 +107,8 @@ def test_vaccine_refresh_is_read_only_while_other_feature_is_writing(tmp_path, m
         with original_connect(path) as writer:
             writer.execute("BEGIN IMMEDIATE")
             page.activate_page()
-            page.vaccine_types_list.setCurrentRow(1)
-            assert page.vaccine_types_list.count() >= 4
+            page.vaccine_types_combo.setCurrentIndex(1)
+            assert page.vaccine_types_combo.count() >= 4
             assert migration_calls == []
             writer.rollback()
     finally:
