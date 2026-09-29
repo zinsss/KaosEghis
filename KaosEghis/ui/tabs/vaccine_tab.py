@@ -58,13 +58,9 @@ from KaosEghis.core.kdca_certificate_login import (
     KdcaCertificateLoginResult, start_kdca_certificate_login,
 )
 from KaosEghis.core.vaccine_session_keeper import (
-    SESSION_KEEPER_INTERVAL_MS,
-    SESSION_KEEPER_RETRY_MS,
-    SESSION_KEEPER_RETRY_STATUSES,
-    SESSION_KEEPER_RETRY_WINDOW_SECONDS,
     VaccineSessionResetResult,
-    VaccineSessionResetTarget,
     configured_session_reset_targets,
+    refresh_influenza_session,
     reset_vaccine_session,
 )
 from KaosEghis.core.vaccine_eligibility import (
@@ -217,6 +213,10 @@ class VaccineTab(QWidget):
         self._pending_handoffs: list[VaccineHandoffRequest] = []
         self._completed_handoff_charting_texts: list[str] = []
         self._print_in_progress = False
+        self._session_reset_in_progress = False
+        self._session_reset_alert: QMessageBox | None = None
+        self._session_reset_alert_button: QPushButton | None = None
+        self._session_reset_alert_shown = False
         self._handoff_cancel = threading.Event()
         self.handoff_progress.connect(self._show_handoff_progress)
         self.handoff_finished.connect(self._finish_handoff)
@@ -230,14 +230,11 @@ class VaccineTab(QWidget):
         if application is not None:
             application.aboutToQuit.connect(self._kdca_cancel.set)
             application.aboutToQuit.connect(self._handoff_cancel.set)
-        self._session_keeper_targets: dict[str, VaccineSessionResetTarget] = {}
-        self._session_keeper_timers: dict[str, QTimer] = {}
-        self._session_keeper_retry_deadlines: dict[str, float] = {}
-        self._session_keeper_messages: dict[str, str] = {}
-        self._session_keeper_progress_timer = QTimer(self)
-        self._session_keeper_progress_timer.setInterval(1000)
-        self._session_keeper_progress_timer.timeout.connect(
-            self._update_session_keeper_progress
+        self._session_reminder_started_at = monotonic()
+        self._session_reminder_timer = QTimer(self)
+        self._session_reminder_timer.setInterval(30_000)
+        self._session_reminder_timer.timeout.connect(
+            self._update_session_reset_reminder
         )
         self.nav_buttons: dict[str, QPushButton] = {}
         self.top_nav_row = QHBoxLayout()
@@ -376,7 +373,7 @@ class VaccineTab(QWidget):
             lambda: self.open_vaccine_system("covid")
         )
         self.session_reset_now_button = QPushButton("Reset Now")
-        self.session_reset_now_button.setToolTip("Reset General and COVID vaccination sessions")
+        self.session_reset_now_button.setToolTip("Manually reset vaccination sessions")
         self.session_reset_now_button.clicked.connect(self.reset_vaccine_sessions_now)
         self.save_button = QPushButton("Save record")
         self.save_button.clicked.connect(self.save_record)
@@ -446,7 +443,8 @@ class VaccineTab(QWidget):
 
         self.show_page(0)
         self.refresh_view()
-        self._configure_session_keeper()
+        self._update_session_reset_reminder()
+        self._session_reminder_timer.start()
 
     def activate_page(self) -> None:
         self.refresh_view()
@@ -475,7 +473,7 @@ class VaccineTab(QWidget):
         self._refresh_today_record_menu()
 
     def fetch_current_patient_from_emr(self) -> bool:
-        if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress:
+        if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress or self._session_reset_in_progress:
             return False
         with connect(self._db_path) as connection:
             profile = get_active_emr_target_profile(connection)
@@ -563,7 +561,7 @@ class VaccineTab(QWidget):
 
     def _start_kdca_operation(self, system: str | None = None) -> bool:
         """Return whether a single background operation was accepted."""
-        if self._kdca_thread is not None or self._handoff_thread is not None or self._print_in_progress:
+        if self._kdca_thread is not None or self._handoff_thread is not None or self._print_in_progress or self._session_reset_in_progress:
             return False
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
@@ -1081,8 +1079,10 @@ class VaccineTab(QWidget):
 
     def _update_handoff_controls(self, *, external_busy: bool = False) -> None:
         pending = bool(self._pending_handoffs)
-        active = external_busy or self._handoff_thread is not None or self._kdca_thread is not None
+        active = external_busy or self._handoff_thread is not None or self._kdca_thread is not None or self._session_reset_in_progress
         blocked = pending or active or self._print_in_progress
+        if self._session_reset_alert_button is not None:
+            self._session_reset_alert_button.setEnabled(not blocked)
         for widget in (
             self.fetch_button, self.new_record_button, self.clear_button, self.save_button,
             self.print_button, self.prepare_flu_covid_button, self.print_prepared_pair_button,
@@ -1349,161 +1349,109 @@ class VaccineTab(QWidget):
             )
         self._update_today_counts(settings, counts)
         self._reset_influenza_check()
-        self._configure_session_keeper(settings)
+        self._update_session_reset_reminder()
         self.status_label.setText("Vaccine settings loaded.")
 
-    def _configure_session_keeper(self, settings: dict[str, str] | None = None) -> None:
-        """Arm independent General/COVID timers only after opt-in configuration."""
-
-        if settings is None:
-            initialize_database(self._db_path)
-            with connect(self._db_path) as connection:
-                settings = get_settings(connection)
-
-        for timer in self._session_keeper_timers.values():
-            timer.stop()
-        self._session_keeper_targets.clear()
-        self._session_keeper_retry_deadlines.clear()
-        self._session_keeper_messages.clear()
-        self._session_keeper_progress_timer.stop()
-
-        enabled = str(settings.get("vaccine_session_keeper_enabled", "false")).strip().lower()
-        if enabled not in {"1", "true", "yes", "on"}:
-            self.settings_page.system_targets_editor.set_session_keeper_status(
-                "Session keeper: off."
-            )
-            self.settings_page.system_targets_editor.set_session_keeper_progress(None)
-            return
-
-        missing = []
-        for target in configured_session_reset_targets(settings):
-            if not target.is_configured:
-                missing.append(target.label)
-                continue
-            self._session_keeper_targets[target.key] = target
-            timer = self._session_keeper_timers.get(target.key)
-            if timer is None:
-                timer = QTimer(self)
-                timer.setSingleShot(True)
-                timer.timeout.connect(
-                    lambda target_key=target.key: self._run_session_keeper(target_key)
-                )
-                self._session_keeper_timers[target.key] = timer
-            # First action is delayed: construction/configuration never clicks a system.
-            timer.start(SESSION_KEEPER_INTERVAL_MS)
-
-        self._update_session_keeper_progress()
-        if any(timer.isActive() for timer in self._session_keeper_timers.values()):
-            self._session_keeper_progress_timer.start()
-
-        if missing:
-            self.settings_page.system_targets_editor.set_session_keeper_status(
-                "Session keeper: configuration required for " + ", ".join(missing) + "."
-            )
-        else:
-            self.settings_page.system_targets_editor.set_session_keeper_status(
-                "Session keeper: armed for General and COVID; first check in 90 minutes."
-            )
-
-    def _run_session_keeper(self, target_key: str) -> None:
-        target = self._session_keeper_targets.get(target_key)
-        timer = self._session_keeper_timers.get(target_key)
-        if target is None or timer is None:
-            return
-        if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress:
-            timer.start(SESSION_KEEPER_RETRY_MS)
-            return
-        deadline = self._session_keeper_retry_deadlines.get(target_key)
-        if deadline is not None and monotonic() >= deadline:
-            self._stop_session_keeper_retry(target)
-        else:
-            result = reset_vaccine_session(target, require_idle=True)
-            self._schedule_session_keeper_result(target, result)
-        self._show_session_keeper_messages()
-        self._update_session_keeper_progress()
-
-    def _schedule_session_keeper_result(
-        self, target: VaccineSessionResetTarget, result: VaccineSessionResetResult,
-    ) -> None:
-        timer = self._session_keeper_timers.get(target.key)
-        if timer is None or target.key not in self._session_keeper_targets:
-            return
-        self._session_keeper_messages[target.key] = f"{target.label}: {result.message}"
-        if result.clicked or result.status == "not_open":
-            self._session_keeper_retry_deadlines.pop(target.key, None)
-            timer.start(SESSION_KEEPER_INTERVAL_MS)
-        elif result.status in SESSION_KEEPER_RETRY_STATUSES:
-            now = monotonic()
-            deadline = self._session_keeper_retry_deadlines.setdefault(
-                target.key, now + SESSION_KEEPER_RETRY_WINDOW_SECONDS,
-            )
-            if now >= deadline:
-                self._stop_session_keeper_retry(target)
-            else:
-                timer.start(min(SESSION_KEEPER_RETRY_MS, max(1, int((deadline - now) * 1000))))
-                self._session_keeper_messages[target.key] += " Retry pending (up to 10 minutes)."
-        else:
-            self._stop_session_keeper_retry(target)
-        if timer.isActive():
-            self._session_keeper_progress_timer.start()
-
-    def _stop_session_keeper_retry(self, target: VaccineSessionResetTarget) -> None:
-        self._session_keeper_timers[target.key].stop()
-        self._session_keeper_retry_deadlines.pop(target.key, None)
-        self._session_keeper_messages[target.key] = (
-            f"{target.label}: Reset required. Check the system and use Reset Now; "
-            "no further automatic attempts for this system."
+    def _update_session_reset_reminder(self) -> None:
+        """Update appearance only; this timer never inspects or operates a system."""
+        elapsed = max(0, int(monotonic() - self._session_reminder_started_at))
+        fraction = min(1.0, max(0.0, (elapsed - 3600) / 1800))
+        normal, overdue = (163, 177, 194), (239, 107, 115)
+        color = "#" + "".join(
+            f"{round(start + (end - start) * fraction):02x}"
+            for start, end in zip(normal, overdue)
         )
-        self.status_label.setText(self._session_keeper_messages[target.key])
+        for button in (
+            self.session_reset_now_button,
+            self.settings_page.system_targets_editor.session_reset_now_button,
+        ):
+            button.setStyleSheet(
+                f"QPushButton {{ color: {color}; background-color: transparent; }}"
+                "QPushButton:disabled { color: #4c566a; }"
+            )
+            button.setToolTip(
+                f"Manual reset reminder: {elapsed // 60} minutes elapsed. "
+                "This is not a verified session-expiry timer."
+            )
+        self.settings_page.system_targets_editor.set_session_reset_reminder(elapsed)
+        if elapsed >= 115 * 60 and not self._session_reset_alert_shown:
+            self._show_session_reset_alert()
 
-    def _show_session_keeper_messages(self) -> None:
-        self.settings_page.system_targets_editor.set_session_keeper_status(
-            "; ".join(self._session_keeper_messages.values())
-        )
+    def _show_session_reset_alert(self) -> None:
+        self._session_reset_alert_shown = True
+        popup = QMessageBox(self.window())
+        popup.setWindowTitle("Vaccine session reminder")
+        popup.setIcon(QMessageBox.Icon.Warning)
+        popup.setText("115 minutes have passed since the manual reset reminder started.")
+        popup.setWindowModality(Qt.WindowModality.NonModal)
+        popup.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        popup.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        popup.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        reset_button = popup.addButton("Reset Now", QMessageBox.ButtonRole.ActionRole)
+        reset_button.setStyleSheet(self.session_reset_now_button.styleSheet())
+        close_button = popup.addButton("Close", QMessageBox.ButtonRole.RejectRole)
+        popup.setDefaultButton(close_button)
+        popup.setEscapeButton(close_button)
+        self._session_reset_alert = popup
+        self._session_reset_alert_button = reset_button
 
-    def _update_session_keeper_progress(self) -> None:
-        remaining_times = [
-            (timer.remainingTime(), key)
-            for key, timer in self._session_keeper_timers.items()
-            if timer.isActive() and timer.remainingTime() >= 0
-        ]
-        if not remaining_times:
-            self._session_keeper_progress_timer.stop()
-            self.settings_page.system_targets_editor.set_session_keeper_progress(None)
-            return
-        remaining_ms, key = min(remaining_times)
-        self.settings_page.system_targets_editor.set_session_keeper_progress(
-            remaining_ms, retry=key in self._session_keeper_retry_deadlines,
-        )
+        def reset_now() -> None:
+            popup.close()
+            self.reset_vaccine_sessions_now()
+
+        reset_button.clicked.connect(reset_now)
+        popup.finished.connect(self._session_reset_alert_closed)
+        self._update_handoff_controls()
+        popup.show()
+
+    def _session_reset_alert_closed(self, _result: int) -> None:
+        self._session_reset_alert = None
+        self._session_reset_alert_button = None
+
+    def _confirm_flu_session_refresh(self) -> bool:
+        return QMessageBox.question(
+            self, "Refresh Influenza system?",
+            "F5 reloads the Flu page and may discard unfinished input. "
+            "Refresh now? Session renewal is not guaranteed.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes
 
     def reset_vaccine_sessions_now(self) -> None:
-        """Run one guarded native-session reset without requiring timer opt-in."""
+        """Run one manual attempt; failures never schedule another attempt."""
 
-        if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress:
+        if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress or self._session_reset_in_progress:
             return
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
 
-        results = [
-            (target, reset_vaccine_session(target))
-            for target in configured_session_reset_targets(settings)
-        ]
-        summary = "; ".join(f"{target.label}: {result.message}" for target, result in results)
-        sent_count = sum(1 for _target, result in results if result.clicked)
-
-        # Do not give a failed system a fresh 90 minutes because its peer succeeded.
-        for target, result in results:
-            self._schedule_session_keeper_result(target, result)
-        self._update_session_keeper_progress()
-        if sent_count:
+        self._session_reset_in_progress = True
+        self._update_handoff_controls()
+        try:
+            results: list[tuple[str, VaccineSessionResetResult]] = [
+                (target.label, reset_vaccine_session(target))
+                for target in configured_session_reset_targets(settings)
+            ]
+            results.append(("Influenza system", refresh_influenza_session(
+                settings, confirm=self._confirm_flu_session_refresh,
+            )))
+            sent = any(result.sent for _label, result in results)
+            complete = all(result.sent or result.status == "not_open" for _label, result in results)
+            # A successful peer must not hide a failed or declined reset.
+            if sent and complete:
+                self._session_reminder_started_at = monotonic()
+                self._session_reset_alert_shown = False
+                if self._session_reset_alert is not None:
+                    self._session_reset_alert.close()
+            summary = "; ".join(f"{label}: {result.message}" for label, result in results)
             message = f"Reset now: {summary}"
-        else:
-            message = f"Reset now: no session reset was sent. {summary}"
-        self.settings_page.system_targets_editor.set_session_keeper_status(message)
-        if self._session_keeper_messages:
-            self._show_session_keeper_messages()
-        self.status_label.setText(message)
+            self.settings_page.system_targets_editor.set_session_keeper_status(message)
+            self.status_label.setText(message)
+        finally:
+            self._session_reset_in_progress = False
+            self._update_handoff_controls()
+            self._update_session_reset_reminder()
 
     def add_vaccine_type(self) -> None:
         dialog = VaccineTypeDialog(self)

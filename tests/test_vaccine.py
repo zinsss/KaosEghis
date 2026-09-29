@@ -159,13 +159,7 @@ def test_kdca_worker_is_single_flight_and_defers_session_reset(tmp_path, monkeyp
         panel.session_reset_now_button.click()
         assert panel.fetch_current_patient_from_emr() is False
         panel.reset_vaccine_sessions_now()
-        timer = module.QTimer(panel)
-        timer.setSingleShot(True)
-        panel._session_keeper_targets["general"] = SimpleNamespace(key="general")
-        panel._session_keeper_timers["general"] = timer
-        panel._run_session_keeper("general")
-        assert timer.isActive()
-        timer.stop()
+        panel._session_reminder_timer.timeout.emit()
         panel.kdca_stop_button.click()
         assert panel._kdca_cancel.is_set()
         assert panel._kdca_thread is not None
@@ -1357,7 +1351,7 @@ def test_vaccine_tab_db_buckets_split_records_by_type(tmp_path) -> None:
     assert page.general_records_table.rowCount() == 1
 
 
-def test_session_keeper_is_opt_in_and_never_clicks_during_vaccine_tab_startup(
+def test_legacy_auto_setting_never_arms_input_at_startup(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1381,12 +1375,13 @@ def test_session_keeper_is_opt_in_and_never_clicks_during_vaccine_tab_startup(
     page = vaccine_tab.VaccineTab(db_path)
 
     assert reset_calls == []
-    assert set(page._session_keeper_timers) == {"general", "covid"}
-    assert all(timer.isActive() for timer in page._session_keeper_timers.values())
-    assert "first check in 90 minutes" in (
+    assert not hasattr(page, "_session_keeper_timers")
+    page._session_reminder_timer.timeout.emit()
+    assert reset_calls == []
+    assert "Manual session reset" in (
         page.settings_page.system_targets_editor.session_keeper_status_label.text()
     )
-    assert "Next reset in" in (
+    assert "Reminder age:" in (
         page.settings_page.system_targets_editor.session_keeper_progress_bar.format()
     )
 
@@ -1421,8 +1416,10 @@ def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
         vaccine_tab,
         "reset_vaccine_session",
         lambda target: reset_calls.append(target.key)
-        or SimpleNamespace(message="Session reset sent.", clicked=True),
+        or vaccine_tab.VaccineSessionResetResult(target.key, "reset_sent", "Session reset sent.", True),
     )
+    monkeypatch.setattr(vaccine_tab, "refresh_influenza_session", lambda *_a, **_kw:
+        vaccine_tab.VaccineSessionResetResult("influenza", "not_open", "Not open."))
 
     page = vaccine_tab.VaccineTab(db_path)
     if surface == "main":
@@ -1439,10 +1436,10 @@ def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
     assert "Reset now: General: Session reset sent.; COVID: Session reset sent." in (
         page.settings_page.system_targets_editor.session_keeper_status_label.text()
     )
-    assert page._session_keeper_timers == {}
+    assert not hasattr(page, "_session_keeper_timers")
     assert (
         page.settings_page.system_targets_editor.session_keeper_progress_bar.format()
-        == "Next reset: off"
+        == "Reminder age: 0:00"
     )
 
 

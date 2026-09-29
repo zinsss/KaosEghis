@@ -264,9 +264,9 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     assert targets.portal_menu_inputs["covid"].text() == "시스템을 선택해주세요 > 코로나19 예방접종관리 > 등록시스템 > 예방접종등록시스템"
     assert targets.launch_control_inputs["influenza"].text() == "현물공급인플루엔자시스템"
     assert targets.launch_control_inputs["general"].text() == "예방접종통합관리시스템"
-    assert targets.session_keeper_enabled_check.isChecked() is False
+    assert not hasattr(targets, "session_keeper_enabled_check")
     assert targets.session_reset_now_button.text() == "Reset Now"
-    assert targets.session_keeper_progress_bar.format() == "Next reset: off"
+    assert targets.session_keeper_progress_bar.format() == "Reminder age: 0:00"
 
 
 def test_system_target_settings_save_editable_stable_values_without_handle(
@@ -330,22 +330,24 @@ def test_system_target_settings_save_editable_stable_values_without_handle(
     assert "1513248" not in settings.values()
 
 
-def test_system_target_settings_save_session_keeper_opt_in(tmp_path) -> None:
+def test_system_target_settings_clear_legacy_auto_setting(tmp_path) -> None:
     _app()
     from KaosEghis.db.database import connect, initialize_database
-    from KaosEghis.db.repositories import get_settings
+    from KaosEghis.db.repositories import get_settings, set_settings
     from KaosEghis.ui.tabs.vaccine_settings_page import VaccineSettingsPage
 
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
+    with connect(db_path) as connection:
+        set_settings(connection, {"vaccine_session_keeper_enabled": "true"})
     page = VaccineSettingsPage(db_path)
-    page.system_targets_editor.session_keeper_enabled_check.setChecked(True)
+    assert not hasattr(page.system_targets_editor, "session_keeper_enabled_check")
 
     assert page.save_settings()
 
     with connect(db_path) as connection:
         settings = get_settings(connection)
-    assert settings["vaccine_session_keeper_enabled"] == "true"
+    assert settings["vaccine_session_keeper_enabled"] == "false"
 
 
 def test_external_system_coordinate_migration_updates_only_old_seed_values(tmp_path) -> None:

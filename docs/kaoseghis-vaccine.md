@@ -551,7 +551,7 @@ for manual review. A permission/notice dialog is never accepted automatically.
 The explicit KDCA operation runs in one background COM worker. Progress identifies
 portal detection, certificate picker, password field, confirmed sign-in, portal menu,
 optional selection control, and destination detection. Other launch buttons and Fetch from EMR are
-disabled while it runs; automatic session reset is deferred and Reset Now is blocked.
+disabled while it runs; Reset Now is blocked. Session maintenance is manual only.
 `Stop` prevents subsequent actions after the current UIA call returns. No second
 worker is started while that call is outstanding.
 
@@ -673,30 +673,26 @@ SQLite settings, macros, clipboard history, notifications, or logs. If the certi
 provider blocks synthetic keyboard input or changes its password dialog, KaosEghis stops
 for manual entry; it does not guess a replacement control.
 
-### Opt-in Native Session Keeper
+### Manual Session Reset and Reminder
 
-General and COVID are native systems that time out after approximately two hours. Their
-saved session-reset coordinates can be used by the opt-in **Keep General and COVID
-sessions active every 90 minutes** setting in `Vaccine -> Settings -> System targets`.
+Automatic resets and automatic retries have been removed for all vaccine systems.
+The old `vaccine_session_keeper_enabled` value is ignored even when stored as `true`;
+saving System targets writes it as `false`. There is no automatic-reset toggle.
 
-When enabled, KaosEghis starts two independent, process-local 90-minute timers. Startup
-and enabling the setting do **not** click either system; the first check occurs only
-after the full interval. At a due time, KaosEghis clicks a reset point only after all of
-the following are true:
+Reset Now in Main and System targets is the only trigger for external input. General
+and COVID retain their saved session-reset coordinates, guarded by these checks:
 
 - exactly one visible native window has the configured exact title and class;
 - Windows is unlocked and the system window is enabled and not minimized;
-- no keyboard/mouse button is held and at least five seconds have passed since
-  the last input event (automatic resets only);
+- no keyboard/mouse button is held;
 - **virtual Desktop 1** (the first desktop in Windows Task View, not monitor 1)
   has been selected and verified;
 - the saved reset point is inside that window; and
 - the window at that point belongs to the verified system rather than an overlapping
   application.
 
-Once input is idle and a unique matching system window exists, the keeper switches
-to virtual Desktop 1 before testing the reset point. Both automatic resets and
-**Reset Now** use this rule. It uses the Windows-only
+After a manual press and a unique matching system window is found, Reset Now switches
+to virtual Desktop 1 before testing the reset point. It uses the Windows-only
 [pyvda desktop API](https://github.com/mirober/pyvda), not repeated Ctrl+Win+Arrow
 shortcuts. The dependency is declared in both project dependency files. No desktop
 is created, renamed, or deleted, and individual windows are not moved to another
@@ -704,26 +700,36 @@ desktop or monitor by a session reset. The operator remains on Desktop 1 afterwa
 
 After switching, window identity, input activity, Desktop 1, and point ownership
 are checked again. If the operator resumes input or leaves Desktop 1, that attempt
-sends no click. If a desktop switch has not completed or cannot be verified, the
-existing bounded retry handles it without clicking during the transition. Missing
-desktop support blocks resets instead of falling back to blind keyboard input.
+sends no click. Missing desktop support, ambiguous targets, or failed checks block
+that attempt. Nothing schedules a retry; the operator decides when to press again.
 
-Input activity, a locked desktop, an unconfirmed desktop switch, an unavailable or
-covered reset point, or a failed click defers only that system. It retries every
-30 seconds for at most 10 minutes
-from the first failure, checking the guards again each time. The retry deadline
-does not move on repeated failures. After that deadline, automatic attempts stop
-for that system and **Reset required** appears in Main and System targets. Make
-the system available and use **Reset Now**. A missing/closed system retains the
-normal 90-minute interval; ambiguous windows, invalid settings, or unavailable
-native checks stop with **Reset required** rather than repeated input attempts.
+For Flu, Reset Now looks for one visible browser page matching the configured HTTPS
+launch origin and system path. It requires a top-level page, not an embedded Flu frame
+inside the portal. The operator must separately confirm the F5 refresh, with No as the
+default because unfinished input may be lost. Focus, page identity, URL, input state,
+and Desktop 1 are rechecked before sending F5 once. It does not dismiss browser reload
+warnings, resubmit forms, log in, enter credentials, or retry. F5 being sent is not
+proof that the server renewed the session or that the login remained valid.
 
-A sent reset starts a new 90-minute timer only for that system. General and COVID
-results remain separate, so one success cannot hide or postpone the other's retry.
-The countdown distinguishes the next retry from the next normal reset. Disabling
-the keeper clears pending retries. A retry may switch to Desktop 1 after the idle
-check, but never brings a covered window forward, blocks operator input, or sends
-a blind coordinate click.
+The passive reminder starts when the Vaccine workspace is constructed. It remains
+active while other pages are displayed and is process-local, so an application restart
+starts a new reminder age. It never inspects a browser or sends input by itself:
+
+- Before 60 minutes: Reset Now uses its normal text color.
+- From 60 to 90 minutes: both Reset Now buttons gradually change toward red.
+- At 90 minutes and later: the text stays red.
+- At 115 minutes: one nonmodal, topmost popup offers Reset Now and Close, even when
+  the Vaccine page is hidden. It is shown without activating/stealing typing focus.
+- Close (also the default/Escape action) dismisses only the popup; age and red text
+  remain. There is no repeated popup until a completed manual reset starts a new cycle.
+- Reset Now performs the same guarded manual action. It is disabled during conflicting
+  vaccine operations; Close remains available.
+
+The reminder age resets only when at least one action was sent and every other target
+was either acted on or not open. A partial failure or declined Flu refresh retains the
+old reminder age. Successful completion also closes any outstanding reminder popup.
+The settings progress bar shows elapsed reminder age, not an automatic-action countdown
+or verified session expiry. The appearance/popup check runs every 30 seconds.
 
 The activity check reads only timing and whether keys/buttons are held; it does
 not capture typed content. It uses Windows
@@ -735,10 +741,8 @@ input races but cannot guarantee that the operator will not resume moving the mo
 at that instant. **Reset sent** means the click was sent, not that the external
 application's new session expiry was read or confirmed.
 
-The status is shown in System targets. The keeper never interacts
-with the Influenza browser, enters credentials, searches for patients, reads patient
-data, or changes/submits vaccination records. It is only a non-clinical idle-session
-reset convenience and remains disabled by default.
+Results are shown in Main and System targets, without logging patient or credential
+values. Flu's actual timeout and whether refresh renews it remain unverified.
 
 ## Combined Influenza + COVID Workflow
 
@@ -1002,49 +1006,17 @@ No patient workflow may attempt a program insertion until the required destinati
 ready. The combined influenza + COVID workflow requires both the influenza browser page
 and COVID desktop application to be ready before `Prepare both programs` begins.
 
-### Two-Hour Session Keeper
-
-The general and COVID vaccination applications automatically log out after approximately
-two hours without use. The influenza browser system is excluded from this native-app
-session keeper.
-
-Provide an explicit `Keep vaccination sessions active` toggle after the operator has
-completed authenticated session preparation and KaosEghis has verified the relevant
-applications.
+### Manual Session Maintenance
 
 `Vaccine -> Main -> KDCA systems -> Reset Now` is the last button in the system row.
 The same action remains in `Vaccine -> Settings -> System targets -> Reset Now`.
 Both buttons are disabled during KDCA login/launch, printing, and resident-number handoff.
-Either button performs one immediate guarded
-reset for the configured General and COVID native windows, even when the recurring
-keeper is off. It uses the same desktop, held-button, exact-window and point-ownership
-checks as the timer, but does not require five seconds of idle time after the operator
-clicks Reset Now. When the keeper is enabled, only a successfully sent reset restarts
-that system's 90-minute delay; a transient failure enters the bounded retry instead.
-When the keeper is off, Reset Now does not arm automatic retries. It never touches Influenza.
-The small countdown bar shows time remaining until the next automatic reset; it is off
-when the recurring keeper is disabled.
+Each press makes one guarded General/COVID reset attempt and offers a separately
+confirmed Flu refresh. There are no automatic resets or retries. Both buttons fade
+toward red after 60 minutes; a 115-minute popup remains available from other pages.
+See Manual Session Reset and Reminder above for failure and dismissal behavior.
 
-- Off by default until a successful manual session preparation.
-- Maintain independent timers for the general and COVID applications.
-- Default to a configurable refresh interval shorter than the two-hour timeout, with
-  `90 minutes` as the initial safe default.
-- Refresh only a positively identified application/window and only through its known
-  non-clinical session-extension action.
-- Never use a generic click against whichever window happens to be foreground.
-- Never enter the certificate password or attempt certificate login.
-- Never open, edit, or submit a patient record as part of session maintenance.
-- Do not run the native-app keeper for the influenza HTML browser page.
-- If the expected window, session-extension control, or screen state cannot be verified,
-  skip the action, mark that application `Reconnect required`, and notify the operator.
-- Stop the timer when the operator disconnects, the process exits, the window identity
-  changes, the desktop is unavailable, or KaosEghis closes.
-- Show last successful extension and next planned extension for each application.
-- Keep logs sanitized to application name, result, and time; no patient or credential
-  values are permitted.
-
-This is session maintenance only. It must remain isolated from vaccination registration,
-patient lookup, label printing, counters, and charting.
+This remains isolated from registration, lookup, label printing, counters, and charting.
 
 ### Authentication Boundary
 

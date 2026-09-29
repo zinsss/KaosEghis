@@ -268,11 +268,8 @@ def test_pending_handoff_defers_resets_and_blocks_mutation(page, monkeypatch):
     page.print_label()
     _wait(page)
     resets = []
-    timers = []
     monkeypatch.setattr(vaccine_tab, "reset_vaccine_session", lambda *_a: resets.append(True))
-    page._session_keeper_targets["general"] = SimpleNamespace(key="general")
-    page._session_keeper_timers["general"] = SimpleNamespace(start=timers.append, stop=lambda: None)
-    page._run_session_keeper("general")
+    page._session_reminder_timer.timeout.emit()
     page.reset_vaccine_sessions_now()
     page.clear_form()
     page.start_new_vaccine_record()
@@ -280,7 +277,7 @@ def test_pending_handoff_defers_resets_and_blocks_mutation(page, monkeypatch):
     assert page.prepare_flu_and_covid() is None
     assert page.patient_chart_no_input.text() == "0000"
     assert resets == []
-    assert timers == [vaccine_tab.SESSION_KEEPER_RETRY_MS]
+    assert not hasattr(page, "_session_keeper_timers")
 
 
 def test_handoff_runs_off_gui_thread_is_single_flight_and_can_stop(page, monkeypatch):
@@ -463,7 +460,7 @@ def test_charting_worker_blocks_other_input_and_stop_does_not_repeat_lookup(page
         return VaccineHandoffResult(False, "EMR charting stopped.")
 
     monkeypatch.setattr(vaccine_tab, "paste_vaccine_charting", paste)
-    resets, timers = [], []
+    resets = []
     monkeypatch.setattr(vaccine_tab, "reset_vaccine_session", lambda *_a: resets.append(True))
     try:
         page.print_label()
@@ -484,12 +481,10 @@ def test_charting_worker_blocks_other_input_and_stop_does_not_repeat_lookup(page
         page.print_label()
         page.print_prepared_pair()
         assert page.patient_chart_no_input.text() == "0000"
-        page._session_keeper_targets["general"] = SimpleNamespace(key="general")
-        page._session_keeper_timers["general"] = SimpleNamespace(start=timers.append, stop=lambda: None)
-        page._run_session_keeper("general")
+        page._session_reminder_timer.timeout.emit()
         page.reset_vaccine_sessions_now()
         assert resets == []
-        assert timers == [vaccine_tab.SESSION_KEEPER_RETRY_MS]
+        assert not hasattr(page, "_session_keeper_timers")
         page._stop_kdca_operation()
     finally:
         release.set()

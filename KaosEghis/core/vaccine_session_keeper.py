@@ -1,13 +1,20 @@
-"""Guarded session-reset clicks for the native vaccination systems.
+"""Manual, guarded vaccination-system session maintenance.
 
 The General and COVID applications time out independently.  This module is
-deliberately limited to their configured non-clinical session-reset points; it
-never reads or writes patient data, enters credentials, or submits a record.
+limited to their configured session-reset points. Flu refresh requires an explicit
+confirmation callback. Nothing in this module schedules input or retries.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
+import posixpath
+from urllib.parse import urlparse
+
+from KaosEghis.core.kdca_browser import (
+    _document_url, document_identity, foreground_handle, iter_documents_for_url,
+)
 
 from KaosEghis.core.vaccine_system_launch import find_native_vaccine_windows
 from KaosEghis.core.windows_desktop import interactive_desktop_error
@@ -17,14 +24,7 @@ from KaosEghis.core.windows_virtual_desktop import (
 )
 
 
-SESSION_KEEPER_INTERVAL_MS = 90 * 60 * 1000
 SESSION_KEEPER_IDLE_MS = 5000
-SESSION_KEEPER_RETRY_MS = 30 * 1000
-SESSION_KEEPER_RETRY_WINDOW_SECONDS = 10 * 60
-SESSION_KEEPER_RETRY_STATUSES = frozenset({
-    "input_busy", "desktop_unavailable", "desktop_switch_failed",
-    "point_not_ready", "input_failed",
-})
 
 
 @dataclass(frozen=True)
@@ -55,14 +55,17 @@ class VaccineSessionResetResult:
     message: str
     clicked: bool = False
 
+    @property
+    def sent(self) -> bool:
+        return self.clicked or self.status == "refresh_sent"
+
 
 def configured_session_reset_targets(
     settings: dict[str, str],
 ) -> tuple[VaccineSessionResetTarget, ...]:
     """Return the two native systems that have a known idle-session reset.
 
-    Influenza is browser-based and has no captured idle-reset operation, so it
-    is intentionally not represented here.
+    Influenza uses the separately confirmed manual browser-refresh operation.
     """
 
     return (
@@ -138,6 +141,89 @@ def _input_is_idle(minimum_idle_ms: int) -> bool | None:
         return minimum_idle_ms <= elapsed < 0x80000000
     except Exception:
         return None
+
+
+def refresh_influenza_session(
+    settings: dict[str, str], *, confirm: Callable[[], bool],
+) -> VaccineSessionResetResult:
+    """Send F5 once to a verified Flu tab, only after operator confirmation."""
+    def result(status: str, message: str) -> VaccineSessionResetResult:
+        return VaccineSessionResetResult("influenza", status, message)
+
+    if interactive_desktop_error() is not None:
+        return result("desktop_unavailable", "Unlock Windows before refreshing Flu.")
+    url = settings.get("vaccine_influenza_system_launch_url", "").strip()
+    expected = urlparse(url)
+    prefix = posixpath.dirname(expected.path).rstrip("/") + "/"
+    if expected.scheme != "https" or not expected.netloc or prefix == "/":
+        return result("configuration_required", "Flu launch URL is not configured safely.")
+    title = settings.get("vaccine_influenza_system_window_title", "").strip().casefold()
+
+    def trusted_document(document, handle: int) -> bool:
+        actual = urlparse(_document_url(document))
+        if (
+            not document.is_visible() or document_identity(document) is None
+            or (actual.scheme, actual.netloc.casefold()) != (expected.scheme, expected.netloc.casefold())
+            or not actual.path.startswith(prefix)
+        ):
+            return False
+        # A Flu iframe inside a portal is not permission to reload the whole portal.
+        parent = document.parent()
+        for _ in range(32):
+            if parent is None or parent.element_info.control_type == "Document":
+                return False
+            if parent.element_info.control_type == "Window":
+                return int(getattr(parent, "handle", 0) or 0) == handle
+            parent = parent.parent()
+        return False
+
+    try:
+        from pywinauto import Desktop
+        import pyautogui
+
+        matches = []
+        for window in Desktop(backend="uia").windows():
+            if window.element_info.class_name not in {"Chrome_WidgetWin_1", "MozillaWindowClass"}:
+                continue
+            if not window.is_visible() or not window.is_enabled():
+                continue
+            if title and title not in window.window_text().casefold():
+                continue
+            for document in iter_documents_for_url(window, url):
+                if trusted_document(document, int(window.handle)):
+                    matches.append((window, document))
+        if not matches:
+            return result("not_open", "No visible verified Flu tab; no refresh sent.")
+        if len(matches) != 1:
+            return result("ambiguous", "Multiple Flu pages match; no refresh sent.")
+        window, document = matches[0]
+        identity = document_identity(document)
+        handle = int(window.handle)
+        if not confirm():
+            return result("declined", "Flu refresh declined; no input sent.")
+        if interactive_desktop_error() is not None or _input_is_idle(0) is not True:
+            return result("input_busy", "Desktop or input changed; no refresh sent.")
+        desktop = ensure_first_virtual_desktop()
+        if not desktop.success:
+            return result(desktop.status, desktop.message)
+        window.set_focus()
+        if (
+            interactive_desktop_error() is not None
+            or not first_virtual_desktop_is_active() or _input_is_idle(0) is not True
+            or foreground_handle() != handle or not window.is_enabled()
+            or (title and title not in window.window_text().casefold())
+            or document_identity(document) != identity or not trusted_document(document, handle)
+        ):
+            return result("page_changed", "Flu page/focus changed; no refresh sent.")
+        if (
+            foreground_handle() != handle or _input_is_idle(0) is not True
+            or not first_virtual_desktop_is_active() or interactive_desktop_error() is not None
+        ):
+            return result("page_changed", "Focus/input changed before F5; no refresh sent.")
+        pyautogui.press("f5")
+        return result("refresh_sent", "F5 sent; session renewal is not verified.")
+    except Exception:
+        return result("unavailable", "Flu refresh could not be verified; no automatic retry.")
 
 
 def _target_from_settings(

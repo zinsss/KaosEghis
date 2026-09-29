@@ -357,23 +357,20 @@ class VaccineSystemTargetsEditor(QWidget):
         self.kdca_password_control_type_input = QLineEdit()
         self.kdca_confirm_control_name_input = QLineEdit()
         self.kdca_credential_reference_input = QLineEdit()
-        self.session_keeper_enabled_check = QCheckBox(
-            "Keep General and COVID sessions active every 90 minutes"
-        )
         self.session_reset_now_button = QPushButton("Reset Now")
         self.session_reset_now_button.setToolTip(
-            "Safely reset the currently open General and COVID sessions once."
+            "Manually reset General/COVID and confirm an optional Flu page refresh."
         )
         self.session_reset_now_button.clicked.connect(self.session_reset_requested.emit)
         self.session_keeper_progress_bar = QProgressBar()
         self.session_keeper_progress_bar.setRange(0, 100)
         self.session_keeper_progress_bar.setValue(0)
         self.session_keeper_progress_bar.setMaximumHeight(18)
-        self.session_keeper_progress_bar.setFormat("Next reset: off")
+        self.session_keeper_progress_bar.setFormat("Reminder age: 0:00")
         self.session_keeper_progress_bar.setToolTip(
-            "Time remaining before the next automatic General/COVID session reset."
+            "Manual reminder age, not the systems' actual session-expiry time."
         )
-        self.session_keeper_status_label = QLabel("Session keeper: off.")
+        self.session_keeper_status_label = QLabel("Manual session reset.")
         self.session_keeper_status_label.setWordWrap(True)
 
         general_group = QGroupBox("General vaccine system")
@@ -458,13 +455,6 @@ class VaccineSystemTargetsEditor(QWidget):
             "coordinates instead. These settings do not submit vaccination records."
         )
         note.setWordWrap(True)
-        session_note = QLabel(
-            "When enabled, KaosEghis checks only the configured General and COVID "
-            "native windows every 90 minutes. It clicks the saved session-reset point "
-            "only when that exact visible window owns the point. It never runs for "
-            "the Influenza browser, types credentials, or changes vaccination records."
-        )
-        session_note.setWordWrap(True)
         kdca_note = QLabel(
             "KDCA certificate login runs only when the operator presses Log in to KDCA. "
             "It opens the portal, requires one visible matching browser, certificate, "
@@ -480,12 +470,10 @@ class VaccineSystemTargetsEditor(QWidget):
         layout.addWidget(kdca_group)
         layout.addWidget(kdca_note)
         session_controls = QHBoxLayout()
-        session_controls.addWidget(self.session_keeper_enabled_check)
         session_controls.addWidget(self.session_reset_now_button)
         session_controls.addStretch()
         layout.addLayout(session_controls)
         layout.addWidget(self.session_keeper_progress_bar)
-        layout.addWidget(session_note)
         layout.addWidget(self.session_keeper_status_label)
         layout.addWidget(note)
         layout.addStretch()
@@ -602,9 +590,6 @@ class VaccineSystemTargetsEditor(QWidget):
         self.kdca_credential_reference_input.setText(
             settings.get("vaccine_kdca_credential_reference", "")
         )
-        self.session_keeper_enabled_check.setChecked(
-            _as_bool(settings.get("vaccine_session_keeper_enabled", "false"))
-        )
 
     def values(self) -> dict[str, str]:
         return {
@@ -708,29 +693,17 @@ class VaccineSystemTargetsEditor(QWidget):
             "vaccine_kdca_credential_reference": (
                 self.kdca_credential_reference_input.text().strip()
             ),
-            "vaccine_session_keeper_enabled": (
-                "true" if self.session_keeper_enabled_check.isChecked() else "false"
-            ),
+            "vaccine_session_keeper_enabled": "false",
         }
 
     def set_session_keeper_status(self, message: str) -> None:
         self.session_keeper_status_label.setText(message)
 
-    def set_session_keeper_progress(self, remaining_ms: int | None, *, retry: bool = False) -> None:
-        if remaining_ms is None:
-            self.session_keeper_progress_bar.setValue(0)
-            self.session_keeper_progress_bar.setFormat("Next reset: off")
-            return
-
-        total_ms = 30 * 1000 if retry else 90 * 60 * 1000
-        remaining_ms = max(0, min(int(remaining_ms), total_ms))
-        remaining_seconds = (remaining_ms + 999) // 1000
-        minutes, seconds = divmod(remaining_seconds, 60)
-        percent = round(remaining_ms * 100 / total_ms)
-        self.session_keeper_progress_bar.setValue(percent)
-        self.session_keeper_progress_bar.setFormat(
-            f"Next {'retry' if retry else 'reset'} in {minutes}:{seconds:02d}"
-        )
+    def set_session_reset_reminder(self, elapsed_seconds: int) -> None:
+        elapsed_seconds = max(0, int(elapsed_seconds))
+        minutes, seconds = divmod(elapsed_seconds, 60)
+        self.session_keeper_progress_bar.setValue(min(100, round(elapsed_seconds * 100 / 5400)))
+        self.session_keeper_progress_bar.setFormat(f"Reminder age: {minutes}:{seconds:02d}")
 
 
 class VaccineSettingsPage(QWidget):
