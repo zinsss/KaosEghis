@@ -368,6 +368,7 @@ class PacsWorklistItemRecord:
     kaospacs_mwl_error: str | None
     created_at: str
     updated_at: str
+    kaospacs_mwl_fingerprint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2006,7 +2007,7 @@ def list_pacs_worklist_items(
             SELECT id, status, patient_name, patient_birth_date, patient_sex, chart_no, study, modality, requested_at,
                    accession_or_order_id, source, error_message,
                    kaospacs_mwl_status, kaospacs_mwl_last_synced_at, kaospacs_mwl_error,
-                   created_at, updated_at
+                   created_at, updated_at, kaospacs_mwl_fingerprint
             FROM pacs_worklist_items
             ORDER BY requested_at DESC, id DESC
             """
@@ -2019,7 +2020,7 @@ def list_pacs_worklist_items(
             SELECT id, status, patient_name, patient_birth_date, patient_sex, chart_no, study, modality, requested_at,
                    accession_or_order_id, source, error_message,
                    kaospacs_mwl_status, kaospacs_mwl_last_synced_at, kaospacs_mwl_error,
-                   created_at, updated_at
+                   created_at, updated_at, kaospacs_mwl_fingerprint
             FROM pacs_worklist_items
             WHERE status = ?
             ORDER BY requested_at DESC, id DESC
@@ -2037,7 +2038,7 @@ def get_pacs_worklist_item(
         SELECT id, status, patient_name, patient_birth_date, patient_sex, chart_no, study, modality, requested_at,
                accession_or_order_id, source, error_message,
                kaospacs_mwl_status, kaospacs_mwl_last_synced_at, kaospacs_mwl_error,
-               created_at, updated_at
+               created_at, updated_at, kaospacs_mwl_fingerprint
         FROM pacs_worklist_items
         WHERE id = ?
         """,
@@ -2135,6 +2136,7 @@ def update_pacs_worklist_sync_state(
     kaospacs_mwl_status: str,
     kaospacs_mwl_last_synced_at: str | None = None,
     kaospacs_mwl_error: str | None = None,
+    kaospacs_mwl_fingerprint: str | None = None,
 ) -> bool:
     cursor = connection.execute(
         """
@@ -2142,6 +2144,7 @@ def update_pacs_worklist_sync_state(
         SET kaospacs_mwl_status = ?,
             kaospacs_mwl_last_synced_at = ?,
             kaospacs_mwl_error = ?,
+            kaospacs_mwl_fingerprint = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
@@ -2149,6 +2152,7 @@ def update_pacs_worklist_sync_state(
             kaospacs_mwl_status,
             _blank_to_none(kaospacs_mwl_last_synced_at),
             _blank_to_none(kaospacs_mwl_error),
+            _blank_to_none(kaospacs_mwl_fingerprint),
             item_id,
         ),
     )
@@ -3569,6 +3573,7 @@ def _pacs_worklist_item_from_row(
         kaospacs_mwl_error=row[14],
         created_at=row[15],
         updated_at=row[16],
+        kaospacs_mwl_fingerprint=row[17],
     )
 
 

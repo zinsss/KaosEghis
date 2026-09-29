@@ -71,6 +71,46 @@ def test_default_event_mode_preserves_enabled_and_stops_regular_timer(panel):
     assert not panel.calls
 
 
+@pytest.mark.parametrize("delivery_failure", [False, True])
+def test_operation_reports_separate_timings_and_preserves_source_success(panel, monkeypatch, delivery_failure):
+    clock = [0.0]
+    monkeypatch.setattr(module.time, "perf_counter", lambda: clock[0])
+    def check(settings):
+        clock[0] += 2
+        return True
+    def poll(*args, **kwargs):
+        clock[0] += 3
+        return PollResult(1, 0, 0, source_read_seconds=2.5)
+    def deliver(*args):
+        clock[0] += 7
+        if delivery_failure:
+            raise RuntimeError("simulated delivery failure")
+        return KaosPacsSyncResult(1, 0, 0, 0)
+    monkeypatch.setattr(module, "check_kaospacs_health", check)
+    monkeypatch.setattr(module, "poll_eghis_image_orders_into_local_worklist", poll)
+    monkeypatch.setattr(module, "sync_local_worklist_to_kaospacs", deliver)
+    result = panel._perform_poll_operation({"eghis_db_connection_string": "mock"},
+                                          selected_date=date.today(), is_auto_poll=True)
+    assert (result.checks_seconds, result.poll_seconds, result.delivery_seconds) == (2, 3, 7)
+    assert result.timing_summary() == "checks=2.00s, source=2.50s, local=0.50s, delivery=7.00s"
+    assert result.error_message is None and result.poll_result.message is None
+    assert result.sync_result.errors == int(delivery_failure)
+    panel._record_refresh_result(module._RefreshJob(date.today(), "Safety check", True), result)
+    assert panel._next_safety_at == panel._clock() + 300
+
+
+def test_refresh_log_contains_timing_and_unchanged_counters(panel, monkeypatch):
+    messages = []
+    panel.refresh_status.connect(messages.append)
+    monkeypatch.setattr(module, "sync_local_worklist_to_kaospacs",
+                        lambda *args: KaosPacsSyncResult(0, 0, 3, 53, unchanged=53, invalid=3))
+    panel.poll_now()
+    wait(panel)
+    assert len(messages) == 1
+    for field in ("sent=0", "unchanged=53", "invalid=3", "checks=", "source=", "local=", "delivery=", "total="):
+        assert field in messages[0]
+
+
 def test_startup_and_one_follow_up_only(panel):
     panel.start_refresh_runtime()
     panel.start_refresh_runtime()

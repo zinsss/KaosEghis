@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 import re
+from time import perf_counter
 from typing import Callable
 
 from KaosEghis.db.database import connect, get_database_path, initialize_database
@@ -130,6 +131,7 @@ class PollResult:
     skipped: int
     removed_active: int = 0
     message: str | None = None
+    source_read_seconds: float = field(default=0.0, compare=False)
 
 
 class PollingUnavailableError(RuntimeError):
@@ -161,15 +163,17 @@ def poll_eghis_image_orders_into_local_worklist(
         return PollResult(inserted=0, updated=0, skipped=0)
 
     initialize_database(db_path)
+    read_started = perf_counter()
     try:
         if poller is None:
             orders = poll_image_orders(settings, selected_date=selected_date)
         else:
             orders = poller(settings)
     except QueryRejectedError:
-        return PollResult(inserted=0, updated=0, skipped=0, message="query rejected")
+        return PollResult(0, 0, 0, message="query rejected", source_read_seconds=perf_counter() - read_started)
     except PollingUnavailableError:
-        return PollResult(inserted=0, updated=0, skipped=0, message="unavailable")
+        return PollResult(0, 0, 0, message="unavailable", source_read_seconds=perf_counter() - read_started)
+    source_read_seconds = perf_counter() - read_started
     inserted = 0
     updated = 0
     skipped = 0
@@ -258,6 +262,7 @@ def poll_eghis_image_orders_into_local_worklist(
             ]
         # No local transaction may stay open across an external EMR query.
         # Otherwise a slow query also blocks unrelated GUI database writes.
+        read_started = perf_counter()
         existing_mwl_ids = _fetch_existing_mwl_order_ids(
             settings,
             selected_ymd,
@@ -267,6 +272,7 @@ def poll_eghis_image_orders_into_local_worklist(
                 if item.accession_or_order_id is not None
             ],
         )
+        source_read_seconds += perf_counter() - read_started
         if existing_mwl_ids is not None:
             for item in local_active_items:
                 accession = _blank_to_none(item.accession_or_order_id)
@@ -299,6 +305,7 @@ def poll_eghis_image_orders_into_local_worklist(
         updated=updated,
         skipped=skipped,
         removed_active=removed_active,
+        source_read_seconds=source_read_seconds,
     )
 
 

@@ -502,7 +502,7 @@ def test_pacs_panel_poll_now_only_hits_polling(monkeypatch, tmp_path) -> None:
     assert calls == {"health": 2, "poll": 1, "sync": 1}
     assert (
         panel.polling_status.text()
-        == "Polling status: inserted=1, updated=0, skipped=0 | KaosPACS sync: sent=1, cancelled=0, errors=0, skipped=0"
+        == "Polling status: inserted=1, updated=0, skipped=0 | KaosPACS sync: sent=1, cancelled=0, errors=0, invalid=0, unchanged=0, skipped=0"
     )
 
 
@@ -745,7 +745,7 @@ def test_pacs_panel_sync_schedules_deferred_admin_reload(monkeypatch, tmp_path) 
     monkeypatch.setattr(
         pacs_panel_module,
         "sync_local_worklist_to_kaospacs",
-        lambda settings, db_path: KaosPacsSyncResult(sent=1, cancelled=0, errors=0, skipped=0),
+        lambda settings, db_path, force=False: KaosPacsSyncResult(sent=int(force), cancelled=0, errors=0, skipped=0),
     )
     monkeypatch.setattr(pacs_panel_module, "QWebEngineView", None)
 
@@ -756,6 +756,7 @@ def test_pacs_panel_sync_schedules_deferred_admin_reload(monkeypatch, tmp_path) 
     panel.sync_to_kaospacs()
 
     assert scheduled == [True]
+    assert "sent=1" in panel.polling_status.text()
 
 
 def test_pacs_panel_reconcile_schedules_deferred_admin_reload(monkeypatch, tmp_path) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 from urllib import error, request
@@ -10,6 +11,7 @@ from KaosEghis.db.database import connect, get_database_path, initialize_databas
 from KaosEghis.db.repositories import (
     PacsWorklistItemRecord,
     get_settings,
+    get_pacs_worklist_item,
     list_pacs_worklist_items,
     update_pacs_worklist_sync_state,
 )
@@ -24,6 +26,8 @@ class KaosPacsSyncResult:
     skipped: int
     message: str | None = None
     dry_run: bool = False
+    unchanged: int = 0
+    invalid: int = 0
 
 
 @dataclass(frozen=True)
@@ -81,6 +85,8 @@ def cancel_kaospacs_order(settings: dict[str, str], accession_number: str) -> di
 def sync_local_worklist_to_kaospacs(
     settings: dict[str, str],
     db_path: Path | None = None,
+    *,
+    force: bool = False,
 ) -> KaosPacsSyncResult:
     initialize_database(db_path)
     db_file = db_path or get_database_path()
@@ -88,6 +94,8 @@ def sync_local_worklist_to_kaospacs(
     cancelled = 0
     errors = 0
     skipped = 0
+    unchanged = 0
+    invalid = 0
 
     with connect(db_file) as connection:
         items = list_pacs_worklist_items(connection)
@@ -104,7 +112,7 @@ def sync_local_worklist_to_kaospacs(
             entry = _build_kaospacs_entry(item)
             validation_error = _validate_kaospacs_entry(entry)
             if validation_error is not None:
-                if not dry_run:
+                if not dry_run and (item.kaospacs_mwl_status != "error" or item.kaospacs_mwl_error != validation_error):
                     with connect(db_file) as connection:
                         update_pacs_worklist_sync_state(
                             connection,
@@ -113,6 +121,11 @@ def sync_local_worklist_to_kaospacs(
                             kaospacs_mwl_error=validation_error,
                         )
                 errors += 1
+                invalid += 1
+                continue
+            if not force and _delivery_is_current(settings, item):
+                skipped += 1
+                unchanged += 1
                 continue
             active_items.append(item)
         elif item.status == "cancelled":
@@ -121,10 +134,15 @@ def sync_local_worklist_to_kaospacs(
             # not infer it from downstream imaging lifecycle state.
             # A failed delivery may already have reached the server. Keep an
             # explicit source cancellation retryable until acknowledged.
-            if item.kaospacs_mwl_status in {"sent", "error"}:
+            if not force and _delivery_is_current(settings, item):
+                skipped += 1
+                unchanged += 1
+            elif item.kaospacs_mwl_status in {"sent", "error", "cancelled"}:
                 cancelled_items.append(item)
             else:
                 skipped += 1
+        else:
+            skipped += 1
 
     if dry_run:
         return KaosPacsSyncResult(
@@ -133,11 +151,16 @@ def sync_local_worklist_to_kaospacs(
             errors=errors,
             skipped=skipped,
             dry_run=True,
+            unchanged=unchanged,
+            invalid=invalid,
         )
 
     for item in active_items:
+        if not _delivery_snapshot_is_current(db_file, settings, item):
+            skipped += 1
+            continue
         try:
-            push_kaospacs_worklist(settings, [item])
+            _validate_delivery_response(push_kaospacs_worklist(settings, [item]))
             synced_at = _utc_now_text()
             with connect(db_file) as connection:
                 update_pacs_worklist_sync_state(
@@ -146,6 +169,7 @@ def sync_local_worklist_to_kaospacs(
                     kaospacs_mwl_status="sent",
                     kaospacs_mwl_last_synced_at=synced_at,
                     kaospacs_mwl_error=None,
+                    kaospacs_mwl_fingerprint=_delivery_fingerprint(settings, item),
                 )
             sent += 1
         except RuntimeError as exc:
@@ -159,8 +183,11 @@ def sync_local_worklist_to_kaospacs(
             errors += 1
 
     for item in cancelled_items:
+        if not _delivery_snapshot_is_current(db_file, settings, item):
+            skipped += 1
+            continue
         try:
-            cancel_kaospacs_order(settings, item.accession_or_order_id or "")
+            _validate_delivery_response(cancel_kaospacs_order(settings, item.accession_or_order_id or ""))
             with connect(db_file) as connection:
                 update_pacs_worklist_sync_state(
                     connection,
@@ -168,6 +195,7 @@ def sync_local_worklist_to_kaospacs(
                     kaospacs_mwl_status="cancelled",
                     kaospacs_mwl_last_synced_at=_utc_now_text(),
                     kaospacs_mwl_error=None,
+                    kaospacs_mwl_fingerprint=_delivery_fingerprint(settings, item),
                 )
             cancelled += 1
         except RuntimeError as exc:
@@ -186,7 +214,45 @@ def sync_local_worklist_to_kaospacs(
         errors=errors,
         skipped=skipped,
         dry_run=False,
+        unchanged=unchanged,
+        invalid=invalid,
     )
+
+
+def _delivery_fingerprint(settings: dict[str, str], item: PacsWorklistItemRecord) -> str:
+    # Hash the actual normalized contracts and destination, never timestamps or
+    # credentials. Only successful delivery may persist this fingerprint.
+    payload = ({"AccessionNumber": item.accession_or_order_id or ""}
+               if item.status == "cancelled" else {
+                   "gateway": _build_kaospacs_entry(item),
+                   "legacy": _build_legacy_worklist_entry(item),
+               })
+    receipt = {
+        "version": 1,
+        "destination": _api_base_url(settings),
+        "status": item.status,
+        "payload": payload,
+    }
+    return hashlib.sha256(json.dumps(receipt, sort_keys=True, ensure_ascii=True,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _delivery_is_current(settings: dict[str, str], item: PacsWorklistItemRecord) -> bool:
+    expected_status = "cancelled" if item.status == "cancelled" else "sent"
+    return (item.kaospacs_mwl_status == expected_status
+            and item.kaospacs_mwl_fingerprint == _delivery_fingerprint(settings, item))
+
+
+def _delivery_snapshot_is_current(db_file, settings, item) -> bool:
+    with connect(db_file) as connection:
+        current = get_pacs_worklist_item(connection, item.id)
+    return (current is not None and current.status == item.status
+            and _delivery_fingerprint(settings, current) == _delivery_fingerprint(settings, item))
+
+
+def _validate_delivery_response(response) -> None:
+    if not isinstance(response, dict) or response.get("ok") is False or response.get("error"):
+        raise KaosPacsRequestError("KaosPACS rejected delivery or returned an invalid response")
 
 
 def reconcile_kaospacs_worklist_to_local(
@@ -438,13 +504,17 @@ def _text(value) -> str:
     return str(value).strip()
 
 
+def _api_base_url(settings: dict[str, str]) -> str:
+    return (settings.get("kaospacs_api_base_url") or "http://127.0.0.1:8060").strip().rstrip("/")
+
+
 def _request_json(
     settings: dict[str, str],
     method: str,
     path: str,
     payload: dict | None = None,
 ) -> dict:
-    base_url = (settings.get("kaospacs_api_base_url") or "http://127.0.0.1:8060").strip().rstrip("/")
+    base_url = _api_base_url(settings)
     timeout_seconds = float(settings.get("kaospacs_api_timeout_seconds") or "5")
     data = None
     headers = {"Accept": "application/json; charset=utf-8"}
@@ -469,7 +539,10 @@ def _request_json(
         raise KaosPacsRequestError(str(exc), status_code=None) from exc
     if not body:
         return {}
-    return json.loads(body)
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise KaosPacsRequestError("KaosPACS returned invalid JSON") from exc
 
 
 def _utc_now_text() -> str:

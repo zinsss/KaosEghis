@@ -39,6 +39,7 @@ def test_database_migration_creates_pacs_worklist_table(tmp_path) -> None:
     assert "kaospacs_mwl_status" in columns
     assert "kaospacs_mwl_last_synced_at" in columns
     assert "kaospacs_mwl_error" in columns
+    assert "kaospacs_mwl_fingerprint" in columns
 
 
 def test_database_migration_creates_pacs_audit_table(tmp_path) -> None:
@@ -379,7 +380,7 @@ def test_pacs_panel_poll_status_remains_visible_after_poll_now(
 
     assert (
         panel.polling_status.text()
-        == "Polling status: inserted=0, updated=1, skipped=2 | KaosPACS sync: sent=0, cancelled=0, errors=0, skipped=0"
+        == "Polling status: inserted=0, updated=1, skipped=2 | KaosPACS sync: sent=0, cancelled=0, errors=0, invalid=0, unchanged=0, skipped=0"
     )
 
 

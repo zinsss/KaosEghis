@@ -19,6 +19,43 @@ def test_poll_image_orders_without_db_config_returns_no_rows() -> None:
     assert poll_image_orders({}) == []
 
 
+def test_source_timing_includes_order_and_existence_reads_but_not_local_writes(tmp_path, monkeypatch):
+    from KaosEghis.core import pacs_polling as module
+    clock = [0.0]
+    monkeypatch.setattr(module, "perf_counter", lambda: clock[0])
+    def orders(settings, selected_date=None):
+        clock[0] += 2
+        return [dict(status="active", accession_or_order_id="TEST", requested_at="2026-09-29T09:00:00", source="eghis-db")]
+    def exists(*args):
+        clock[0] += 3
+        return {"TEST"}
+    original_create = module.create_pacs_worklist_item
+    def local_write(*args, **kwargs):
+        clock[0] += 7
+        return original_create(*args, **kwargs)
+    monkeypatch.setattr(module, "poll_image_orders", orders)
+    monkeypatch.setattr(module, "_fetch_existing_mwl_order_ids", exists)
+    monkeypatch.setattr(module, "create_pacs_worklist_item", local_write)
+    result = module.poll_eghis_image_orders_into_local_worklist(
+        {"eghis_db_connection_string": "mock"}, tmp_path / "test.sqlite", selected_date=date(2026, 9, 29))
+    assert result.source_read_seconds == 5
+    assert clock[0] == 12
+
+
+def test_failed_source_read_retains_elapsed_time(tmp_path, monkeypatch):
+    from KaosEghis.core import pacs_polling as module
+    clock = [0.0]
+    monkeypatch.setattr(module, "perf_counter", lambda: clock[0])
+    def fail(*args, **kwargs):
+        clock[0] = 5
+        raise PollingUnavailableError("simulated timeout")
+    monkeypatch.setattr(module, "poll_image_orders", fail)
+    result = module.poll_eghis_image_orders_into_local_worklist(
+        {"eghis_db_connection_string": "mock"}, tmp_path / "test.sqlite")
+    assert result.message == "unavailable"
+    assert result.source_read_seconds == 5
+
+
 def test_poll_image_orders_uses_default_postgres_query_when_query_blank(
     monkeypatch,
 ) -> None:

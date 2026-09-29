@@ -229,8 +229,15 @@ the callback path. Button activation-event delivery remains unverified.
   safety timer and cancels pending automatic work; Poll Now remains available.
   `timer` is an explicit rollback option in PACS Operator Mode or Settings > PACS.
 - Launcher status shows each refresh's reason, date, outcome and total elapsed
-  time (including queue wait and delivery). PACS shows the last successful source
-  read time; failures do not advance it. Memo timing remains unchanged.
+  time, plus separate health-check, source-read, local-update and delivery timings.
+  Source time includes serialization/connection waits, not just SQL execution;
+  total begins at dispatch, excluding the trigger's settling delay. PACS shows the
+  last successful source read time; source failures do not advance it. Delivery
+  failures do not erase source-read success. Memo timing remains unchanged.
+- Delivery now skips successfully acknowledged unchanged payloads. New/edited
+  payloads and failed deliveries remain eligible; legacy rows establish a baseline
+  with one successful send. See [PACS changed-only delivery](kaoseghis-pacs.md#changed-only-delivery)
+  for migration, cancellation, invalid-row and manual-resend behavior.
 
 Before relying on this during normal work, verify F6/F7 keys and buttons, the last
 patient of the day, fast patient switches, edits/deletions, and offline recovery.
@@ -254,8 +261,8 @@ five seconds; flu-report retains its existing shorter three-second statement lim
 The in-process queue is bounded to 64 callers; mutex waiting is bounded to 60 seconds.
 Neither SQL nor connection strings nor patient data are logged by the queue.
 
-This is the foundation, not the full future broker below. Pending work is in memory;
-durable delivery, all-orders snapshots and reception status semantics remain future
+This is the foundation, not the full future broker below. Pending refresh jobs are
+in memory; durable broker queues, all-orders snapshots and reception status semantics remain future
 work. Serialization may reduce contention but does not prove the flu-report/EMR
 timeout issue is resolved.
 

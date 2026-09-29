@@ -182,6 +182,7 @@ CREATE TABLE IF NOT EXISTS pacs_worklist_items (
     kaospacs_mwl_status TEXT NOT NULL DEFAULT 'not_sent',
     kaospacs_mwl_last_synced_at TEXT,
     kaospacs_mwl_error TEXT,
+    kaospacs_mwl_fingerprint TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

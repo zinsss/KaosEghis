@@ -77,6 +77,17 @@ class _PollOperationResult:
     poll_result: PollResult | None = None
     sync_result: KaosPacsSyncResult | None = None
     error_message: str | None = None
+    checks_seconds: float = 0.0
+    poll_seconds: float = 0.0
+    delivery_seconds: float = 0.0
+
+    def timing_summary(self) -> str:
+        if self.poll_result is None:
+            read_text = f"read/local={self.poll_seconds:.2f}s"
+        else:
+            source = self.poll_result.source_read_seconds
+            read_text = f"source={source:.2f}s, local={max(0, self.poll_seconds - source):.2f}s"
+        return f"checks={self.checks_seconds:.2f}s, {read_text}, delivery={self.delivery_seconds:.2f}s"
 
 
 @dataclass(frozen=True)
@@ -245,14 +256,14 @@ class PacsPanel(QWidget):
         self.eghis_db_status = QLabel("Eghis DB: not connected")
         self.pacs_server_status = QLabel("KaosPACS server: not checked")
         self.polling_status = QLabel("Polling status: stopped")
+        self.polling_status.setWordWrap(True)
         self.last_poll_time_label = QLabel("Last successful read: never")
         self.last_poll_result_label = QLabel("Last poll result: none")
 
         status_row = QHBoxLayout()
         status_row.addWidget(self.eghis_db_status)
         status_row.addWidget(self.pacs_server_status)
-        status_row.addWidget(self.polling_status)
-        status_row.addStretch()
+        status_row.addWidget(self.polling_status, 1)
 
         polling_info_row = QHBoxLayout()
         polling_info_row.addWidget(self.last_poll_time_label)
@@ -593,19 +604,19 @@ class PacsPanel(QWidget):
             items = list_pacs_worklist_items(connection)
 
         sync_summary = self._build_sync_summary(items)
-        if sync_summary["active_rows"] > 0 and not self._confirm_sync(sync_summary):
+        if (sync_summary["active_rows"] or sync_summary["cancelled_pending_rows"]) and not self._confirm_sync(sync_summary):
             self.polling_status.setText("KaosPACS sync: canceled")
             return
 
-        result = sync_local_worklist_to_kaospacs(settings, self._db_path)
+        result = sync_local_worklist_to_kaospacs(settings, self._db_path, force=True)
         self.refresh_rows()
         dry_run_prefix = "KaosPACS sync (DRY RUN): " if result.dry_run else "KaosPACS sync: "
         summary = (
             f"{dry_run_prefix}"
             f"active rows={sync_summary['active_rows']}, "
-            f"cancelled pending rows={sync_summary['cancelled_pending_rows']}, "
+            f"cancellation rows={sync_summary['cancelled_pending_rows']}, "
             f"sent={result.sent}, cancelled={result.cancelled}, "
-            f"errors={result.errors}, skipped={result.skipped}"
+            f"errors={result.errors}, invalid={result.invalid}, unchanged={result.unchanged}, skipped={result.skipped}"
         )
         self.polling_status.setText(summary)
         self._log_audit_aggregate(
@@ -613,7 +624,7 @@ class PacsPanel(QWidget):
             summary=self._prefix_dry_run_summary(
                 result.dry_run,
                 f"sent={result.sent}, cancelled={result.cancelled}, "
-                f"errors={result.errors}, skipped={result.skipped}",
+                f"errors={result.errors}, invalid={result.invalid}, unchanged={result.unchanged}, skipped={result.skipped}",
             ),
         )
         self.refresh_audit()
@@ -770,15 +781,15 @@ class PacsPanel(QWidget):
             "cancelled_pending_rows": sum(
                 1
                 for item in items
-                if item.status == "cancelled" and item.kaospacs_mwl_status in {"sent", "error"}
+                if item.status == "cancelled" and item.kaospacs_mwl_status in {"sent", "error", "cancelled"}
             ),
         }
 
     def _confirm_sync(self, sync_summary: dict[str, int]) -> bool:
         message = (
-            "Sync local PACS worklist to KaosPACS?\n\n"
+            "Resend local PACS worklist to KaosPACS, including unchanged rows?\n\n"
             f"Active rows: {sync_summary['active_rows']}\n"
-            f"Cancelled pending rows: {sync_summary['cancelled_pending_rows']}"
+            f"Cancellation rows: {sync_summary['cancelled_pending_rows']}"
         )
         return (
             QMessageBox.question(
@@ -988,7 +999,7 @@ class PacsPanel(QWidget):
             elapsed = self._clock() - self._poll_started_at
             self.refresh_status.emit(
                 f"{datetime.now():%H:%M:%S} | PACS refresh | {job.reason} | {job.day:%Y-%m-%d} | "
-                f"{self.polling_status.text()} ({elapsed:.2f} s)"
+                f"{self.polling_status.text()} | {result.timing_summary()} | total={elapsed:.2f}s"
             )
         finally:
             self._poll_in_progress = False
@@ -1003,6 +1014,7 @@ class PacsPanel(QWidget):
         selected_date: date,
         is_auto_poll: bool,
     ) -> _PollOperationResult:
+        checks_started = time.perf_counter()
         try:
             kaospacs_available = bool(check_kaospacs_health(settings))
         except RuntimeError:
@@ -1018,28 +1030,21 @@ class PacsPanel(QWidget):
             except (EghisDbUnavailableError, EghisDbQueryRejectedError, RuntimeError):
                 pass
 
+        checks_seconds = time.perf_counter() - checks_started
         if is_auto_poll and (not kaospacs_available or not eghis_db_available):
             return _PollOperationResult(
                 kaospacs_available,
                 eghis_db_available,
                 eghis_db_configured,
+                checks_seconds=checks_seconds,
             )
 
+        poll_started = time.perf_counter()
         try:
             poll_result = poll_eghis_image_orders_into_local_worklist(
                 settings,
                 self._db_path,
                 selected_date=selected_date,
-            )
-            sync_result = None
-            if poll_result.message is None:
-                sync_result = sync_local_worklist_to_kaospacs(settings, self._db_path)
-            return _PollOperationResult(
-                kaospacs_available,
-                eghis_db_available,
-                eghis_db_configured,
-                poll_result=poll_result,
-                sync_result=sync_result,
             )
         except Exception:
             return _PollOperationResult(
@@ -1047,7 +1052,27 @@ class PacsPanel(QWidget):
                 eghis_db_available,
                 eghis_db_configured,
                 error_message="unknown error",
+                checks_seconds=checks_seconds,
+                poll_seconds=time.perf_counter() - poll_started,
             )
+        poll_seconds = time.perf_counter() - poll_started
+        sync_result = None
+        delivery_seconds = 0.0
+        if poll_result.message is None:
+            delivery_started = time.perf_counter()
+            try:
+                sync_result = sync_local_worklist_to_kaospacs(settings, self._db_path)
+            except Exception:
+                # Keep successful source-read evidence even if delivery fails.
+                sync_result = KaosPacsSyncResult(0, 0, 1, 0, message="delivery failed")
+            finally:
+                delivery_seconds = time.perf_counter() - delivery_started
+        return _PollOperationResult(
+            kaospacs_available, eghis_db_available, eghis_db_configured,
+            poll_result=poll_result, sync_result=sync_result,
+            checks_seconds=checks_seconds, poll_seconds=poll_seconds,
+            delivery_seconds=delivery_seconds,
+        )
 
     def _apply_poll_operation_result(
         self,
@@ -1115,7 +1140,8 @@ class PacsPanel(QWidget):
             sync_prefix = "DRY RUN - " if sync_result.dry_run else ""
             sync_summary = (
                 f"{sync_prefix}sent={sync_result.sent}, cancelled={sync_result.cancelled}, "
-                f"errors={sync_result.errors}, skipped={sync_result.skipped}"
+                f"errors={sync_result.errors}, invalid={sync_result.invalid}, "
+                f"unchanged={sync_result.unchanged}, skipped={sync_result.skipped}"
             )
             if sync_result.message is not None:
                 self.polling_status.setText(

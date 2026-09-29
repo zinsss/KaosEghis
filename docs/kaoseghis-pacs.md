@@ -189,6 +189,57 @@ Status ownership:
 - active rows only
 - cancelled previously-sent rows call the KaosPACS cancel endpoint
 
+### Changed-Only Delivery
+
+Automatic refreshes and Poll Now send only new/changed active payloads and pending
+cancellations. A local `kaospacs_mwl_fingerprint` records the normalized payload,
+operation and destination after successful delivery. Repeated source upserts or
+local timestamp changes alone do not cause HTTP delivery. The fingerprint is a
+SHA-256 digest; credentials and raw payload copies are not stored in it or logged.
+
+- Payload edits, changing the destination URL, or reactivating a cancelled order
+  require delivery again. Token rotation does not invalidate acknowledgements.
+- Errors remain retryable. Failed delivery clears the acknowledgement because a
+  timeout may occur after the server accepted a change. Dry run never acknowledges
+  a payload or changes sync state. Malformed JSON and explicit rejection responses
+  are failures, not acknowledgements. HTTP 404 compatibility fallbacks are unchanged.
+- Before sending each item, recheck that its payload and business state still match
+  the captured candidate. An edit during HTTP retains the old payload's fingerprint,
+  so the new payload remains eligible for the next refresh.
+- Old sent/cancelled rows without a fingerprint are delivered once to establish a
+  verified baseline; migration does not assume the current payload was sent before.
+  No records are deleted or silently marked delivered by migration.
+- `Sync to KaosPACS` remains the explicit full-resend fallback, including unchanged
+  eligible rows, with confirmation. Poll Now uses changed-only delivery. After a
+  remote restore/reset at the same URL, use full resend to rebuild its worklist.
+- `unchanged` is a subset of `skipped`; `invalid` is a subset of `errors`. Invalid
+  rows remain visible locally but generate no HTTP calls. Unchanged validation
+  errors are not rewritten on every refresh. Correcting the missing fields makes
+  a record eligible again.
+
+Read-only local inspection on 2026-09-29 found three error rows missing both
+`ScheduledAt` and `Description`. No EMR query, repair, deletion or live delivery
+was performed during this investigation. These validation failures are not
+evidence of database or network timeouts.
+
+### Refresh Timings
+
+Launcher refresh messages include `checks`, `source`, `local`, `delivery` and
+`total`, all in seconds:
+
+- `checks`: PACS health and source SELECT 1 checks.
+- `source`: order and existence reads, including serialization/connection waits,
+  fetch/close and mapping overhead. This is not pure server SQL execution time.
+- `local`: the remaining poll stage, including SQLite updates/reconciliation.
+- `delivery`: local candidate validation and acknowledgement work plus HTTP sends.
+- `total`: the whole dispatched refresh, including settings and GUI/result handling;
+  it does not include the initial two-second delay or time before dispatch.
+
+If the poll stage aborts unexpectedly without a result, its time is shown as
+`read/local` rather than incorrectly assigning all time to source SQL. Delivery
+exceptions preserve successful source-read evidence for the safety timer. Timing
+logs contain no queries, payloads, chart numbers or credentials.
+
 ### Reconcile
 
 - source: KaosPACS Gateway imaging worklist when Gateway URL is configured

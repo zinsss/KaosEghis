@@ -366,6 +366,10 @@ def _migrate_pacs_worklist(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE pacs_worklist_items ADD COLUMN kaospacs_mwl_error TEXT"
         )
+    if "kaospacs_mwl_fingerprint" not in columns:
+        connection.execute(
+            "ALTER TABLE pacs_worklist_items ADD COLUMN kaospacs_mwl_fingerprint TEXT"
+        )
     if _pacs_worklist_status_schema_needs_rebuild(connection):
         _rebuild_pacs_worklist_status_schema(connection)
 
@@ -406,6 +410,7 @@ def _rebuild_pacs_worklist_status_schema(connection: sqlite3.Connection) -> None
             kaospacs_mwl_status TEXT NOT NULL DEFAULT 'not_sent',
             kaospacs_mwl_last_synced_at TEXT,
             kaospacs_mwl_error TEXT,
+            kaospacs_mwl_fingerprint TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -429,6 +434,7 @@ def _rebuild_pacs_worklist_status_schema(connection: sqlite3.Connection) -> None
             kaospacs_mwl_status,
             kaospacs_mwl_last_synced_at,
             kaospacs_mwl_error,
+            kaospacs_mwl_fingerprint,
             created_at,
             updated_at
         )
@@ -451,6 +457,7 @@ def _rebuild_pacs_worklist_status_schema(connection: sqlite3.Connection) -> None
             kaospacs_mwl_status,
             kaospacs_mwl_last_synced_at,
             kaospacs_mwl_error,
+            kaospacs_mwl_fingerprint,
             created_at,
             updated_at
         FROM pacs_worklist_items
