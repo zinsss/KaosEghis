@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from KaosEghis.core.emr_refresh_probe import ClearRefreshTrigger, RefreshRequest
+from KaosEghis.core.emr_refresh_probe import ChartRefreshTrigger, RefreshRequest
 from KaosEghis.core.emr_signal_probe import PatientChartContext, SignalScope
 
 
@@ -16,7 +16,7 @@ DAY = date(2026, 9, 29)
 @pytest.fixture
 def trigger():
     clock, messages, today = [10.0], [], [DAY]
-    probe = ClearRefreshTrigger(messages.append, clock=lambda: clock[0], today=lambda: today[0])
+    probe = ChartRefreshTrigger(messages.append, clock=lambda: clock[0], today=lambda: today[0])
     return SimpleNamespace(probe=probe, clock=clock, messages=messages, today=today,
                            context=PatientChartContext(SCOPE, "001234", 1))
 
@@ -32,7 +32,7 @@ def test_waits_two_seconds_and_emits_one_day_request_without_patient_data(trigge
         tick(trigger, at)
         assert trigger.probe.take_ready(SCOPE) == []
     tick(trigger, 12)
-    assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY)]
+    assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY, follow_up_at=40)]
     assert trigger.probe.take_ready(SCOPE) == []
     assert "DB commit unverified" in trigger.messages[0]
     assert "001234" not in repr(trigger.messages) + repr(trigger.probe._pending)
@@ -47,7 +47,7 @@ def test_burst_coalesces_and_waits_after_latest_clear(trigger):
     tick(trigger, 12)
     assert trigger.probe.take_ready(SCOPE) == []
     tick(trigger, 13)
-    assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY)]
+    assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY, follow_up_at=41)]
 
 
 def test_same_patient_reload_after_refresh_can_request_again(trigger):
@@ -55,7 +55,7 @@ def test_same_patient_reload_after_refresh_can_request_again(trigger):
         trigger.clock[0] = at
         trigger.probe.enqueue(trigger.context)
         tick(trigger, at + 2)
-        assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY)]
+        assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY, follow_up_at=at + 30)]
 
 
 @pytest.mark.parametrize("scope", [None, replace(SCOPE, pid=43), replace(SCOPE, root=200), replace(SCOPE, treatment=102)])
@@ -91,7 +91,7 @@ def test_midnight_preserves_clear_date(trigger):
     trigger.probe.enqueue(trigger.context)
     trigger.today[0] = date(2026, 9, 30)
     tick(trigger, 12)
-    assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY)]
+    assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY, follow_up_at=40)]
 
 
 def test_concurrent_enqueues_and_slow_diagnostic_consumer_coalesce(trigger):
@@ -104,7 +104,37 @@ def test_concurrent_enqueues_and_slow_diagnostic_consumer_coalesce(trigger):
     tick(trigger, 12)
     trigger.probe.enqueue(trigger.context)
     tick(trigger, 14)
-    assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY)]
+    assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY, follow_up_at=42)]
+
+
+def test_load_only_has_fast_read_without_follow_up(trigger):
+    trigger.probe.enqueue(trigger.context, reason="Chart loaded")
+    tick(trigger, 12)
+    assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY, "Chart loaded")]
+
+
+@pytest.mark.parametrize("clear_already_ready", [False, True])
+def test_load_preserves_clear_deadline_during_coalescing(trigger, clear_already_ready):
+    trigger.probe.enqueue(trigger.context)
+    if clear_already_ready:
+        tick(trigger, 12)
+    trigger.clock[0] = 13
+    trigger.probe.enqueue(trigger.context, reason="Chart loaded")
+    tick(trigger, 15)
+    assert trigger.probe.take_ready(SCOPE) == [RefreshRequest(SCOPE, DAY, "Chart loaded", 40)]
+
+
+def test_clear_then_load_across_midnight_keeps_both_days(trigger):
+    trigger.probe.enqueue(trigger.context)
+    tomorrow = DAY.replace(day=30)
+    trigger.today[0] = tomorrow
+    trigger.clock[0] = 11
+    trigger.probe.enqueue(trigger.context, reason="Chart loaded")
+    tick(trigger, 13)
+    assert trigger.probe.take_ready(SCOPE) == [
+        RefreshRequest(SCOPE, DAY, follow_up_at=40),
+        RefreshRequest(SCOPE, tomorrow, "Chart loaded"),
+    ]
 
 
 def test_trigger_never_opens_database_or_performs_input(monkeypatch, trigger):

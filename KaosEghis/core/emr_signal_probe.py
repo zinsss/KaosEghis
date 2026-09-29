@@ -17,7 +17,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from KaosEghis.core.eghis_connector import get_cached_eghis_state
 from KaosEghis.core.emr_activation_probe import UiaActivationListener
 from KaosEghis.core.emr_chart_probe import ChartFieldObservation, ChartTarget, UiaChartListener
-from KaosEghis.core.emr_refresh_probe import ClearRefreshTrigger
+from KaosEghis.core.emr_refresh_probe import ChartRefreshTrigger
 from KaosEghis.core.ui_capture import _best_text_value
 from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 
@@ -85,7 +85,7 @@ class ChartClearObservation:
 
     def status_text(self) -> str:
         detail = (
-            f"Chart {self.chart_no} -> waiting {ClearRefreshTrigger.SETTLE_SECONDS:g} s before refresh "
+            f"Chart {self.chart_no} -> waiting {ChartRefreshTrigger.SETTLE_SECONDS:g} s before refresh "
             f"(day-wide PACS; previous snapshot {self.age_ms} ms)"
             if self.chart_no else
             "Waiting 2 s before day-wide PACS refresh (departing chart identity not required)"
@@ -398,7 +398,9 @@ class EmrSignalCapture:
         self._patient_last_sample = None
         self._patient_revision = 0
         self._patient_invalidated_at = float("-inf")
-        self.refresh_probe = ClearRefreshTrigger(self._emit, clock=clock)
+        self._refresh_scope = None
+        self._refresh_chart = ""
+        self.refresh_probe = ChartRefreshTrigger(self._emit, clock=clock)
 
     @property
     def patient_context(self):
@@ -419,6 +421,8 @@ class EmrSignalCapture:
 
     def _update_patient_context(self, scope, snapshot) -> None:
         with self._patient_lock:
+            if scope != self._refresh_scope or not self.enabled:
+                self._refresh_scope, self._refresh_chart = scope, ""
             if self._patient_context is not None and self._patient_context.scope != scope:
                 self._patient_context = None
                 self._patient_last_sample = None
@@ -433,17 +437,22 @@ class EmrSignalCapture:
             if snapshot.unavailable_reason == "chart UIA text is empty":
                 self._observe_chart_clear("sampled", scope)
                 self._patient_invalidated_at = self.clock()
-            elif re.fullmatch(r"[0-9]{1,20}", snapshot.chart_no):
+            elif not snapshot.unavailable_reason and re.fullmatch(r"[0-9]{1,20}", snapshot.chart_no):
                 if self._patient_context is None or self._patient_context.chart_no != snapshot.chart_no:
                     self._patient_revision += 1
                     self._patient_context = PatientChartContext(scope, snapshot.chart_no, self._patient_revision)
                 self._patient_last_sample = snapshot
+                if snapshot.chart_no != self._refresh_chart:
+                    self._refresh_chart = snapshot.chart_no
+                    self.refresh_probe.enqueue(self._patient_context, reason="Chart loaded")
 
     def _observe_chart_clear(self, source, scope) -> None:
         # Called under the patient lock. Consuming the context deduplicates UIA
         # properties and sampled clears without suppressing a same-patient reload.
         context, snapshot = self._patient_context, self._patient_last_sample
         self._patient_context = self._patient_last_sample = None
+        if scope == self._refresh_scope:
+            self._refresh_chart = ""
         if context is None or context.scope != scope:
             return
         age = self.clock() - snapshot.sampled_at if snapshot is not None else None

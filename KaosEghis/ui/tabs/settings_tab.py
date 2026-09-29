@@ -98,7 +98,7 @@ class SettingsTab(QWidget):
         self.kaospacs_api_timeout_seconds = QLineEdit()
         self.pacs_auto_poll_enabled = QCheckBox("Enable automatic PACS refresh")
         self.pacs_refresh_mode = QComboBox()
-        self.pacs_refresh_mode.addItem("Chart clear", "chart_clear")
+        self.pacs_refresh_mode.addItem("Chart clear/load", "chart_clear")
         self.pacs_refresh_mode.addItem("Timer (legacy)", "timer")
         self.pacs_dry_run = QCheckBox("Enable PACS dry run")
         self.pacs_poll_interval_seconds = QSpinBox()

@@ -173,44 +173,60 @@ During normal patient changes, compare UIA lines with sampled lines. A value set
 before the first subscription may have only a sampled baseline. Same-patient
 reloads may not change any chart property. Neither kind of line proves that all
 patient fields/orders have finished loading, and property events do not overwrite
-F6/F7 snapshots. Verified clears can request a day-wide PACS refresh; numeric
-changes alone do not. Clear/change events invalidate pending memo
+F6/F7 snapshots. Verified clears and sampled numeric loads/changes can request a
+day-wide PACS refresh; raw numeric events wait for a verified sample. Clear/change events invalidate pending memo
 checks; subsequent sampled chart identity schedules a delayed alert check as
 described below. Live logs now confirm eGHIS Name-change event delivery, including clear
 and numeric transitions, but not complete coverage or patient-load completion.
 A real property change on an isolated, hidden Windows test field also verified
 the callback path. Button activation-event delivery remains unverified.
 
-### Clear-Triggered PACS Refresh
+### Chart-Triggered PACS Refresh
 
 - A previously verified numeric chart changing to a verified empty field requests
   refresh. UIA properties and sampled clears are deduplicated under the patient
   lock. Missing/unreadable text, focus loss, and initial empty fields are not clears.
-- A fresh numeric sample rearms the observer, including same-patient reloads.
+- A verified numeric sample requests refresh when first observed or changed,
+  including the same patient after a confirmed clear. Repeated samples of the same
+  number and temporary unreadable/focus gaps do not create duplicate load requests.
   Patient identity still uses the 750-ms freshness rule, but day-wide refresh does
   not: no departing chart number is passed to the database reader.
-- Wait two seconds after the latest clear in a burst, then emit a separate Qt
+- Wait two seconds after the latest clear/load in a burst, then emit a separate Qt
   request. No F1, caret readiness, focus, typing, or mouse input is needed.
   A new patient loading cannot redirect the request to another patient's query.
-- The request retains the clear's date across midnight. Automatic refresh does
+- Each request retains its event date across midnight. Automatic refresh does
   not use an operator's currently selected historical worklist date. Poll Now does.
 - The PACS worker uses the existing imaging query and cancellation reconciliation,
   then existing KaosPACS delivery. It does not infer completion/cancellation from
   a clear and does not yet read all orders or reception statuses.
-- One follow-up is scheduled eight seconds after the initial operation finishes,
-  even after a failure. Follow-ups do not recursively schedule retries. Neither
-  delay proves that EMR has committed; Poll Now remains necessary for unusually
-  delayed changes, edits without a clear, or a missed signal.
+- Each clear also schedules one follow-up at 30 seconds after that clear, not
+  after the first read finishes. A new load neither cancels nor postpones it and
+  does not create its own follow-up. A later clear replaces the pending deadline
+  with its own +30 seconds. Neither delay proves that EMR has committed.
+- Fast reads and follow-ups have separate pending slots per day. If both are due,
+  one read covers both; a read begun before the follow-up deadline cannot consume
+  it merely by finishing late. Follow-ups do not recursively schedule follow-ups.
 - Only one PACS operation runs at a time. Further requests coalesce by day and
   remain pending rather than being dropped during an active refresh.
-- Chart-clear mode performs startup and detected EMR-reconnection refreshes.
-  There is no periodic DB reconnect probe: a backend recovering silently is read
-  on the next clear, bounded follow-up, or Poll Now.
-- Clear requests are independent of the bounded diagnostic queue. Disconnects,
+- Event mode performs startup and detected EMR-reconnection refreshes, each with
+  a +30-second follow-up. F6/F7 keys, clicks and activation events remain diagnostic
+  only; they do not request database reads.
+- A safety check requests today's refresh after five minutes without a successful
+  current-day read, even if no more chart events arrive. A five-second local timer
+  checks the deadline only, not the database. It does not require EMR focus or a
+  chart signal. In-flight/queued work for today coalesces with this check.
+- Safety-check failures retry after 60, 120, 240, then 300 seconds (capped there).
+  A successful current-day read resets the five-minute deadline and backoff;
+  events, historical reads and failures do not count as success. Delivery errors
+  returned by KaosPACS do not invalidate a successful source read. Day rollover
+  requests the new day without discarding the previous day's pending follow-up.
+- Chart requests are independent of the bounded diagnostic queue. Disconnects,
   changed EMR scope, stop, invalid timing, or a 120-second UIA worker stall discard
-  pending trigger candidates. Startup/reconnection reads reconcile missed work.
+  pending trigger candidates. Startup/reconnection and safety reads reconcile missed work.
 - Existing automatic-refresh enable/disable and PACS dry-run settings are honored.
-  The default `pacs_refresh_mode=chart_clear` disables the regular polling timer.
+  The default `pacs_refresh_mode=chart_clear` (shown as `Chart clear/load`) disables
+  the legacy regular polling timer. Disabling automatic refresh also stops the
+  safety timer and cancels pending automatic work; Poll Now remains available.
   `timer` is an explicit rollback option in PACS Operator Mode or Settings > PACS.
 - Launcher status shows each refresh's reason, date, outcome and total elapsed
   time (including queue wait and delivery). PACS shows the last successful source
@@ -218,7 +234,9 @@ the callback path. Button activation-event delivery remains unverified.
 
 Before relying on this during normal work, verify F6/F7 keys and buttons, the last
 patient of the day, fast patient switches, edits/deletions, and offline recovery.
-Compare PACS after the follow-up with Poll Now. Do not create clinical orders just
+Compare PACS after the follow-up with Poll Now. The safety check improves recovery
+but does not guarantee immediate delivery, especially while the app is closed or
+source/destination services are unavailable. Do not create clinical orders just
 for testing. No production DB or UI input was exercised during implementation.
 
 ### Shared Read Queue (Stage One)
@@ -277,8 +295,9 @@ Pending clear diagnostics only check in-memory deadlines and cached connection
 identity. The earlier F1 caret/focus probe and local target lookup have been removed.
 Subscriptions are element-scoped, never desktop-wide. Event handlers use a bounded
 queue and perform no synchronous UI update. No resource benchmark against EMR's
-30-second PACS DB polling has been claimed. Chart-clear mode avoids idle periodic
-reads, but its initial/follow-up whole-day reads can still be frequent during busy work.
+30-second PACS DB polling has been claimed. Event mode replaces that timer with
+clear/load reads, bounded follow-ups and a five-minute successful-read safety
+deadline. Whole-day reads and existing delivery can still be frequent during busy work.
 
 The input-hook constraints follow Microsoft's
 [low-level hook guidance](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)
@@ -302,7 +321,7 @@ KaosOrders, on-demand flu reporting, and patient-context database lookups.
 - Capture verified chart identity before the EMR action opens another window.
 - Validate the initial and follow-up timing during normal clinical work. The
   earlier per-chart 20-second F7 proposal in [KaosOrders signal capture](kaosorders.md)
-  is superseded by day-wide chart-clear refreshes.
+  is superseded by day-wide chart-clear/load refreshes.
 - Reconcile actual source states before delivering minimal data to the PACS and
   KaosOrders adapters. These adapters retain their own domain and delivery logic.
 - Run flu reporting only on explicit request. Prefer small source reads and local

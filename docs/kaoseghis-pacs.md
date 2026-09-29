@@ -396,21 +396,32 @@ Rules:
 - auto poll is off by default
 - dry run is off by default
 - testing KaosPACS connection uses `GET /health` only
-- When enabled, chart-clear mode waits two seconds after a verified clear, refreshes
-  that day's PACS orders, then performs one follow-up eight seconds after completion.
-  There is no regular polling timer in this mode. Startup and detected EMR reconnect
-  also refresh. The selected historical date affects Poll Now, not chart-clear jobs.
+- When enabled, `Chart clear/load` mode waits two seconds after a verified clear
+  or sampled numeric load/change, then refreshes that day's PACS orders. A clear
+  also requests a follow-up at clear +30 seconds. Loads preserve that deadline
+  and do not schedule their own follow-up. A later clear updates the deadline.
+  Startup and detected EMR reconnect also refresh with one +30-second follow-up.
+  The persisted mode key remains `chart_clear`; no settings migration is needed.
+  The selected historical date affects Poll Now, not chart-triggered jobs.
+- With automatic event refresh enabled, five minutes without a successful read
+  for today requests a safety refresh, independent of chart signals and EMR focus.
+  Failures of that check back off by 60, 120, 240, then 300 seconds, capped there.
+  Successful reads reset the deadline; events, failed reads and historical reads
+  do not. The five-second deadline timer itself performs no database access.
 - Poll Now remains available with automatic refresh disabled. It also runs on the
   background worker. Requests received during a refresh coalesce by date rather than
-  being discarded. Failed reads do not advance the last-successful-read timestamp.
+  being discarded. Fast reads and delayed follow-ups are queued separately so a
+  load does not consume a future follow-up. Already-due work for the same day is
+  combined. Failed reads do not advance the last-successful-read timestamp.
 - The legacy timer is retained as an explicit rollback option. Existing automatic
   enable/disable and dry-run settings are preserved. Restart the desktop after updating.
 - All existing eGHIS database readers now use the shared serialized read queue.
   Connections are read-only, bounded, and closed before local work or HTTP delivery.
   See [KaosEghis-emr](kaoseghis-emr.md) for concurrency boundaries and live checks.
 - This stage does not change the imaging query into an all-orders/status snapshot,
-  nor guarantee detection of changes after the bounded follow-up. Use Poll Now for
-  unusually delayed saves or changes that do not clear the chart.
+  nor guarantee immediate delivery after a missed signal or delayed save. The safety
+  check covers silent changes while the app and services are available; Poll Now
+  remains the immediate manual fallback. F6/F7 signals are still diagnostic only.
 - Explicit source cancellations whose previous delivery failed remain eligible
   for the next sync, including the bounded follow-up, until PACS acknowledges them.
   Source read success and delivery success remain separate; no clear implies cancellation.

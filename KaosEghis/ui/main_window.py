@@ -126,7 +126,7 @@ class MainWindow(QMainWindow):
         self.workspace_tab = WorkspaceTab()
         tabs.addTab(self.workspace_tab, "Workspace")
         self.pacs_panel = PacsPanel()
-        self.emr_signal_probe.refresh_requested.connect(self.pacs_panel.handle_chart_clear)
+        self.emr_signal_probe.refresh_requested.connect(self.pacs_panel.handle_chart_refresh)
         self.emr_signal_probe.connection_changed.connect(self.pacs_panel.handle_emr_connection)
         self.pacs_panel.refresh_status.connect(self.kaoseghis_tab.launcher_page.show_emr_signal_status)
         self.pacs_tab_index = tabs.addTab(self.pacs_panel, "PACS")

@@ -82,6 +82,74 @@ def test_shared_patient_context_deduplicates_samples_and_same_value_events(captu
     assert snapshot.chart_no not in repr(context)
 
 
+def settled_refreshes(capture):
+    capture.test_clock[0] += 2.1
+    scope = probe.connected_scope(capture.test_state)
+    capture.refresh_probe.tick(scope)
+    return capture.refresh_probe.take_ready(scope)
+
+
+def test_verified_load_requests_once_and_changed_chart_requests_again(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    request, = settled_refreshes(capture)
+    assert request.reason == "Chart loaded"
+    assert request.follow_up_at is None
+    for _ in range(5):
+        capture.update_snapshot(replace(snapshot, sampled_at=capture.test_clock[0]))
+    assert settled_refreshes(capture) == []
+    capture.update_snapshot(replace(snapshot, chart_no="000456", sampled_at=capture.test_clock[0]))
+    request, = settled_refreshes(capture)
+    assert request.reason == "Chart loaded"
+    assert request.follow_up_at is None
+
+
+def test_raw_numeric_event_waits_for_verified_sample(capture):
+    scope = capture.snapshot.scope
+    capture.chart_property_event(scope, "Name", "000456")
+    assert settled_refreshes(capture) == []
+    capture.update_snapshot(replace(capture.snapshot, chart_no="000456", sampled_at=capture.test_clock[0]))
+    assert len(settled_refreshes(capture)) == 1
+
+
+@pytest.mark.parametrize("reason", ["EMR not focused", "UIA chart read failed", "chart UIA text is not numeric"])
+def test_temporary_read_failure_does_not_rearm_same_load(capture, reason):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    assert len(settled_refreshes(capture)) == 1
+    capture.update_snapshot(None)
+    capture.update_snapshot(replace(snapshot, chart_no="", unavailable_reason=reason))
+    capture.chart_property_event(snapshot.scope, "Name", "unavailable")
+    capture.test_clock[0] += 0.1
+    capture.update_snapshot(replace(snapshot, sampled_at=capture.test_clock[0]))
+    assert settled_refreshes(capture) == []
+
+
+def test_same_patient_load_after_clear_preserves_follow_up(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    settled_refreshes(capture)
+    cleared_at = capture.test_clock[0]
+    capture.chart_property_event(snapshot.scope, "Name", "")
+    capture.test_clock[0] += 0.1
+    capture.update_snapshot(replace(snapshot, sampled_at=capture.test_clock[0]))
+    request, = settled_refreshes(capture)
+    assert request.reason == "Chart loaded"
+    assert request.follow_up_at == cleared_at + 30
+
+
+def test_f6_f7_keyboard_mouse_and_activation_do_not_schedule_reads(capture):
+    snapshot = capture.snapshot
+    capture.update_snapshot(snapshot)
+    settled_refreshes(capture)
+    for vk, button, label, handle in ((0x75, 6, "F6", 106), (0x76, 7, "F7", 107)):
+        key(capture, vk)
+        mouse(capture, button)
+        mouse(capture, button, 0x202)
+        capture.activation_event(label, snapshot.scope, handle)
+    assert settled_refreshes(capture) == []
+
+
 def test_chart_clear_immediately_invalidates_patient_and_old_inflight_samples(capture):
     snapshot = capture.snapshot
     capture.update_snapshot(snapshot)
@@ -310,7 +378,7 @@ def test_settle_delay_after_new_patient_load_targets_day_not_patient(capture):
     capture.update_snapshot(replace(snapshot, chart_no="000456", sampled_at=10.4))
     assert capture.patient_context.chart_no == "000456"
     clear_observations(capture)
-    for at in (10.5, 12.1):
+    for at in (10.5, 12.5):
         capture.test_clock[0] = at
         capture.refresh_probe.tick(snapshot.scope)
     message = capture.output.get_nowait()
@@ -808,14 +876,14 @@ def test_runtime_delays_clear_without_caret_or_focus_on_existing_background_work
     listeners = (Listener(), Listener())
     dispatched = []
 
-    class TrackingTrigger(probe.ClearRefreshTrigger):
+    class TrackingTrigger(probe.ChartRefreshTrigger):
         def tick(self, scope):
             before = bool(self._ready)
             super().tick(scope)
             if self._ready and not before:
                 dispatched.append((threading.get_ident(), time.monotonic()))
 
-    monkeypatch.setattr(probe, "ClearRefreshTrigger", TrackingTrigger)
+    monkeypatch.setattr(probe, "ChartRefreshTrigger", TrackingTrigger)
 
     runtime = probe.EmrSignalProbeRuntime(
         reader_factory=Reader, listener_factory=lambda capture: listeners, state_provider=state,

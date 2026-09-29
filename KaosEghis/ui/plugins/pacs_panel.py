@@ -40,6 +40,7 @@ from KaosEghis.core.eghis_db import (
     EghisDbUnavailableError,
     run_readonly_query,
 )
+from KaosEghis.core.emr_refresh_probe import ChartRefreshTrigger
 from KaosEghis.core.kaospacs_client import (
     KaosPacsSyncResult,
     check_kaospacs_health,
@@ -83,14 +84,15 @@ class _RefreshJob:
     day: date
     reason: str
     automatic: bool
-    follow_up: bool = False
 
 
 class PacsPanel(QWidget):
     health_state_changed = Signal(bool, str)
     auto_poll_finished = Signal(object)
     refresh_status = Signal(str)
-    FOLLOW_UP_SECONDS = 8.0
+    FOLLOW_UP_SECONDS = ChartRefreshTrigger.FOLLOW_UP_SECONDS
+    SAFETY_INTERVAL_SECONDS = 300.0
+    SAFETY_RETRY_SECONDS = 60.0
     DEFAULT_POLL_INTERVAL_SECONDS = 60
     MIN_POLL_INTERVAL_SECONDS = 15
     ADMIN_REFRESH_DELAY_MS = 350
@@ -115,10 +117,12 @@ class PacsPanel(QWidget):
         "Summary",
         "Error",
     ]
-    def __init__(self, db_path: Path | None = None) -> None:
+    def __init__(self, db_path: Path | None = None, *, clock=time.monotonic, today=date.today) -> None:
         super().__init__()
 
         self._db_path = db_path
+        self._clock = clock
+        self._today = today
         self._visible_items: list[PacsWorklistItemRecord] = []
         self._visible_audit_events: list[PacsAuditEventRecord] = []
         self._kaospacs_available = False
@@ -135,10 +139,16 @@ class PacsPanel(QWidget):
         self._connection_seen = False
         self._auto_refresh_enabled = False
         self._refresh_mode = "chart_clear"
+        self._next_safety_at = None
+        self._safety_day = self._today()
+        self._safety_backoff = self.SAFETY_RETRY_SECONDS
+        self._safety_timer = QTimer(self)
+        self._safety_timer.setInterval(5000)
+        self._safety_timer.timeout.connect(self._check_safety_refresh)
         self._dispatch_timer = QTimer(self)
         self._dispatch_timer.setSingleShot(True)
         self._dispatch_timer.timeout.connect(self._dispatch_refresh)
-        self._selected_date = date.today()
+        self._selected_date = self._today()
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._handle_poll_timer_tick)
         self.auto_poll_finished.connect(self._finish_auto_poll)
@@ -273,7 +283,7 @@ class PacsPanel(QWidget):
 
         self.auto_poll_checkbox = QCheckBox("Automatic refresh")
         self.refresh_mode_combo = QComboBox()
-        self.refresh_mode_combo.addItem("Chart clear", "chart_clear")
+        self.refresh_mode_combo.addItem("Chart clear/load", "chart_clear")
         self.refresh_mode_combo.addItem("Timer (legacy)", "timer")
         self.interval_spinbox = QSpinBox()
         self.interval_spinbox.setMinimum(self.MIN_POLL_INTERVAL_SECONDS)
@@ -814,8 +824,9 @@ class PacsPanel(QWidget):
             self._poll_timer.start(interval_seconds * 1000)
         else:
             self._poll_timer.stop()
+        self._update_safety_timer()
         if enabled and self._refresh_mode == "chart_clear" and self._runtime_started:
-            self._queue_refresh(date.today(), "Settings enabled", automatic=True, follow_up=True)
+            self._queue_refresh(self._today(), "Settings enabled", automatic=True, follow_up=True)
 
     def _handle_poll_timer_tick(self) -> None:
         self._queue_refresh(self._selected_date, "Timer", automatic=True)
@@ -825,8 +836,9 @@ class PacsPanel(QWidget):
             return
         self._runtime_started = True
         self._stopped = False
+        self._update_safety_timer()
         if self._auto_refresh_enabled and self._refresh_mode == "chart_clear":
-            self._queue_refresh(date.today(), "Startup", automatic=True, follow_up=True)
+            self._queue_refresh(self._today(), "Startup", automatic=True, follow_up=True)
 
     def stop_refresh_runtime(self) -> None:
         self._stopped = True
@@ -834,6 +846,8 @@ class PacsPanel(QWidget):
         self._pending_refreshes.clear()
         self._dispatch_timer.stop()
         self._poll_timer.stop()
+        self._safety_timer.stop()
+        self._next_safety_at = None
 
     def closeEvent(self, event) -> None:
         self.stop_refresh_runtime()
@@ -845,42 +859,104 @@ class PacsPanel(QWidget):
         self._emr_connection = connection
         self._connection_seen = True
         if connection is not None and connection != previous and seen and self._event_refresh_active():
-            self._queue_refresh(date.today(), "EMR reconnected", automatic=True, follow_up=True)
+            self._queue_refresh(self._today(), "EMR reconnected", automatic=True, follow_up=True)
 
-    def handle_chart_clear(self, request) -> None:
+    def handle_chart_refresh(self, request) -> None:
         if self._event_refresh_active():
-            self._queue_refresh(request.day, "Chart cleared", automatic=True, follow_up=True)
+            self._queue_refresh(request.day, request.reason, automatic=True, follow_up_at=request.follow_up_at)
 
     def _event_refresh_active(self) -> bool:
         return self._runtime_started and not self._stopped and self._auto_refresh_enabled and self._refresh_mode == "chart_clear"
 
-    def _queue_refresh(self, day, reason, *, automatic, follow_up=False, delay=0.0) -> None:
+    def _update_safety_timer(self) -> None:
+        if self._event_refresh_active():
+            if self._next_safety_at is None:
+                self._safety_day = self._today()
+                self._next_safety_at = self._clock() + self.SAFETY_INTERVAL_SECONDS
+                self._safety_backoff = self.SAFETY_RETRY_SECONDS
+            self._safety_timer.start()
+        else:
+            self._safety_timer.stop()
+            self._next_safety_at = None
+
+    def _check_safety_refresh(self) -> None:
+        if not self._event_refresh_active():
+            return
+        day, now = self._today(), self._clock()
+        if day != self._safety_day:
+            self._safety_day = day
+            self._next_safety_at = now
+            self._safety_backoff = self.SAFETY_RETRY_SECONDS
+        if self._next_safety_at is None or now < self._next_safety_at:
+            return
+        # A source read already in flight or queued for today can satisfy this
+        # check. Events alone must not move the successful-read deadline.
+        if (self._active_job is not None and self._active_job.day == day) or (day, "refresh") in self._pending_refreshes:
+            return
+        self._queue_refresh(day, "Safety check", automatic=True)
+
+    def _record_refresh_result(self, job, result) -> None:
+        succeeded = (
+            result.eghis_db_available and result.error_message is None
+            and result.poll_result is not None and result.poll_result.message is None
+        )
+        if succeeded:
+            key = (job.day, "follow_up")
+            pending = self._pending_refreshes.get(key)
+            # A read that started after the verification deadline covers that
+            # check. Finishing late is not enough: its snapshot could be old.
+            if pending is not None and self._poll_started_at >= pending[0]:
+                del self._pending_refreshes[key]
+            if job.day == self._today():
+                self._safety_day = job.day
+                self._next_safety_at = self._clock() + self.SAFETY_INTERVAL_SECONDS
+                self._safety_backoff = self.SAFETY_RETRY_SECONDS
+        elif job.reason == "Safety check":
+            self._next_safety_at = self._clock() + self._safety_backoff
+            self._safety_backoff = min(self._safety_backoff * 2, self.SAFETY_INTERVAL_SECONDS)
+
+    def _queue_refresh(self, day, reason, *, automatic, follow_up=False, follow_up_at=None) -> None:
         if self._stopped:
             return
-        due = time.monotonic() + delay
-        job = _RefreshJob(day, reason, automatic, follow_up)
-        previous = self._pending_refreshes.get(day)
+        due = self._clock()
+        if follow_up:
+            follow_up_at = due + self.FOLLOW_UP_SECONDS
+        if follow_up_at is not None:
+            key = (day, "follow_up")
+            previous = self._pending_refreshes.get(key)
+            if previous is not None:
+                follow_up_at = max(follow_up_at, previous[0])
+            self._pending_refreshes[key] = (follow_up_at, _RefreshJob(day, "Follow-up", True))
+        key = (day, "refresh")
+        job = _RefreshJob(day, reason, automatic)
+        previous = self._pending_refreshes.get(key)
         if previous is not None:
             old_due, old = previous
             due = min(due, old_due)
-            job = _RefreshJob(day, old.reason if reason == "Follow-up" else reason,
-                              automatic and old.automatic, follow_up or old.follow_up)
-        self._pending_refreshes[day] = (due, job)
+            job = _RefreshJob(day, old.reason if reason == "Safety check" else reason,
+                              automatic and old.automatic)
+        self._pending_refreshes[key] = (due, job)
         self._dispatch_refresh()
 
     def _dispatch_refresh(self) -> None:
         if self._stopped or self._poll_in_progress or not self._pending_refreshes:
             return
-        due, job = min(self._pending_refreshes.values(), key=lambda item: item[0])
-        remaining = due - time.monotonic()
+        key, (due, job) = min(self._pending_refreshes.items(), key=lambda item: item[1][0])
+        now = self._clock()
+        remaining = due - now
         if remaining > 0:
             self._dispatch_timer.start(max(1, int(remaining * 1000) + 1))
             return
         self._dispatch_timer.stop()
-        del self._pending_refreshes[job.day]
+        del self._pending_refreshes[key]
+        for other_key, (other_due, other) in list(self._pending_refreshes.items()):
+            if other.day == job.day and other_due <= now:
+                del self._pending_refreshes[other_key]
+                job = _RefreshJob(job.day, other.reason if job.reason == "Follow-up" else job.reason,
+                                  job.automatic and other.automatic)
         self._active_job = job
         self._poll_in_progress = True
-        self._poll_started_at = time.monotonic()
+        self._poll_started_at = now
         self.polling_status.setText(f"PACS refresh: {job.reason} ({job.day:%Y-%m-%d})")
 
         def worker():
@@ -903,12 +979,13 @@ class PacsPanel(QWidget):
         try:
             if self._stopped or job is None:
                 return
+            self._record_refresh_result(job, result)
             self._apply_poll_operation_result(
                 result,
                 refresh_admin=True,
                 is_auto_poll=job.automatic,
             )
-            elapsed = time.monotonic() - self._poll_started_at
+            elapsed = self._clock() - self._poll_started_at
             self.refresh_status.emit(
                 f"{datetime.now():%H:%M:%S} | PACS refresh | {job.reason} | {job.day:%Y-%m-%d} | "
                 f"{self.polling_status.text()} ({elapsed:.2f} s)"
@@ -917,8 +994,6 @@ class PacsPanel(QWidget):
             self._poll_in_progress = False
             self._poll_worker_thread = None
             self._active_job = None
-            if job is not None and job.follow_up and self._event_refresh_active():
-                self._queue_refresh(job.day, "Follow-up", automatic=True, delay=self.FOLLOW_UP_SECONDS)
             self._dispatch_refresh()
 
     def _perform_poll_operation(
