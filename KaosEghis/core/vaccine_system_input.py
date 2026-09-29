@@ -136,10 +136,7 @@ def enter_vaccine_resident(
 
         if not ready():
             return VaccineHandoffResult(False, "Input focus was not confirmed. No number was typed.")
-        # Select all after the double-click so a formatted value is fully cleared.
-        _send_keys("^a")
-        if not ready():
-            return VaccineHandoffResult(False, "Input focus changed before clearing. No number was typed.")
+        # Keep the double-click selection; Ctrl+A can move to the second field.
         _send_keys("{DELETE}")
         type_digit = _send_digit_key if request.system == "influenza" else _send_unicode_text
         for digit in digits:

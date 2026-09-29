@@ -199,14 +199,13 @@ def test_complete_flu_handoff_uses_thirteen_digit_keys_not_unicode_or_paste(brow
         browser.settings, handoff.VaccineHandoffRequest("influenza", "700101-1000000"),
     )
     assert events[0] == ("click", {"x": 40, "y": 50, "clicks": 2, "interval": 0.1, "duration": 0})
-    assert events[1] == ("keys", "^a", {"pause": 0.05})
-    assert events[2] == ("keys", "{DELETE}", {"pause": 0.05})
+    assert events[1] == ("keys", "{DELETE}", {"pause": 0.05})
     if interrupt:
         assert not result.success
-        assert events[3:] == [("keys", "7", {"pause": 0.05, "vk_packet": False})]
+        assert events[2:] == [("keys", "7", {"pause": 0.05, "vk_packet": False})]
     else:
         assert result.success
-        assert events[3:-1] == [
+        assert events[2:-1] == [
             ("keys", digit, {"pause": 0.05, "vk_packet": False}) for digit in "7001011000000"
         ]
         assert events[-1] == ("keys", "{ENTER}", {"pause": 0.05})
