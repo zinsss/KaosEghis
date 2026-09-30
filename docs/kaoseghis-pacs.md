@@ -1,6 +1,6 @@
 # KaosEghis PACS
 
-Last updated: 2026-07-08
+Last updated: 2026-09-30
 
 Project name: `KaosEghis-pacs`  
 Panel title: `PACS Worklist`
@@ -169,6 +169,26 @@ Status ownership:
 - read-only against Eghis DB
 - operator-selected date only
 - if a local active row for the selected date disappears from `public.mwl`, it is preserved locally and marked `cancelled`
+
+### Shared-source coordination
+
+All PACS source and health reads use the shared FIFO worker and Windows
+machine-wide mutex documented in
+[KaosEghis-emr](kaoseghis-emr.md#shared-read-queue-stage-one). Cursor and
+connection cleanup finishes inside that exclusive operation before SQLite work
+or KaosPACS delivery. Uncertain physical connection closure blocks subsequent
+reads instead of releasing the slot.
+
+Verified chart clear/load changes request whole-day reconciliation after the
+two-second debounce. Clear +30-second follow-up, startup/reconnect work,
+five-minute successful-read safety, date preservation across midnight, and
+manual `Poll Now` remain in effect. F6/F7 and button observations are diagnostic
+only; they do not prove a successful save.
+
+The future KaosOrders all-orders/reception reader must enter the same shared
+boundary. It is a separate registered operation and must not broaden or replace
+the working PACS query in place. Preserve PACS changed-only delivery and current
+business/imaging ownership while introducing it.
 
 ### Sync
 

@@ -1,6 +1,6 @@
 # KaosEghis Plans
 
-Last updated: 2026-09-22
+Last updated: 2026-09-30
 
 ## Current Working State
 
@@ -46,21 +46,18 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 
 ### KaosEghis-emr
 
-- planned shared read adapter for PACS, KaosOrders, patient lookups, and on-demand
-  flu reporting; implementation is not yet enabled
-- observation-only probe implemented: Launcher status displays F6/F7 key or button
-  source with a provisional chart snapshot; no DB reads or polling changes
-- observe F6/F7 and their buttons, capture verified chart identity, and reconcile
-  source state after the fixed per-chart 20-second delay
-- coordinate a bounded background queue with at most one live source DB connection;
-  on-demand flu waits without connecting until the active connection has closed
-- mandatory: never modify the EMR database; fail closed without verified read-only
-  access and reviewed operations
-- mandatory: close every source connection immediately after its read, including
-  error/timeout/cancellation cleanup; no idle pool or connection held for publishing
-- preserve fallback reconciliation until signal capture is validated and account
-  for independently running legacy pollers during migration
-- requirements and acceptance gates: [KaosEghis-emr](kaoseghis-emr.md)
+- first shared-read stage implemented and verified on the Windows checkout
+- PACS, flu, health, patient-context, and diagnostic reads use one FIFO worker
+  and a Windows machine-wide mutex
+- cursor/connection cleanup completes before local work or delivery; uncertain
+  physical closure latches the reader unhealthy and blocks further connections
+- chart clear/load uses the verified two-second debounce, clear +30-second
+  follow-up, startup/reconnect reconciliation, and five-minute successful-read
+  safety check; F6/F7 remains diagnostic only
+- manual PACS `Poll Now` remains available
+- production privilege verification, registered parameterized operations,
+  stuck-driver recovery, and the all-orders/reception reader remain gated
+- requirements and evidence: [KaosEghis-emr](kaoseghis-emr.md)
 
 ### KaosEghis-pacs
 
@@ -128,32 +125,20 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - must not become a general-purpose password manager
 - detailed plan: `docs/kaoseghis-pw.md`
 
-### KaosEghis-inj
+### KaosOrders (successor to KaosEghis-inj / KaosInj)
 
-- planned immediately after KaosEghis-vaccine
-- patient-centered staff task-board track covering injection, verified laboratory, and
-  optional read-only imaging/PACS updates
-- read-only eGHIS DB polling for `ord_type='07'` and `proc_dept_cd='INJ'`
-- laboratory source classification and completion semantics must be verified against the
-  live eGHIS schema before implementation; do not guess from injection fields
-- imaging status must reuse the existing KaosEghis-pacs/KaosPACS boundary and must not
-  duplicate PACS polling or permit staff-created imaging completion
-- stable order-key reconciliation for new, changed, cancelled, deleted, and restored
-  source orders
-- date-scoped KaosEghis-owned task board with independent category/source/operational
-  states
-- Raspberry Pi kiosk receives a non-PHI reload signal and pulls a complete generation
-  snapshot into memory
-- target a 21-inch touch-screen appliance with kinetic patient-list scrolling, large
-  64-pixel-or-greater Done/Undo controls, no hover/right-click dependency, and no mouse
-  or keyboard required for routine use
-- staff may scroll and confirm Done/Undo; state is persisted only in KaosEghis
-- Done rows remain visible, move below Active rows, and are struck through
-- Raspberry Pi OS Lite kiosk with no mouse exit, automatic recovery, and scheduled
-  display wake/sleep
-- no Raspberry Pi durable PHI storage
-- the current successor direction is a separate KaosOrders service with signal-driven,
-  read-only reconciliation after eGHIS F6/F7 actions; captured target and timing notes:
+- separate LAN-only, staff-facing, read-only service on KaosClinic
+- KaosEghis is the sole source adapter and publishes only after closing the EMR
+  database connection
+- existing Acer laptop running LMDE is the kiosk-only viewer; it stores no
+  durable patient/order data
+- responsive patient-tile grid using the measured Acer display, not a fixed
+  Raspberry Pi resolution or fixed column count
+- diagnostic `보류` tiles are non-clickable and show only X-ray/BMD/ECG badges
+- eligible `완료` tiles show `처방완료` and open allowlisted read-only details
+- daily reconciliation, stable source identities, deletion/cancellation,
+  revisions, retries, stale state, and clinic-day retention remain staged work
+- architecture, contract proposal, tests, acceptance, and rollback:
   `docs/kaosorders.md`
 
 ### KaosEghis-scan
@@ -243,15 +228,16 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 ### High Priority
 
 - keep PR documentation and repo docs current
-- implement in this order: KaosEghis-vaccine, then KaosEghis-inj
+- keep the KaosOrders source adapter behind production permission, registered
+  operation, real-schema identity, and complete-read gates
 - define KaosEghis-pw as hidden infrastructure before adding credential-backed
   internal service autofill
 - keep PACS deployment checklist and production-readiness docs current
 - keep PACS dry-run behavior explicit and safe
 - refine flu reporting UX and export/report format
-- validate the KaosEghis-inj live injection and laboratory source queries, category
-  state semantics, cancellation behavior, PACS projection boundary, and minimum display
-  fields before implementing its local worklist milestone
+- verify KaosOrders encounter/order identities, source states, deletion behavior,
+  complete-read criteria, and minimum detail allowlist before implementing its
+  all-orders reader
 - validate KaosEghis-scan behavior with representative multi-page feeder documents
 - verify the scheduler's real backup artifact paths before implementing the backup
   macro, and capture the eGHIS close/backup dialog before that later macro is built
@@ -264,9 +250,9 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - keep infrastructure modules hidden unless they truly need first-class operator UI
 - define final home for KaosClip
 - improve plugin naming consistency
-- implement KaosEghis-inj only in the staged order documented in
-  `docs/kaoseghis-inj.md`: source verification, local worklist, API, kiosk, then
-  appliance hardening
+- implement KaosOrders only in the staged order documented in
+  `docs/kaosorders.md`: source safety, schema discovery, shadow delivery,
+  service/board changes, then LMDE kiosk cutover
 - consider scanner settings UI only after the fixed NAPS2 profile workflow is proven in daily use
 - test the Scheduler foundation with disabled and harmless macros before enabling a
   production backup schedule
@@ -277,12 +263,16 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - MWL/DICOM write paths
 - arbitrary shell commands or an unattended scheduler service outside the visible app
 - broad macro recorder
+- separate EMR broker process unless independent consumers or bounded stuck-driver
+  recovery prove it necessary
 
 ## Known Mismatches to Reconcile Later
 
 - README current UI list is stale relative to actual tabs
 - `KaosClip` still exists as a tab even though long-term direction is plugin integration
 - some historical macro/config UI work exists outside the newest simplified visible flow
+- `docs/kaoseghis-inj.md` remains historical background; KaosOrders is the
+  current staff-board direction
 
 ## Documentation Rule
 
