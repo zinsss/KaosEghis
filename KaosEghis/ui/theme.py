@@ -194,6 +194,22 @@ QWebEngineView#launcherKaosGddWebView {
     border-radius: 6px;
 }
 
+QLabel#vaccineInfluenzaCount,
+QLabel#vaccineCovidCount {
+    background-color: transparent;
+    font-size: 18px;
+    font-weight: bold;
+    padding: 4px 0;
+}
+
+QLabel#vaccineInfluenzaCount {
+    color: #88c0d0;
+}
+
+QLabel#vaccineCovidCount {
+    color: #ebcb8b;
+}
+
 QLabel#influenzaProgramResult,
 QLabel#covidProgramResult {
     background-color: #3b4252;

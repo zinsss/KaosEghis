@@ -253,7 +253,13 @@ class VaccineTab(QWidget):
         self.patient_address_input = QLineEdit()
 
         self.today_influenza_count_label = QLabel("Influenza today: 0 / 100")
+        self.today_influenza_count_label.setObjectName("vaccineInfluenzaCount")
         self.today_covid_count_label = QLabel("COVID-19 today: 0 / 100")
+        self.today_covid_count_label.setObjectName("vaccineCovidCount")
+        for counter in (self.today_influenza_count_label, self.today_covid_count_label):
+            counter.setWordWrap(True)
+            counter.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            counter.setMinimumHeight(52)
         self.influenza_check_button = QPushButton("Check influenza program")
         self.influenza_check_button.clicked.connect(self.check_influenza_program)
         self.influenza_check_result = QLabel("Influenza program: Not checked.")
@@ -1640,10 +1646,10 @@ class VaccineTab(QWidget):
         influenza_cap = settings.get("vaccine_influenza_daily_cap", "100").strip() or "100"
         covid_cap = settings.get("vaccine_covid_daily_cap", "100").strip() or "100"
         self.today_influenza_count_label.setText(
-            f"Influenza today: {counts.get('flu', 0)} / {influenza_cap}"
+            f"Influenza today: {counts.get('flu', 0)}\u00a0/\u00a0{influenza_cap}"
         )
         self.today_covid_count_label.setText(
-            f"COVID-19 today: {counts.get('covid', 0)} / {covid_cap}"
+            f"COVID-19 today: {counts.get('covid', 0)}\u00a0/\u00a0{covid_cap}"
         )
 
     def _reset_program_checks(self) -> None:
@@ -1983,10 +1989,9 @@ class VaccineTab(QWidget):
         program_group = QGroupBox("Programme checks")
         program_layout = QVBoxLayout(program_group)
         counts_row = QHBoxLayout()
-        counts_row.addWidget(self.today_influenza_count_label)
+        counts_row.addWidget(self.today_influenza_count_label, 1)
         counts_row.addSpacing(16)
-        counts_row.addWidget(self.today_covid_count_label)
-        counts_row.addStretch()
+        counts_row.addWidget(self.today_covid_count_label, 1)
         program_layout.addLayout(counts_row)
         program_layout.addWidget(self.rural_exception_check)
         check_actions = QHBoxLayout()
