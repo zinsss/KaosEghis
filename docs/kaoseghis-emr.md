@@ -1,6 +1,6 @@
 # KaosEghis-emr
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 Status: the first shared-read stage is implemented. Verified chart clears can now
 refresh the existing whole-day PACS query; Poll Now remains a manual fallback.
@@ -261,6 +261,54 @@ five seconds; flu-report retains its existing shorter three-second statement lim
 The in-process queue is bounded to 64 callers; mutex waiting is bounded to 60 seconds.
 Neither SQL nor connection strings nor patient data are logged by the queue.
 
+If connection close raises, is unavailable, or the driver still reports an open
+connection, the read fails and the coordinator latches unhealthy. Queued and new
+reads are rejected without connecting. The worker retains the Windows mutex so
+other updated processes cannot open a second source connection; their lock wait
+times out. An abandoned mutex is also an uncertain-ownership failure, not permission
+to connect. A cursor-close failure still attempts connection closure; if physical
+connection close succeeds, the read fails but subsequent work may proceed.
+Nested reads from inside the worker are rejected instead of deadlocking. Queue
+capacity is released when the submitted job finishes, not when its caller stops
+waiting.
+
+There is no automatic cleanup-failure reset. Operator recovery must establish that
+old Kaos-managed connections are gone before restarting the affected clients. The
+unhealthy latch and retained mutex are process-lifetime safeguards, not a durable
+cross-reboot recovery record. Older agents that bypass this helper are not covered.
+
+#### Windows Checkout Verification (2026-09-30)
+
+The real `E:\Kaos\KaosEghis` checkout was clean on `main` at
+`44e3d8f75560321aa3cc7a7e6f2b55131577e58d`, matching the remote `main` head before
+this coordinator hardening. No pull, merge, reset, stash, or data-file changes were
+needed. Both this document and `docs/kaosorders.md` were present.
+
+Source inspection confirmed the shared reader, global Windows mutex, chart clear/load
+trigger, two-second debounce, clear +30-second follow-up, and five-minute
+successful-current-day-read safety check. All existing source consumers enter via
+`run_readonly_query`: PACS orders/existence checks, flu reporting, patient context,
+health checks, and the PACS diagnostic tool. Future KaosOrders reads must use this
+same boundary; no KaosOrders adapter or new production-table query was introduced.
+
+Mock tests exercise FIFO ordering across consumer categories, a maximum of one
+connection through delayed cleanup, setup/query/fetch/cursor errors, uncertain
+connection closure, queue capacity, nested calls, actual consumer entry points, and
+post-close result processing. Separate-process lock tests use unique test-only mutex
+names. The test suite rejects unmocked PostgreSQL connection attempts by default;
+tests never acquire the running clinic app's production mutex.
+The focused coordinator/refresh/source-read run passed 111 tests; the broader
+EMR/PACS/flu/patient-context regression run passed 474 tests using temporary local
+data and mocked source connections.
+
+This verification does not certify production DB privileges or eliminate all future
+broker work. Configured legacy SQL still uses the existing safety gate; a reviewed,
+parameterized operation-only API and least-privilege credential verification remain
+acceptance gates. The queue does not yet offer a per-job queue deadline or active
+driver cancellation. A stuck driver can keep ownership indefinitely; process-isolated
+bounded recovery is not implemented. No live source queries, UI actions, or claim
+that the flu-report slowdown is fixed were part of this verification.
+
 This is the foundation, not the full future broker below. Pending refresh jobs are
 in memory; durable broker queues, all-orders snapshots and reception status semantics remain future
 work. Serialization may reduce contention but does not prove the flu-report/EMR
@@ -469,6 +517,7 @@ Before enabling the new source path:
 
 `core/eghis_db.py` already requests read-only sessions and uses nested cursor and
 connection cleanup. Flu queries have connection/statement limits. This is useful
-groundwork, but not certification of the complete policy above: the shared queue,
-reviewed-operation API, privilege verification, and production validation of signal
-capture remain work to do.
+groundwork, but not certification of the complete policy above: the reviewed-operation
+API, privilege verification, bounded queue/cancellation recovery, and production
+validation remain work to do. The stage-one shared queue is implemented as described
+above; it is not a separate broker executable.

@@ -6,7 +6,7 @@ import math
 import re
 from time import perf_counter
 
-from KaosEghis.core.emr_read_queue import run_serialized_read
+from KaosEghis.core.emr_read_queue import EmrConnectionCloseError, run_serialized_read
 
 _WRITE_SQL_PATTERN = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|MERGE|EXEC|CALL)\b",
@@ -92,14 +92,17 @@ def _read_and_close(
             rows = cursor.fetchall()
             record_stage("rows_fetched")
         finally:
-            close_cursor = getattr(cursor, "close", None)
-            if callable(close_cursor):
-                close_cursor()
-                record_stage("cursor_closed")
+            cursor.close()
+            record_stage("cursor_closed")
     finally:
-        close_connection = getattr(connection, "close", None)
-        if callable(close_connection):
-            close_connection()
-            record_stage("connection_closed")
+        try:
+            connection.close()
+            if not getattr(connection, "closed", True):
+                raise RuntimeError("Connection remains open after close.")
+        except BaseException as exc:
+            raise EmrConnectionCloseError(
+                "EMR connection closure could not be confirmed. Further reads are blocked."
+            ) from exc
+        record_stage("connection_closed")
 
     return column_names, rows
