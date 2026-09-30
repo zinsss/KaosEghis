@@ -16,7 +16,7 @@ from KaosEghis.core.kdca_browser import (
     _document_url, document_identity, foreground_handle, iter_documents_for_url,
 )
 
-from KaosEghis.core.vaccine_system_launch import find_native_vaccine_windows
+from KaosEghis.core.vaccine_system_launch import _focus_native_window, find_native_vaccine_windows
 from KaosEghis.core.windows_desktop import interactive_desktop_error
 from KaosEghis.core.windows_virtual_desktop import (
     ensure_first_virtual_desktop,
@@ -76,14 +76,16 @@ def configured_session_reset_targets(
 
 def reset_vaccine_session(
     target: VaccineSessionResetTarget, *, require_idle: bool = False,
+    cancelled: Callable[[], bool] = lambda: False,
 ) -> VaccineSessionResetResult:
     """Click a reset point only after exact native-window verification.
 
-    The reset is skipped when the app is closed, ambiguous, minimized, moved,
-    or covered at the configured point.  This keeps a saved absolute coordinate
-    from becoming an unqualified global click.
+    Bring the exact target forward before checking point ownership. Closed,
+    ambiguous, minimized, moved, or still-covered targets are skipped.
     """
 
+    if cancelled():
+        return _result(target, "cancelled", "Reset stopped; no click sent.")
     if not target.is_configured:
         return _result(target, "configuration_required", "Session reset is not configured.")
     if interactive_desktop_error() is not None:
@@ -104,8 +106,10 @@ def reset_vaccine_session(
     if idle is None:
         return _result(target, "unavailable", "Input activity could not be checked; no reset was sent.")
     if not idle:
-        return _result(target, "input_busy", "Keyboard or mouse is in use; reset deferred.")
+        return _result(target, "input_busy", "Keyboard or mouse is in use; no reset sent. Retry when ready.")
 
+    if cancelled():
+        return _result(target, "cancelled", "Reset stopped; no click sent.")
     desktop = ensure_first_virtual_desktop()
     if not desktop.success:
         return _result(target, desktop.status, desktop.message)
@@ -113,16 +117,28 @@ def reset_vaccine_session(
     if _matching_window_handles(win32gui, target) != window_handles:
         return _result(target, "point_not_ready", "System window changed; no reset was sent.")
     window_handle = window_handles[0]
+    if not _reset_point_in_window(win32gui, window_handle, target):
+        return _result(target, "point_not_ready", "Reset point is outside the available window; check System targets.")
+    if cancelled():
+        return _result(target, "cancelled", "Reset stopped; no click sent.")
+    if not _focus_native_window(window_handle):
+        return _result(target, "focus_failed", "Could not bring the system forward; no reset sent.")
     if not _reset_point_is_ready(win32gui, window_handle, target):
-        return _result(target, "point_not_ready", "Session reset point is unavailable on Desktop 1.")
+        return _result(target, "point_not_ready", "Reset point is still covered or unavailable on Desktop 1; no reset sent.")
     idle = _input_is_idle(SESSION_KEEPER_IDLE_MS if require_idle else 0)
     if idle is not True:
-        return _result(target, "input_busy", "Input activity changed; reset deferred.")
+        return _result(target, "input_busy", "Input activity changed; no reset sent. Retry when ready.")
     if not first_virtual_desktop_is_active():
         return _result(target, "desktop_switch_failed", "Desktop 1 is no longer active; no reset was sent.")
     # Recheck point ownership immediately before input, after all other guards.
     if not _reset_point_is_ready(win32gui, window_handle, target):
         return _result(target, "point_not_ready", "Session reset point changed; no reset was sent.")
+    if cancelled():
+        return _result(target, "cancelled", "Reset stopped; no click sent.")
+    if interactive_desktop_error() is not None or foreground_handle() != window_handle:
+        return _result(target, "focus_failed", "System focus changed; no reset sent.")
+    if cancelled():
+        return _result(target, "cancelled", "Reset stopped; no click sent.")
     if not _click_screen_coordinate(target.reset_x, target.reset_y):
         return _result(target, "input_failed", "Session reset click could not be sent.")
     return _result(target, "reset_sent", "Session reset sent.", clicked=True)
@@ -145,11 +161,14 @@ def _input_is_idle(minimum_idle_ms: int) -> bool | None:
 
 def refresh_influenza_session(
     settings: dict[str, str], *, confirm: Callable[[], bool],
+    cancelled: Callable[[], bool] = lambda: False,
 ) -> VaccineSessionResetResult:
     """Send F5 once to a verified Flu tab, only after operator confirmation."""
     def result(status: str, message: str) -> VaccineSessionResetResult:
         return VaccineSessionResetResult("influenza", status, message)
 
+    if cancelled():
+        return result("cancelled", "Flu refresh stopped; no F5 sent.")
     if interactive_desktop_error() is not None:
         return result("desktop_unavailable", "Unlock Windows before refreshing Flu.")
     url = settings.get("vaccine_influenza_system_launch_url", "").strip()
@@ -183,6 +202,8 @@ def refresh_influenza_session(
 
         matches = []
         for window in Desktop(backend="uia").windows():
+            if cancelled():
+                return result("cancelled", "Flu refresh stopped; no F5 sent.")
             if window.element_info.class_name not in {"Chrome_WidgetWin_1", "MozillaWindowClass"}:
                 continue
             if not window.is_visible() or not window.is_enabled():
@@ -190,8 +211,12 @@ def refresh_influenza_session(
             if title and title not in window.window_text().casefold():
                 continue
             for document in iter_documents_for_url(window, url):
+                if cancelled():
+                    return result("cancelled", "Flu refresh stopped; no F5 sent.")
                 if trusted_document(document, int(window.handle)):
                     matches.append((window, document))
+        if cancelled():
+            return result("cancelled", "Flu refresh stopped; no F5 sent.")
         if not matches:
             return result("not_open", "No visible verified Flu tab; no refresh sent.")
         if len(matches) != 1:
@@ -201,11 +226,15 @@ def refresh_influenza_session(
         handle = int(window.handle)
         if not confirm():
             return result("declined", "Flu refresh declined; no input sent.")
+        if cancelled():
+            return result("cancelled", "Flu refresh stopped; no F5 sent.")
         if interactive_desktop_error() is not None or _input_is_idle(0) is not True:
             return result("input_busy", "Desktop or input changed; no refresh sent.")
         desktop = ensure_first_virtual_desktop()
         if not desktop.success:
             return result(desktop.status, desktop.message)
+        if cancelled():
+            return result("cancelled", "Flu refresh stopped; no F5 sent.")
         window.set_focus()
         if (
             interactive_desktop_error() is not None
@@ -216,10 +245,12 @@ def refresh_influenza_session(
         ):
             return result("page_changed", "Flu page/focus changed; no refresh sent.")
         if (
-            foreground_handle() != handle or _input_is_idle(0) is not True
+            cancelled() or foreground_handle() != handle or _input_is_idle(0) is not True
             or not first_virtual_desktop_is_active() or interactive_desktop_error() is not None
         ):
             return result("page_changed", "Focus/input changed before F5; no refresh sent.")
+        if cancelled():
+            return result("cancelled", "Flu refresh stopped; no F5 sent.")
         pyautogui.press("f5")
         return result("refresh_sent", "F5 sent; session renewal is not verified.")
     except Exception:
@@ -255,10 +286,7 @@ def _reset_point_is_ready(
     win32gui, window_handle: int, target: VaccineSessionResetTarget
 ) -> bool:
     try:
-        if bool(win32gui.IsIconic(window_handle)) or not win32gui.IsWindowEnabled(window_handle):
-            return False
-        left, top, right, bottom = win32gui.GetWindowRect(window_handle)
-        if not (left <= target.reset_x < right and top <= target.reset_y < bottom):
+        if not _reset_point_in_window(win32gui, window_handle, target):
             return False
         point_handle = win32gui.WindowFromPoint((target.reset_x, target.reset_y))
         if not point_handle:
@@ -266,6 +294,16 @@ def _reset_point_is_ready(
         if not win32gui.IsWindowEnabled(point_handle):
             return False
         return _root_window_handle(win32gui, int(point_handle)) == window_handle
+    except Exception:
+        return False
+
+
+def _reset_point_in_window(win32gui, window_handle: int, target: VaccineSessionResetTarget) -> bool:
+    try:
+        if win32gui.IsIconic(window_handle) or not win32gui.IsWindowEnabled(window_handle):
+            return False
+        left, top, right, bottom = win32gui.GetWindowRect(window_handle)
+        return left <= target.reset_x < right and top <= target.reset_y < bottom
     except Exception:
         return False
 

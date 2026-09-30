@@ -62,6 +62,8 @@ def simulated_input(monkeypatch):
     monkeypatch.setattr(vaccine_session_keeper, "ensure_first_virtual_desktop",
                         lambda: SimpleNamespace(success=True))
     monkeypatch.setattr(vaccine_session_keeper, "first_virtual_desktop_is_active", lambda: True)
+    monkeypatch.setattr(vaccine_session_keeper, "_focus_native_window", lambda _handle: True)
+    monkeypatch.setattr(vaccine_session_keeper, "foreground_handle", lambda: 101)
 
 
 @pytest.fixture
@@ -302,4 +304,46 @@ def test_closed_system_does_not_switch_desktops(monkeypatch, verified_window):
 
     monkeypatch.setattr(vaccine_session_keeper, "ensure_first_virtual_desktop", forbidden)
     assert vaccine_session_keeper.reset_vaccine_session(_target()).status == "not_open"
+    assert clicks == []
+
+
+def test_covered_system_is_focused_before_point_check(monkeypatch, verified_window):
+    api, clicks = verified_window
+    api.point_handle = 0
+    focused = []
+
+    def focus(handle):
+        focused.append(handle)
+        api.point_handle = handle
+        return True
+
+    monkeypatch.setattr(vaccine_session_keeper, "_focus_native_window", focus)
+    assert vaccine_session_keeper.reset_vaccine_session(_target()).sent
+    assert focused == [101] and clicks == [(1154, 1968)]
+
+
+@pytest.mark.parametrize("change", ["focus_failed", "foreground_changed", "cancelled", "locked"])
+def test_focus_failure_or_late_change_never_clicks(monkeypatch, verified_window, change):
+    _api, clicks = verified_window
+    stopped = [False]
+
+    def focus(_handle):
+        if change == "foreground_changed":
+            monkeypatch.setattr(vaccine_session_keeper, "foreground_handle", lambda: 999)
+        elif change == "cancelled":
+            stopped[0] = True
+        elif change == "locked":
+            monkeypatch.setattr(vaccine_session_keeper, "interactive_desktop_error", lambda: "locked")
+        return change != "focus_failed"
+
+    monkeypatch.setattr(vaccine_session_keeper, "_focus_native_window", focus)
+    result = vaccine_session_keeper.reset_vaccine_session(_target(), cancelled=lambda: stopped[0])
+    assert not result.sent and clicks == []
+
+
+def test_cancel_before_start_never_switches_or_focuses(monkeypatch, verified_window):
+    _api, clicks = verified_window
+    monkeypatch.setattr(vaccine_session_keeper, "_focus_native_window", lambda _h: pytest.fail("Unexpected focus"))
+    monkeypatch.setattr(vaccine_session_keeper, "ensure_first_virtual_desktop", lambda: pytest.fail("Unexpected switch"))
+    assert vaccine_session_keeper.reset_vaccine_session(_target(), cancelled=lambda: True).status == "cancelled"
     assert clicks == []

@@ -201,6 +201,9 @@ class VaccineTab(QWidget):
     handoff_progress = Signal(str)
     handoff_finished = Signal(int, object)
     charting_finished = Signal(object)
+    session_reset_progress = Signal(str)
+    session_reset_finished = Signal(object)
+    session_reset_confirmation_requested = Signal(object)
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -214,6 +217,18 @@ class VaccineTab(QWidget):
         self._completed_handoff_charting_texts: list[str] = []
         self._print_in_progress = False
         self._session_reset_in_progress = False
+        self._session_reset_thread: threading.Thread | None = None
+        self._session_reset_cancel = threading.Event()
+        self._session_reset_stop_message = ""
+        self._session_reset_confirmation: QMessageBox | None = None
+        self.session_reset_progress.connect(self._show_session_reset_progress)
+        self.session_reset_finished.connect(self._finish_session_reset)
+        self.session_reset_confirmation_requested.connect(self._answer_session_reset_confirmation)
+        self.destroyed.connect(self._session_reset_cancel.set)
+        self._session_reset_watchdog = QTimer(self)
+        self._session_reset_watchdog.setSingleShot(True)
+        self._session_reset_watchdog.setInterval(60_000)
+        self._session_reset_watchdog.timeout.connect(self._session_reset_timed_out)
         self._session_reset_alert: QMessageBox | None = None
         self._session_reset_alert_button: QPushButton | None = None
         self._session_reset_alert_shown = False
@@ -230,6 +245,7 @@ class VaccineTab(QWidget):
         if application is not None:
             application.aboutToQuit.connect(self._kdca_cancel.set)
             application.aboutToQuit.connect(self._handoff_cancel.set)
+            application.aboutToQuit.connect(self._session_reset_cancel.set)
         self._session_reminder_started_at = monotonic()
         self._session_reminder_timer = QTimer(self)
         self._session_reminder_timer.setInterval(30_000)
@@ -635,6 +651,9 @@ class VaccineTab(QWidget):
         self._update_handoff_controls(external_busy=busy)
 
     def _stop_kdca_operation(self) -> None:
+        if self._session_reset_in_progress:
+            self._cancel_session_reset("Reset stopped. Waiting for the current system check to return; no further input will be sent.")
+            return
         if self._handoff_thread is not None:
             self._handoff_cancel.set()
             self.kdca_stop_button.setEnabled(False)
@@ -1415,49 +1434,158 @@ class VaccineTab(QWidget):
         self._session_reset_alert_button = None
 
     def _confirm_flu_session_refresh(self) -> bool:
-        return QMessageBox.question(
-            self, "Refresh Influenza system?",
+        popup = QMessageBox(self.window())
+        popup.setWindowTitle("Refresh Influenza system?")
+        popup.setText(
             "F5 reloads the Flu page and may discard unfinished input. "
-            "Refresh now? Session renewal is not guaranteed.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes
+            "Refresh now? Session renewal is not guaranteed."
+        )
+        popup.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        popup.setDefaultButton(QMessageBox.StandardButton.No)
+        self._session_reset_confirmation = popup
+        try:
+            return popup.exec() == QMessageBox.StandardButton.Yes
+        finally:
+            self._session_reset_confirmation = None
+            popup.deleteLater()
 
     def reset_vaccine_sessions_now(self) -> None:
         """Run one manual attempt; failures never schedule another attempt."""
 
         if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress or self._session_reset_in_progress:
+            self._show_session_reset_progress("Reset unavailable: another vaccine operation is still active.")
             return
-        initialize_database(self._db_path)
-        with connect(self._db_path) as connection:
-            settings = get_settings(connection)
-
         self._session_reset_in_progress = True
-        self._update_handoff_controls()
+        self._session_reset_cancel.clear()
+        self._session_reset_stop_message = ""
+        deadline = monotonic() + 60.0
+        self._set_kdca_busy(True)
+        self._show_session_reset_progress("Reset now: reading settings...")
+        self._session_reset_watchdog.start()
+
+        def worker() -> None:
+            results: list[tuple[str, VaccineSessionResetResult]] = []
+            com_initialized = False
+            phase = "reading settings"
+
+            def cancelled() -> bool:
+                # Enforce the deadline in the worker too, even if the GUI timer
+                # cannot run while another modal operation is being processed.
+                if monotonic() >= deadline:
+                    self._session_reset_cancel.set()
+                return self._session_reset_cancel.is_set()
+
+            def progress(message: str) -> None:
+                try:
+                    self.session_reset_progress.emit(message)
+                except RuntimeError:
+                    self._session_reset_cancel.set()
+
+            def confirm() -> bool:
+                request = {"answered": threading.Event(), "accepted": False}
+                try:
+                    self.session_reset_confirmation_requested.emit(request)
+                except RuntimeError:
+                    return False
+                while not cancelled():
+                    if request["answered"].wait(0.1):
+                        return bool(request["accepted"])
+                return False
+
+            try:
+                # The app already initialized its local database. Reset only reads
+                # settings, and closes the connection before inspecting any windows.
+                with connect(self._db_path, timeout=0.25) as connection:
+                    connection.execute("PRAGMA query_only = ON")
+                    settings = get_settings(connection)
+                if cancelled():
+                    return
+                phase = "initializing window checks"
+                import pythoncom
+
+                pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
+                com_initialized = True
+                for target in configured_session_reset_targets(settings):
+                    if cancelled():
+                        return
+                    phase = target.label
+                    progress(f"Reset now: checking {phase}...")
+                    result = reset_vaccine_session(target, cancelled=cancelled)
+                    results.append((target.label, result))
+                    progress(f"Reset now: {target.label}: {result.message}")
+                if cancelled():
+                    return
+                phase = "Influenza system"
+                progress("Reset now: checking the Flu browser tab...")
+                results.append((phase, refresh_influenza_session(
+                    settings, confirm=confirm, cancelled=cancelled,
+                )))
+            except Exception as exc:
+                # Exception text can contain private provider data; show its type only.
+                results.append((phase, VaccineSessionResetResult(
+                    "operation", "error", f"Failed ({type(exc).__name__}). No automatic retry; check the system and try again.",
+                )))
+            finally:
+                if com_initialized:
+                    pythoncom.CoUninitialize()
+                try:
+                    self.session_reset_finished.emit(results)
+                except RuntimeError:
+                    pass
+
+        self._session_reset_thread = threading.Thread(target=worker, name="Manual vaccine reset", daemon=True)
         try:
-            results: list[tuple[str, VaccineSessionResetResult]] = [
-                (target.label, reset_vaccine_session(target))
-                for target in configured_session_reset_targets(settings)
-            ]
-            results.append(("Influenza system", refresh_influenza_session(
-                settings, confirm=self._confirm_flu_session_refresh,
-            )))
-            sent = any(result.sent for _label, result in results)
-            complete = all(result.sent or result.status == "not_open" for _label, result in results)
-            # A successful peer must not hide a failed or declined reset.
-            if sent and complete:
-                self._session_reminder_started_at = monotonic()
-                self._session_reset_alert_shown = False
-                if self._session_reset_alert is not None:
-                    self._session_reset_alert.close()
-            summary = "; ".join(f"{label}: {result.message}" for label, result in results)
-            message = f"Reset now: {summary}"
-            self.settings_page.system_targets_editor.set_session_keeper_status(message)
-            self.status_label.setText(message)
+            self._session_reset_thread.start()
+        except Exception:
+            self._finish_session_reset([("Reset", VaccineSessionResetResult(
+                "operation", "error", "Could not start window checks; no input sent.",
+            ))])
+
+    def _show_session_reset_progress(self, message: str) -> None:
+        if self._session_reset_cancel.is_set() and self._session_reset_stop_message:
+            message = self._session_reset_stop_message
+        self.settings_page.system_targets_editor.set_session_keeper_status(message)
+        self.status_label.setText(message)
+
+    def _answer_session_reset_confirmation(self, request: dict) -> None:
+        try:
+            if self._session_reset_in_progress and not self._session_reset_cancel.is_set():
+                self._show_session_reset_progress("Reset now: waiting for your Flu refresh confirmation...")
+                request["accepted"] = self._confirm_flu_session_refresh()
         finally:
-            self._session_reset_in_progress = False
-            self._update_handoff_controls()
-            self._update_session_reset_reminder()
+            request["answered"].set()
+
+    def _session_reset_timed_out(self) -> None:
+        self._cancel_session_reset("Reset timed out. Waiting for the current system check to return; no further input will be sent.")
+
+    def _cancel_session_reset(self, message: str) -> None:
+        self._session_reset_stop_message = message
+        self._session_reset_cancel.set()
+        self.kdca_stop_button.setEnabled(False)
+        if self._session_reset_confirmation is not None:
+            self._session_reset_confirmation.reject()
+        self._show_session_reset_progress(message)
+
+    def _finish_session_reset(self, results: list[tuple[str, VaccineSessionResetResult]]) -> None:
+        self._session_reset_watchdog.stop()
+        if self._session_reset_confirmation is not None:
+            self._session_reset_confirmation.reject()
+        self._session_reset_thread = None
+        sent = any(result.sent for _label, result in results)
+        complete = all(result.sent or result.status == "not_open" for _label, result in results)
+        # A successful peer must not hide a failed, stopped, or declined reset.
+        if sent and complete and not self._session_reset_cancel.is_set():
+            self._session_reminder_started_at = monotonic()
+            self._session_reset_alert_shown = False
+            if self._session_reset_alert is not None:
+                self._session_reset_alert.close()
+        summary = "; ".join(f"{label}: {result.message}" for label, result in results)
+        prefix = "Reset stopped; no further input sent." if self._session_reset_cancel.is_set() else "Reset now:"
+        self._session_reset_in_progress = False
+        self._session_reset_stop_message = ""
+        self._show_session_reset_progress(f"{prefix} {summary}".strip())
+        self._set_kdca_busy(False)
+        self._update_session_reset_reminder()
 
     def add_vaccine_type(self) -> None:
         dialog = VaccineTypeDialog(self)

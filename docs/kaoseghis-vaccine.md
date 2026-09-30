@@ -692,7 +692,9 @@ and COVID retain their saved session-reset coordinates, guarded by these checks:
   application.
 
 After a manual press and a unique matching system window is found, Reset Now switches
-to virtual Desktop 1 before testing the reset point. It uses the Windows-only
+to virtual Desktop 1 and brings the exact General/COVID window forward before testing
+the reset point. A window that remains covered, moved away from the saved point, or
+cannot be focused is not clicked. It uses the Windows-only
 [pyvda desktop API](https://github.com/mirober/pyvda), not repeated Ctrl+Win+Arrow
 shortcuts. The dependency is declared in both project dependency files. No desktop
 is created, renamed, or deleted, and individual windows are not moved to another
@@ -702,6 +704,17 @@ After switching, window identity, input activity, Desktop 1, and point ownership
 are checked again. If the operator resumes input or leaves Desktop 1, that attempt
 sends no click. Missing desktop support, ambiguous targets, or failed checks block
 that attempt. Nothing schedules a retry; the operator decides when to press again.
+
+Reset Now immediately displays progress on Main and System targets. Local settings
+are read without migrations or writes, with a short database timeout, and the connection
+is closed before any window checks. All window inspection and reset input runs in one
+background worker, so a slow browser/UIA provider does not freeze the interface.
+Failures (including settings-read failures) are shown instead of silently returning.
+The existing Stop button cancels a pending reset. A 60-second limit also cancels it;
+both prevent subsequent input when a stalled provider call finally returns. Another
+reset cannot start until that worker exits. The final summary retains results already
+sent before cancellation, and a cancelled/failed attempt does not restart the reminder.
+These limits only stop a user-requested operation; they never schedule a reset.
 
 For Flu, Reset Now looks for one visible browser page matching the configured HTTPS
 launch origin and system path. It requires a top-level page, not an embedded Flu frame

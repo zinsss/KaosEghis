@@ -1415,7 +1415,7 @@ def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
     monkeypatch.setattr(
         vaccine_tab,
         "reset_vaccine_session",
-        lambda target: reset_calls.append(target.key)
+        lambda target, **_kw: reset_calls.append(target.key)
         or vaccine_tab.VaccineSessionResetResult(target.key, "reset_sent", "Session reset sent.", True),
     )
     monkeypatch.setattr(vaccine_tab, "refresh_influenza_session", lambda *_a, **_kw:
@@ -1431,6 +1431,12 @@ def test_reset_vaccine_sessions_now_uses_guarded_targets_when_timer_is_off(
     else:
         button = page.settings_page.system_targets_editor.session_reset_now_button
     button.click()
+    from time import monotonic, sleep
+    deadline = monotonic() + 5
+    while page._session_reset_in_progress and monotonic() < deadline:
+        _app().processEvents()
+        sleep(0.005)
+    assert not page._session_reset_in_progress
 
     assert reset_calls == ["general", "covid"]
     assert "Reset now: General: Session reset sent.; COVID: Session reset sent." in (

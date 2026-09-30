@@ -116,3 +116,35 @@ def test_no_tab_does_not_prompt_or_focus(browser):
     result = keeper.refresh_influenza_session(settings, confirm=lambda: pytest.fail("No tab"))
     assert result.status == "not_open"
     assert state["keys"] == [] and state["switches"] == 0
+
+
+@pytest.mark.parametrize("stage", ["scan", "confirm", "focus"])
+def test_cancel_during_slow_check_or_confirmation_blocks_f5(browser, stage):
+    state, window, _document, _windows, settings = browser
+    stopped = [False]
+    if stage == "scan":
+        original = window.descendants
+
+        def scan(**kwargs):
+            stopped[0] = True
+            return original(**kwargs)
+
+        window.descendants = scan
+    elif stage == "focus":
+        original_focus = window.set_focus
+
+        def focus():
+            original_focus()
+            stopped[0] = True
+
+        window.set_focus = focus
+
+    def confirm():
+        if stage == "confirm":
+            stopped[0] = True
+        return True
+
+    result = keeper.refresh_influenza_session(settings, confirm=confirm, cancelled=lambda: stopped[0])
+    assert not result.sent and state["keys"] == []
+    if stage != "focus":
+        assert state["focuses"] == 0 and state["switches"] == 0
