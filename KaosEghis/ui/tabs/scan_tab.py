@@ -86,6 +86,7 @@ class ScanTab(QWidget):
         self.output_dir = get_scan_output_dir(db_path.parent if db_path else None)
         self._scan_output_path: Path | None = None
         self._drag_in_progress = False
+        self._text_dialog = None
 
         initialize_database(self._db_path)
 
@@ -139,7 +140,15 @@ class ScanTab(QWidget):
         self.preview_container = QWidget()
         self.preview_layout = QVBoxLayout(self.preview_container)
         self.preview_layout.setContentsMargins(0, 0, 0, 0)
-        self.preview_layout.addWidget(QLabel("PDF preview"))
+        preview_heading = QHBoxLayout()
+        preview_heading.addWidget(QLabel("PDF preview"))
+        preview_heading.addStretch()
+        self.select_text_button = QPushButton("Select text")
+        self.select_text_button.setToolTip("Select a scan area for local text recognition")
+        self.select_text_button.setEnabled(False)
+        self.select_text_button.clicked.connect(self.select_scan_text)
+        preview_heading.addWidget(self.select_text_button)
+        self.preview_layout.addLayout(preview_heading)
         self._pdf_document = None
         self._pdf_view = None
         self._pdf_buffer = None
@@ -177,6 +186,9 @@ class ScanTab(QWidget):
         self.refresh_files()
 
     def start_scan(self) -> None:
+        if self._text_dialog is not None:
+            self.status_label.setText("Close text review before starting another scan.")
+            return
         if self.scan_process.state() != QProcess.ProcessState.NotRunning:
             self.status_label.setText("A scan is already running.")
             return
@@ -198,12 +210,15 @@ class ScanTab(QWidget):
 
         self._scan_output_path = command.output_path
         self.scan_button.setEnabled(False)
+        self.select_text_button.setEnabled(False)
         self.status_label.setText("Scanning from Canon DR-C125...")
         self.scan_process.setProgram(command.executable)
         self.scan_process.setArguments(list(command.arguments))
         self.scan_process.start()
 
     def refresh_files(self, select_path: Path | None = None) -> None:
+        if self._text_dialog is not None:
+            return
         self._close_preview()
         self.file_list.clear()
         selected_item = None
@@ -247,6 +262,9 @@ class ScanTab(QWidget):
             return
         if self._drag_in_progress:
             self.status_label.setText("Cleanup skipped while a PDF is being dragged.")
+            return
+        if self._text_dialog is not None:
+            self.status_label.setText("Cleanup skipped while scan text is being reviewed.")
             return
 
         self._close_preview()
@@ -315,6 +333,7 @@ class ScanTab(QWidget):
         if self._scan_output_path is not None:
             discard_failed_scan(self._scan_output_path, self.output_dir)
         self._scan_output_path = None
+        self._update_text_button()
         self.status_label.setText("NAPS2 scan process could not start.")
 
     def _build_pdf_preview(self) -> None:
@@ -328,6 +347,7 @@ class ScanTab(QWidget):
             return
 
         self._pdf_document = QPdfDocument(self)
+        self._pdf_document.statusChanged.connect(self._update_text_button)
         self._pdf_view = QPdfView()
         self._pdf_view.setDocument(self._pdf_document)
         self._pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
@@ -340,7 +360,7 @@ class ScanTab(QWidget):
     ) -> None:
         if self._pdf_document is None:
             return
-        self._pdf_document.close()
+        self._close_preview()
         if self._pdf_view is not None:
             self._pdf_view.setDocument(self._pdf_document)
         if current is None:
@@ -355,8 +375,36 @@ class ScanTab(QWidget):
             self._pdf_buffer.setData(pdf_data)
             self._pdf_buffer.open(QIODevice.OpenModeFlag.ReadOnly)
             self._pdf_document.load(self._pdf_buffer)
+            self._update_text_button()
+
+    def _update_text_button(self, _status=None) -> None:
+        self.select_text_button.setEnabled(
+            self._pdf_document is not None and self._pdf_document.pageCount() > 0
+            and (not hasattr(self, "scan_process") or self.scan_process.state() == QProcess.ProcessState.NotRunning)
+        )
+
+    def select_scan_text(self) -> None:
+        if self._text_dialog is not None or self._pdf_document is None:
+            return
+        if self.scan_process.state() != QProcess.ProcessState.NotRunning:
+            self.status_label.setText("Wait for the current scan to finish before selecting text.")
+            return
+        if self._pdf_document.pageCount() < 1:
+            self.status_label.setText("Select a readable PDF first.")
+            return
+        from KaosEghis.ui.dialogs.scan_text_dialog import ScanTextDialog
+
+        page = self._pdf_view.pageNavigator().currentPage() if self._pdf_view is not None else 0
+        dialog = ScanTextDialog(self._pdf_document, page, self)
+        self._text_dialog = dialog
+        try:
+            dialog.exec()
+        finally:
+            self._text_dialog = None
+            dialog.deleteLater()
 
     def _close_preview(self) -> None:
+        self.select_text_button.setEnabled(False)
         if self._pdf_document is not None:
             if self._pdf_view is not None:
                 self._pdf_view.setDocument(None)

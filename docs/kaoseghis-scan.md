@@ -1,6 +1,6 @@
 # KaosEghis-scan
 
-Last updated: 2026-07-21
+Last updated: 2026-09-30
 
 ## Purpose
 
@@ -10,6 +10,7 @@ Last updated: 2026-07-21
 - produce one PDF document per scan job
 - place the completed PDF in a short-lived local spool
 - display the completed PDF in KaosEghis when PDF preview support is available
+- recognize selected scan areas locally for reviewed, manual text copying
 - let the operator drag the PDF into a browser upload control or open its folder
 - empty the dedicated temporary folder on a configurable minute interval
 
@@ -83,6 +84,46 @@ For drag-out, the PySide6 UI starts a native `QDrag` carrying a local file URL i
 The application should use Qt PDF preview support when available. If PDF rendering support is unavailable, it should show file name, creation time, page count when known, and the open/drag controls without blocking scanning.
 
 Dragging or opening a PDF must not delete it. A completed drag operation does not prove that the browser accepted or stored the document.
+
+## Selected-Area Text Recognition
+
+`Select text` beside PDF preview opens the currently viewed page in a selection dialog.
+Draw a rectangle around the required rows or values. The result appears in an editable
+text area beside the source image. Copy transfers the highlighted text, or all text
+when nothing is highlighted. Nothing focuses, types into, or pastes into EMR.
+
+- Pages are rendered from the PDF at up to 300 DPI, not captured from the desktop.
+- Previous/next page, zoom, and fit-width controls are available. A page change clears
+  the previous page's recognized text; another PDF starts a fresh dialog.
+- A new area replaces the previous text by default. `Append selections` explicitly
+  allows collecting multiple areas on the same page.
+- Recognized word positions are used to keep neighboring table columns on the same
+  visual row. This preserves reading layout, not a verified test-name/value mapping.
+- Korean is the default OCR language; English can be selected. The corresponding
+  Windows OCR language must be installed. The current workstation has both.
+- Review every value, decimal point, sign, and unit against the scan before pasting.
+  OCR can be wrong. The application does not infer units, repair numbers, classify
+  results, or make clinical interpretations.
+
+The engine is [Windows.Media.Ocr](https://learn.microsoft.com/en-us/uwp/api/windows.media.ocr.ocrengine),
+invoked through a hidden Windows PowerShell process. Recognition is local, with no
+cloud OCR API, upload, new Python dependency, or change to the original PDF. A static
+script is passed as the command; image pixels travel as JSON over standard input,
+not in command arguments or a temporary image file. Text returns through standard
+output and is never logged or stored in the KaosEghis database.
+
+Recognition is asynchronous and limited to one process per dialog. Stop, closing the
+dialog, or a 30-second timeout terminates that helper; late results are discarded.
+Copy and page/area changes are disabled while recognition is running. Image dimensions
+are bounded for the Windows engine. Empty, failed, or missing-language results are
+shown explicitly instead of silently copying old text.
+Scanning and text review cannot run together, so a completed scan cannot replace the
+PDF under an open text-review dialog.
+
+Temporary-folder cleanup is deferred while the text dialog is open, then resumes on
+the next cleanup interval or manual cleanup. Closing the dialog drops its source image
+and recognized text. Explicitly copied text remains in the Windows clipboard; OS
+clipboard history/synchronization is controlled by Windows, not this feature.
 
 ## Scanner Integration
 
@@ -215,7 +256,7 @@ No browser/PACS credential or scanner credential should be stored or displayed b
 
 ## Non-Goals for the First Milestone
 
-- OCR
+- full-document searchable-PDF generation
 - document classification
 - automatic patient matching
 - PACS upload of any kind from KaosEghis-scan
