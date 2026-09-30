@@ -1,8 +1,8 @@
 """Manual, guarded vaccination-system session maintenance.
 
 The General and COVID applications time out independently.  This module is
-limited to their configured session-reset points. Flu refresh requires an explicit
-confirmation callback. Nothing in this module schedules input or retries.
+limited to their configured session-reset points. Flu refresh requires operator
+approval from its caller (the manual Reset Now press). Nothing schedules input or retries.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def configured_session_reset_targets(
 ) -> tuple[VaccineSessionResetTarget, ...]:
     """Return the two native systems that have a known idle-session reset.
 
-    Influenza uses the separately confirmed manual browser-refresh operation.
+    Influenza uses the manual browser-refresh operation.
     """
 
     return (
@@ -163,7 +163,7 @@ def refresh_influenza_session(
     settings: dict[str, str], *, confirm: Callable[[], bool],
     cancelled: Callable[[], bool] = lambda: False,
 ) -> VaccineSessionResetResult:
-    """Send F5 once to a verified Flu tab, only after operator confirmation."""
+    """Send F5 once to a verified Flu tab after caller-supplied operator approval."""
     def result(status: str, message: str) -> VaccineSessionResetResult:
         return VaccineSessionResetResult("influenza", status, message)
 

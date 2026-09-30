@@ -275,30 +275,26 @@ def test_stop_or_timeout_does_not_proceed_after_stalled_check(reminder, monkeypa
     assert "Reset stopped" in page.status_label.text()
 
 
-@pytest.mark.parametrize("accepted", [True, False])
-def test_flu_confirmation_runs_on_gui_thread(reminder, monkeypatch, accepted):
+def test_reset_now_approves_flu_refresh_without_another_popup(reminder, monkeypatch):
     page, _now = reminder
     install_outcomes(monkeypatch)
     approvals = []
 
-    def confirm():
-        assert threading.current_thread() is threading.main_thread()
-        approvals.append(True)
-        return accepted
+    def unexpected_popup(*_args, **_kwargs):
+        pytest.fail("Reset Now must not open a Flu confirmation popup")
 
     def refresh(_settings, *, confirm, cancelled):
-        approved = confirm()
-        assert approved == accepted
+        approvals.append(confirm())
         assert not cancelled()
-        status = "refresh_sent" if approved else "declined"
-        return VaccineSessionResetResult("influenza", status, status)
+        return VaccineSessionResetResult("influenza", "refresh_sent", "F5 sent")
 
-    monkeypatch.setattr(page, "_confirm_flu_session_refresh", confirm)
+    monkeypatch.setattr(vaccine_tab.QMessageBox, "__init__", unexpected_popup)
+    monkeypatch.setattr(vaccine_tab.QMessageBox, "question", unexpected_popup)
     monkeypatch.setattr(vaccine_tab, "refresh_influenza_session", refresh)
     page.reset_vaccine_sessions_now()
     wait_for_reset(page)
     assert approvals == [True]
-    assert ("refresh_sent" if accepted else "declined") in page.status_label.text()
+    assert "F5 sent" in page.status_label.text()
 
 
 def test_reset_reads_settings_without_migrations_or_write_lock(reminder, monkeypatch):
@@ -333,29 +329,28 @@ def test_worker_deadline_blocks_input_even_without_gui_timer(reminder, monkeypat
     assert "Reset stopped" in page.status_label.text()
 
 
-def test_timeout_closes_flu_confirmation_without_approval(reminder, monkeypatch):
-    from PySide6.QtCore import QTimer
-
+def test_timeout_revokes_flu_approval_before_input(reminder, monkeypatch):
     page, _now = reminder
     install_outcomes(monkeypatch)
-    original_confirm = page._confirm_flu_session_refresh
+    entered, release = threading.Event(), threading.Event()
     approvals = []
 
-    def confirm():
-        QTimer.singleShot(0, page._session_reset_timed_out)
-        return original_confirm()
-
     def refresh(_settings, *, confirm, cancelled):
+        entered.set()
+        assert release.wait(3)
         approvals.append(confirm())
         assert cancelled()
         return VaccineSessionResetResult("influenza", "cancelled", "no F5 sent")
 
-    monkeypatch.setattr(page, "_confirm_flu_session_refresh", confirm)
     monkeypatch.setattr(vaccine_tab, "refresh_influenza_session", refresh)
     page.reset_vaccine_sessions_now()
+    try:
+        assert entered.wait(3)
+        page._session_reset_timed_out()
+    finally:
+        release.set()
     wait_for_reset(page)
     assert approvals == [False]
-    assert page._session_reset_confirmation is None
     assert page.session_reset_now_button.isEnabled()
 
 

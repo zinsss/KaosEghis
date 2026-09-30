@@ -718,8 +718,9 @@ These limits only stop a user-requested operation; they never schedule a reset.
 
 For Flu, Reset Now looks for one visible browser page matching the configured HTTPS
 launch origin and system path. It requires a top-level page, not an embedded Flu frame
-inside the portal. The operator must separately confirm the F5 refresh, with No as the
-default because unfinished input may be lost. Focus, page identity, URL, input state,
+inside the portal. Pressing Reset Now is the operator's approval to send F5; there is
+no extra KaosEghis confirmation/warning popup. Unfinished Flu input may be lost.
+Focus, page identity, URL, input state,
 and Desktop 1 are rechecked before sending F5 once. It does not dismiss browser reload
 warnings, resubmit forms, log in, enter credentials, or retry. F5 being sent is not
 proof that the server renewed the session or that the login remained valid.

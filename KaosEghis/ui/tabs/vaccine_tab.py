@@ -203,7 +203,6 @@ class VaccineTab(QWidget):
     charting_finished = Signal(object)
     session_reset_progress = Signal(str)
     session_reset_finished = Signal(object)
-    session_reset_confirmation_requested = Signal(object)
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -220,10 +219,8 @@ class VaccineTab(QWidget):
         self._session_reset_thread: threading.Thread | None = None
         self._session_reset_cancel = threading.Event()
         self._session_reset_stop_message = ""
-        self._session_reset_confirmation: QMessageBox | None = None
         self.session_reset_progress.connect(self._show_session_reset_progress)
         self.session_reset_finished.connect(self._finish_session_reset)
-        self.session_reset_confirmation_requested.connect(self._answer_session_reset_confirmation)
         self.destroyed.connect(self._session_reset_cancel.set)
         self._session_reset_watchdog = QTimer(self)
         self._session_reset_watchdog.setSingleShot(True)
@@ -1433,22 +1430,6 @@ class VaccineTab(QWidget):
         self._session_reset_alert = None
         self._session_reset_alert_button = None
 
-    def _confirm_flu_session_refresh(self) -> bool:
-        popup = QMessageBox(self.window())
-        popup.setWindowTitle("Refresh Influenza system?")
-        popup.setText(
-            "F5 reloads the Flu page and may discard unfinished input. "
-            "Refresh now? Session renewal is not guaranteed."
-        )
-        popup.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        popup.setDefaultButton(QMessageBox.StandardButton.No)
-        self._session_reset_confirmation = popup
-        try:
-            return popup.exec() == QMessageBox.StandardButton.Yes
-        finally:
-            self._session_reset_confirmation = None
-            popup.deleteLater()
-
     def reset_vaccine_sessions_now(self) -> None:
         """Run one manual attempt; failures never schedule another attempt."""
 
@@ -1481,17 +1462,6 @@ class VaccineTab(QWidget):
                 except RuntimeError:
                     self._session_reset_cancel.set()
 
-            def confirm() -> bool:
-                request = {"answered": threading.Event(), "accepted": False}
-                try:
-                    self.session_reset_confirmation_requested.emit(request)
-                except RuntimeError:
-                    return False
-                while not cancelled():
-                    if request["answered"].wait(0.1):
-                        return bool(request["accepted"])
-                return False
-
             try:
                 # The app already initialized its local database. Reset only reads
                 # settings, and closes the connection before inspecting any windows.
@@ -1517,8 +1487,9 @@ class VaccineTab(QWidget):
                     return
                 phase = "Influenza system"
                 progress("Reset now: checking the Flu browser tab...")
+                # Reset Now is the operator's approval; there is no second popup.
                 results.append((phase, refresh_influenza_session(
-                    settings, confirm=confirm, cancelled=cancelled,
+                    settings, confirm=lambda: not cancelled(), cancelled=cancelled,
                 )))
             except Exception as exc:
                 # Exception text can contain private provider data; show its type only.
@@ -1547,14 +1518,6 @@ class VaccineTab(QWidget):
         self.settings_page.system_targets_editor.set_session_keeper_status(message)
         self.status_label.setText(message)
 
-    def _answer_session_reset_confirmation(self, request: dict) -> None:
-        try:
-            if self._session_reset_in_progress and not self._session_reset_cancel.is_set():
-                self._show_session_reset_progress("Reset now: waiting for your Flu refresh confirmation...")
-                request["accepted"] = self._confirm_flu_session_refresh()
-        finally:
-            request["answered"].set()
-
     def _session_reset_timed_out(self) -> None:
         self._cancel_session_reset("Reset timed out. Waiting for the current system check to return; no further input will be sent.")
 
@@ -1562,14 +1525,10 @@ class VaccineTab(QWidget):
         self._session_reset_stop_message = message
         self._session_reset_cancel.set()
         self.kdca_stop_button.setEnabled(False)
-        if self._session_reset_confirmation is not None:
-            self._session_reset_confirmation.reject()
         self._show_session_reset_progress(message)
 
     def _finish_session_reset(self, results: list[tuple[str, VaccineSessionResetResult]]) -> None:
         self._session_reset_watchdog.stop()
-        if self._session_reset_confirmation is not None:
-            self._session_reset_confirmation.reject()
         self._session_reset_thread = None
         sent = any(result.sent for _label, result in results)
         complete = all(result.sent or result.status == "not_open" for _label, result in results)
