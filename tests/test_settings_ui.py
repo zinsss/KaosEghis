@@ -67,6 +67,35 @@ def test_save_general_settings_persists_patient_alert_targets(tmp_path) -> None:
     )
 
 
+def test_retired_service_settings_are_hidden_but_preserved(tmp_path):
+    _app()
+    from PySide6.QtWidgets import QLabel
+    from KaosEghis.db.database import connect, initialize_database
+    from KaosEghis.db.repositories import get_settings, set_settings
+    from KaosEghis.ui.tabs.settings_tab import SettingsTab
+
+    db_path = tmp_path / "KaosEghis.sqlite"
+    initialize_database(db_path)
+    retired = {
+        "memos_url": "http://localhost/old-memos/",
+        "stirling_pdf_url": "http://localhost/old-pdf/",
+        "rhwp_url": "http://localhost/old-rhwp/",
+    }
+    with connect(db_path) as connection:
+        assert all(key not in get_settings(connection) for key in retired)
+        set_settings(connection, retired)
+    tab = SettingsTab(db_path=db_path)
+    labels = {label.text() for label in tab.findChildren(QLabel)}
+    assert not labels.intersection({"Memos URL", "Stirling-PDF URL", "rHWP URL"})
+    assert all(not hasattr(tab, key) for key in retired)
+    tab.paperless_url.setText("http://localhost/current-paperless/")
+    tab.save_general_settings()
+    with connect(db_path) as connection:
+        settings = get_settings(connection)
+    assert {key: settings[key] for key in retired} == retired
+    assert settings["paperless_url"] == "http://localhost/current-paperless/"
+
+
 def test_previous_patient_alert_defaults_upgrade_to_verified_targets(tmp_path) -> None:
     from KaosEghis.db.database import connect, initialize_database
     from KaosEghis.db.repositories import get_settings, set_settings

@@ -1,0 +1,18 @@
+{
+  "notice": "Synthetic projection only. Not captured EMR rows or approved schema evidence.",
+  "clinic_day": "2026-10-01",
+  "observed_at": "2026-10-01T09:05:00+09:00",
+  "encounters": [
+    {"encounter_id": "fixture-encounter-1", "chart_no": "TEST-0001", "patient_name": "\ud14c\uc2a4\ud2b8", "sex": "\uc5ec", "age": 53, "state_code": "TEST_HOLD"}
+  ],
+  "orders": [
+    {"encounter_id": "fixture-encounter-1", "order_id": "fixture-xray-1", "category_code": "TEST_XRAY", "state_code": "TEST_ACTIVE", "detail_code": "TEST_APPROVED"},
+    {"encounter_id": "fixture-encounter-1", "order_id": "fixture-xray-2", "category_code": "TEST_XRAY", "state_code": "TEST_ACTIVE", "detail_code": "TEST_UNMAPPED"},
+    {"encounter_id": "fixture-encounter-1", "order_id": "fixture-blood-1", "category_code": "TEST_BLOOD", "state_code": "TEST_ACTIVE", "detail_code": "TEST_APPROVED"},
+    {"encounter_id": "fixture-encounter-1", "order_id": "fixture-urine-1", "category_code": "TEST_URINE", "state_code": "TEST_ACTIVE", "detail_code": "TEST_APPROVED"},
+    {"encounter_id": "fixture-encounter-1", "order_id": "fixture-ecg-1", "category_code": "TEST_ECG", "state_code": "TEST_ACTIVE", "detail_code": "TEST_APPROVED"},
+    {"encounter_id": "fixture-encounter-1", "order_id": "fixture-bmd-1", "category_code": "TEST_BMD", "state_code": "TEST_ACTIVE", "detail_code": "TEST_APPROVED"},
+    {"encounter_id": "fixture-encounter-1", "order_id": "fixture-injection-1", "category_code": "TEST_INJECTION", "state_code": "TEST_ACTIVE", "detail_code": "TEST_APPROVED"},
+    {"encounter_id": "fixture-encounter-1", "order_id": "fixture-unrelated-1", "category_code": "TEST_UNRELATED", "state_code": "TEST_ACTIVE"}
+  ]
+}

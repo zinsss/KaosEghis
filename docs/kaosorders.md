@@ -1,96 +1,945 @@
-# KaosOrders Signal Capture Plan
+# KaosOrders Source-Side Shadow Foundation
 
-Last updated: 2026-09-22
+Last updated: 2026-10-03
 
-## Status
+## Status and Current Decisions
 
-KaosOrders is planned as a separate staff-facing order-board service. KaosEghis will
-remain the eGHIS-side adapter: it observes configured eGHIS operator actions, reads
-the database in read-only mode, and later publishes verified order state to KaosOrders.
-Signal observation and source database access will belong to the shared
-[KaosEghis-emr adapter](kaoseghis-emr.md), also used by PACS and on-demand flu
-reporting. Its mandatory read-only and immediate-connection-closure policy applies
-to this entire source path; downstream publishing starts only after DB closure.
+This supersedes the older laptop/LMDE, completed-patient board, PACS-only hold tiles,
+and per-chart F7/20-second designs. KaosOrders runs on **KaosClinic**. The viewer is
+a continuously running **Raspberry Pi 4 with Raspberry Pi OS, Chromium kiosk, and
+a 21-inch touchscreen**. The Pi must persist no patient/order data. Browser storage,
+cache, swap, crash recovery, and maintenance controls belong to that deployment,
+not this repository.
 
-An observation-only probe now displays key/button sources and provisional chart
-snapshots in the existing Launcher status area. It neither changes eGHIS nor posts
-patient/order data. The fixed-delay reconciliation and shared DB manager below
-are still planned; see the probe's limitations in the adapter document.
+The planned board is a responsive patient grid using Korean category pills. Only a
+confirmed `보류` encounter with at least one active relevant order is visible. Touching its tile
+shows every allowlisted normalized order; touching anywhere again closes the detail.
+The board never infers clinical completion. No board/kiosk UI was changed here.
 
-## Verified eGHIS Action Targets
+The Windows foundation is **disabled and not connected to runtime triggers**. It has
+a blocked reader interface, typed in-memory normalization, synthetic fixtures,
+complete-snapshot comparison, and an offline proposed v2 serializer. There is no
+source SQL, production mapping catalog, HTTP client, outbox, persisted snapshot,
+or production publish path. Enabling settings cannot bypass missing approvals.
 
-The following controls were captured from the current eGHIS `진료실` window. Their
-common stable scope is:
+A destination-neutral [offline source model](kaoseghis-emr.md#offline-source-model-2026-10-03)
+now lives in `core/emr_source.py` and `core/emr_source_shadow.py`. This is the new
+source-interpretation/comparison foundation, not the old board-filtered serializer.
+Its real day reader is also blocked; no Orders adapter or server integration is enabled.
+The 2026-10-03 offline regression run passed 120 new source-model cases and 528
+targeted tests overall, including the retained board prototype and shared DB reader.
+
+On 2026-10-03 the operator corrected the server to `zin@kaosclinic`. Read-only SSH
+inspection found `/srv/projects/KaosOrders`, clean on `main`, revision
+`b5f7ccd8257f29235c90b11499b8ed352fc06d0d`. Its implemented v1 API accepts
+per-encounter category snapshots and stores XRAY/BMD/ECG only. It does not accept
+the new shared source model, distinct completion/payment states, structured edits
+or authoritative day reconciliation. Its September 30 deployment/board plans are
+older than the current decisions above. Remote code/docs and services were not
+changed; the running deployed image/API was not tested.
+The old normalized v2 proposal remains a superseded offline reference, not the
+agreed source contract. See the [source contract review](kaoseghis-emr-contract-review.md)
+for actual receiver gaps, field boundaries and acceptance cases. This does not
+approve a live day reader or sending the shared snapshot to the v1 endpoint.
+
+### Source and Application Ownership: 2026-10-03
+
+[KaosEghis-emr](kaoseghis-emr.md#connector-ownership-decision-2026-10-03) is the
+shared read-only source adapter, with separate KaosPACS and KaosOrders deliveries.
+**KaosEghis-emr owns reusable EMR interpretation and source-change detection;
+KaosOrders on KaosClinic owns board-specific processing and persistent state.**
+This supersedes the earlier same-day connector-only restriction. Processing on
+Windows is allowed; source interpretation and application decisions are separate.
+
+- Windows owns the shared queue/mutex, reviewed SQL, key and field validation,
+  snapshot coverage/consistency evidence, privacy allowlists and transport. Close
+  the physical EMR connection before local processing or delivery; a slow receiver
+  must not hold up another source job by retaining its DB connection.
+- KaosEghis-emr interprets verified EMR reception/order codes, normalizes approved
+  fields and detects source edits, state transitions, disappearance/restoration and
+  reused keys by comparing validated source snapshots after connection closure.
+  Preserve approved source facts with normalized meanings, including distinct
+  진료완료 (`30`) and 수납완료 (`40`); receivers need not duplicate EMR table logic.
+- KaosOrders owns order categorization, reviewed fee exclusions, visibility, badges
+  and grid/details. It validates and applies source observations idempotently,
+  rejects stale updates and maintains its own application state. A source transition
+  to 보류 is a fact from Windows; whether it creates a tile is a KaosOrders decision.
+- KaosPACS receives directly from the sibling PACS adapter, not through KaosOrders.
+  KaosOrders filtering or availability must not determine PACS order delivery.
+- Read the approved day's encounter/order facts across relevant states, including
+  waiting, hold, completed-unpaid, paid and cancelled. Do not send only current
+  hold patients: unchanged child orders can become visible or hidden solely from
+  reception changes, and edits may leave a paid encounter's status unchanged.
+- Use the reviewed source encounter key and full order tuple including `ord_ymd`.
+  A current-row key is not an immutable lifetime order instance. Compare approved
+  structured contents as well as status; key reuse must not retain old details.
+- No reliable source edit/cancel timestamp is verified. `observed_at` records our
+  read time. Changes reverted between observations remain undetectable without
+  separately verified history; do not invent event timestamps.
+- Failed, partial or inconsistent reads are not authoritative empty days. Windows
+  reports a non-authoritative outcome; KaosOrders retains its last valid state.
+- Shared source processing and receiver-owned board rules do not permit raw-row
+  exports, arbitrary SQL, free-text notes or additional patient identifiers. Preserve the
+  Orders privacy boundary: no resident ID, DOB, phone, address, diagnosis or notes.
+  Any necessary transient DOB-to-age projection stays local and discards DOB.
+
+The legacy `kaosorders_source.py` normalizer, `kaosorders_shadow.py` ledger and
+synthetic v2 JSON remain **disabled reference/test artifacts**, not an approved
+implementation of this split. Common validation helpers now come from `emr_source`;
+the new shared model/comparison has no category, fee or visibility rules. Its source
+lifecycle tests are separate from the retained legacy board tests. Receiver
+classification, update-application and board tests still belong in KaosOrders.
+No runtime code, query or endpoint is migrated by this offline stage.
+
+Next gates, in order:
+
+1. Resolve the reviewed KaosOrders v1 gaps and agree a versioned normalized-source
+   schema, approved raw/normalized meanings, field allowlist, key scope, structured
+   edit fields and authoritative snapshot semantics. The old v2 example is not approval
+   of a new API; baseline/delta delivery and recovery rules also need review.
+2. Test Windows source interpretation/change detection and receiver application rules
+   with synthetic lifecycle scenarios. Test acquisition/serialization through the
+   shared coordinator using mocked DBs only, including close-before-processing.
+   The internal source model/comparison and mocked cleanup tests are implemented;
+   receiver rules, the wire schema and actual day acquisition remain future work.
+3. After separate approval, verify a bounded day-wide query and compare shadow
+   results without publishing or replacing PACS. Complete-day consistency, payment,
+   reception removal/reuse and other-category behavior still need evidence.
+4. Review authenticated delivery, acknowledgements, stale/retry ordering, restart
+   and retention before enabling publishing. Board UI work follows the verified
+   foundation and receiver contract, not the current disabled serializer.
+
+## Source Evidence and Blockers
+
+The initial foundation evidence below comes from existing code/documentation, not
+a verified production schema. No production query was used to build that foundation.
+The separately approved, limited laboratory and reception-status metadata reviews
+are recorded afterward; they do not establish full source-reader or reconciliation
+semantics.
+
+| Required field | Non-sensitive provenance | What remains unproven |
+| --- | --- | --- |
+| Encounter ID | The approved 2026-10-02 catalog inspection found a valid unique index on `public.h1opdin.recept_no`, a NOT NULL column. | Stability, reuse after removal, patient linkage over transitions, encounters without orders, cancellation/removal behavior. |
+| Order ID | The approved 2026-10-02 catalog inspection found a valid unique index on `(recept_no, ord_ymd, ord_no, ord_seq_no)`, all NOT NULL. A supervised follow-up observed a deleted full key reappear with different order code/type/department. | The tuple identifies a current source row, not an immutable lifetime order instance. Restoration/replacement and key-reuse handling must be reviewed before enabling reconciliation. The older three-part PACS join omits `ord_ymd` and is not sufficient evidence for a KaosOrders key. Existing PACS behavior is unchanged. |
+| Chart number | Flu joins `h1opdin.ptnt_no` with `hz_mst_ptnt.ptnt_no`; patient-context SQL reads `hz_mst_ptnt.ptnt_no`. | Reception linkage for a whole-day projection. Chart number cannot substitute for encounter ID. |
+| Name, sex, age | Context reader uses `hz_mst_ptnt.ptnt_nm`, `sex`, `birth_ymd`; flu calculates age at `h1opdin.clinic_ymd`. Older injection notes mention `ageday`. | Exact age convention and sex mapping. The shadow boundary accepts Korean sex plus integer age, never DOB. |
+| Clinic day | Flu reader uses `h1opdin.clinic_ymd`. | Authoritative day membership for every relevant encounter and order. |
+| Reception state | Flu filters `h1opdin.proc_gb IN ('30', '40')`; supervised 2026-10-01 UI comparisons observed `10` on one 진료대기 encounter, `25` on one 보류 encounter, `40` on five 완료 encounters, and `50` on one 취소 encounter, all with `hold_yn=N`, `hold_opd=N`. Code-30 counts progressed from one to two to three as expected by the operator. Agreed labels: `30` 진료완료 (수납 전), `40` 수납완료. | Not a complete state dictionary or enabled mapping. Other codes, compound-state rules and transitions remain unverified; dictionary access is denied to the configured reader. The 30/40 terminology is operator-confirmed, not dictionary-derived. |
+| Order state | PACS treats `h2opd_doct_ord.dc_yn = 'Y'` as cancellation in its imaging join. | All-category state, withdrawal, replacement, deletion and restoration semantics. Do not generalize automatically. |
+| Category/detail | PACS uses `proc_dept_cd`, `ord_cd`; old notes list `ord_type`, `medfee_nm`. | Reviewed category and static display-spec catalogs. No name matching or raw descriptions. |
+| Timestamps | PACS timestamps come from MWL. | Verified reception/order/update timestamps are unavailable. MWL is not a permitted KaosOrders source. Omit unverified times. |
+| Complete read | Existing queries are domain-filtered PACS/flu readers. | No authoritative daily all-encounter/all-relevant-order snapshot is proven. Successful fetch or zero rows alone is not completeness. |
+
+Relevant files: `core/pacs_polling.py`, `core/weekly_age_reporting.py`,
+`core/kaospacs_patient_context.py`, and historical `docs/kaoseghis-inj.md`.
+The injection plan is historical evidence, not approved current behavior.
+
+### Approved Laboratory Metadata Review: 2026-10-01
+
+The operator explicitly approved a limited read-only order-metadata inspection.
+Distinct catalog codes/names/type/department were inspected for 2026-09-01 through
+2026-09-30, using the existing serialized reader and Windows mutex. Reception keys
+were used only inside the date filter; no patient fields or source order-instance
+IDs were returned. Connections/cursors closed before reviewing the detached metadata.
+The month-wide read finished and closed in approximately 0.24 seconds, with a
+2-second statement timeout and a 301-combination result cap (not reached).
+
+Observed laboratory metadata used `ord_type = '03'` and `proc_dept_cd = 'LAB'`,
+but this includes urine tests and cannot itself authorize a BLOOD mapping. This is
+a recent-use sample, not the full order catalog or proof of specimen/collection method.
+There were 32 distinct nonempty catalog codes; empty code/name entries were also
+present and must not become mapped orders.
+
+The following is a manually summarized review catalog, not raw order rows or
+enabled production mappings. Categories follow the operator-approved rule below;
+display labels remain review summaries, not approved production specifications.
+
+| Agreed group | Catalog codes | Proposed review label |
+| --- | --- | --- |
+| BLOOD under agreed LAB rule | `D0002010`, `D0002030`, `D0002040`, `D0002050`, `D0002070`, `D0013` | CBC components and differential |
+| BLOOD under agreed LAB rule | `D1830`, `D1840`, `D1850`, `D1860`, `D1880`, `D1890` | Bilirubin, total protein, ALT, AST, albumin, gamma-GTP |
+| BLOOD under agreed LAB rule | `D2263`, `D2611`, `D2613` | Triglycerides, total cholesterol, HDL |
+| BLOOD under agreed LAB rule | `D2280`, `D2300`, `D2310` | Creatinine, BUN, uric acid |
+| BLOOD under agreed LAB rule | `D2800020`, `D2800030`, `D2800060` | Sodium, chloride, potassium |
+| BLOOD under agreed LAB rule | `D3230050`, `D3250010` | Free T4, TSH |
+| BLOOD under agreed LAB rule | `D3800010`, `D3800020` | Lipase, amylase |
+| BLOOD under agreed LAB rule | `D4300030` | PSA |
+| BLOOD under agreed LAB rule | `D6020006` | TB antigen-stimulated interferon-gamma study |
+| URINE override; not BLOOD | `D2202`, `D2252` | Urine microscopy and urinalysis |
+| BLOOD confirmed by operator | `D3063` | HbA1c: laboratory blood test; include in 채혈 |
+| Excluded, confirmed by operator | `D3021`, `D3022` | Finger-stick glucose; do not trigger 채혈 or another laboratory category |
+
+On 2026-10-01 the operator confirmed that `D3063` is a laboratory HbA1c test and
+belongs in BLOOD/채혈, while `D3021` and `D3022` are finger-stick glucose tests and
+are excluded. These exact-code decisions take precedence over the shared `03`/`LAB`
+metadata. They do not classify other unreviewed point-of-care codes. A patient with
+only either excluded code must not gain a 채혈 badge; a coexisting approved BLOOD
+order can still make the patient eligible under the normal reception-state rules.
+
+The operator subsequently approved the broader rule on the same day:
+
+1. Require exact `ord_type = '03'` and `proc_dept_cd = 'LAB'`, with a nonempty code.
+2. Exclude exact codes `D3021` and `D3022` before category assignment.
+3. Route exact codes `D2202` and `D2252` to URINE/소변검사.
+4. Classify the remaining matching laboratory orders as BLOOD/채혈.
+
+This gives 28 BLOOD codes, two URINE codes, and two exclusions in the reviewed
+sample, without maintaining an individual inclusion rule for each blood test.
+Keep exclusions/category overrides editable and flag newly encountered codes for
+review: a new non-blood laboratory test could otherwise receive the wrong badge.
+This is a clinic-approved workflow heuristic, not verified specimen metadata.
+Do not infer classification from code prefixes or broad substring matching. The
+disabled exact-code fixture policy has not yet been replaced by a production LAB
+rule implementation. This inspection did not validate encounter identity, source
+state, specimen fields, or complete-day reconciliation semantics.
+No code mapping, feature flag, source query implementation, or publishing was enabled.
+
+### Approved Reception-Status Metadata Review: 2026-10-01
+
+The operator approved a separate limited read-only inspection to verify reception
+states. Queries used the existing serialized reader/machine-wide mutex, 3-second
+connection and 2-second statement timeouts. No patient values or encounter/order
+instance IDs were returned, and no database permissions or records were changed.
+Successful metadata reads closed their source connections in approximately
+0.16-0.22 seconds.
+
+Verified schema facts from PostgreSQL catalog metadata for `public.h1opdin`:
+
+- `proc_gb` is `character varying(10)` with no explanatory column comment.
+- `hold_yn` is documented as `수납, 진료 등 진행중인 상태 : 'Y'`.
+- `hold_opd` is documented as `진료중인 상태 : 'Y'`.
+- Consequently, neither field name alone establishes membership in the 보류 list.
+  No numeric status-to-label mapping was inferred from existing flu filters.
+
+Candidate code dictionaries exist: `public.hz_mst_div` (index/label definitions),
+`hz_mst_div_detail` (field-key definitions), and `hz_mst_div_key1`, `key2`, `key3`,
+`longkey1` (codediv/key/value definitions). A narrow header lookup was rejected
+with SQLSTATE `42501` (insufficient privilege). A separate metadata privilege check
+confirmed that the configured account has table-level SELECT on `h1opdin`, but not
+on any of these dictionary tables. No alternate credentials, grants, or privileged
+workarounds were used. The rejected query followed the shared helper's cleanup path.
+
+**Status mapping remains blocked.** Obtain an authorized, non-patient export of
+the dictionary definition for `h1opdin.proc_gb`, including its labels and any
+required compound-state logic, or ask the database administrator for a narrowly
+scoped read-only dictionary view. Broad dictionary access is unnecessary and could
+expose unrelated configuration. If no authoritative dictionary exists, plan an
+operator-supervised comparison against already known EMR list states, without
+changing real patient records. Counts alone are not proof of a status mapping.
+Stable keys, cancellations/removals and whole-day completeness remain separate gates.
+
+The operator subsequently approved a one-time elevated UI inspection. The passive
+helper `KaosEghis/tools/inspect_reception_status.py` sends no input and opens no
+database connection. Its report contains only allowlisted status/header labels,
+selection flags, grid structure, and fixed diagnostic reasons, never patient values.
+It exits after a bounded inspection; six focused privacy/label/ancestor tests pass.
+
+On this workstation, direct native-handle UIA traversal remained empty even after
+elevation. Starting at the operator-captured point `(1834, 169)` and walking to its
+same-process `외래리스트` ancestor exposed the `진료대기`, `보류`, `완료`, `취소` tabs.
+The observed selected tab was `진료대기`. Grid headers included `상태`, `접수시간`,
+`환자번호`, `환자명`, `성별`, `나이`; patient rows/values were not exported or inspected.
+No database/UI status pairing has yet been verified. The operator was asked to
+select `보류` manually for a subsequent supervised comparison. A future paired
+reader must verify the displayed clinic day and unambiguous encounter linkage,
+recheck the UI selection, and keep patient values out of reports and persistence.
+
+A subsequent attempt after the operator opened 보류 could not see the pane:
+Windows reported the EMR as shell-cloaked (`DWMWA_CLOAKED = 2`). The helper now
+checks visibility before point lookup, can wait up to 60 seconds without changing
+desktops, and tries bounded points within the pane's current native rectangle.
+The supervised wait expired while the EMR was still hidden from the active desktop.
+No patient values or database queries were involved. A temporary desktop switch
+and return was proposed for operator approval; it is not implemented or automatic.
+
+### Supervised Completed-List Comparison: 2026-10-01
+
+The retry confirmed 보류 was selected; the operator confirmed that list was empty.
+No encounter was created or changed for the test. The operator then selected 완료
+and explicitly confirmed the displayed clinic day as **2026-10-01**. The UI exposed
+30 row objects (not an authoritative day total).
+
+The separate, explicitly launched `KaosEghis/tools/compare_reception_status.py`
+sampled five visible chart-number cells in memory, without reading name, DOB,
+resident ID or other patient-value cells. It used the shared read coordinator to
+aggregate `h1opdin.proc_gb`, `hold_yn`, and `hold_opd` for those chart numbers and the
+operator-confirmed day. Matching exactly one same-day encounter per sampled chart
+was required. No identifiers were returned by the database query or included in
+the saved report. The same EMR process/pane, selected list, and sampled chart cells
+were rechecked after the connection closed.
+
+Observed result, **not a production mapping**:
+
+| UI list | Sampled encounters | proc_gb | hold_yn | hold_opd |
+| --- | --- | --- | --- | --- |
+| 완료 | 5 | `40` | `N` | `N` |
+
+The source connection closed in approximately **0.162 seconds**. No clicks,
+keystrokes, desktop switches, source writes, or feature-flag changes were sent.
+The report contains only the confirmed day, UI label, status codes, aggregate counts,
+closure/timing information, and disabled-mapping status.
+
+This is evidence that `40` occurs in 완료, not proof that it is the only 완료 code
+or that every `40` encounter belongs there under every flag combination. The day
+was confirmed by the operator, not independently extracted from a UI date control.
+At this stage, stable production encounter/order identity, other states (especially
+보류), state transitions, and complete-day reconciliation remained unverified. UI chart/day
+matching is confined to this diagnostic and is not a production encounter key.
+
+The comparison helper has a UI-only watchdog, disabled while the shared reader may
+own a source connection. Its database operation remains a bounded SELECT under
+the existing read-only account and mutex. Only a parsed date and up to five strict
+ASCII-digit chart literals can enter its one-off query; it does not replace the
+planned parameterized production reader. No inspection is scheduled or automatic.
+Focused inspection/comparison/coordinator tests: **43 passed**. The complete
+isolated repository suite, including the new helpers, passed **1,923 tests**.
+
+### Supervised Cancelled-List Comparison: 2026-10-01
+
+The operator then selected 취소 and reported one cancelled entry. The same helper
+used the previously operator-confirmed clinic day, **2026-10-01**, and sampled the
+one visible chart-number cell in memory. Exactly one same-day source encounter
+matched. The selected list, EMR process/pane, and sampled chart cell were unchanged
+when rechecked after the source connection closed.
+
+Observed result, **not a production mapping**:
+
+| UI list | Sampled encounters | proc_gb | hold_yn | hold_opd |
+| --- | --- | --- | --- | --- |
+| 취소 | 1 | `50` | `N` | `N` |
+
+The source connection closed in **0.1062 seconds**. No UI actions, source writes,
+or production mapping changes were made. Only aggregate status metadata, the
+confirmed day, and closure/timing information were saved; no patient identifiers
+were exported. This establishes an observed 취소 case with `50`, not an exhaustive
+mapping or proof of all cancellation/restore transitions. At this stage, 보류 and
+진료대기 remained unpaired with source states, and `30` remained unverified. The day was operator
+confirmed, not independently read from a UI date control.
+
+### Supervised Hold-List Comparison: 2026-10-01
+
+After a patient naturally appeared in 보류, the operator selected that list and
+approved another comparison for the same confirmed clinic day, **2026-10-01**.
+One earlier attempt stopped on an unexpected selected tab before querying the
+source; another was cancelled while Windows approval was pending. Neither attempt
+produced accepted source evidence.
+
+The successful retry sampled one visible chart-number cell in memory and matched
+exactly one same-day source encounter. The same process/pane, selected list, and
+sampled chart cell were rechecked unchanged after the source connection closed.
+
+Observed result, **not a production mapping**:
+
+| UI list | Sampled encounters | proc_gb | hold_yn | hold_opd |
+| --- | --- | --- | --- | --- |
+| 보류 | 1 | `25` | `N` | `N` |
+
+The shared reader closed the source connection in **0.0892 seconds**. No UI actions,
+source writes, or production mapping changes were made. Only aggregate status
+metadata, the confirmed day, and closure/timing information were saved; no patient
+identifiers were exported. This is evidence of 보류 with `proc_gb=25` despite both
+hold flags being `N`, not proof of every 보류 flag combination or transition.
+The clinic day was operator-confirmed, not independently read from a UI date control.
+
+At this stage, 진료대기 and code `30` remained unverified. Stable production keys, order-state
+semantics, state transitions, and complete-day reconciliation remain separate
+gates. The production reader and publishing remain disabled.
+
+### Supervised Waiting-List Comparison: 2026-10-01
+
+The operator reported one waiting patient and approved comparison of 진료대기 for
+the same confirmed clinic day, **2026-10-01**. The helper sampled one visible
+chart-number cell in memory and matched exactly one same-day source encounter.
+The process/pane, selected list, and sampled chart cell were unchanged on the
+post-read UI check, after the source connection had closed.
+
+Observed result, **not a production mapping**:
+
+| UI list | Sampled encounters | proc_gb | hold_yn | hold_opd |
+| --- | --- | --- | --- | --- |
+| 진료대기 | 1 | `10` | `N` | `N` |
+
+The shared reader closed the source connection in **0.078 seconds**. No UI actions,
+source writes, or production mapping changes were made. Only aggregate status
+metadata, the confirmed day, and closure/timing information were saved; no patient
+identifiers were exported. The clinic day was operator-confirmed, not independently
+read from a UI date control.
+
+This confirms an observed waiting-list case with `10`, not an exhaustive rule for
+all rows in that list or a verified distinction between registered and in-progress
+states. At this stage, code `30` remained unexplained. The four observed list/code pairs do not
+prove state-transition behavior, durable encounter/order keys, order-state
+semantics, or complete-day reconciliation. Production reading and publishing remain
+disabled pending those separate checks.
+
+### Code 30 Presence Check: 2026-10-01
+
+The operator asked whether any encounters currently have `proc_gb=30` and noted
+that the Reservation tab is hidden because the clinic does not use reservations.
+A one-off, same-day SELECT on the already reviewed `public.h1opdin` table returned
+only grouped flags and counts, filtered to `clinic_ymd=20261001` and `proc_gb=30`.
+No patient identifiers or other patient values were selected or exported.
+
+| proc_gb | Encounter count | hold_yn | hold_opd |
+| --- | --- | --- | --- |
+| `30` | 1 | `N` | `N` |
+
+The operation used the shared FIFO reader and Windows mutex, with 3-second connect
+and 2-second statement timeouts. Its source connection closed in **0.0939 seconds**.
+There were no source writes, UI actions, or production mapping changes.
+
+This is a point-in-time count of encounter rows, not a distinct-patient count or a
+UI/state-label comparison. No historical dates were queried. The existence of the
+unused Reservation tab did not establish that `30` means reservation. The subsequent
+operator confirmation below identifies the observed workflow state separately.
+
+### Operator-Confirmed Code 30 Meaning: 2026-10-01
+
+At the operator's explicit request, a separate bounded lookup returned only the
+name of the single current code-30 encounter for manual identification. That name
+is not retained in this document or diagnostic files. The shared reader closed
+its source connection in **0.1021 seconds**. A subsequent count-only read, also
+explicitly requested, found **two** code-30 encounter rows for the same clinic day;
+its connection closed in **0.1007 seconds**. A further requested count found **three**,
+matching the operator's expectation, and closed in **0.1038 seconds**. The operator
+confirmed the result. No records or UI states were changed.
+
+The operator confirmed code `30` as **orders complete but not paid yet**, then
+explicitly chose distinct encounter-status labels:
+
+| proc_gb | Agreed label | Meaning |
+| --- | --- | --- |
+| `30` | 진료완료 | Clinical/order-entry workflow complete; payment pending. |
+| `40` | 수납완료 | Payment complete. |
+
+These labels are operator-confirmed terminology, not independently read dictionary
+labels. Preserve the historical UI observation of the tab named 완료 above; it is
+not being renamed in the EMR. Code `30` is not a reservation state.
+
+Reception workflow completion and payment state are separate from individual order
+execution, cancellation, or withdrawal. Code `30` must not by itself mark child
+orders completed/cancelled, and unpaid must not be treated as 보류. The existing
+board rule remains confirmed 보류 plus an ACTIVE relevant order. No normalization
+mapping, source reader, publishing flag, or PACS behavior was enabled or changed.
+State transitions and compound flag combinations still require separate verification.
+
+**Blocked:** the reviewed, parameterized whole-day source operation. Do not invent
+joins, status codes, IDs, or completeness filters. `EghisKaosOrdersDayReader.read_day`
+currently returns `unavailable` without connecting. The `DayReader` interface requires
+detached results after cursor and physical connection closure.
+
+### Approved Single-Visit Identifier Baseline: 2026-10-02
+
+The operator supplied their own visit in the hold list and approved a limited
+read-only identifier inspection. A catalog-only query inspected the two existing
+source tables, followed by one parameterized statement limited to the exact
+operator-supplied name and clinic day. Ambiguous patient/visit matches stop the
+inspection; no other patient histories or new production tables were queried.
+Both reads used `run_readonly_query`, its FIFO and machine-wide mutex, a 3-second
+connect timeout, and a 2-second statement timeout. The local connection setting
+was read with SQLite `mode=ro`; credentials were not output.
+
+Catalog evidence:
+
+- `h1opdin_pkey` is a valid unique index on `(recept_no)`; the column is NOT NULL.
+- `h2opd_doct_ord_key` is a valid unique index on
+  `(recept_no, ord_ymd, ord_no, ord_seq_no)`; all four columns are NOT NULL.
+- The date is part of source order uniqueness. The previously proposed three-part
+  identity is not approved for KaosOrders even if unique in a small sample.
+- Index uniqueness does not establish identity stability during edits, or prevent
+  reuse of an identifier after its row is removed. Those remain separate tests.
+
+The sample matched exactly one patient and one encounter on the confirmed day.
+The encounter state was `proc_gb=25`, `hold_yn=N`, `hold_opd=N`, consistent with the
+operator's hold-list observation. Two source order rows were present: one with
+`ord_type=05`, empty department, `dc_yn=N`, `act_yn=Y`; one with `ord_type=01`,
+department `DRUG`, `dc_yn=N`, `act_yn=N`. Both order dates matched the clinic day;
+full keys were nonempty and unique in this sample. These are two source rows, not
+two approved board tasks. No meaning for `act_yn`, type `05`, or board eligibility
+was inferred from this sample.
+
+Catalog and sample connections were confirmed closed after approximately 0.1512
+and 0.1626 seconds respectively. No UI input, writes, clinical changes, delivery,
+or runtime reader enablement occurred. No names, chart numbers, raw visit/order
+IDs, order descriptions, resident IDs, or source-row snapshots were written to a
+local report or this document. Temporary keyed comparison fingerprints were kept
+in the diagnostic session, without raw identifiers, for a supervised follow-up;
+they are not production IDs or a durable source snapshot. At baseline, edits,
+cancellations, deletions, restoration and state-transition behavior were unverified.
+
+### Supervised Test-Order Edit: 2026-10-02
+
+The operator confirmed that the visit is disposable, edited the existing test
+order manually, saved back to hold, and requested the follow-up read. The same
+bounded, parameterized single-statement inspection and shared reader were used;
+the connection was confirmed closed in approximately 0.1809 seconds.
+
+Comparison against the baseline's temporary keyed fingerprints found:
+
+- Patient linkage and encounter identity were unchanged.
+- Both full four-part order keys were retained, with no added or missing keys.
+- The encounter remained `proc_gb=25`, `hold_yn=N`, `hold_opd=N`.
+- One order's inspected fields were unchanged; the other changed `qty`, `days`,
+  and `divide`. The remaining inspected fields, including code, cancellation
+  flag and action flag, were unchanged. The operator subsequently confirmed that
+  all three fields were deliberately edited, so the observed field changes match
+  the intended test edit.
+
+This supports identity retention for this particular saved medication edit only.
+It does not establish edit behavior for all six board categories, date changes,
+replacement, cancellation, deletion, restoration or reception-state transitions.
+No raw identifiers or numeric medication values were added to diagnostic output
+or this document. No EMR input, writes, production reader or publishing was enabled.
+
+### Supervised Test-Order Removal: 2026-10-02
+
+The operator removed only the medication order from the disposable test visit,
+saved back to hold, and requested another read. The same bounded statement
+returned one source order row, down from two. The patient linkage and encounter
+identity remained unchanged, as did `proc_gb=25`, `hold_yn=N`, `hold_opd=N`.
+
+One full order key was absent; the other key and all its inspected fields were
+unchanged. The only remaining row had `ord_type=05`, empty department, `dc_yn=N`,
+and `act_yn=Y`. No retained `DRUG` row or `dc_yn=Y` replacement appeared in this
+visit's `h2opd_doct_ord` result. The query did not filter orders by cancellation or
+action flags, and its 101-row cap was not reached, so this disappearance was not
+caused by either filter or truncation. This establishes disappearance from the
+inspected source table for this removal, not absence from any history/archive
+table or a universal deletion rule for other order categories.
+
+The source connection was confirmed closed in approximately 0.1596 seconds.
+No EMR input or writes were sent by the diagnostic. No raw identifiers, patient
+details or medication values were persisted in a local report or this document.
+
+The planned reader must detect missing orders using complete authoritative
+snapshots, not cancellation flags alone. The unchanged encounter must not be
+cancelled merely because an order disappears. This single-visit observation does
+not establish whole-day completeness or authorize live reconciliation. At this
+point restoration and key reuse were unverified; the requested next step was
+re-adding the same disposable test order and comparing its key with the removed one.
+
+### Follow-Up Showing Order-Key Reuse: 2026-10-02
+
+After the operator reported readiness, the same read-only inspection found three
+source rows: the unchanged type `05` row and two `INJ` rows, with types `07` and
+`06`. All three had `dc_yn=N`; both `INJ` rows had `act_yn=N`. The patient linkage,
+encounter key and hold-state fields remained unchanged. The row cap was not
+reached, and current full keys were nonempty and unique.
+
+Of the two keys added since the removal snapshot, one exactly matched the deleted
+full four-part key and one had not appeared in the original snapshot. The reused
+key now had different `ord_cd`, `ord_type`, `proc_dept_cd`, `qty`, `days` and
+`divide` fingerprints from the removed medication row. The operator subsequently
+confirmed that an injection was deliberately added for testing instead of the
+original medication. This confirms a replacement/key-reuse case, not a
+same-medication restoration test. The two `INJ` rows do not establish two clinical
+injections; drug/administration-row relationships and display rules remain
+unverified. No order names or medication values were output.
+
+The source connection was confirmed closed in approximately 0.1756 seconds.
+No UI input, writes, production enablement or delivery occurred. The observation
+refutes treating this tuple as an immutable historical order-instance ID. A future
+complete-snapshot reader must handle disappearance followed by reappearance with
+changed content, including category changes, without retaining obsolete details
+or treating a withdrawal as permanent. It must not infer a new lifetime instance
+from code, row position or a fingerprint. Exact reconstruction of an unobserved
+delete/re-add between snapshots remains unproven. The disabled reader and existing
+PACS behavior are unchanged.
+
+### Supervised Hold-to-Completed Transition: 2026-10-02
+
+The operator was asked to complete the disposable visit without changing its
+injection orders or processing payment, then reported completion. The diagnostic
+kept the exact patient/day scope, uniqueness guards, row cap and shared reader,
+changing only the expected state from `25` to `30`. No broad day query was used.
+
+The read found `proc_gb=30`, `hold_yn=N`, `hold_opd=N`, with unchanged patient linkage
+and encounter identity. The source connection was confirmed closed in approximately
+0.1377 seconds. The full order keys were nonempty and unique, the row cap was not
+reached, and all sampled order dates still matched the clinic day.
+
+Order rows increased from three to four: two previous keys remained with all
+inspected fields unchanged, one key disappeared, and two new keys appeared. The
+new snapshot contained one type `05` row (empty department, `act_yn=Y`), one type
+`07`/`INJ` row (`act_yn=N`), and two type `06` rows (empty department, `act_yn=Y`).
+All four had `dc_yn=N`. The previous type `06`/`INJ` row was absent from the result.
+The operator subsequently confirmed that only completion was performed, with no
+manual order edits and no payment. Source-row replacement therefore occurred
+during this completion-only test, and `30` was observed as unpaid completion.
+The internal mechanism remains unverified. Do not infer billing/clinical meaning
+for these types or that a vanished row means a clinical cancellation.
+
+This observes the requested `25` to `30` transition for the same encounter, but
+does not establish unchanged order identity through completion. The planned board
+must gate visibility on reception state independently of order existence. The return
+to hold and subsequent cancellation are recorded below; payment remains untested.
+No raw identifiers or patient/medication values were written to the test notes,
+and no EMR input, writes, live reader enablement or publishing was performed.
+
+### Return to Hold and Added Fee Labels: 2026-10-02
+
+The operator asked whether the rows added at completion were injection fees. A
+narrow follow-up requested only order codes and their standard `medfee_nm` labels
+within the same guarded single-visit inspection, without notes or free-text fields.
+The completion-state guard first found that the visit was already back at `25`
+and stopped without reading order details (connection closed in 0.1030 seconds).
+The expected-hold query then completed and closed its connection in 0.1025 seconds.
+
+The encounter moved from `30` back to `25`, with `hold_yn=N`, `hold_opd=N`, unchanged
+patient linkage and the same encounter key. All four order keys remained, with no
+changes in their inspected fields, additions or removals. The two completion-added
+keys still matched their completed-snapshot code/type/department fingerprints, so
+their current labels could be safely associated with those earlier additions:
+
+| Code | Standard source fee label |
+| --- | --- |
+| `KK010` | 피하또는근육내주사 |
+| `AL801` | 외래환자 의약품관리료-1일분(의원,치과의원,보건의료원 의·치과) |
+
+Both were type `06`, with empty department, `dc_yn=N`, `act_yn=Y`; order and
+medical-fee codes matched. These label observations identify an injection
+administration fee and an outpatient medication-management fee, not two additional
+clinical injections. Keep these billing rows distinct from the actual injection
+order when reviewing future category/display rules. No production mapping was
+enabled, and no general rule for all type `06` or empty-department rows is inferred.
+
+Only these two standard fee-code labels and aggregate comparison results were
+reported. No patient identity, raw visit/order keys, numeric medication values or
+free-text notes were written to local diagnostic reports or this document. The
+day-wide reader, board, PACS behavior and delivery remain unchanged and disabled
+where previously disabled.
+
+### Supervised Reception Cancellation: 2026-10-02
+
+The operator was asked to cancel only the disposable reception/visit, without
+deleting the patient or manually removing its orders, and reported readiness.
+The same parameterized single-visit query changed its expected-state guard from
+`25` to `50`. Patient/day scope, match-uniqueness checks, row cap, timeouts and the
+shared serialized reader were unchanged.
+
+The read observed `proc_gb=50`, `hold_yn=N`, `hold_opd=N`, with unchanged patient
+linkage and encounter identity. All four full order keys remained, with no added
+or missing keys and no changes in their inspected fields. All four rows still had
+`dc_yn=N`: one type `05` row, one type `07`/`INJ` row, and two type `06` rows with
+empty departments. Cancellation did not remove the reception or its order rows
+from the inspected tables in this sample. It did not set an order cancellation
+flag on the inspected rows either. The query was untruncated.
+
+The source connection was confirmed closed in approximately 0.1148 seconds. No
+UI input, writes, patient-data report, delivery or production enablement occurred.
+
+This confirms that encounter cancellation must override otherwise uncancelled
+child rows for the board. A future reader must not leave a cancelled visit visible
+merely because orders exist with `dc_yn=N`, and must not equate reception
+cancellation with completion of those orders. This supports the existing planned
+encounter-withdrawal cascade, not a live mapping or whole-day completeness claim.
+At this point cancellation recovery was unverified. The operator then confirmed
+that the cancellation list offers reception restoration; that same-visit test is
+recorded below. Reception removal/key reuse and payment transitions remain unverified.
+
+### Cancelled Reception Restored to Waiting: 2026-10-02
+
+The operator used reception restoration on the same disposable cancelled visit,
+without creating a new reception, and reported that it returned to `접수대기`, not
+hold. The diagnostic did not assume a destination code: it removed only the
+expected-state condition while retaining the exact patient/day scope, unique
+patient/visit requirement, row cap, timeouts and shared serialized reader. It
+observed the state of this one restored encounter, not a whole-day state mapping.
+
+The reception changed from `proc_gb=50` to `10`, with `hold_yn=N`, `hold_opd=N`.
+Patient linkage and encounter identity were unchanged. All four full order keys
+remained, and all inspected fields matched the cancelled snapshot. No keys were
+added or removed, the read was untruncated, and every sampled order date still
+matched the clinic day. The source connection was confirmed closed in approximately
+0.1243 seconds. No UI input, writes, patient-data report, delivery or runtime
+enablement occurred.
+
+This verifies restoration to waiting for this encounter, not automatic return to
+hold. The operator's `접수대기` wording is recorded as reported; the earlier UI
+tab observation named `진료대기` is not retroactively renamed. Both observations
+associated waiting with code `10` in their respective samples.
+
+For the planned hold-only board, restored waiting must remain hidden despite the
+surviving orders. Cancellation must not create an irreversible tombstone for the
+encounter or its unchanged order keys: a later verified return to hold with a
+relevant order must be eligible again. The final waiting-to-hold check is recorded
+below. Whole-day completeness, payment, other-category behavior and reception key
+reuse after actual removal remain unverified. No production mapping was enabled.
+
+### Final Waiting-to-Hold Round Trip: 2026-10-02
+
+The operator moved the restored test visit to hold without editing its orders and
+requested the final comparison. The original expected-hold single-visit query
+observed `proc_gb=25`, `hold_yn=N`, `hold_opd=N`, after the previous `10` state.
+Patient linkage and encounter identity were unchanged. All four full order keys
+and all inspected fields matched both the waiting snapshot and the pre-cancellation
+hold snapshot; there were no added or removed keys. Keys remained nonempty and
+unique, the read was untruncated, and order dates still matched the clinic day.
+
+The source connection was confirmed closed in approximately 0.1122 seconds. No
+EMR input, source writes, raw-row report, delivery or runtime enablement occurred.
+This completes this disposable encounter's observed state round trip:
+`25 -> 30 -> 25 -> 50 -> 10 -> 25`. Completion changed some source order rows;
+all subsequent transitions preserved the resulting four keys and inspected fields.
+
+The observed cases should become synthetic regression scenarios before building
+the day reader: same-key field edits, physical row disappearance, key reuse with
+changed category/content, completion-added fee rows, cancellation with uncancelled
+child rows, restored waiting remaining hidden, and return to hold without changed
+order data. Do not copy real identifiers or source rows into fixtures. A restored
+relevant order must be eligible without requiring its content to change, while
+the reviewed fee rows must not be mistaken for extra injections.
+
+This is one encounter and a limited set of order types, not approval of all six
+categories, a general lifecycle model, a complete-day query or live publishing.
+Payment, reception removal/key reuse, other-category cancellation behavior,
+unobserved between-poll changes and whole-day completeness remain separate gates.
+The production KaosOrders reader remains unavailable; PACS is unchanged.
+
+### Offline Lifecycle Regression Tests: 2026-10-02
+
+After the operator reported cleanup of the disposable visit, this stage used only
+synthetic projection fixtures and mocked database connections. No live inspection
+command was run, and no captured identifiers, medication values or source rows
+were copied into tests. The real source reader remains unavailable and publishing
+is still blocked. No board, production mapping, source SQL or API contract changed.
+
+Added 34 parameterized test cases across `tests/test_kaosorders_shadow.py` and
+`tests/test_emr_read_queue.py`, covering:
+
+- Same-key approved detail edits, exact payload replacement, and idempotent retries.
+- Complete-snapshot disappearance followed by same-key return, with the same or
+  a different category; category replacement without an observed empty snapshot.
+- An ignored medication key becoming an injection, and a relevant key becoming
+  an ignored fee without leaving stale board content.
+- Synthetic consultation/administration/medication-management fee rows not adding
+  injections; unknown fee categories still rejecting the entire uncertain day.
+- The observed hold/closed/hold/cancelled/waiting/hold sequence with active child
+  orders unchanged, including cancellation/restart and restored waiting hidden.
+- Failed, partial, timed-out or unverified fee-only reads preserving the last
+  valid injection; a failed read also preserving a pending edit and its retry.
+- FIFO handoff after a simulated flu-read error/timeout to queued orders, health
+  and PACS work, with cursor/connection cleanup before the next connection opens.
+
+Five new cases initially failed: explicitly ignored fee rows bypassed duplicate,
+empty-ID and orphan checks. The disabled normalizer now validates parent linkage
+and per-encounter order-key uniqueness before excluding reviewed unrelated rows.
+Ambiguous snapshots preserve the prior baseline. Reuse across separate snapshots
+or across distinct encounters remains allowed; it is not confused with duplicate
+keys inside one encounter in one snapshot. No shared connection code changed.
+
+Approved display edits are represented by synthetic, reviewed `detail_code`
+entries. Raw `qty`, `days` and `divide` remain rejected projection fields; mapping
+these source values to an approved dose/display specification is still future
+reader work. Synthetic fee exclusions are not production code/type mappings.
+These tests cover the sender's normalized state and proposed payload, not a live
+server, UI or a proof of complete-day SQL/identity semantics.
+
+The initial focused shadow/coordinator/import run passed **273 tests**. Tests used
+a temporary local app-data directory, mocked driver/input/network boundaries and
+test-only Windows mutex names, never the running clinic app's source connection.
+The broader targeted regression run passed **407 tests in 73.63 seconds**, including
+PACS polling/refresh/delivery, weekly flu reporting, flu diagnostics and patient
+context API tests. This was not a full repository test run. Garbage collection was
+kept on the test main thread for Qt test stability; that runner-only precaution
+did not change application code. The final diff whitespace check passed.
+
+## Shared Reader and Triggers
+
+The [EMR coordinator](kaoseghis-emr.md) retains its existing scheduling and connection
+ownership. A future real operation must
+enter `run_readonly_query` and its one-worker FIFO/global Windows mutex, never a new
+connection or a nested queue. Fixed reviewed SQL and bound day parameters are required.
+Optional `params=` binding was added and verified with mocked databases on 2026-10-01.
+It supports copied positional/named values without changing existing callers. This
+completes the binding capability, not approval or implementation of a whole-day
+operation. The focused regression run passed **162 tests**; the full isolated suite
+passed **1,950 tests**. No live EMR access or app restart was part of that verification.
+The one-off status-comparison diagnostic still uses its previously
+validated literals; its existing query behavior was not migrated in this stage.
+There is no configurable KaosOrders SQL or connection-string override in this patch.
+
+PACS retains chart clear/load +2-second debounce, clear +30-second follow-up preserved
+across loads, five-minute successful-read safety check, startup/reconnect reconciliation,
+manual Poll Now, and fail-closed cleanup. F6/F7/BtnF6/BtnF7 remain diagnostic intent
+signals, not proof of commit/completion. Chart discovery is defined in the EMR document.
+
+Future integration must reuse these coalesced day requests, not install another timer.
+Multiple reads for one day require reviewed consistency, not an assumption that separate
+autocommit queries form a consistent snapshot. No Orthanc, KaosPACS, DICOM or MWL read
+is introduced. Existing PACS continues its own unchanged integration.
+
+## Offline Prototype: Normalization and Privacy
+
+This section documents the legacy disabled board prototype, not the new shared
+`emr_source` model or the approved final
+boundary. Under the refined 2026-10-03 decision, verified EMR code interpretation,
+source-field normalization, identity validation and privacy belong on Windows.
+Category/display mapping and fee exclusions belong in KaosOrders. Any replacement
+normalized-source schema needs explicit review; the current combined model is not
+automatically suitable for both adapters.
+
+`core/kaosorders_source.py` defines detached reads, mapping policies, encounters,
+orders and daily snapshots. Required IDs are non-empty source keys, never derived
+from chart number, time, text, category, list order or row position. Duplicate encounter
+IDs or duplicate order IDs within an encounter invalidate the day. Multiple encounters
+per chart and multiple same-category orders remain distinct.
+
+The exact-code policy has no default production rules. Tests use synthetic `TEST_*`
+codes, not a production dictionary. An explicitly reviewed unrelated category is omitted;
+unknown categories invalidate the day rather than silently disappearing from comparison.
+
+| Category | Pill | Allowlisted static display-spec fields |
+| --- | --- | --- |
+| XRAY | 엑스레이 | exam, body_part, view |
+| BLOOD | 채혈 | study |
+| URINE | 소변검사 | study |
+| ECG | 심전도 | exam |
+| BMD | 골밀도 | exam, site |
+| INJECTION | 주사 | medication, dose, route |
+
+Details come only from exact reviewed catalog entries. Unmapped detail codes produce
+an empty specification, allowing category-only display. No raw-text fallback exists.
+Injection dose/route combinations require explicit approval; source free text cannot
+pass through the current boundary.
+
+Extra fields are rejected, including resident ID, DOB, phone, address, diagnosis, notes,
+insurance, SQL, bearer tokens and credentials. DOB calculation is not implemented;
+if needed later, calculate transiently after source closure and discard DOB before
+constructing these models. Timestamps must be timezone-aware and verified or absent.
+Data-bearing representations are redacted; exceptions contain fixed reason codes.
+Only count/status summaries are loggable. No rows, payloads, identifiers, or patient
+fields are logged or written by the new modules.
+
+## Offline Prototype: Complete-Snapshot Comparison
+
+The ledger below is an offline reference implementation combining source comparison
+and board rules. The target keeps reusable source-snapshot comparison in KaosEghis-emr
+and board decisions/persistent application state in KaosOrders. Receivers still validate
+completeness, duplicates and stale updates. Source-baseline progress and per-destination
+acknowledgement must be separate; missed deliveries need full-snapshot recovery.
+The prototype's generic CLOSED state does not preserve the required 30/40 distinction.
+The following behavior records existing offline code, not an approved new contract.
+The new `emr_source_shadow.SourceLedger` implements the source-only comparison
+separately; unlike this legacy ledger, it never cascades board withdrawals or waits
+for a receiver acknowledgement before advancing its source baseline.
+
+`core/kaosorders_shadow.py` normalizes the entire read before changing state.
+A complete read must also assert verified keys/states, whole-day coverage, no truncation,
+and source consistency. These assertions describe an approved reader's obligations,
+not independent proof or production enablement. Fixtures do not validate real schema.
+
+- 접수 (`REGISTERED`), 진료 (`IN_PROGRESS`), 보류 (`ON_HOLD`) are live; only ON_HOLD with an ACTIVE relevant order is visible.
+- 완료 (`CLOSED`) hides the encounter without changing order states. CLOSED to ON_HOLD can show it again.
+- 취소 (`CANCELLED`) withdraws the encounter and previously published child orders. The receiver must cascade this withdrawal, never mark completion.
+- `WITHDRAWN` explicitly withdraws one order. No order/completed state exists in this contract.
+- Missing orders can be withdrawn only from a complete authoritative day. Removing all orders hides the tile without cancelling an existing encounter.
+- Missing encounters can be withdrawn only with the same complete-day evidence.
+- Failed, partial, timed-out, unavailable, unknown-state, invalid-key, stale or conflicting observations preserve the last validated snapshot.
+- The same encounter key changing chart identity is rejected, not silently reassigned.
+
+One pending proposal is allowed. An identical retry returns the same proposal/batch ID;
+another read waits for acknowledgement. Acknowledgement advances the memory baseline;
+none is sent to a server. A future subscriber must coalesce busy requests instead of
+dropping them. Two clinic-day baselines are retained by default. Rollover cannot withdraw
+the previous day, and eviction is not a source action. Restart or an evicted day requires
+full authoritative reconciliation. There is no persisted outbox or snapshot.
+
+## Superseded v2 Proposal and Receiver Work
+
+See [synthetic v2 example](kaosorders-v2-proposal.json). This combined sender-side
+proposal predates the refined source/application ownership decision and is retained
+for existing offline tests. It is not the existing v1 contract, not a patient export,
+and not approved for production. Reusable source normalization remains appropriate
+on Windows, but the proposal's board-category filtering, generic CLOSED state and
+non-cancelled/relevant-order filter must not define the shared source boundary.
+The serializer needs
+an explicit synthetic-fixture argument and has no HTTP transport. Route proposal only:
+`POST /api/v2/source/day-snapshots` on KaosClinic, never the v1 route.
+
+The proposal includes clinic day, timezone-aware observation time, random batch ID,
+complete-day declaration, reception-state inventory without demographics, and minimal
+normalized demographics/orders only for non-cancelled encounters with relevant orders.
+The inventory distinguishes no-order encounters from source removal after restart.
+It still contains source identifiers: do not log it or forward it to the Pi.
+Explicit withdrawals remain separate from closure.
+
+Required KaosOrders-side work under the refined ownership split, pending repository review:
+
+1. Agree a versioned strict normalized-source schema/endpoint: approved source facts
+   and normalized meanings, completeness evidence, timestamp checks and size limits.
+   Preserve v1 unchanged; neither the route nor version of the replacement is settled.
+2. Authenticate the source to one authorized clinic scope; do not infer authorization
+   from patient identifiers. Keep bearer tokens in a secret store, never URLs or logs.
+3. Atomically reconcile one complete clinic day only after full validation. Omission
+   must never delete/withdraw data from a failed or partial request.
+4. Consume centrally interpreted reception/order facts without duplicating EMR table
+   decoding. Apply board categories on the server, including approved LAB/finger-stick/
+   urine rules and reviewed fee exclusions. Apply source edits/replacement using
+   verified keys without collapsing encounters or retaining old details on key reuse.
+   Keep unknown/unreviewed data from silently withdrawing prior state. Distinguish
+   disappearance, explicit cancellation, clinical completion and payment; retain the
+   normalized 30/40 distinction even when both states hide a tile.
+5. Idempotently acknowledge batch ID plus a server-side content check. Reject reused IDs
+   with different contents and stale/conflicting observations. Define authenticated restart
+   epochs/revisions if clock ordering is insufficient; no durable revision scheme exists here.
+6. Derive visible tiles only from ON_HOLD plus ACTIVE orders. Show Korean pills and all
+   allowlisted details; never infer performed/completed state.
+7. Serve a minimal viewer projection, not source IDs/reconciliation payloads, with
+   authenticated access and no-store headers. Handle stale/offline state without emptying
+   the board on failure. Enforce no PHI in logs/browser persistence.
+8. Define retention, full restart reconciliation, rejected-batch handling, acknowledgements,
+   retry/backoff bounds and cache clearing. Validate with synthetic integration tests first.
+
+## Flags, Secrets and Deployment Gates
+
+Implemented defaults:
 
 ```text
-stackPanel1 (Pane)
-  > eghisPanel2 (Pane)
-  > 진료실 (Window)
-  > 이지스 전자차트 2.0 (Window)
+kaosorders_shadow_enabled=false
+kaosorders_publish_enabled=false
 ```
 
-| Business action | Visible name | Shortcut | Automation ID | Control type |
-| --- | --- | --- | --- | --- |
-| Hold / temporary save | `임시저장(F6)` | `F6` | `BtnF6` | `Button` |
-| Complete / send / confirm / print series | `완료(F7)` | `F7` | `BtnF7` | `Button` |
+Neither is enabled in the working database. No UI/startup hook exists. The offline
+`read_shadow_day(settings, clinic_day, observed_at)` returns nothing when disabled.
+With shadow `true`, it returns `unavailable`: the real reader remains blocked. Publishing
+`true` is rejected when invoking shadow. No setting currently enables HTTP or source SQL.
 
-`F7` can drive a multi-stage eGHIS flow (send, confirmation, and prescription print),
-so neither key nor button activation is evidence that a source order was successfully
-saved. They are only triggers for later reconciliation.
+Before a later supervised shadow deployment:
 
-## Chart-Number Snapshot
+- Obtain explicit approval for limited production/schema verification. Prove keys, state
+  codes, categories, timestamps, clinic-day membership and consistent complete-read semantics.
+- Implement/review the parameterized day operation through the shared reader. Verify
+  SELECT-only least-privilege credentials, finite limits and all cleanup paths.
+- Review versioned mapping catalogs, row/byte bounds, completeness evidence, queue and
+  cancellation recovery, plus the inventory of other Kaos-managed readers.
+- Add a gated subscriber reusing existing triggers; verify startup, reconnect, busy
+  coalescing, follow-up, safety, manual fallback and midnight without changing PACS.
+- Use existing `eghis_db_connection_string` through its existing configuration/credential
+  path only. Do not open a second connection or log/read out credentials. Shadow needs
+  no KaosOrders endpoint or bearer token because publishing stays `false`.
+- Review count/status output only, never persist real source rows or shadow payloads.
+- Publishing is a separate stage: approved normalized-source contract, authenticated
+  KaosClinic HTTPS endpoint, non-PHI source scope, secret-store token reference and
+  bounded idempotent delivery.
+  These endpoint/scope/secret settings do not yet exist in this implementation.
 
-Before observing an F6/F7 action, the adapter should capture the currently displayed
-chart number. The current operator layout has a chart-number coordinate fallback at
-`(222, 115)`.
+## Verification
 
-Coordinates are display/DPI/layout dependent and must stay editable configuration,
-not a hard-coded identity. A verified UIA target for the chart number takes precedence
-when one is available. The captured value is used only to scope the later read-only
-query; it must not be placed in routine logs or a Raspberry Pi signal.
+Synthetic fixtures and mocked connections cover queueing, close-before-processing,
+six categories, identity, state changes, authoritative deletion, incomplete/unknown data,
+retry identity, restart, day isolation, forbidden fields, redaction and disabled defaults.
+Existing refresh tests cover coalescing, startup/reconnect, follow-up, retry and rollover.
 
-## Fixed Reconciliation Delay
+The suite rejects unmocked PostgreSQL connections and non-test network access. Only
+test-owned ephemeral loopback HTTP listeners are allowed. Native WebEngine navigation
+is stubbed; test mutexes/databases are isolated. Foundation implementation/testing
+used no production queries. The separately approved metadata-only inspection above
+made no database changes. No v1/v2 publishing was enabled.
 
-For each chart number:
+Verification on 2026-10-01 (isolated temporary data, mocked source/network/input):
 
-1. The first observed F6, F7, `BtnF6`, or `BtnF7` captures the chart number and starts
-   one fixed 20-second timer.
-2. Further F6/F7/button triggers for that same chart are ignored during that window;
-   they do not reset the timer.
-3. A different chart number receives its own independent 20-second timer.
-4. At expiry, KaosEghis runs one narrow, read-only eGHIS query for that chart number
-   and determines the actual current order/reception state.
-5. Only that verified result may be published to the future KaosOrders service.
-
-This allows the complete F7 send/confirm/print sequence to settle while preventing
-duplicate database reads and duplicate downstream notifications.
-
-## Source-State Rules
-
-- F6 / `BtnF6` is an intent signal for an eGHIS `보류` workflow.
-- F7 / `BtnF7` is an intent signal for a `완료` workflow.
-- The source database query, not the UI signal, is authoritative.
-- `보류` patients appear only when they have relevant verified categories.
-- `취소` is a source cancellation and withdraws affected source orders.
-- `완료` closes the eGHIS encounter; it must not be treated as imaging completion or
-  source cancellation.
-
-## Privacy and Integration Boundary
-
-- KaosEghis reads eGHIS only with read-only access.
-- The eventual Raspberry Pi receives a non-PHI reload signal and pulls only its
-  transient worklist from KaosOrders.
-- The Raspberry Pi does not store patient or order data.
-- Routine diagnostics must not log patient name, chart number, resident ID, diagnosis,
-  raw source rows, or complete order payloads.
-- KaosOrders must not connect directly to eGHIS, KaosPACS, Orthanc, or DICOM services.
-
-## Next Implementation Work
-
-1. Validate the observation-only probe in normal work, then make its targets
-   configurable and establish authoritative chart capture before downstream use.
-2. Implement the chart-scoped fixed-delay queue with tests for deduplication and
-   independent patients.
-3. Verify the narrow read-only queries for `보류`, `완료`, and `취소` against the
-   production eGHIS schema before creating any downstream worklist entries.
-4. Define the authenticated, minimal KaosEghis-to-KaosOrders publish contract.
+- Focused shadow/coordinator/refresh tests: **144 passed**.
+- Complete repository suite, including the supervised inspection helpers: **1,923 passed**.
+- Existing coordinator, PACS readers/triggers, flu reader, and patient-context
+  production modules are unchanged. The suite performed no live EMR validation.

@@ -86,6 +86,51 @@ def test_declining_handoff_clears_only_form_after_print(page, monkeypatch):
         assert len(list_vaccine_records(connection)) == 1
 
 
+@pytest.mark.parametrize("already_started", [False, True])
+@pytest.mark.parametrize("print_success", [False, True])
+def test_label_print_starts_reminder_once_for_manually_opened_system(page, monkeypatch, already_started, print_success):
+    now = [1000.0]
+    monkeypatch.setattr(vaccine_tab, "monotonic", lambda: now[0])
+    assert page._session_reminder_started_at is None
+    if already_started:
+        page._start_session_reset_reminder()
+    original_start = page._session_reminder_started_at
+    now[0] += 120
+    expected_start = original_start if already_started else now[0]
+    printed_at = []
+
+    def print_label(*_args, **_kwargs):
+        printed_at.append(page._session_reminder_started_at)
+        assert page._session_reminder_timer.isActive()
+        return VaccineLabelPrintResult(print_success, "Synthetic print result")
+
+    monkeypatch.setattr(vaccine_tab, "print_vaccine_label", print_label)
+    monkeypatch.setattr(page, "_begin_post_print_handoff", lambda _records: None)
+    page.print_button.click()
+    assert page._session_reminder_started_at == expected_start
+    now[0] += 120
+    page.print_button.click()
+    assert page._session_reminder_started_at == expected_start
+    assert printed_at == [expected_start, expected_start]
+
+
+@pytest.mark.parametrize("blocked", ["no_selection", "program_declined", "busy"])
+def test_blocked_print_does_not_start_reminder(page, monkeypatch, blocked):
+    if blocked == "no_selection":
+        page._clear_vaccine_selection()
+    elif blocked == "program_declined":
+        monkeypatch.setattr(page, "_confirm_program_printing", lambda *_a: (False, False))
+    else:
+        page._print_in_progress = True
+    monkeypatch.setattr(vaccine_tab, "print_vaccine_label", lambda *_a, **_kw: pytest.fail("No print expected"))
+    try:
+        page.print_label()
+        assert page._session_reminder_started_at is None
+        assert not page._session_reminder_timer.isActive()
+    finally:
+        page._print_in_progress = False
+
+
 def test_yes_uses_printed_snapshot_and_clears_after_success(page, monkeypatch):
     entered = []
     charting_text = page.charting_text_preview.toPlainText()
@@ -179,6 +224,34 @@ def _prepare_pair(page, monkeypatch):
     monkeypatch.setattr(page, "_confirm_program_printing", lambda *_a: (True, True))
     monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.StandardButton.Yes)
     return pair
+
+
+def test_pair_print_starts_one_reminder_not_one_per_label(page, monkeypatch):
+    _prepare_pair(page, monkeypatch)
+    now = [1000.0]
+    monkeypatch.setattr(vaccine_tab, "monotonic", lambda: now[0])
+    printed_at = []
+
+    def print_label(*_args, **_kwargs):
+        printed_at.append(page._session_reminder_started_at)
+        now[0] += 10
+        return VaccineLabelPrintResult(True, "Printed")
+
+    monkeypatch.setattr(vaccine_tab, "print_vaccine_label", print_label)
+    monkeypatch.setattr(page, "_begin_post_print_handoff", lambda _records: None)
+    page.print_prepared_pair_button.click()
+    assert printed_at == [1000.0, 1000.0]
+    assert page._session_reminder_started_at == 1000.0
+    assert page._session_reminder_timer.isActive()
+
+
+def test_declined_pair_print_leaves_reminder_idle(page, monkeypatch):
+    _prepare_pair(page, monkeypatch)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(vaccine_tab, "print_vaccine_label", lambda *_a, **_kw: pytest.fail("No print expected"))
+    page.print_prepared_pair_button.click()
+    assert page._session_reminder_started_at is None
+    assert not page._session_reminder_timer.isActive()
 
 
 def test_pair_prompts_once_after_both_prints_and_retries_only_failed_system(page, monkeypatch):

@@ -366,7 +366,7 @@ class VaccineSystemTargetsEditor(QWidget):
         self.session_keeper_progress_bar.setRange(0, 100)
         self.session_keeper_progress_bar.setValue(0)
         self.session_keeper_progress_bar.setMaximumHeight(18)
-        self.session_keeper_progress_bar.setFormat("Reminder age: 0:00")
+        self.session_keeper_progress_bar.setFormat("Reminder not started")
         self.session_keeper_progress_bar.setToolTip(
             "Manual reminder age, not the systems' actual session-expiry time."
         )
@@ -699,7 +699,11 @@ class VaccineSystemTargetsEditor(QWidget):
     def set_session_keeper_status(self, message: str) -> None:
         self.session_keeper_status_label.setText(message)
 
-    def set_session_reset_reminder(self, elapsed_seconds: int) -> None:
+    def set_session_reset_reminder(self, elapsed_seconds: int | None) -> None:
+        if elapsed_seconds is None:
+            self.session_keeper_progress_bar.setValue(0)
+            self.session_keeper_progress_bar.setFormat("Reminder not started")
+            return
         elapsed_seconds = max(0, int(elapsed_seconds))
         minutes, seconds = divmod(elapsed_seconds, 60)
         self.session_keeper_progress_bar.setValue(min(100, round(elapsed_seconds * 100 / 5400)))

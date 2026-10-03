@@ -1092,6 +1092,10 @@ def _resolve_cached_grid_handle(
         )
         if handle is not None:
             return handle
+        # A valid UIA grid need not expose an HWND. Do not repeat the lookup
+        # through Win32 after the UIA anchor has already been cached.
+        if _cached_grid_element_for_scope(scope_handle, automation_id) is not None:
+            return None
     return None
 
 

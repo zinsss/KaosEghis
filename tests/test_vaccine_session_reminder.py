@@ -1,6 +1,8 @@
 import pytest
 import threading
+import sys
 from time import monotonic, sleep
+from types import SimpleNamespace
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
@@ -17,7 +19,7 @@ def wait_for_reset(page):
 
 
 @pytest.fixture
-def reminder(tmp_path, monkeypatch):
+def idle_reminder(tmp_path, monkeypatch):
     app = QApplication.instance() or QApplication([])
     now = [1000.0]
     monkeypatch.setattr(vaccine_tab, "monotonic", lambda: now[0])
@@ -43,6 +45,106 @@ def reminder(tmp_path, monkeypatch):
     page.close()
     page.deleteLater()
     app.processEvents()
+
+
+@pytest.fixture
+def reminder(idle_reminder):
+    page, _now = idle_reminder
+    page._start_session_reset_reminder()
+    return idle_reminder
+
+
+def test_startup_and_settings_reload_leave_reminder_idle(idle_reminder):
+    page, now = idle_reminder
+    assert page._session_reminder_started_at is None
+    assert not page._session_reminder_timer.isActive()
+    now[0] += 4 * 3600
+    page._session_reminder_timer.timeout.emit()
+    page.load_vaccine_settings()
+    page.activate_page()
+    assert page._session_reminder_started_at is None
+    assert not page._session_reminder_timer.isActive()
+    assert page._session_reset_alert is None
+    assert "#a3b1c2" in page.session_reset_now_button.styleSheet()
+    assert "not started" in page.session_reset_now_button.toolTip()
+    assert page.settings_page.system_targets_editor.session_keeper_progress_bar.format() == "Reminder not started"
+
+
+@pytest.mark.parametrize("system", ["general", "influenza", "covid"])
+@pytest.mark.parametrize("outcome", ["opened", "already_open", "failed", "cancelled"])
+def test_launch_result_starts_reminder_only_for_detected_system(idle_reminder, monkeypatch, system, outcome):
+    page, now = idle_reminder
+    calls = []
+    monkeypatch.setitem(sys.modules, "pythoncom", SimpleNamespace(
+        COINIT_MULTITHREADED=0, CoInitializeEx=lambda _mode: None, CoUninitialize=lambda: None,
+    ))
+    monkeypatch.setattr(vaccine_tab, "start_kdca_certificate_login", lambda *_a, **_kw:
+        vaccine_tab.KdcaCertificateLoginResult(True, "signed_in", "Signed in", browser_handle=123))
+
+    def launch(_settings, key, **_kwargs):
+        calls.append(key)
+        assert page._session_reminder_started_at is None
+        if outcome == "cancelled":
+            page._kdca_cancel.set()
+        return vaccine_tab.VaccineSystemLaunchResult(outcome != "failed", outcome)
+
+    monkeypatch.setattr(vaccine_tab, "open_vaccine_system", launch)
+    now[0] += 2 * 3600
+    assert page.open_vaccine_system(system)
+    worker = page._kdca_thread
+    worker.join(3)
+    assert not worker.is_alive()
+    QApplication.processEvents()
+    assert page._kdca_thread is None
+    assert calls == [system]
+    if outcome in {"opened", "already_open"}:
+        assert page._session_reminder_started_at == now[0]
+        assert page._session_reminder_timer.isActive()
+    else:
+        assert page._session_reminder_started_at is None
+        assert not page._session_reminder_timer.isActive()
+    assert page._session_reset_alert is None
+
+
+@pytest.mark.parametrize("success", [False, True])
+def test_portal_login_alone_does_not_start_reminder(idle_reminder, success):
+    page, now = idle_reminder
+    now[0] += 3600
+    page._finish_kdca_operation(vaccine_tab.KdcaCertificateLoginResult(success, "test", "Login result"))
+    assert page._session_reminder_started_at is None
+    assert not page._session_reminder_timer.isActive()
+
+
+def test_later_launch_does_not_postpone_existing_reminder(reminder):
+    page, now = reminder
+    started = page._session_reminder_started_at
+    now[0] += 90 * 60
+    page._finish_kdca_operation(vaccine_tab.VaccineSystemLaunchResult(True, "Another system opened"))
+    page._update_session_reset_reminder()
+    assert page._session_reminder_started_at == started
+    assert "#ef6b73" in page.session_reset_now_button.styleSheet()
+
+
+def test_successful_reset_can_start_an_idle_reminder(idle_reminder, monkeypatch):
+    page, now = idle_reminder
+    install_outcomes(monkeypatch)
+    now[0] += 3600
+    page.reset_vaccine_sessions_now()
+    wait_for_reset(page)
+    assert page._session_reminder_started_at == now[0]
+    assert page._session_reminder_timer.isActive()
+
+
+def test_reset_with_no_open_system_leaves_reminder_idle(idle_reminder, monkeypatch):
+    page, _now = idle_reminder
+    monkeypatch.setattr(vaccine_tab, "reset_vaccine_session", lambda target, **_kw:
+        VaccineSessionResetResult(target.key, "not_open", "Not open"))
+    monkeypatch.setattr(vaccine_tab, "refresh_influenza_session", lambda *_a, **_kw:
+        VaccineSessionResetResult("influenza", "not_open", "Not open"))
+    page.reset_vaccine_sessions_now()
+    wait_for_reset(page)
+    assert page._session_reminder_started_at is None
+    assert not page._session_reminder_timer.isActive()
 
 
 def install_outcomes(monkeypatch, *, covid="reset_sent", flu="not_open"):

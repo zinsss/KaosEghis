@@ -35,6 +35,9 @@ class _Root:
         self.handle = handle
         self._values = values
 
+    def is_visible(self):
+        return True
+
     def child_window(self, *, auto_id: str):
         if auto_id not in self._values:
             return _Specification(LookupError(auto_id))
@@ -81,6 +84,9 @@ class _LegacyValueChartElement:
         self._parent_scope = parent_scope
         self.value_reads = 0
 
+    def is_visible(self):
+        return True
+
     def top_level_parent(self):
         return self._patient_root
 
@@ -103,6 +109,9 @@ class _WrapperRoot:
             for automation_id, value in values.items()
         ]
         self.descendant_calls = 0
+
+    def is_visible(self):
+        return True
 
     def descendants(self):
         self.descendant_calls += 1
@@ -512,6 +521,9 @@ def test_exact_process_lookup_prefers_chart_under_patient_information(
 
     expected = Candidate("829", 20, patient_scope)
     unrelated = Candidate("999", 10, unrelated_scope)
+    monkeypatch.setattr(
+        vaccine_patient_context, "_visible_process_window_handles", lambda _pids: (77,),
+    )
     monkeypatch.setattr(
         vaccine_patient_context,
         "find_uia_elements_by_automation_ids",

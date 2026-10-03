@@ -1,6 +1,6 @@
 # KaosEghis-emr
 
-Last updated: 2026-09-30
+Last updated: 2026-10-03
 
 Status: the first shared-read stage is implemented. Verified chart clears can now
 refresh the existing whole-day PACS query; Poll Now remains a manual fallback.
@@ -9,6 +9,164 @@ process and a Windows machine-wide mutex. Each source connection is read-only an
 closed before the next read or any downstream delivery. This is not yet a separate
 broker executable or an all-orders/reception-status reader for KaosOrders.
 F6/F7 observations remain diagnostic only. The patient-memo alert is unchanged.
+
+The [KaosOrders shadow foundation](kaosorders.md) now has detached typed models,
+strict synthetic mapping tests and memory-only complete-day comparison. Its actual
+day reader remains blocked: limited key/state/lifecycle evidence is recorded, but
+whole-day identity, mappings and completeness are not fully verified. Both new flags
+default off; there is no runtime trigger subscriber, new source SQL, network publisher
+or persistent outbox.
+KaosOrders is hosted on KaosClinic with a Raspberry Pi OS touchscreen viewer; the
+new source-state and deployment decisions in that document supersede older plans.
+
+The destination-neutral source model and source comparison are now implemented
+**offline only** in `core/emr_source.py` and `core/emr_source_shadow.py`. They have
+no production mappings, source SQL, runtime subscribers or delivery path. The
+existing PACS pipeline and its shared connection boundary remain unchanged.
+
+## Connector Ownership Decision: 2026-10-03
+
+**KaosEghis-emr owns safe source access, reusable EMR interpretation and source-change
+detection. KaosPACS and KaosOrders own application-specific decisions and state.**
+This refines the earlier same-day connector-only proposal: the boundary is EMR
+interpretation versus application behavior, not processing versus no processing.
+This is the target design, not a claim that the existing PACS pipeline or disabled
+Orders prototype has moved.
+
+```text
+eGHIS DB (read-only)
+  -> KaosEghis-emr: shared FIFO + Windows machine-wide mutex
+  -> bounded read, detached result, cursor/physical connection closed
+  -> validated source normalization and source-snapshot comparison
+  -> destination-specific adapters
+       -> KaosPACS: imaging eligibility, routing, worklist and imaging lifecycle
+       -> KaosOrders: categories, fees, visibility, badges and order details
+
+Flu reports, health checks and patient-context reads use the same source boundary.
+```
+
+| Responsibility | Owner |
+| --- | --- |
+| Chart clear/load scheduling, coalescing, safety/manual reads | KaosEghis-emr |
+| Reviewed parameterized SQL, one live Kaos-managed connection, read-only mode, finite limits and verified cleanup | KaosEghis-emr |
+| Source key scope, field/type validation, consistency and complete/partial/failed read evidence | KaosEghis-emr |
+| Verified EMR code interpretation, normalized fields and source-change detection | KaosEghis-emr, after connection closure |
+| Destination field allowlists, minimal identity projection, schema serialization, authenticated delivery and bounded retry | KaosEghis-emr adapters, after connection closure |
+| Idempotent update application, stale-update rejection and persistent application state | Each receiving system |
+| Category mappings, fee exclusions, badges, visibility and order details | KaosOrders |
+| Imaging eligibility, modality/station rules, worklist behavior, completion and expiry | KaosPACS |
+
+Separate adapters do not mean separate database owners or a generic SQL proxy.
+They may need different reviewed queries and privacy contracts; do not force the
+current imaging query and a future all-orders reader into one universal query.
+Neither receiver receives EMR credentials or opens its own EMR DB connection.
+Network waits/retries never retain the connection slot or machine-wide mutex.
+Share already-read data where the reviewed projections permit it. KaosPACS receives
+data directly from its adapter, not through KaosOrders or its filtered board data.
+Neither receiver's restart or visibility rules should control the other's source feed.
+
+The Orders projection must preserve approved source facts across relevant reception
+states, including completed, paid and cancelled encounters; it must not pre-filter
+to visible hold patients or decide categories on Windows. Include reviewed order
+codes/type/department, state flags and approved structured edit fields as required
+by the future contract, not unrestricted source rows or clinical free text. Source
+privacy and completeness checks remain mandatory. Interpret verified source codes
+centrally and preserve approved source facts alongside their normalized meanings.
+In particular, keep `30` / 진료완료 and `40` / 수납완료 distinct; do not collapse both
+into a generic closed state at the shared boundary. Unknown or ambiguous meanings
+must fail closed for dependent decisions, not become guessed completion/cancellation.
+
+KaosEghis-emr compares validated source snapshots for same-key content edits, state
+transitions, physical disappearance and key reuse. For example, it can report a
+진료완료-to-보류 transition or an approved quantity change without deciding tile
+visibility or imaging eligibility. Absence proves disappearance only within a
+verified complete source scope; it is not itself proof of clinical cancellation.
+Reused keys must not silently retain old content or imply an immutable order lifetime.
+
+Receivers apply those observations to their own state with duplicate/stale checks
+and full-snapshot recovery. Source observation progress is separate from each
+destination's delivery acknowledgement; a missed delivery must remain recoverable.
+Snapshot/delta format, retry ordering and baseline persistence still need contract
+review. No new event stream or persisted source ledger is enabled by this decision.
+`observed_at` means when we read the source, not an inferred edit/cancel time.
+Failed or partial reads cannot advance an authoritative comparison or imply removals.
+
+Migration is staged: agree minimal normalized-source contracts with both receiving
+repos, test EMR interpretation/source comparison here and application behavior there,
+verify the Windows reader with mocked DBs, then seek approval for bounded live
+shadow validation. Keep the current PACS
+query, cancellation authority and API behavior until contract compatibility and
+shadow parity are verified. No new production query or publisher is enabled by
+this documentation decision. See [Orders migration](kaosorders.md) and
+[PACS compatibility](kaoseghis-pacs.md).
+
+## Offline Source Model: 2026-10-03
+
+This stage implements an internal, fixture-testable model, not a receiver-approved
+wire schema. `EghisSourceDayReader.read_day` always returns `unavailable`; no flag
+can enable a live query. The old Orders normalizer reuses common validation types
+from this module but remains a separate disabled board-reference prototype.
+
+| Model | Contents and boundary |
+| --- | --- |
+| `EmrDayRead` | Detached rows, source/projection/day scope, observation time, read outcome and explicit evidence flags. |
+| `SourcePolicy` | Versioned exact reception/order-state mappings. No default production mapping or category rules. |
+| `EncounterFacts` | Encounter ID, chart number, name, normalized sex/age, source state code and normalized state. Consultation completed and payment completed are distinct. |
+| `OrderKey` | Encounter ID, order date, order number and sequence as separate fields. Not a lifetime identity or an accession-number replacement. |
+| `OrderFacts` | Key, source order code/type/department, source state code and normalized state; optional exact-decimal quantity/days/frequency behind a separate evidence gate. |
+| `SourceSnapshot` | Validated complete scope, mapping revision and immutable encounter/order facts, including cancelled encounters, fee rows and no-order encounters. |
+| `SourceObservation` | Full snapshot, observation ID, changed/added facts and missing keys. Missing means absent from the complete scope, not clinically cancelled. |
+
+All field aliases are proposed projections, not new production SQL columns. Optional
+structured values have no clinical dose/unit conversion; their source meanings still
+need review. DOB, resident ID, phone, address, diagnosis, notes, arbitrary extra fields
+and unverified source-event timestamps are rejected. Only `observed_at` is recorded.
+Routine representations are redacted and summaries contain counts/status only.
+
+Normalization rejects unverified keys/states/coverage/consistency/closure, failed or
+partial reads, unknown state codes, duplicate/orphan keys, invalid fields/numbers
+and oversized results (more than 10,000 encounters or 100,000 orders). It never
+truncates a result into an authoritative day. Numeric guards bound exact-decimal
+representations; they are not vaccine, fee or clinical eligibility rules. Evidence
+flags are reader assertions, not independent proof of completeness or DB closure.
+
+`SourceLedger.observe` advances a memory-only baseline after whole-input validation,
+independent of any destination acknowledgement. Identical latest observations reuse
+their ID; later observations can proceed without either receiver. Every result keeps
+the full snapshot for eventual recovery, not just deltas. Stale/conflicting reads,
+changed chart identity for an existing encounter, or a changed mapping definition/
+revision cannot advance that baseline. Source/projection/day scopes are separate.
+Two snapshots are retained by default; restart or eviction requires full reconciliation
+and never creates a disappearance event. There is no persistent ledger or outbox.
+
+Synthetic tests cover same-key edits while paid, explicit cancellation versus missing
+rows, reused keys with different contents, completion/payment/hold/cancel/restore,
+unchanged active child orders, fee preservation, privacy, retry, scope isolation,
+mapping drift and incomplete reads. Mocked DB tests check cursor/connection cleanup
+before source processing and another queued read finishing while processing waits.
+Real database access, network publishing and native input are not part of this stage.
+
+Verification: **120 new source-model cases** and **528 total targeted tests passed**
+in 65.22 seconds, including the legacy Orders shadow, shared reader, imports, PACS
+polling/refresh/delivery, flu reporting/diagnostics, patient-context API and PACS docs.
+Tests used temporary application data, mocked DB/network/input and isolated test
+mutexes. This was not a full repository run or live-source validation. Relative
+documentation links and tracked/new-file whitespace checks also passed.
+
+Remaining gates: review this internal projection with the receiving repositories,
+verify all required source fields and complete-day semantics, implement a bounded
+read through the shared coordinator, then separately approve live shadow validation.
+Do not activate the old board serializer or replace the existing PACS imaging query.
+
+The [2026-10-03 contract review](kaoseghis-emr-contract-review.md) records receiver
+field gaps and the next acceptance checklist. The shared model lacks PACS-specific
+accession/schedule/routing data; a separate projection is required. Raw state
+qualifiers and durable delivery ordering also remain unresolved. The corrected
+host is `zin@kaosclinic`, repository `/srv/projects/KaosOrders`, inspected at
+`b5f7ccd8257f29235c90b11499b8ed352fc06d0d`. Its existing v1 per-encounter/category
+API cannot accept the shared day snapshot or preserve its full state/edit facts.
+The review records migration and receiver-test gaps; remote code is unchanged,
+running deployment compatibility is unverified, and the reader gate is not passed.
 
 ## Observation-Only Probe
 
@@ -314,6 +472,38 @@ in memory; durable broker queues, all-orders snapshots and reception status sema
 work. Serialization may reduce contention but does not prove the flu-report/EMR
 timeout issue is resolved.
 
+#### Bound Query Parameters (2026-10-01)
+
+`run_readonly_query` now accepts an optional keyword-only `params` argument:
+tuples/lists for `%s` placeholders, or mappings for `%(name)s` placeholders.
+Values are passed separately to the driver's `cursor.execute(query, params)`;
+the helper does not interpolate, quote, or format them into SQL. Parameters are
+for values, never table/column names or arbitrary SQL fragments. Queries must
+still be fixed, reviewed read operations under the existing safety policy.
+
+The parameter container and its values are copied before queue submission so
+later caller edits, including nested list edits, do not change a waiting request.
+Other top-level containers (including bare strings and generators) fail before
+queueing or connecting. Values must support copying and driver adaptation.
+Calls omitting `params` (or using `None`) retain the original one-argument execute
+path, including literal percent characters in existing SQL. Empty containers are
+passed to the driver as supplied parameters, not treated as missing parameters.
+
+Bound and legacy reads share the same FIFO, machine-wide mutex, read-only session,
+finite timeouts, cursor/connection cleanup, and uncertain-close stop policy. The
+new argument does not introduce connections, retries, timers, logging, or pooling.
+PACS, flu, health, context and diagnostic call sites were not migrated in this
+stage. No live source read or app restart was performed to verify this change.
+
+Focused mocked tests passed **162 tests**, covering existing consumers and shadow
+logic, separate parameter forwarding, literal SQL-like values, supported value
+types, caller mutation during queue wait, invalid containers, driver adaptation
+errors, simulated query timeout, all cleanup failure stages, and blocked subsequent
+reads after uncertain connection closure. Test-only Windows mutex names and a
+default rejection of unmocked PostgreSQL connections keep production isolated.
+The full isolated repository suite passed **1,950 tests** in **193.65 seconds**.
+This API capability does not implement or approve the future all-orders day query.
+
 ### Delayed Patient-Memo Alert
 
 With `Enable *** patient-note alert` enabled, the shared chart observer schedules
@@ -368,8 +558,8 @@ Chart events use the
 The following sections describe the full target architecture, beyond the PACS-only
 stage above; they are not a claim that all acceptance gates are implemented.
 
-KaosEghis-emr will be the shared eGHIS read adapter for KaosEghis-pacs,
-KaosOrders, on-demand flu reporting, and patient-context database lookups.
+KaosEghis-emr will be the shared eGHIS connector with separate adapters for
+KaosPACS and KaosOrders, plus on-demand flu reporting and patient-context reads.
 
 - Observe F6/F7 and the verified BtnF6/BtnF7 controls without suppressing, replaying,
   or generating those inputs. Signals indicate intent, not successful order saves.
@@ -377,8 +567,10 @@ KaosOrders, on-demand flu reporting, and patient-context database lookups.
 - Validate the initial and follow-up timing during normal clinical work. The
   earlier per-chart 20-second F7 proposal in [KaosOrders signal capture](kaosorders.md)
   is superseded by day-wide chart-clear/load refreshes.
-- Reconcile actual source states before delivering minimal data to the PACS and
-  KaosOrders adapters. These adapters retain their own domain and delivery logic.
+- Validate source facts and completeness, then interpret verified EMR codes,
+  normalize fields and compare source snapshots after connection closure. Deliver
+  minimal approved observations through destination adapters; imaging and board
+  decisions belong to KaosPACS and KaosOrders respectively.
 - Run flu reporting only on explicit request. Prefer small source reads and local
   calculations, subject to exact count/age semantics and validation.
 - Serialize source reads through a bounded background queue. UIA observation and

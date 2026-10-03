@@ -75,10 +75,7 @@ class SettingsTab(QWidget):
         )
         self.patient_alert_memo_ancestor_path.setMaximumHeight(110)
         self.kaosgdd_url = QLineEdit()
-        self.memos_url = QLineEdit()
         self.paperless_url = QLineEdit()
-        self.stirling_pdf_url = QLineEdit()
-        self.rhwp_url = QLineEdit()
         self.wikijs_url = QLineEdit()
         self.sftpgo_url = QLineEdit()
         self.credential_ref = QLineEdit()
@@ -157,10 +154,7 @@ class SettingsTab(QWidget):
             self.patient_alert_memo_ancestor_path,
         )
         form.addRow("KaosGDD URL", self.kaosgdd_url)
-        form.addRow("Memos URL", self.memos_url)
         form.addRow("Paperless URL", self.paperless_url)
-        form.addRow("Stirling-PDF URL", self.stirling_pdf_url)
-        form.addRow("rHWP URL", self.rhwp_url)
         form.addRow("Wiki.js URL", self.wikijs_url)
         form.addRow("SFTPGo URL", self.sftpgo_url)
         form.addRow("Credential reference name", self.credential_ref)
@@ -276,10 +270,7 @@ class SettingsTab(QWidget):
             settings["eghis_patient_alert_memo_ancestor_path"]
         )
         self.kaosgdd_url.setText(settings["kaosgdd_url"])
-        self.memos_url.setText(settings["memos_url"])
         self.paperless_url.setText(settings["paperless_url"])
-        self.stirling_pdf_url.setText(settings["stirling_pdf_url"])
-        self.rhwp_url.setText(settings["rhwp_url"])
         self.wikijs_url.setText(settings["wikijs_url"])
         self.sftpgo_url.setText(settings["sftpgo_url"])
         self.credential_ref.setText(settings["credential_reference_name"])
@@ -345,10 +336,7 @@ class SettingsTab(QWidget):
                 self.patient_alert_memo_ancestor_path.toPlainText().strip()
             ),
             "kaosgdd_url": self.kaosgdd_url.text().strip(),
-            "memos_url": self.memos_url.text().strip(),
             "paperless_url": self.paperless_url.text().strip(),
-            "stirling_pdf_url": self.stirling_pdf_url.text().strip(),
-            "rhwp_url": self.rhwp_url.text().strip(),
             "wikijs_url": self.wikijs_url.text().strip(),
             "sftpgo_url": self.sftpgo_url.text().strip(),
             "credential_reference_name": self.credential_ref.text().strip(),

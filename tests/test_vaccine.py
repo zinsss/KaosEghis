@@ -1,4 +1,5 @@
 import os
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -294,8 +295,22 @@ def test_authenticated_system_buttons_use_portal_menu_in_verified_browser(tmp_pa
         open_vaccine_system, opener=lambda *_args, **_kwargs: pytest.fail("direct URL launch"),
         ready=lambda *_args: events[-1] != "authenticated",
     ))
-    hotkey = Mock(side_effect=AssertionError("Launch must not send positioning shortcuts"))
-    monkeypatch.setattr(pyautogui, "hotkey", hotkey)
+    placement_calls = []
+    for name in ("hotkey", "keyDown", "keyUp", "press", "moveTo", "moveRel",
+                 "dragTo", "dragRel", "mouseDown", "mouseUp"):
+        spy = Mock(side_effect=AssertionError("Launch must not send placement input"))
+        monkeypatch.setattr(pyautogui, name, spy)
+        placement_calls.append(spy)
+    import pywinauto.keyboard
+    keys = Mock(side_effect=AssertionError("Launch must not send placement keys"))
+    monkeypatch.setattr(pywinauto.keyboard, "send_keys", keys)
+    placement_calls.append(keys)
+    if sys.platform == "win32":
+        import win32gui
+        for name in ("MoveWindow", "SetWindowPos"):
+            spy = Mock(side_effect=AssertionError("Launch must not relocate or resize windows"))
+            monkeypatch.setattr(win32gui, name, spy)
+            placement_calls.append(spy)
     panel = module.VaccineTab(tmp_path / "KaosEghis.sqlite")
     panel.open_general_system_button.click()
     _wait_for_kdca(panel)
@@ -309,7 +324,8 @@ def test_authenticated_system_buttons_use_portal_menu_in_verified_browser(tmp_pa
         "authenticated", ("portal_menu", "influenza"),
         "authenticated", ("portal_menu", "covid"),
     ]
-    hotkey.assert_not_called()
+    for spy in placement_calls:
+        spy.assert_not_called()
     assert not hasattr(panel, "_system_position_timer")
     assert panel.open_general_system_button.isEnabled()
     assert panel.open_influenza_system_button.isEnabled()
@@ -1381,7 +1397,7 @@ def test_legacy_auto_setting_never_arms_input_at_startup(
     assert "Manual session reset" in (
         page.settings_page.system_targets_editor.session_keeper_status_label.text()
     )
-    assert "Reminder age:" in (
+    assert "Reminder not started" in (
         page.settings_page.system_targets_editor.session_keeper_progress_bar.format()
     )
 

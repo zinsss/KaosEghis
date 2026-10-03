@@ -45,13 +45,23 @@ Main window:
   clipboard contents, patient information, or national IDs
 - the optional KaosEghis-PACS patient-context listener follows the desktop app
   lifecycle; it starts from saved settings and closes with the application
-- top-level tabs currently in code:
-  - `KaosEghis`
-  - `Memos`
-- `Workspace`
-- `PACS`
-- `Macros`
-- `Settings`
+- top-level tabs currently in code: `KaosEghis`, `Workspace`, `PACS`, `Macros`,
+  and `Settings`
+
+### Embedded Services (2026-10-01)
+
+Memos, Stirling-PDF, and rHWP have been removed from navigation, startup loading,
+URL settings, and default configuration. KaosGDD remains in Launcher for the memo
+workflow; the operator uses Polaris Office externally for document tools. No
+Polaris launch or integration is added by this removal.
+
+The remaining embedded pages are KaosGDD, Paperless, and KaosPACS Admin.
+Workspace navigation is `Mail`, `Paperless`, `Flu-Report`, `Scan`, and `Formatter`.
+Scan's PDF preview/OCR and all EMR/vaccine workflows are unchanged. Browser process
+counts may differ from page counts; memory savings need a post-restart measurement.
+
+Existing retired-service settings and browser profiles are left on disk, unused.
+No notes, documents, remote services, or saved user data are deleted.
 
 Hidden infrastructure should not add top-level tabs unless it truly needs a daily-use
 operator surface. The current credential plan for `KaosEghis-pw` is intentionally

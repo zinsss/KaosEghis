@@ -37,7 +37,6 @@ from KaosEghis.ui.dialogs.pw_popup_dialog import (
     CredentialPopupDialog,
 )
 from KaosEghis.ui.emr_patient_alert import EmrPatientAlertPopup
-from KaosEghis.ui.tabs.memos_tab import MemosTab
 from KaosEghis.ui.tabs.kaoseghis_tab import (
     KaosEghisTab,
     MacrosTab,
@@ -121,8 +120,6 @@ class MainWindow(QMainWindow):
         self.emr_signal_probe.patient_changed.connect(self.patient_alert_monitor.patient_changed)
         self.scheduler_runtime = SchedulerRuntime(parent=self)
         tabs.addTab(self.kaoseghis_tab, "KaosEghis")
-        self.memos_tab = MemosTab()
-        tabs.addTab(self.memos_tab, "Memos")
         self.workspace_tab = WorkspaceTab()
         tabs.addTab(self.workspace_tab, "Workspace")
         self.pacs_panel = PacsPanel()

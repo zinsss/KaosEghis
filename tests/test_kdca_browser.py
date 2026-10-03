@@ -204,3 +204,18 @@ def test_native_existing_window_is_focused_without_duplicate_launch(monkeypatch,
     )
     assert result.success is success
     assert focused == ([202] if len(handles) == 1 else [])
+
+
+def test_native_focus_does_not_reposition_window(monkeypatch):
+    from unittest.mock import Mock
+    import pywinauto
+
+    window = SimpleNamespace(set_focus=Mock(), move_window=Mock())
+    desktop = SimpleNamespace(window=Mock(return_value=SimpleNamespace(wrapper_object=lambda: window)))
+    monkeypatch.setattr(pywinauto, "Desktop", lambda **_kw: desktop)
+    monkeypatch.setattr(launch, "foreground_handle", lambda: 202)
+
+    assert launch._focus_native_window(202)
+    desktop.window.assert_called_once_with(handle=202)
+    window.set_focus.assert_called_once_with()
+    window.move_window.assert_not_called()

@@ -15,6 +15,7 @@ from KaosEghis.core.vaccine_patient_control_cache import PatientControlCache
 
 DEFAULT_PATIENT_INFO_OPEN_COORDINATES = (210, 115)
 DEFAULT_PATIENT_INFO_TIMEOUT_SECONDS = 4.0
+PATIENT_INFO_OPEN_GRACE_SECONDS = 0.6
 PATIENT_FIELD_AUTOMATION_ID_FALLBACKS = {
     # Older/current patient-information views expose this value as txtSexAge,
     # while the main treatment view commonly exposes lblSexAge.
@@ -48,6 +49,7 @@ class _PatientInformationResolution:
     chart_value: str
     chart_element: Any | None = None
     cached_elements: dict[str, Any] | None = None
+    pending: bool = False
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,7 @@ def fetch_vaccine_patient_context(
     desktop_factory: Callable[..., Any] | None = None,
     process_family_provider: Callable[[int], tuple[int, ...]] | None = None,
     process_target_finder: Callable[[str, tuple[int, ...]], Any | None] | None = None,
+    foreground_scope_finder: Callable[..., _PatientInformationResolution | None] | None = None,
     clicker: Callable[[tuple[int, int]], None] | None = None,
     closer: Callable[[], None] | None = None,
     on_date: date | None = None,
@@ -136,6 +139,8 @@ def fetch_vaccine_patient_context(
         process_family_provider = _trusted_eghis_process_ids
     if process_target_finder is None and uses_native_desktop:
         process_target_finder = _find_exact_uia_edit_in_processes
+    if foreground_scope_finder is None and uses_native_desktop:
+        foreground_scope_finder = _find_foreground_patient_information_scope
 
     try:
         clicker(opener_coordinates)
@@ -162,21 +167,47 @@ def fetch_vaccine_patient_context(
     }
     selectors = {"chart_no": (chart_automation_id,), **field_automation_ids}
     root_handle = getattr(state, "window_handle", None)
-    deadline = clock() + max(float(timeout_seconds), 0.1)
+    started = clock()
+    deadline = started + max(float(timeout_seconds), 0.1)
     patient_resolution = None
-    while clock() <= deadline:
-        patient_resolution = _find_cached_patient_information_scope(
+    while (now := clock()) <= deadline:
+        cached_resolution = _find_cached_patient_information_scope(
             desktop,
             int(state.pid),
             chart_automation_id,
             root_handle=root_handle,
             selectors=selectors,
         )
-        if patient_resolution is not None:
+        if cached_resolution is not None and not cached_resolution.pending:
+            patient_resolution = cached_resolution
             break
         # The patient-information window may start in an eGHIS helper process
         # after the opener is clicked, so refresh the trusted family each pass.
         process_ids = process_family_provider(int(state.pid))
+        if foreground_scope_finder is not None:
+            foreground_resolution = foreground_scope_finder(
+                desktop, state, chart_automation_id, process_ids,
+            )
+            if foreground_resolution is not None:
+                if foreground_resolution.pending:
+                    sleeper(0.1)
+                    continue
+                patient_resolution = foreground_resolution
+                _remember_patient_information_scope(
+                    int(state.pid), chart_automation_id, patient_resolution.scope,
+                )
+                break
+        # Reopening a live popup can briefly leave its cached controls hidden.
+        # Give the narrow paths a chance before starting an expensive tree scan.
+        if (
+            (cached_resolution is not None or foreground_scope_finder is not None)
+            and now - started < PATIENT_INFO_OPEN_GRACE_SECONDS
+        ):
+            sleeper(0.1)
+            continue
+        if cached_resolution is not None:
+            with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
+                _PATIENT_INFORMATION_SCOPE_CACHE.pop((int(state.pid), chart_automation_id), None)
         patient_resolution = _find_patient_information_scope(
             desktop,
             state,
@@ -194,6 +225,8 @@ def fetch_vaccine_patient_context(
         sleeper(0.1)
 
     if patient_resolution is None:
+        with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
+            _PATIENT_INFORMATION_SCOPE_CACHE.pop((int(state.pid), chart_automation_id), None)
         return VaccinePatientFetchResult(
             False,
             "Patient information opened, but its chart-number target was not found. "
@@ -325,6 +358,50 @@ def _close_patient_information() -> None:
     send_keys("{ESC}")
 
 
+def _foreground_patient_window_handle(state: Any, process_ids: tuple[int, ...]) -> int | None:
+    try:
+        import win32gui
+        import win32process
+
+        handle = win32gui.GetAncestor(win32gui.GetForegroundWindow(), 2)
+        if not handle or handle in {
+            getattr(state, "window_handle", None), getattr(state, "main_window_handle", None),
+        }:
+            return None
+        if (
+            win32process.GetWindowThreadProcessId(handle)[1] not in process_ids
+            or not win32gui.IsWindowVisible(handle) or win32gui.IsIconic(handle)
+        ):
+            return None
+        return int(handle)
+    except Exception:
+        return None
+
+
+def _find_foreground_patient_information_scope(
+    desktop: Any, state: Any, chart_automation_id: str, process_ids: tuple[int, ...],
+) -> _PatientInformationResolution | None:
+    handle = _foreground_patient_window_handle(state, process_ids)
+    if handle is None:
+        return None
+    try:
+        window = desktop.window(handle=handle).wrapper_object()
+        chart = _find_element(window, chart_automation_id)
+        if chart is None or not _element_is_visible(chart):
+            return None
+        if int(chart.element_info.process_id) not in process_ids:
+            return None
+        scope = _nearest_patient_information_scope(chart)
+        if scope is None or not _element_is_visible(scope):
+            return None
+        value = _read_element_value(chart)
+        if _foreground_patient_window_handle(state, process_ids) != handle:
+            return None
+        return _PatientInformationResolution(scope, value, chart, pending=not bool(value))
+    except Exception:
+        return None
+
+
 def _find_patient_information_scope(
     desktop: Any,
     state: Any,
@@ -427,13 +504,22 @@ def _find_cached_patient_information_scope(
         return None
 
     if cached.controls is not None:
-        resolved = cached.controls.resolve(desktop, root_pid, root_handle, selectors or {})
+        resolved = cached.controls.resolve(
+            desktop, root_pid, root_handle, selectors or {}, allow_hidden_scope=True,
+        )
         if resolved is not None:
             scope, elements = resolved
             chart_element = elements[chart_automation_id]
+            if not _element_is_visible(scope) or not all(
+                _element_is_visible(element) for element in elements.values()
+            ):
+                return _PatientInformationResolution(
+                    scope, "", chart_element, elements, pending=True,
+                )
             chart_value = _read_element_value(chart_element)
-            if chart_value:
-                return _PatientInformationResolution(scope, chart_value, chart_element, elements)
+            return _PatientInformationResolution(
+                scope, chart_value, chart_element, elements, pending=not bool(chart_value),
+            )
         with _PATIENT_INFORMATION_SCOPE_CACHE_LOCK:
             _PATIENT_INFORMATION_SCOPE_CACHE.pop(key, None)
         return None
@@ -492,12 +578,17 @@ def _find_exact_uia_edit_in_processes(
 ) -> Any | None:
     """Find the patient-info Edit through a native exact Automation-ID query."""
 
-    matches = find_uia_elements_by_automation_ids(
-        (automation_id,),
-        process_ids=process_ids,
-        control_type="Edit",
-    )
-    candidates = _deduplicate_elements(matches.get(automation_id, []))
+    matches: list[Any] = []
+    # A process condition on the desktop root still traverses unrelated apps.
+    # Find native top-level handles first, then query only trusted EMR subtrees.
+    for handle in _visible_process_window_handles(process_ids):
+        matches.extend(find_uia_elements_by_automation_ids(
+            (automation_id,),
+            root_handle=handle,
+            process_ids=process_ids,
+            control_type="Edit",
+        ).get(automation_id, []))
+    candidates = _deduplicate_elements(matches)
     visible_with_values: list[_ResolvedChartCandidate] = []
     for candidate in candidates:
         if not _element_is_visible(candidate):
@@ -518,6 +609,30 @@ def _find_exact_uia_edit_in_processes(
     return None
 
 
+def _visible_process_window_handles(process_ids: tuple[int, ...]) -> tuple[int, ...]:
+    try:
+        import win32gui
+        import win32process
+
+        trusted = set(process_ids)
+        handles: list[int] = []
+
+        def collect(handle: int, _context: Any) -> None:
+            try:
+                if (
+                    win32process.GetWindowThreadProcessId(handle)[1] in trusted
+                    and win32gui.IsWindowVisible(handle)
+                ):
+                    handles.append(int(handle))
+            except Exception:
+                pass  # Windows can close while EnumWindows is running.
+
+        win32gui.EnumWindows(collect, None)
+        return tuple(dict.fromkeys(handles))
+    except Exception:
+        return ()
+
+
 def _top_level_scope(element: Any) -> Any:
     try:
         return element.top_level_parent()
@@ -534,12 +649,18 @@ def _patient_information_resolution(
         chart_value = chart_element.value
         chart_element = chart_element.element
     else:
-        chart_value = _read_element_value(chart_element)
-    if not chart_value:
+        chart_value = None
+    if chart_element is None or not _element_is_visible(chart_element):
         return None
     scope = _nearest_patient_information_scope(chart_element)
     if scope is None:
         scope = fallback_scope or _top_level_scope(chart_element)
+    if not _element_is_visible(scope):
+        return None
+    if chart_value is None:
+        chart_value = _read_element_value(chart_element)
+    if not chart_value:
+        return None
     return _PatientInformationResolution(scope, chart_value, chart_element)
 
 

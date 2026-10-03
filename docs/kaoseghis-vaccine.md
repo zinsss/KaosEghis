@@ -79,8 +79,16 @@ connection, focuses the connected process through the connector gate, and clicks
 current Patient Information opener at screen coordinate `(210, 115)`. It then waits for
 `txt환자번호` and reads all configured fields from that same eGHIS process/window. The
 reader refreshes the trusted eGHIS helper-process family while the patient-information
-window opens, includes hidden UIA host windows, and can perform an exact process-scoped
-`Edit` lookup when ordinary top-level enumeration misses the deeply nested chart field.
+window opens. Before broad discovery, it tries the foreground popup only when it is
+visible, belongs to that trusted process family, and is not the main EMR window. The
+chart control must resolve uniquely beneath the named Patient Information scope;
+focus is rechecked after lookup. An empty chart in that verified popup remains pending
+instead of falling through to another window's patient. There is up to a 600 ms opening
+grace period for these narrow paths, with no delay when the popup is already ready.
+The exact fallback `Edit` lookup enumerates visible native windows owned by
+that trusted family, then queries only their UIA subtrees with a process condition. It
+does not query the entire desktop UIA tree. Existing process-window fallback discovery
+still includes hidden UIA host windows when the native-window fast path finds no match.
 The exact chart control that establishes readiness is retained for value reading instead
 of being rediscovered in a second WinForms tree scan. Value extraction follows the same
 UIA ValuePattern and WinForms legacy-value paths used by the in-app capture tool.
@@ -88,6 +96,10 @@ Its readable value is captured immediately, and the nearest `환자 기초 정�
 used as the scope for the remaining fields instead of rescanning the full eGHIS window.
 This coordinate is a temporary opener fallback; the patient fields themselves use stable
 UIA Automation IDs. The fetch never runs on startup or in the background.
+An external timing helper must have sufficient access to the EMR process: a standard-user
+helper inspecting an elevated EMR may see only the outer window. Zero matches in that
+case are not evidence of a fast or missing control. Read-only performance checks must
+not click, focus, type, run macros, access the source DB, or log patient values.
 After the configured fields are read, KaosEghis sends one `{ESC}` to close the Patient
 Information view. Escape is never sent when that view could not be resolved.
 
@@ -142,6 +154,12 @@ startup. The cache retains only handles and identity metadata, never patient val
 UIA wrappers, and is not written to SQLite. Each fetch still opens the view normally.
 
 On a repeat fetch, fresh UIA wrappers are acquired directly from the cached handles.
+An identity-valid cache is retained briefly while the popup is hidden or its chart field
+is empty during reopening. No patient values are read from a hidden cached scope. If
+it never becomes ready, the fetch fails and discards the cache; broad fallback discovery
+also rejects hidden chart controls and hidden scopes. A new verified foreground popup
+can supersede the pending old popup immediately. Missing optional fields are still
+searched again, preserving support for controls that appear later.
 The connected window, process creation times, scope/control runtime IDs, Automation IDs,
 control types, visibility, and native child ownership must still match. Valid cached
 fields avoid another descendant search and always read current values. A missing or
@@ -355,6 +373,47 @@ engine remains compatible.
 KaosEghis must never submit the final vaccination record without an explicit operator
 action.
 
+### Vaccine Shortcuts (2026-10-01)
+
+The Main page has four explicit actions: `National Influenza`, `National COVID`,
+`National Flu+COVID`, and `General Influenza`.
+
+- Each opens a confirmation before fetching, creating a record, or printing.
+  The confirmation authorizes the label(s), system lookup(s), and existing EMR
+  chart-text handoff together. Cancel performs none of those actions.
+- COVID products must be chosen every time, with no preselected Pfizer/Moderna.
+  Choices come from the currently enabled vaccine catalog by program type, not
+  hardcoded IDs or name matching. Multiple flu entries also require a choice.
+- On Yes, fetch a fresh EMR patient and detach the previous record/selection.
+  A failed fetch or missing name, chart number, or complete resident number stops
+  before printing. Changed/disabled vaccine configuration also stops the shortcut.
+- An existing non-cancelled record for this chart/date and requested program
+  stops the shortcut and directs the operator to `Edit today's record`.
+  National/private flu are both checked for a flu shortcut; either COVID product
+  matches the COVID check. The shortcut never silently reprints or counts twice.
+- Existing age, schedule, cap, general/private target warnings, and explicit
+  exception confirmations remain in force. The pair fetches once, creates two
+  separate records, and checks/prints each independently.
+- Successful label printing/checkpointing proceeds directly to the corresponding
+  resident-number entry and EMR chart-text handoff, without repeating the generic
+  post-print confirmation. Normal manual printing retains its existing prompts.
+- Print failure retains the form; partial pair printing sends no system input.
+  Entry failure keeps `Retry entry` / `Skip and clear`. Login/launch remains
+  available for recovery, and retry does not reprint or increment counters.
+- Conflicting actions and repeated shortcut activation are blocked during the
+  workflow. No new automatic login, reset, clinical registration, or EMR database
+  query is introduced. Keep the same patient selected in EMR throughout.
+
+The previously idle session reminder starts on the existing valid print attempt
+as a fallback for manually opened systems. Subsequent shortcut prints do not
+restart an already-running reminder.
+
+Validation uses synthetic patients, temporary local databases, and mocked EMR,
+printer, clipboard, and system input. Live end-to-end verification is still needed.
+The Windows regression run passed 2,026 tests, including 49 shortcut cases;
+native Qt previews were checked at 1280x900 and 1920x1080 without opening the live
+app or sending printer/EMR input.
+
 ### External System Handoff
 
 The post-print handoff uses the printed vaccine's configured external system,
@@ -423,8 +482,9 @@ The handoff runs on a COM-initialized worker, using transient snapshots of the
 printed records rather than live form text. Patient editing, Fetch, Print, and
 record-changing buttons are disabled while a handoff is pending or EMR charting
 is active. Login/launch can
-be used after a failed handoff, before Retry. Automatic and manual session resets
-are deferred during printing, the handoff prompt, and pending/active handoffs.
+be used after a failed handoff, before Retry. Automatic session resets are disabled;
+manual resets are blocked during shortcuts, printing, the handoff prompt, and
+pending/active handoffs.
 
 Before input, the worker verifies an unlocked Windows desktop, no held input keys,
 Virtual Desktop 1, and an unambiguous target. Each typing stage rechecks focus and
@@ -601,20 +661,23 @@ and windows; they do not sign in to KDCA or send real patient data.
 `Vaccine -> Main` provides explicit `Open General`, `Open Influenza`, and `Open COVID`
 actions. They never read or enter patient data, and never automate a vaccination step.
 
-### Native Window Positioning
+### Manual Window Placement (2026-10-01)
 
-System launch no longer sends `Win+Left`, `Win+Right`, or `Win+Down`. The previous
-relative shortcut sequence could wrap between zones and depend on the window's
-starting position, so it could not reliably restore a workflow layout. Its
-positioning timer has been removed. The readiness wait above only verifies launch;
-it does not move or resize a window. The configured system deep links are unchanged.
+Window placement is entirely operator-controlled for General, Influenza, and COVID.
+There is no automatic placement or planned replacement: no Shift-drag, FancyZones
+snapping, `Win+Arrow` sequence, saved-rectangle restoration, monitor relocation,
+or positioning timer. The current source already had the former snapping sequence
+removed; this decision also removes the remaining future auto-placement proposal.
 
-Position General and COVID manually for now. A future replacement should save and
-restore an explicit window rectangle rather than count directional shortcuts;
-that replacement is not implemented yet.
+Open actions only launch/detect the requested system or focus an already-open
+native system. The readiness wait verifies launch, not window placement. Regression
+tests prohibit mouse/keyboard placement input and Win32 move/resize calls on launch.
 
-Resident-number and session-reset coordinates are unchanged. Verify them with the
-systems in their final workflow positions; opening a system does not click either point.
+Resident-number and session-reset coordinates are unchanged. Manually position each
+system so those saved points match its inputs, or update the points in System targets.
+Opening a system does not click either point. Existing focus and Virtual Desktop 1
+selection for resident-number entry/manual resets remain; they do not relocate
+individual windows, resize them, or place them on a monitor.
 
 ### Explicit KDCA Certificate Login
 
@@ -725,9 +788,26 @@ and Desktop 1 are rechecked before sending F5 once. It does not dismiss browser 
 warnings, resubmit forms, log in, enter credentials, or retry. F5 being sent is not
 proof that the server renewed the session or that the login remained valid.
 
-The passive reminder starts when the Vaccine workspace is constructed. It remains
-active while other pages are displayed and is process-local, so an application restart
-starts a new reminder age. It never inspects a browser or sends input by itself:
+The shared passive reminder is idle when the Vaccine workspace is constructed;
+app startup, page visits, settings reloads, and portal login alone do not start it.
+It starts after a successful General/Flu/COVID launch result confirms the destination
+system (including a verified already-open system). Failed or cancelled launches do
+not start it. If a system was opened manually, the first valid label-print attempt
+starts the reminder immediately before calling the printer service, even if that
+service subsequently reports a print failure. Missing selection, declined program
+checks, and cancelled pair-print confirmation do not start it.
+
+Single-label and paired-label printing share this fallback. Further launches,
+prints, or reprints never restart an already-running reminder. There remains one
+shared reminder, not separate counters per system. A successful manual reset can
+also start an idle reminder or restart an active one under the rules below.
+
+Until started, the progress bar shows `Reminder not started`, Reset Now keeps its
+normal text color and remains manually available, and no reminder popup is scheduled.
+Once started, the reminder remains active while other pages are displayed. Its state
+is process-local: restarting KaosEghis leaves it idle again until a qualifying action.
+It does not infer when a manually opened system actually signed in, and never
+inspects a browser or sends input by itself:
 
 - Before 60 minutes: Reset Now uses its normal text color.
 - From 60 to 90 minutes: both Reset Now buttons gradually change toward red.
@@ -743,7 +823,12 @@ The reminder age resets only when at least one action was sent and every other t
 was either acted on or not open. A partial failure or declined Flu refresh retains the
 old reminder age. Successful completion also closes any outstanding reminder popup.
 The settings progress bar shows elapsed reminder age, not an automatic-action countdown
-or verified session expiry. The appearance/popup check runs every 30 seconds.
+or verified session expiry. The appearance/popup check runs every 30 seconds only
+after the reminder has started.
+
+The 2026-10-01 reminder-start change passed **226 focused tests** and the full
+**1,977-test** isolated suite. Launches, print output, and reset input were mocked;
+no live vaccine-system actions or real label printing were used for verification.
 
 The activity check reads only timing and whether keys/buttons are held; it does
 not capture typed content. It uses Windows
@@ -1030,7 +1115,8 @@ confirmed Flu refresh. There are no automatic resets or retries. Both buttons fa
 toward red after 60 minutes; a 115-minute popup remains available from other pages.
 See Manual Session Reset and Reminder above for failure and dismissal behavior.
 
-This remains isolated from registration, lookup, label printing, counters, and charting.
+Manual reset input remains isolated from registration, lookup, vaccination counters,
+and charting. Label printing can start the passive reminder but never sends reset input.
 
 ### Authentication Boundary
 

@@ -43,12 +43,21 @@ def wait_for_target_condition(
     deadline = start + (timeout_ms / 1000)
     attempts = 0
     last_message = "Condition was not checked."
+    condition_properties = {
+        WaitCondition.EXISTS.value: frozenset(),
+        WaitCondition.VISIBLE.value: frozenset({"is_visible"}),
+        WaitCondition.ENABLED.value: frozenset({"is_enabled"}),
+        WaitCondition.TEXT_NON_EMPTY.value: frozenset({"text_value"}),
+        WaitCondition.KEYBOARD_FOCUS.value: frozenset({"has_keyboard_focus"}),
+    }.get(condition_value)
 
     while True:
         attempts += 1
         try:
             inspection = (
-                inspect_resolved_target_readonly(target, resolved_element)
+                inspect_resolved_target_readonly(
+                    target, resolved_element, properties=condition_properties,
+                )
                 if resolved_element is not None
                 else inspect_target_readonly(settings, target)
             )

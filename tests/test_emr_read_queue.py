@@ -1,9 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from datetime import date
+from decimal import Decimal
 import sys
 import threading
 import time
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 
@@ -102,8 +104,11 @@ def test_pacs_flu_health_context_and_future_orders_reads_are_fifo(monkeypatch):
 
 
 @pytest.mark.parametrize("failure", ["connect", "readonly", "cursor", "timeout_setup", "query", "fetch", "cursor_close"])
-def test_failed_read_releases_exclusive_slot_and_closes_connection(monkeypatch, failure):
+@pytest.mark.parametrize("bound", [False, True])
+def test_failed_read_releases_exclusive_slot_and_closes_connection(monkeypatch, failure, bound):
     events = []
+    query = "SELECT %s" if bound else "SELECT 1"
+    params = (1,) if bound else None
 
     @contextmanager
     def exclusive():
@@ -119,7 +124,7 @@ def test_failed_read_releases_exclusive_slot_and_closes_connection(monkeypatch, 
 
     class Cursor:
         description = [("value",)]
-        def execute(self, query):
+        def execute(self, query, params=None):
             if query.startswith("SELECT"):
                 fail("query")
             else:
@@ -147,18 +152,19 @@ def test_failed_read_releases_exclusive_slot_and_closes_connection(monkeypatch, 
     monkeypatch.setattr(emr_read_queue, "_exclusive_reader", exclusive)
     monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=connect))
     with pytest.raises(RuntimeError):
-        eghis_db.run_readonly_query("mock", "SELECT 1")
+        eghis_db.run_readonly_query("mock", query, params=params)
     assert events[-1] == "unlock"
     if failure != "connect":
         assert events[-2] == "close"
     failure = None
-    assert eghis_db.run_readonly_query("mock", "SELECT 1") == (["value"], [(1,)])
+    assert eghis_db.run_readonly_query("mock", query, params=params) == (["value"], [(1,)])
 
 
-def test_rejected_write_never_connects(monkeypatch):
+@pytest.mark.parametrize("params", [None, ("synthetic",)])
+def test_rejected_write_never_connects(monkeypatch, params):
     monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=lambda *a, **k: pytest.fail("write connected")))
     with pytest.raises(eghis_db.EghisDbQueryRejectedError):
-        eghis_db.run_readonly_query("mock", "DELETE FROM orders")
+        eghis_db.run_readonly_query("mock", "DELETE FROM orders WHERE id = %s", params=params)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows process mutex")
@@ -181,13 +187,16 @@ def test_named_mutex_serializes_another_process_without_opening_db():
 
 
 @pytest.mark.parametrize("failure", ["raises", "still_open", "missing_close"])
-def test_uncertain_connection_close_blocks_queued_and_future_reads(monkeypatch, failure):
+@pytest.mark.parametrize("bound", [False, True])
+def test_uncertain_connection_close_blocks_queued_and_future_reads(monkeypatch, failure, bound):
     entered, release = threading.Event(), threading.Event()
     connects = []
+    query = "SELECT %s" if bound else "SELECT 1"
+    params = (1,) if bound else None
 
     class Cursor:
         description = [("value",)]
-        def execute(self, query):
+        def execute(self, query, params=None):
             pass
         def fetchall(self):
             return [(1,)]
@@ -216,11 +225,11 @@ def test_uncertain_connection_close_blocks_queued_and_future_reads(monkeypatch, 
     monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=connect))
     timings = {}
     with ThreadPoolExecutor(2) as callers:
-        first = callers.submit(eghis_db.run_readonly_query, "mock", "SELECT 1", timings=timings)
+        first = callers.submit(eghis_db.run_readonly_query, "mock", query, params=params, timings=timings)
         try:
             if failure != "missing_close":
                 assert entered.wait(2)
-            second = callers.submit(eghis_db.run_readonly_query, "mock", "SELECT 2")
+            second = callers.submit(eghis_db.run_readonly_query, "mock", query, params=params)
         finally:
             release.set()
         with pytest.raises(emr_read_queue.EmrConnectionCloseError) as error:
@@ -229,7 +238,7 @@ def test_uncertain_connection_close_blocks_queued_and_future_reads(monkeypatch, 
         with pytest.raises(emr_read_queue.EmrReadSafetyError):
             second.result(3)
     with pytest.raises(emr_read_queue.EmrReadSafetyError):
-        eghis_db.run_readonly_query("mock", "SELECT 3")
+        eghis_db.run_readonly_query("mock", query, params=params)
     assert connects == [True]
     assert "connection_closed" not in timings
     if sys.platform == "win32":
@@ -429,3 +438,195 @@ def test_postgres_driver_is_only_imported_at_shared_connection_boundary():
             if any(name.split(".")[0] in drivers for name in modules):
                 users.add(path.relative_to(package).as_posix())
     assert users == {"core/eghis_db.py"}
+
+
+@pytest.fixture
+def parameter_db(monkeypatch):
+    state = SimpleNamespace(
+        events=[], connections=[], query_error=None, query_errors={}, block_first=False,
+        entered=threading.Event(), release=threading.Event(), live=0, maximum=0,
+    )
+
+    class Cursor:
+        description = [("value",)]
+
+        def __init__(self, number):
+            self.number = number
+
+        def execute(self, *args):
+            state.events.append((self.number, "execute", args))
+            if args[0].startswith("SELECT"):
+                if state.block_first and self.number == 1:
+                    state.entered.set()
+                    assert state.release.wait(5)
+                error = state.query_errors.get(self.number, state.query_error)
+                if error is not None:
+                    raise error
+
+        def fetchall(self):
+            return [(self.number,)]
+
+        def close(self):
+            state.events.append((self.number, "cursor_closed"))
+
+    class Connection:
+        closed = False
+
+        def __init__(self, number):
+            self.number = number
+
+        def set_session(self, **options):
+            assert options == {"readonly": True, "autocommit": True}
+
+        def cursor(self):
+            return Cursor(self.number)
+
+        def close(self):
+            self.closed = True
+            state.live -= 1
+            state.events.append((self.number, "connection_closed"))
+
+    def connect(_connection_string, **options):
+        assert options["connect_timeout"] == 5
+        assert threading.current_thread().name.startswith("KaosEghis-emr")
+        number = len(state.connections) + 1
+        connection = Connection(number)
+        state.connections.append(connection)
+        state.live += 1
+        state.maximum = max(state.maximum, state.live)
+        state.events.append((number, "connected"))
+        return connection
+
+    monkeypatch.setitem(sys.modules, "psycopg2", SimpleNamespace(connect=connect))
+    return state
+
+
+@pytest.mark.parametrize("query, params, expected", [
+    ("SELECT '100% synthetic'", None, None),
+    ("SELECT 1", (), ()),
+    ("SELECT 1", [], ()),
+    ("SELECT 1", {}, {}),
+    ("SELECT %s, %s, %s, %s, %s",
+     (date(2026, 10, 1), Decimal("1.25"), None, True, b"test"),
+     (date(2026, 10, 1), Decimal("1.25"), None, True, b"test")),
+    ("SELECT %s", ["quote'; DELETE FROM synthetic_orders; -- 100%"],
+     ("quote'; DELETE FROM synthetic_orders; -- 100%",)),
+    ("SELECT %(day)s, %(codes)s", MappingProxyType({"day": date(2026, 10, 1), "codes": ["TEST"]}),
+     {"day": date(2026, 10, 1), "codes": ["TEST"]}),
+])
+def test_parameters_reach_driver_separately_and_results_follow_close(parameter_db, query, params, expected):
+    timings = {}
+    assert eghis_db.run_readonly_query("mock", query, params=params, timings=timings) == (["value"], [(1,)])
+    expected_args = (query,) if expected is None else (query, expected)
+    assert parameter_db.events == [
+        (1, "connected"),
+        (1, "execute", ("SET statement_timeout = 5000",)),
+        (1, "execute", expected_args),
+        (1, "cursor_closed"),
+        (1, "connection_closed"),
+    ]
+    assert parameter_db.connections[0].closed
+    assert parameter_db.live == 0
+    assert "connection_closed" in timings
+    assert all(isinstance(value, float) for value in timings.values())
+
+
+@pytest.mark.parametrize("params", ["private synthetic value", b"private", 1, {1, 2}, iter([1])])
+def test_invalid_parameter_container_never_enters_queue(monkeypatch, params):
+    monkeypatch.setattr(eghis_db, "run_serialized_read", lambda *_a: pytest.fail("invalid parameters queued"))
+    with pytest.raises(TypeError, match="tuple, list, or mapping") as error:
+        eghis_db.run_readonly_query("mock", "SELECT %s", params=params)
+    assert "private" not in str(error.value)
+
+
+@pytest.mark.parametrize("named", [False, True])
+def test_queued_parameters_are_a_detached_snapshot(parameter_db, named):
+    parameter_db.block_first = True
+    params = {"day": date(2026, 10, 1), "codes": ["TEST"]} if named else [date(2026, 10, 1), ["TEST"]]
+    expected = {"day": date(2026, 10, 1), "codes": ["TEST"]} if named else (date(2026, 10, 1), ["TEST"])
+    query = "SELECT %(day)s, %(codes)s" if named else "SELECT %s, %s"
+    with ThreadPoolExecutor(2) as callers:
+        first = callers.submit(eghis_db.run_readonly_query, "mock", "SELECT 1")
+        try:
+            assert parameter_db.entered.wait(2)
+            second = callers.submit(eghis_db.run_readonly_query, "mock", query, params=params)
+            deadline = time.monotonic() + 2
+            while emr_read_queue._worker._work_queue.qsize() < 1:
+                assert time.monotonic() < deadline
+                time.sleep(0.005)
+            if named:
+                params["codes"].append("CHANGED")
+                params["day"] = date(2026, 10, 2)
+            else:
+                params[1].append("CHANGED")
+                params[0] = date(2026, 10, 2)
+            assert len(parameter_db.connections) == 1
+            assert not second.done()
+        finally:
+            parameter_db.release.set()
+        assert first.result(3) == (["value"], [(1,)])
+        assert second.result(3) == (["value"], [(2,)])
+    assert (2, "execute", (query, expected)) in parameter_db.events
+    assert parameter_db.events.index((1, "connection_closed")) < parameter_db.events.index((2, "connected"))
+    assert parameter_db.maximum == 1 and parameter_db.live == 0
+
+
+@pytest.mark.parametrize("failure", ["adaptation", "timeout"])
+def test_bound_execute_errors_close_without_retry_and_leave_reader_usable(parameter_db, failure):
+    class QueryCancelled(RuntimeError):
+        pgcode = "57014"
+
+    error = TypeError("synthetic adaptation failure") if failure == "adaptation" else QueryCancelled("synthetic timeout")
+    parameter_db.query_error = error
+    timings = {}
+    with pytest.raises(type(error)) as caught:
+        eghis_db.run_readonly_query("mock", "SELECT %s", params=("TEST",), timings=timings)
+    assert caught.value is error
+    assert len(parameter_db.connections) == 1
+    assert parameter_db.connections[0].closed
+    assert parameter_db.events[-2:] == [(1, "cursor_closed"), (1, "connection_closed")]
+    assert "connection_closed" in timings and "query_finished" not in timings
+    parameter_db.query_error = None
+    assert eghis_db.run_readonly_query("mock", "SELECT %s", params=("NEXT",)) == (["value"], [(2,)])
+    assert parameter_db.maximum == 1 and parameter_db.live == 0
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, TimeoutError])
+def test_failed_flu_read_closes_before_queued_orders_health_and_pacs(parameter_db, failure):
+    parameter_db.block_first = True
+    parameter_db.query_errors[1] = failure("synthetic read failure")
+    consumers = ("TEST_FLU", "TEST_KAOSORDERS", "TEST_HEALTH", "TEST_PACS")
+    timings = [{} for _ in consumers]
+    with ThreadPoolExecutor(len(consumers)) as callers:
+        futures = []
+        try:
+            for index, consumer in enumerate(consumers):
+                futures.append(callers.submit(
+                    eghis_db.run_readonly_query, "mock", "SELECT %s",
+                    params=(consumer,), timings=timings[index],
+                ))
+                if index == 0:
+                    assert parameter_db.entered.wait(2)
+                else:
+                    deadline = time.monotonic() + 2
+                    while emr_read_queue._worker._work_queue.qsize() < index:
+                        assert time.monotonic() < deadline
+                        time.sleep(0.005)
+            assert len(parameter_db.connections) == 1
+            assert all(not future.done() for future in futures)
+        finally:
+            parameter_db.release.set()
+        with pytest.raises(failure, match="synthetic read failure"):
+            futures[0].result(5)
+        for number, future in enumerate(futures[1:], start=2):
+            assert future.result(5) == (["value"], [(number,)])
+
+    for number, consumer in enumerate(consumers, start=1):
+        assert (number, "execute", ("SELECT %s", (consumer,))) in parameter_db.events
+        closed = parameter_db.events.index((number, "connection_closed"))
+        assert parameter_db.events.index((number, "cursor_closed")) < closed
+        if number < len(consumers):
+            assert closed < parameter_db.events.index((number + 1, "connected"))
+    assert all(connection.closed for connection in parameter_db.connections)
+    assert all("connection_closed" in stages for stages in timings)
+    assert parameter_db.maximum == 1 and parameter_db.live == 0

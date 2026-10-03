@@ -266,7 +266,7 @@ def test_system_target_settings_load_captured_stable_selectors(tmp_path) -> None
     assert targets.launch_control_inputs["general"].text() == "예방접종통합관리시스템"
     assert not hasattr(targets, "session_keeper_enabled_check")
     assert targets.session_reset_now_button.text() == "Reset Now"
-    assert targets.session_keeper_progress_bar.format() == "Reminder age: 0:00"
+    assert targets.session_keeper_progress_bar.format() == "Reminder not started"
 
 
 def test_system_target_settings_save_editable_stable_values_without_handle(

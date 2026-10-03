@@ -85,7 +85,6 @@ def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
 
     assert [window.tabs.tabText(index) for index in range(window.tabs.count())] == [
         "KaosEghis",
-        "Memos",
         "Workspace",
         "PACS",
         "Macros",
@@ -97,6 +96,10 @@ def test_main_window_top_level_tabs_are_exact(tmp_path, monkeypatch) -> None:
     assert window.maximumWidth() == 1438
     assert window.minimumHeight() == 1194
     assert window.maximumHeight() == 1194
+    assert not hasattr(window, "memos_tab")
+    if pacs_panel_module.QWebEngineView is not None:
+        assert len(window.findChildren(pacs_panel_module.QWebEngineView)) == 3
+    window.close()
 
 
 def test_main_window_marks_pacs_tab_red_when_unhealthy(tmp_path, monkeypatch) -> None:
@@ -335,13 +338,15 @@ def test_workspace_tab_pages_are_reachable(tmp_path, monkeypatch) -> None:
     assert list(tab.nav_buttons.keys()) == [
         "Mail",
         "Paperless",
-        "PDF",
-        "rHWP",
         "Flu-Report",
         "Scan",
         "Formatter",
     ]
     assert tab.stacked_widget.currentWidget() is tab.mail_page
+    assert not hasattr(tab, "pdf_page")
+    assert not hasattr(tab, "rhwp_page")
+    tab.nav_buttons["Paperless"].click()
+    assert tab.stacked_widget.currentWidget() is tab.paperless_page
 
     tab.nav_buttons["Flu-Report"].click()
     assert tab.stacked_widget.currentWidget() is tab.flu_report_page
@@ -835,7 +840,7 @@ def test_main_window_starts_without_querying_flu_db(tmp_path, monkeypatch) -> No
 
     window = MainWindow()
 
-    workspace_tab = window.tabs.widget(2)
+    workspace_tab = window.workspace_tab
     flu_tab = workspace_tab.flu_report_page
     assert flu_tab is not None
 
@@ -994,7 +999,7 @@ def test_kaosgdd_profile_persists_cookies_and_cache(tmp_path, monkeypatch) -> No
     monkeypatch.setattr(tab_module, "QWebEngineProfile", FakeProfile)
     profile = FakeProfile()
 
-    tab_module._configure_persistent_profile(profile, "memos")
+    tab_module._configure_persistent_profile(profile, "kaosgdd")
 
     assert profile.storage_path == str(tmp_path / "web" / "kaosgdd" / "storage")
     assert profile.cache_path == str(tmp_path / "web" / "kaosgdd" / "cache")
@@ -1020,25 +1025,27 @@ def test_theme_draws_a_frame_around_the_embedded_kaosgdd_view() -> None:
     assert "border-radius: 6px;" in NORD_QSS
 
 
-def test_memos_tab_falls_back_without_webengine(monkeypatch) -> None:
+def test_paperless_tab_falls_back_without_webengine(monkeypatch) -> None:
     _app()
 
     from PySide6.QtWidgets import QLabel
 
-    import KaosEghis.ui.tabs.memos_tab as tab_module
     import KaosEghis.ui.tabs.service_web_tab as service_tab_module
 
     monkeypatch.setattr(service_tab_module, "QWebEngineView", None)
     monkeypatch.setattr(service_tab_module, "QWebEnginePage", None)
     monkeypatch.setattr(service_tab_module, "QWebEngineProfile", None)
 
-    tab = tab_module.MemosTab()
+    tab = service_tab_module.ServiceWebTab(
+        profile_name="Paperless", setting_key="paperless_url",
+        default_url="http://localhost/paperless/", fallback_text="Paperless webview not available.",
+    )
 
     labels = [label.text() for label in tab.findChildren(QLabel)]
-    assert "Memos webview not available." in labels
+    assert "Paperless webview not available." in labels
 
 
-def test_memos_profile_persists_cookies_and_cache(tmp_path, monkeypatch) -> None:
+def test_paperless_profile_persists_cookies_and_cache(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("KAOSEGHIS_DATA_DIR", str(tmp_path))
 
     import KaosEghis.ui.tabs.service_web_tab as tab_module
@@ -1072,25 +1079,25 @@ def test_memos_profile_persists_cookies_and_cache(tmp_path, monkeypatch) -> None
 
     profile = FakeProfile()
 
-    tab_module._configure_persistent_profile(profile, "memos")
+    tab_module._configure_persistent_profile(profile, "paperless")
 
-    assert profile.storage_path == str(tmp_path / "web" / "memos" / "storage")
-    assert profile.cache_path == str(tmp_path / "web" / "memos" / "cache")
+    assert profile.storage_path == str(tmp_path / "web" / "paperless" / "storage")
+    assert profile.cache_path == str(tmp_path / "web" / "paperless" / "cache")
     assert profile.cookies_policy == "force-cookies"
     assert profile.cache_type == "disk-cache"
-    assert (tmp_path / "web" / "memos" / "storage").is_dir()
-    assert (tmp_path / "web" / "memos" / "cache").is_dir()
+    assert (tmp_path / "web" / "paperless" / "storage").is_dir()
+    assert (tmp_path / "web" / "paperless" / "cache").is_dir()
 
 
-def test_default_settings_include_internal_memos_url() -> None:
+def test_default_settings_only_include_current_service_urls() -> None:
     from KaosEghis.config import DEFAULT_CONFIG
     from KaosEghis.db.repositories import DEFAULT_SETTINGS
 
-    assert DEFAULT_CONFIG.memos_url == "http://100.94.208.16:5230/"
-    assert DEFAULT_SETTINGS["memos_url"] == "http://100.94.208.16:5230/"
+    for retired in ("memos_url", "stirling_pdf_url", "rhwp_url"):
+        assert not hasattr(DEFAULT_CONFIG, retired)
+        assert retired not in DEFAULT_SETTINGS
+    assert DEFAULT_CONFIG.paperless_url == "http://100.94.208.16:8000/"
     assert DEFAULT_SETTINGS["paperless_url"] == "http://100.94.208.16:8000/"
-    assert DEFAULT_SETTINGS["stirling_pdf_url"] == "http://100.94.208.16:8082/"
-    assert DEFAULT_SETTINGS["rhwp_url"] == "http://100.94.208.16:8085/rhwp/"
     assert DEFAULT_SETTINGS["wikijs_url"] == "http://100.94.208.16:3001/"
     assert DEFAULT_SETTINGS["sftpgo_url"] == "http://100.94.208.16:8081/web/client/login"
 

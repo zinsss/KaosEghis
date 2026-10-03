@@ -45,8 +45,9 @@ from KaosEghis.core.printer_service import (
 from KaosEghis.core.vaccine_patient_context import (
     fetch_vaccine_patient_context,
     resident_id_for_label,
+    resident_id_for_vaccine_system,
 )
-from KaosEghis.core.vaccine_system_launch import open_vaccine_system
+from KaosEghis.core.vaccine_system_launch import VaccineSystemLaunchResult, open_vaccine_system
 from KaosEghis.core.vaccine_system_input import (
     SYSTEM_LABELS,
     VaccineHandoffRequest,
@@ -74,6 +75,7 @@ from KaosEghis.core.vaccine_eligibility import (
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     VaccineRecord,
+    VaccineTypeRecord,
     create_vaccine_record,
     create_vaccine_type,
     delete_vaccine_record,
@@ -194,6 +196,63 @@ class _VaccineTypeComboBox(QComboBox):
             event.ignore()
 
 
+VACCINE_SHORTCUTS = {
+    "national_flu": ("National Influenza", ("national_influenza",)),
+    "national_covid": ("National COVID", ("national_covid",)),
+    "national_pair": ("National Flu+COVID", ("national_influenza", "national_covid")),
+    "general_flu": ("General Influenza", ("general_influenza",)),
+}
+
+
+class VaccineShortcutDialog(QDialog):
+    def __init__(self, title: str, choices: list[list[VaccineTypeRecord]], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Vaccine Shortcuts - {title}")
+        self.choices = choices
+        self.combos: list[QComboBox] = []
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        for entries in choices:
+            combo = _VaccineTypeComboBox()
+            combo.setPlaceholderText("Choose vaccine")
+            for entry in entries:
+                combo.addItem(entry.name, entry.id)
+            covid = entries[0].program_type == "national_covid"
+            combo.setCurrentIndex(-1 if covid or len(entries) != 1 else 0)
+            combo.setMinimumHeight(34)
+            combo.currentIndexChanged.connect(self._update_confirm)
+            form.addRow("COVID product" if covid else "Influenza", combo)
+            self.combos.append(combo)
+        layout.addLayout(form)
+        confirmation = QLabel(
+            "Fetch the current EMR patient, check eligibility, print the selected label(s), "
+            "enter the resident number into the corresponding vaccine system(s), "
+            "and paste charting text into EMR?"
+        )
+        confirmation.setWordWrap(True)
+        layout.addWidget(confirmation)
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.buttons.button(QDialogButtonBox.StandardButton.Yes).clicked.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setDefault(True)
+        layout.addWidget(self.buttons)
+        self._update_confirm()
+        self.resize(520, self.sizeHint().height())
+
+    def _update_confirm(self) -> None:
+        self.buttons.button(QDialogButtonBox.StandardButton.Yes).setEnabled(
+            all(combo.currentIndex() >= 0 for combo in self.combos)
+        )
+
+    def selected_types(self) -> tuple[VaccineTypeRecord, ...]:
+        return tuple(
+            entry for entries, combo in zip(self.choices, self.combos)
+            for entry in entries if entry.id == combo.currentData()
+        )
+
+
 class VaccineTab(QWidget):
     TOP_PAGES = ["Main", "DB", "Settings"]
     kdca_progress = Signal(str)
@@ -215,6 +274,7 @@ class VaccineTab(QWidget):
         self._pending_handoffs: list[VaccineHandoffRequest] = []
         self._completed_handoff_charting_texts: list[str] = []
         self._print_in_progress = False
+        self._shortcut_in_progress = False
         self._session_reset_in_progress = False
         self._session_reset_thread: threading.Thread | None = None
         self._session_reset_cancel = threading.Event()
@@ -243,7 +303,7 @@ class VaccineTab(QWidget):
             application.aboutToQuit.connect(self._kdca_cancel.set)
             application.aboutToQuit.connect(self._handoff_cancel.set)
             application.aboutToQuit.connect(self._session_reset_cancel.set)
-        self._session_reminder_started_at = monotonic()
+        self._session_reminder_started_at: float | None = None
         self._session_reminder_timer = QTimer(self)
         self._session_reminder_timer.setInterval(30_000)
         self._session_reminder_timer.timeout.connect(
@@ -374,6 +434,14 @@ class VaccineTab(QWidget):
         self.fetch_button.setObjectName("vaccineFetchButton")
         self.fetch_button.setMinimumHeight(34)
         self.fetch_button.clicked.connect(self.fetch_current_patient_from_emr)
+        self.shortcut_buttons: dict[str, QPushButton] = {}
+        for key, (label, _programs) in VACCINE_SHORTCUTS.items():
+            button = QPushButton(label)
+            button.setMinimumHeight(34)
+            button.clicked.connect(
+                lambda _checked=False, shortcut=key: self.run_vaccine_shortcut(shortcut)
+            )
+            self.shortcut_buttons[key] = button
         self.kdca_login_button = QPushButton("Log in to KDCA")
         self.kdca_login_button.clicked.connect(self.log_in_to_kdca)
         self.kdca_stop_button = QPushButton("Stop")
@@ -463,7 +531,6 @@ class VaccineTab(QWidget):
         self.show_page(0)
         self.refresh_view()
         self._update_session_reset_reminder()
-        self._session_reminder_timer.start()
 
     def activate_page(self) -> None:
         self.refresh_view()
@@ -492,6 +559,11 @@ class VaccineTab(QWidget):
         self._refresh_today_record_menu()
 
     def fetch_current_patient_from_emr(self) -> bool:
+        if self._shortcut_in_progress:
+            return False
+        return self._fetch_current_patient_from_emr()
+
+    def _fetch_current_patient_from_emr(self) -> bool:
         if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress or self._session_reset_in_progress:
             return False
         with connect(self._db_path) as connection:
@@ -572,6 +644,79 @@ class VaccineTab(QWidget):
         self.status_label.setText(f"{result.message} New vaccine record ready.")
         return True
 
+    def _confirm_vaccine_shortcut(
+        self, title: str, choices: list[list[VaccineTypeRecord]]
+    ) -> tuple[VaccineTypeRecord, ...] | None:
+        dialog = VaccineShortcutDialog(title, choices, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return dialog.selected_types()
+
+    def run_vaccine_shortcut(self, key: str) -> None:
+        if (self._shortcut_in_progress or self._print_in_progress or self._pending_handoffs
+                or self._handoff_thread is not None or self._kdca_thread is not None
+                or self._session_reset_in_progress):
+            return
+        if key not in VACCINE_SHORTCUTS:
+            return
+        title, programs = VACCINE_SHORTCUTS[key]
+        self._shortcut_in_progress = True
+        self._update_handoff_controls()
+        try:
+            with connect(self._db_path) as connection:
+                catalog = list_vaccine_types(connection)
+            choices = [
+                [entry for entry in catalog if entry.is_active and entry.program_type == program]
+                for program in programs
+            ]
+            if any(not entries for entries in choices):
+                self.status_label.setText(f"{title}: configure an enabled vaccine for each required program first.")
+                return
+            selected = self._confirm_vaccine_shortcut(title, choices)
+            if selected is None:
+                self.status_label.setText("Vaccine shortcut cancelled. No patient fetched or label printed.")
+                return
+            if (len(selected) != len(programs)
+                    or any(entry not in entries for entry, entries in zip(selected, choices))):
+                self.status_label.setText("Vaccine selection could not be confirmed. Shortcut stopped.")
+                return
+            if not self._fetch_current_patient_from_emr():
+                return
+            digits = resident_id_for_vaccine_system(self.patient_resident_id_input.text())
+            chart = self.patient_chart_no_input.text().strip()
+            if (not chart or not self.patient_name_input.text().strip()
+                    or len(digits) != 13 or not digits.isascii() or not digits.isdigit()):
+                self.status_label.setText("Shortcut stopped: patient name, chart number and complete resident number are required. Form retained.")
+                return
+            with connect(self._db_path) as connection:
+                if any(get_vaccine_type(connection, entry.id) != entry for entry in selected):
+                    self.status_label.setText("Vaccine settings changed. Review the selection and start the shortcut again.")
+                    return
+                today_records = list_patient_vaccine_records_for_date(
+                    connection, chart, datetime.now().date().isoformat()
+                )
+            duplicate_programs = set(programs)
+            if duplicate_programs & {"national_influenza", "general_influenza"}:
+                duplicate_programs.update({"national_influenza", "general_influenza"})
+            if any(record.status != "cancelled" and record.program_type in duplicate_programs
+                   for record in today_records):
+                self.status_label.setText("Shortcut stopped: this patient already has a matching record today. Use Edit today's record; no new label printed.")
+                return
+            self.refresh_view()
+            chosen = selected[-1]
+            self._select_vaccine_type(chosen.id, chosen.name)
+            if len(selected) == 2:
+                if self._prepare_flu_and_covid(flu_type_id=selected[0].id) is not None:
+                    self._print_prepared_pair(confirmed=True)
+            else:
+                self._print_label(handoff_confirmed=True)
+        except Exception:
+            # Never expose patient data from provider exceptions in status/logs.
+            self.status_label.setText("Vaccine shortcut stopped. Check printed labels and saved records before retrying; form retained.")
+        finally:
+            self._shortcut_in_progress = False
+            self._update_handoff_controls()
+
     def log_in_to_kdca(self) -> bool:
         return self._start_kdca_operation()
 
@@ -580,7 +725,7 @@ class VaccineTab(QWidget):
 
     def _start_kdca_operation(self, system: str | None = None) -> bool:
         """Return whether a single background operation was accepted."""
-        if self._kdca_thread is not None or self._handoff_thread is not None or self._print_in_progress or self._session_reset_in_progress:
+        if self._shortcut_in_progress or self._kdca_thread is not None or self._handoff_thread is not None or self._print_in_progress or self._session_reset_in_progress:
             return False
         initialize_database(self._db_path)
         with connect(self._db_path) as connection:
@@ -667,6 +812,8 @@ class VaccineTab(QWidget):
         self._kdca_thread = None
         self._set_kdca_busy(False)
         self.status_label.setText(result.message)
+        if isinstance(result, VaccineSystemLaunchResult) and result.success and not self._kdca_cancel.is_set():
+            self._start_session_reset_reminder()
 
     def check_influenza_program(self) -> InfluenzaEligibilityResult:
         initialize_database(self._db_path)
@@ -750,6 +897,11 @@ class VaccineTab(QWidget):
         return saved_record
 
     def prepare_flu_and_covid(self) -> tuple[object, object] | None:
+        if self._shortcut_in_progress:
+            return None
+        return self._prepare_flu_and_covid()
+
+    def _prepare_flu_and_covid(self, *, flu_type_id: int | None = None) -> tuple[object, object] | None:
         """Create separate Flu and COVID preparation records from one patient context."""
 
         if self._pending_handoffs or self._handoff_thread is not None or self._print_in_progress:
@@ -771,6 +923,7 @@ class VaccineTab(QWidget):
                 entry
                 for entry in vaccine_types
                 if entry.is_active and entry.program_type == "national_influenza"
+                and (flu_type_id is None or entry.id == flu_type_id)
             ]
             covid_types = [
                 entry
@@ -801,6 +954,11 @@ class VaccineTab(QWidget):
         return flu_record, covid_record
 
     def print_prepared_pair(self) -> None:
+        if self._shortcut_in_progress:
+            return
+        self._print_prepared_pair()
+
+    def _print_prepared_pair(self, *, confirmed: bool = False) -> None:
         if self._print_in_progress or self._pending_handoffs or self._handoff_thread is not None or self._kdca_thread is not None:
             return
         if self._prepared_pair_ids is None:
@@ -810,7 +968,7 @@ class VaccineTab(QWidget):
         self._update_handoff_controls()
         printed = []
         try:
-            if QMessageBox.question(
+            if not confirmed and QMessageBox.question(
                 self, "Print Flu + COVID labels",
                 "Print two separate labels after their individual program checks?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -843,7 +1001,10 @@ class VaccineTab(QWidget):
         finally:
             self._print_in_progress = False
             self._update_handoff_controls()
-        self._begin_post_print_handoff(printed)
+        if confirmed:
+            self._begin_post_print_handoff(printed, confirmed=True)
+        else:
+            self._begin_post_print_handoff(printed)
 
     def _create_record_for_type(self, connection, vaccine_type):
         return create_vaccine_record(
@@ -860,6 +1021,11 @@ class VaccineTab(QWidget):
         )
 
     def print_label(self) -> None:
+        if self._shortcut_in_progress:
+            return
+        self._print_label()
+
+    def _print_label(self, *, handoff_confirmed: bool = False) -> None:
         if self._print_in_progress or self._pending_handoffs or self._handoff_thread is not None or self._kdca_thread is not None:
             return
         self._print_in_progress = True
@@ -873,7 +1039,10 @@ class VaccineTab(QWidget):
             self._print_in_progress = False
             self._update_handoff_controls()
         if record is not None:
-            self._begin_post_print_handoff([record])
+            if handoff_confirmed:
+                self._begin_post_print_handoff([record], confirmed=True)
+            else:
+                self._begin_post_print_handoff([record])
 
     def _print_current_label(self) -> VaccineRecord | None:
         """Print the current vaccine label and checkpoint the successful output only."""
@@ -904,6 +1073,7 @@ class VaccineTab(QWidget):
         if not permitted:
             return
 
+        self._start_session_reset_reminder()
         print_result = print_vaccine_label(
             self._label_content(
                 record, settings, counts, counts_toward_cap,
@@ -943,7 +1113,7 @@ class VaccineTab(QWidget):
         )
         return record
 
-    def _begin_post_print_handoff(self, records: list[VaccineRecord]) -> None:
+    def _begin_post_print_handoff(self, records: list[VaccineRecord], *, confirmed: bool = False) -> None:
         self._pending_handoffs = []
         self._completed_handoff_charting_texts = []
         with connect(self._db_path) as connection:
@@ -955,6 +1125,9 @@ class VaccineTab(QWidget):
                 )
                 self._pending_handoffs.append(handoff_request_for_record(record, charting_text=charting_text))
         self._update_handoff_controls()
+        if confirmed:
+            self._start_handoff()
+            return
         labels = ", ".join(SYSTEM_LABELS.get(request.system, "Unconfigured system") for request in self._pending_handoffs)
         answer = QMessageBox.question(
             self, "Vaccine system patient lookup",
@@ -1102,7 +1275,7 @@ class VaccineTab(QWidget):
     def _update_handoff_controls(self, *, external_busy: bool = False) -> None:
         pending = bool(self._pending_handoffs)
         active = external_busy or self._handoff_thread is not None or self._kdca_thread is not None or self._session_reset_in_progress
-        blocked = pending or active or self._print_in_progress
+        blocked = pending or active or self._print_in_progress or self._shortcut_in_progress
         if self._session_reset_alert_button is not None:
             self._session_reset_alert_button.setEnabled(not blocked)
         for widget in (
@@ -1115,9 +1288,15 @@ class VaccineTab(QWidget):
             self.patient_phone_input, self.patient_address_input,
             self.add_type_button, self.edit_type_button, self.delete_type_button,
             self.session_reset_now_button,
+            *self.shortcut_buttons.values(),
             self.settings_page.system_targets_editor.session_reset_now_button,
         ):
             widget.setEnabled(not blocked)
+        for button in (
+            self.kdca_login_button, self.open_general_system_button,
+            self.open_influenza_system_button, self.open_covid_system_button,
+        ):
+            button.setEnabled(not (active or self._print_in_progress or self._shortcut_in_progress))
         selected = self._selected_vaccine_item()
         index = self.vaccine_types_combo.currentIndex()
         self.move_type_up_button.setEnabled(not blocked and index > 0)
@@ -1374,9 +1553,20 @@ class VaccineTab(QWidget):
         self._update_session_reset_reminder()
         self.status_label.setText("Vaccine settings loaded.")
 
+    def _start_session_reset_reminder(self, *, restart: bool = False) -> None:
+        if self._session_reminder_started_at is not None and not restart:
+            return
+        self._session_reminder_started_at = monotonic()
+        self._session_reset_alert_shown = False
+        if self._session_reset_alert is not None:
+            self._session_reset_alert.close()
+        self._session_reminder_timer.start()
+        self._update_session_reset_reminder()
+
     def _update_session_reset_reminder(self) -> None:
         """Update appearance only; this timer never inspects or operates a system."""
-        elapsed = max(0, int(monotonic() - self._session_reminder_started_at))
+        started = self._session_reminder_started_at
+        elapsed = max(0, int(monotonic() - started)) if started is not None else 0
         fraction = min(1.0, max(0.0, (elapsed - 3600) / 1800))
         normal, overdue = (163, 177, 194), (239, 107, 115)
         color = "#" + "".join(
@@ -1392,11 +1582,12 @@ class VaccineTab(QWidget):
                 "QPushButton:disabled { color: #4c566a; }"
             )
             button.setToolTip(
-                f"Manual reset reminder: {elapsed // 60} minutes elapsed. "
+                (f"Manual reset reminder: {elapsed // 60} minutes elapsed. " if started is not None
+                 else "Manual reset reminder has not started. ") +
                 "This is not a verified session-expiry timer."
             )
-        self.settings_page.system_targets_editor.set_session_reset_reminder(elapsed)
-        if elapsed >= 115 * 60 and not self._session_reset_alert_shown:
+        self.settings_page.system_targets_editor.set_session_reset_reminder(elapsed if started is not None else None)
+        if started is not None and elapsed >= 115 * 60 and not self._session_reset_alert_shown:
             self._show_session_reset_alert()
 
     def _show_session_reset_alert(self) -> None:
@@ -1433,7 +1624,7 @@ class VaccineTab(QWidget):
     def reset_vaccine_sessions_now(self) -> None:
         """Run one manual attempt; failures never schedule another attempt."""
 
-        if self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress or self._session_reset_in_progress:
+        if self._shortcut_in_progress or self._kdca_thread is not None or self._handoff_thread is not None or self._pending_handoffs or self._print_in_progress or self._session_reset_in_progress:
             self._show_session_reset_progress("Reset unavailable: another vaccine operation is still active.")
             return
         self._session_reset_in_progress = True
@@ -1534,10 +1725,7 @@ class VaccineTab(QWidget):
         complete = all(result.sent or result.status == "not_open" for _label, result in results)
         # A successful peer must not hide a failed, stopped, or declined reset.
         if sent and complete and not self._session_reset_cancel.is_set():
-            self._session_reminder_started_at = monotonic()
-            self._session_reset_alert_shown = False
-            if self._session_reset_alert is not None:
-                self._session_reset_alert.close()
+            self._start_session_reset_reminder(restart=True)
         summary = "; ".join(f"{label}: {result.message}" for label, result in results)
         prefix = "Reset stopped; no further input sent." if self._session_reset_cancel.is_set() else "Reset now:"
         self._session_reset_in_progress = False
@@ -2044,6 +2232,10 @@ class VaccineTab(QWidget):
         vaccine_type_controls: QHBoxLayout,
     ) -> QWidget:
         page = QWidget()
+        shortcuts = QGroupBox("Vaccine Shortcuts")
+        shortcut_layout = QHBoxLayout(shortcuts)
+        for button in self.shortcut_buttons.values():
+            shortcut_layout.addWidget(button, 1)
         patient_group = QGroupBox("Patient")
         patient_layout = QVBoxLayout(patient_group)
         patient_actions = QHBoxLayout()
@@ -2151,6 +2343,7 @@ class VaccineTab(QWidget):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(systems)
+        layout.addWidget(shortcuts)
         layout.addLayout(content, 1)
         return page
 

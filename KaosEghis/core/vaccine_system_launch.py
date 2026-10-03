@@ -1,4 +1,4 @@
-"""Explicit browser launch helpers for the external vaccine systems."""
+"""Explicit vaccine-system launch/detection; window placement is manual."""
 
 from __future__ import annotations
 
@@ -60,7 +60,11 @@ def open_vaccine_system(
     progress: Callable[[str], None] = lambda _message: None,
     cancelled: Callable[[], bool] = lambda: False,
 ) -> VaccineSystemLaunchResult:
-    """Open one configured external system without passing patient data or credentials."""
+    """Open one system without patient data, credentials, or window placement.
+
+    Detection waits are not positioning delays: never snap, drag, resize, or
+    relocate a detected window. The operator owns its workflow position.
+    """
 
     target = _SYSTEMS.get(system)
     if target is None:

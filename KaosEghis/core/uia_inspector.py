@@ -7,6 +7,7 @@ from KaosEghis.core.eghis_connector import (
     get_cached_eghis_state,
     get_cached_grid_element,
 )
+from KaosEghis.core.uia_fast_lookup import find_uia_elements_by_automation_ids
 from KaosEghis.db.database import connect
 from KaosEghis.db.repositories import UiTargetRecord, get_ui_target
 
@@ -327,6 +328,7 @@ def inspect_resolved_target_readonly(
     *,
     message: str = "Target found.",
     parent_found: bool | None = None,
+    properties: frozenset[str] | None = None,
 ) -> UiaInspectionResult:
     """Inspect an already-resolved element without traversing the UI tree again."""
 
@@ -345,13 +347,25 @@ def inspect_resolved_target_readonly(
         name=target.name,
         control_type=target.control_type,
         class_name=target.class_name,
-        found_name=_element_name(match),
-        found_control_type=_element_control_type(match),
-        found_class_name=_element_class_name(match),
-        is_enabled=_safe_bool(match, "is_enabled"),
-        is_visible=_safe_bool(match, "is_visible"),
-        text_value=_safe_text_value(match),
-        has_keyboard_focus=_safe_bool(match, "has_keyboard_focus"),
+        found_name=_element_name(match) if properties is None else None,
+        found_control_type=_element_control_type(match) if properties is None else None,
+        found_class_name=_element_class_name(match) if properties is None else None,
+        is_enabled=(
+            _safe_bool(match, "is_enabled")
+            if properties is None or "is_enabled" in properties else None
+        ),
+        is_visible=(
+            _safe_bool(match, "is_visible")
+            if properties is None or "is_visible" in properties else None
+        ),
+        text_value=(
+            _safe_text_value(match)
+            if properties is None or "text_value" in properties else None
+        ),
+        has_keyboard_focus=(
+            _safe_bool(match, "has_keyboard_focus")
+            if properties is None or "has_keyboard_focus" in properties else None
+        ),
     )
 
 
@@ -898,7 +912,9 @@ def _resolve_target_inside_parent_scope(
                 tail_failure_message = message
 
     try:
-        elements = scoped_container.descendants()
+        elements = (
+            parent_elements if scoped_container is parent else scoped_container.descendants()
+        )
     except Exception as error:
         return (
             None,
@@ -942,6 +958,16 @@ def _find_direct_child_match(
 
 
 def _quick_child_wrapper(scope: Any, **criteria: str) -> Any:
+    if set(criteria) == {"auto_id"} and callable(
+        getattr(getattr(scope, "element_info", None), "_get_elements", None)
+    ):
+        automation_id = criteria["auto_id"]
+        matches = find_uia_elements_by_automation_ids(
+            (automation_id,), root_element=scope,
+        ).get(automation_id, [])
+        if len(matches) != 1:
+            raise LookupError("UIA child was not found uniquely")
+        return matches[0]
     specification = scope.child_window(**criteria)
     exists = getattr(specification, "exists", None)
     if callable(exists):

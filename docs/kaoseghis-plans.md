@@ -1,6 +1,6 @@
 # KaosEghis Plans
 
-Last updated: 2026-09-22
+Last updated: 2026-10-03
 
 ## Current Working State
 
@@ -46,12 +46,19 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 
 ### KaosEghis-emr
 
-- planned shared read adapter for PACS, KaosOrders, patient lookups, and on-demand
-  flu reporting; implementation is not yet enabled
-- observation-only probe implemented: Launcher status displays F6/F7 key or button
-  source with a provisional chart snapshot; no DB reads or polling changes
-- observe F6/F7 and their buttons, capture verified chart identity, and reconcile
-  source state after the fixed per-chart 20-second delay
+- shared FIFO reader and Windows machine-wide mutex implemented for existing PACS,
+  flu, health and patient-context reads; a separate broker executable is not required
+- target: one KaosEghis-emr connector with separate KaosPACS and KaosOrders adapters;
+  source validation/privacy/delivery plus verified EMR interpretation, normalization
+  and source-change detection stay here; imaging/board decisions belong to receivers
+- perform normalization/comparison only after physical connection closure; preserve
+  approved source facts and normalized meanings, including distinct 30/40 states
+- offline source model/comparison implemented in `core/emr_source.py` and
+  `core/emr_source_shadow.py`, with synthetic lifecycle and mocked-cleanup tests;
+  the day reader remains unavailable and has no runtime or delivery hooks
+- current PACS refresh uses chart clear/load +2-second debounce, clear +30-second
+  follow-up preserved across loads, five-minute successful-read safety check and
+  startup/reconnect/manual reconciliation; F6/F7/button observations are diagnostic only
 - coordinate a bounded background queue with at most one live source DB connection;
   on-demand flu waits without connecting until the active connection has closed
 - mandatory: never modify the EMR database; fail closed without verified read-only
@@ -61,6 +68,30 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - preserve fallback reconciliation until signal capture is validated and account
   for independently running legacy pollers during migration
 - requirements and acceptance gates: [KaosEghis-emr](kaoseghis-emr.md)
+- offline [receiver contract review](kaoseghis-emr-contract-review.md) recorded;
+  KaosOrders on `zin@kaosclinic:/srv/projects/KaosOrders` was inspected read-only
+  at `b5f7ccd`; its v1 lacks normalized source/day intake. Contract agreement,
+  deployed PACS compatibility and source qualifiers remain pending, so the live
+  day-reader gate has not passed
+
+### KaosOrders
+
+- separate KaosClinic service; Raspberry Pi OS/Chromium touchscreen viewer has no
+  durable patient/order storage
+- receiver consumes centrally interpreted EMR facts and owns category rules, fee
+  exclusions, visibility, badges and details; it applies updates idempotently, rejects
+  stale data and maintains its own state without duplicating EMR table decoding
+- source edit/disappearance/key-reuse detection stays in KaosEghis-emr; KaosPACS is
+  a sibling consumer, not a downstream dependency of KaosOrders
+- Windows source normalizer/ledger/v2 example are disabled offline prototypes;
+  no real day reader, production mappings or publishing is enabled
+- destination-neutral source processing is now separate from the legacy board
+  prototype; existing JSON remains an unapproved reference, not the shared contract
+- next: agree the normalized-source contract with the server repository, test source
+  interpretation/comparison and receiver rules with synthetic data/mocked DBs, then
+  obtain approval for bounded live shadow verification
+- preserve existing PACS runtime until its own contract migration is verified
+- detailed evidence and gates: [KaosOrders](kaosorders.md)
 
 ### KaosEghis-pacs
 
@@ -68,8 +99,11 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - local worklist persistence
 - cancellation tracking
 - local KaosPACS API bridge
-- business-state ownership stays in KaosEghis-pacs
-- imaging-state ownership stays in KaosPACS
+- current business-state ownership stays in KaosEghis-pacs until a reviewed migration;
+  target EMR interpretation/source-change detection belongs to KaosEghis-emr, while
+  imaging eligibility, modality/station rules and worklist behavior belong to KaosPACS
+- imaging-state ownership stays in KaosPACS; existing API and cancellation behavior
+  are unchanged by the target architecture
 
 ### KaosEghis-flu
 
@@ -128,7 +162,11 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - must not become a general-purpose password manager
 - detailed plan: `docs/kaoseghis-pw.md`
 
-### KaosEghis-inj
+### KaosEghis-inj (Historical)
+
+The following is the superseded local-board proposal, retained as historical context.
+Do not implement its combined local-board processing or Done/Undo UI; use the
+KaosEghis-emr/KaosOrders ownership split above.
 
 - planned immediately after KaosEghis-vaccine
 - patient-centered staff task-board track covering injection, verified laboratory, and
@@ -243,15 +281,15 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 ### High Priority
 
 - keep PR documentation and repo docs current
-- implement in this order: KaosEghis-vaccine, then KaosEghis-inj
+- keep the vaccine workflow stable while verifying the shared EMR connector and
+  receiver-owned KaosOrders processing; do not implement the superseded local inj board
 - define KaosEghis-pw as hidden infrastructure before adding credential-backed
   internal service autofill
 - keep PACS deployment checklist and production-readiness docs current
 - keep PACS dry-run behavior explicit and safe
 - refine flu reporting UX and export/report format
-- validate the KaosEghis-inj live injection and laboratory source queries, category
-  state semantics, cancellation behavior, PACS projection boundary, and minimum display
-  fields before implementing its local worklist milestone
+- agree the KaosOrders normalized-source contract and extend offline lifecycle tests before
+  any new live day-wide reader; verify completeness and privacy before publishing
 - validate KaosEghis-scan behavior with representative multi-page feeder documents
 - verify the scheduler's real backup artifact paths before implementing the backup
   macro, and capture the eGHIS close/backup dialog before that later macro is built
@@ -264,9 +302,8 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - keep infrastructure modules hidden unless they truly need first-class operator UI
 - define final home for KaosClip
 - improve plugin naming consistency
-- implement KaosEghis-inj only in the staged order documented in
-  `docs/kaoseghis-inj.md`: source verification, local worklist, API, kiosk, then
-  appliance hardening
+- follow the staged KaosOrders gates in `docs/kaosorders.md`; the older
+  `docs/kaoseghis-inj.md` local-worklist/API plan is historical, not the next milestone
 - consider scanner settings UI only after the fixed NAPS2 profile workflow is proven in daily use
 - test the Scheduler foundation with disabled and harmless macros before enabling a
   production backup schedule

@@ -92,6 +92,7 @@ class PatientControlCache:
     def resolve(
         self, desktop: Any, root_pid: int, root_handle: int | None,
         selectors: dict[str, tuple[str, ...]],
+        *, allow_hidden_scope: bool = False,
     ) -> tuple[Any, dict[str, Any]] | None:
         try:
             if (
@@ -102,14 +103,17 @@ class PatientControlCache:
             ):
                 return None
             scope = desktop.window(handle=self.scope.handle).wrapper_object()
-            if _identity(scope) != self.scope or not scope.is_visible():
+            if _identity(scope) != self.scope:
+                return None
+            scope_visible = scope.is_visible()
+            if not scope_visible and not allow_hidden_scope:
                 return None
             elements = {}
             for automation_id, identity in self.controls:
                 if not _belongs_to_scope(identity.handle, self.scope.handle):
                     return None
                 element = desktop.window(handle=identity.handle).wrapper_object()
-                if _identity(element) != identity or not element.is_visible():
+                if _identity(element) != identity or (scope_visible and not element.is_visible()):
                     return None
                 elements[automation_id] = element
             return scope, elements

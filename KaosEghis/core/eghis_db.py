@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 import math
 import re
 from time import perf_counter
@@ -26,13 +28,23 @@ def run_readonly_query(
     connection_string: str,
     query: str,
     *,
+    params: tuple[object, ...] | list[object] | Mapping[str, object] | None = None,
     connect_timeout_seconds: float | None = 5.0,
     statement_timeout_seconds: float | None = 5.0,
     application_name: str | None = None,
     timings: dict[str, float] | None = None,
 ) -> tuple[list[str], list[tuple | list | object]]:
+    """Run trusted SQL with optional bound values and return only after cleanup."""
+    # Requests may wait in the FIFO while the caller edits its original values.
+    if isinstance(params, Mapping):
+        params = deepcopy(dict(params))
+    elif isinstance(params, (tuple, list)):
+        params = deepcopy(tuple(params))
+    elif params is not None:
+        raise TypeError("Query parameters must be a tuple, list, or mapping.")
+
     return run_serialized_read(lambda: _read_and_close(
-        connection_string, query,
+        connection_string, query, params=params,
         connect_timeout_seconds=5.0 if connect_timeout_seconds is None else connect_timeout_seconds,
         statement_timeout_seconds=5.0 if statement_timeout_seconds is None else statement_timeout_seconds,
         application_name=application_name or "KaosEghis-emr", timings=timings,
@@ -40,7 +52,7 @@ def run_readonly_query(
 
 
 def _read_and_close(
-    connection_string, query, *, connect_timeout_seconds,
+    connection_string, query, *, params, connect_timeout_seconds,
     statement_timeout_seconds, application_name, timings,
 ):
     started = perf_counter()
@@ -86,7 +98,10 @@ def _read_and_close(
                 # Session-local and compatible with the clinic's PostgreSQL 9.2.
                 cursor.execute(f"SET statement_timeout = {statement_timeout_ms}")
                 record_stage("timeout_set")
-            cursor.execute(query)
+            if params is None:
+                cursor.execute(query)
+            else:
+                cursor.execute(query, params)
             record_stage("query_finished")
             column_names = [column[0] for column in cursor.description or []]
             rows = cursor.fetchall()

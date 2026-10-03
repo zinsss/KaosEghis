@@ -1,6 +1,6 @@
 # KaosEghis PACS
 
-Last updated: 2026-07-08
+Last updated: 2026-10-03
 
 Project name: `KaosEghis-pacs`  
 Panel title: `PACS Worklist`
@@ -21,6 +21,45 @@ Current scope:
 - embedded KaosPACS Web admin page
 
 This project does not implement direct DICOM behavior in KaosEghis itself.
+
+## Shared Connector Direction: 2026-10-03
+
+The target is [KaosEghis-emr](kaoseghis-emr.md) as the shared read-only connector
+with separate KaosPACS and KaosOrders adapters. The refined ownership boundary is
+EMR interpretation versus application behavior, not processing versus no processing.
+KaosEghis-emr owns reviewed reads, verified EMR code interpretation, field normalization,
+source-snapshot change detection, privacy and delivery. Physical source connections
+close before normalization, comparison or delivery. KaosPACS owns imaging eligibility,
+modality/station rules, worklist behavior, completion and expiry.
+PACS, Orders, flu reports, health checks and patient-context reads share the same
+FIFO/machine-wide mutex boundary, not independent connections.
+
+KaosPACS consumes its adapter directly; KaosOrders is not an intermediary or the
+authority for PACS orders. Share already-read data only where reviewed source
+projections permit it. Preserve approved source facts alongside normalized meanings,
+and keep clinical completion/payment distinct from imaging completion. KaosPACS
+still owns duplicate/stale-update handling and persistent imaging state; source
+change detection must not erase completion history or delete stored DICOM images.
+
+**The runtime and status rules below describe today's PACS implementation.** Moving
+imaging-specific decisions into KaosPACS while centralizing EMR interpretation in
+KaosEghis-emr is a staged migration, not an immediate change to source cancellation
+authority, the imaging query or existing endpoints.
+The current local worklist, changed-only sync, manual fallback and cancellation
+behavior remain in place until the receiving contract and shadow parity are verified.
+The future Orders day reader must not silently replace the existing PACS query.
+
+The EMR remains the authority for source order/reception facts; KaosPACS remains the
+authority for imaging lifecycle. Receiver-owned processing does not authorize it to
+infer EMR cancellation from imaging completion, expiry, failed reads or partial data.
+No new live source read, delivery path or migration is enabled by this decision.
+The new `emr_source`/`emr_source_shadow` modules implement this boundary only as an
+offline source-model prototype. PACS does not import or subscribe to them. The
+working imaging query, accession handling, sync and runtime APIs are unchanged.
+The [source contract review](kaoseghis-emr-contract-review.md) records the current
+PACS field requirements and the API discrepancy in the local server checkout. The
+deployed server contract must be checked before any migration; do not repoint the
+client to the internal MWL API or treat its replacement PUT as a per-order upsert.
 
 ## Patient Context API
 
@@ -155,7 +194,7 @@ Architecture rules:
 
 ## Runtime Boundaries
 
-Status ownership:
+Current status ownership (unchanged until the migration above is verified):
 
 - business state `active` / `cancelled` is owned by KaosEghis-pacs
 - imaging state `completed` / `expired` is owned by KaosPACS

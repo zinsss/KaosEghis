@@ -246,7 +246,7 @@ class MacrosTab(QWidget):
 
 
 class WorkspaceTab(QWidget):
-    TOP_PAGES = ["Mail", "Paperless", "PDF", "rHWP", "Flu-Report", "Scan", "Formatter"]
+    TOP_PAGES = ["Mail", "Paperless", "Flu-Report", "Scan", "Formatter"]
 
     def __init__(self, db_path: Path | None = None) -> None:
         super().__init__()
@@ -264,20 +264,6 @@ class WorkspaceTab(QWidget):
             fallback_text="Paperless webview not available.",
             db_path=db_path,
         )
-        self.pdf_page = ServiceWebTab(
-            profile_name="StirlingPDF",
-            setting_key="stirling_pdf_url",
-            default_url=DEFAULT_CONFIG.stirling_pdf_url,
-            fallback_text="Stirling-PDF webview not available.",
-            db_path=db_path,
-        )
-        self.rhwp_page = ServiceWebTab(
-            profile_name="RHWP",
-            setting_key="rhwp_url",
-            default_url=DEFAULT_CONFIG.rhwp_url,
-            fallback_text="rHWP webview not available.",
-            db_path=db_path,
-        )
         self.flu_report_page = FluReportTab()
         self.scan_page = ScanTab(db_path)
         self.formatter_page = DateFormatterPage()
@@ -285,8 +271,6 @@ class WorkspaceTab(QWidget):
         for page in (
             self.mail_page,
             self.paperless_page,
-            self.pdf_page,
-            self.rhwp_page,
             self.flu_report_page,
             self.scan_page,
             self.formatter_page,

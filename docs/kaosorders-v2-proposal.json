@@ -1,0 +1,34 @@
+{
+  "contract": "kaosorders.v2.proposal",
+  "synthetic": true,
+  "mode": "authoritative_day_snapshot",
+  "batch_id": "00000000-0000-4000-8000-000000000001",
+  "clinic_day": "2026-10-01",
+  "observed_at": "2026-10-01T09:05:00+09:00",
+  "complete": true,
+  "restart_reconciliation": true,
+  "encounter_states": [
+    {"encounter_id": "fixture-encounter-1", "state": "ON_HOLD"}
+  ],
+  "encounters": [
+    {
+      "encounter_id": "fixture-encounter-1",
+      "chart_no": "TEST-0001",
+      "patient_name": "\ud14c\uc2a4\ud2b8",
+      "sex_age": "\uc5ec/53",
+      "reception_state": "ON_HOLD",
+      "received_at": null,
+      "orders": [
+        {"order_id": "fixture-blood-1", "category": "BLOOD", "source_state": "ACTIVE", "display_spec": {"study": "\ucc44\ud608 \uc608\uc2dc"}, "ordered_at": null, "updated_at": null},
+        {"order_id": "fixture-bmd-1", "category": "BMD", "source_state": "ACTIVE", "display_spec": {"exam": "\uace8\ubc00\ub3c4 \uc608\uc2dc", "site": "\ubd80\uc704 \uc608\uc2dc"}, "ordered_at": null, "updated_at": null},
+        {"order_id": "fixture-ecg-1", "category": "ECG", "source_state": "ACTIVE", "display_spec": {"exam": "\uc2ec\uc804\ub3c4 \uc608\uc2dc"}, "ordered_at": null, "updated_at": null},
+        {"order_id": "fixture-injection-1", "category": "INJECTION", "source_state": "ACTIVE", "display_spec": {"medication": "\uc57d\ubb3c \uc608\uc2dc", "dose": "\uc6a9\ub7c9 \uc608\uc2dc", "route": "\uacbd\ub85c \uc608\uc2dc"}, "ordered_at": null, "updated_at": null},
+        {"order_id": "fixture-urine-1", "category": "URINE", "source_state": "ACTIVE", "display_spec": {"study": "\uc18c\ubcc0 \uc608\uc2dc"}, "ordered_at": null, "updated_at": null},
+        {"order_id": "fixture-xray-1", "category": "XRAY", "source_state": "ACTIVE", "display_spec": {"exam": "\uac80\uc0ac \uc608\uc2dc", "view": "\ucd2c\uc601 \uc608\uc2dc"}, "ordered_at": null, "updated_at": null},
+        {"order_id": "fixture-xray-2", "category": "XRAY", "source_state": "ACTIVE", "display_spec": {}, "ordered_at": null, "updated_at": null}
+      ]
+    }
+  ],
+  "order_withdrawals": [],
+  "encounter_withdrawals": []
+}

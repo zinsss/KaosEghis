@@ -86,12 +86,17 @@ def emr(monkeypatch):
         (pid, state.lifetimes[pid]) for pid in sorted(set(pids))
     ))
 
-    def fetch(selectors=None):
+    def fetch(selectors=None, *, foreground_finder=None, on_sleep=None, timeout_seconds=0.25):
         def click(_coords):
             state.clicks += 1
 
         def close():
             state.closes += 1
+
+        def sleep(seconds):
+            state.clock += seconds
+            if on_sleep is not None:
+                on_sleep()
 
         return patient.fetch_vaccine_patient_context(
             {}, SELECTORS if selectors is None else selectors,
@@ -100,9 +105,10 @@ def emr(monkeypatch):
             ),
             desktop_factory=lambda **_kwargs: state.desktop,
             process_family_provider=lambda pid: (pid,),
-            clicker=click, closer=close, timeout_seconds=0.25,
+            foreground_scope_finder=foreground_finder,
+            clicker=click, closer=close, timeout_seconds=timeout_seconds,
             clock=lambda: state.clock,
-            sleeper=lambda seconds: setattr(state, "clock", state.clock + seconds),
+            sleeper=sleep,
         )
 
     state.fetch = fetch
@@ -293,3 +299,122 @@ def test_unverifiable_cache_is_rejected(emr, change):
         emr.desktop, emr.pid, emr.root_handle,
         {key: patient._field_automation_id_candidates(key, value) for key, value in SELECTORS.items()},
     ) is None
+
+
+def test_reopening_hidden_popup_reuses_valid_cache_without_reading_hidden_values(emr):
+    assert emr.fetch().success
+    emr.scope.visible = False
+    reads = []
+    for control in emr.controls.values():
+        control.on_read = lambda: reads.append(emr.scope.visible)
+
+    def reopened():
+        if emr.clock >= 0.2:
+            emr.scope.visible = True
+            emr.controls["chart"].value = "2200"
+            emr.controls["name"].value = "New Test Patient"
+
+    result = emr.fetch(on_sleep=reopened)
+    assert result.success
+    assert result.context.chart_no == "2200"
+    assert result.context.patient_name == "New Test Patient"
+    assert reads and all(reads)
+    assert emr.scope.searches == 2
+    assert emr.windows_calls == 1
+
+
+def test_cached_blank_chart_waits_for_new_value_without_tree_search(emr):
+    assert emr.fetch().success
+    emr.controls["chart"].value = ""
+    result = emr.fetch(on_sleep=lambda: setattr(emr.controls["chart"], "value", "2200"))
+    assert result.success
+    assert result.context.chart_no == "2200"
+    assert emr.scope.searches == 2
+    assert emr.windows_calls == 1
+
+
+def test_hidden_popup_never_returns_previous_patient_after_grace_period(emr):
+    assert emr.fetch().success
+    emr.scope.visible = False
+    reads = []
+    emr.controls["chart"].on_read = lambda: reads.append(True)
+    result = emr.fetch(timeout_seconds=0.8)
+    assert not result.success
+    assert result.context is None
+    assert reads == []
+    assert emr.closes == 1
+    assert patient._PATIENT_INFORMATION_SCOPE_CACHE == {}
+
+
+def test_foreground_popup_avoids_broad_discovery_after_opening_delay(emr):
+    calls = []
+
+    def foreground(*_args):
+        calls.append(emr.clock)
+        if emr.clock < 0.2:
+            return None
+        return patient._PatientInformationResolution(emr.scope, "1170", emr.controls["chart"])
+
+    result = emr.fetch(foreground_finder=foreground)
+    assert result.success
+    assert len(calls) == 3
+    assert emr.windows_calls == 0
+    assert emr.scope.searches == 1
+    assert emr.fetch().success
+    assert emr.scope.searches == 1
+
+
+def test_no_foreground_match_keeps_broad_fallback(emr):
+    result = emr.fetch(foreground_finder=lambda *_args: None, timeout_seconds=0.8)
+    assert result.success
+    assert emr.clock >= patient.PATIENT_INFO_OPEN_GRACE_SECONDS
+    assert emr.windows_calls == 1
+
+
+def test_pending_foreground_chart_does_not_fall_back_to_another_patient(emr):
+    result = emr.fetch(
+        foreground_finder=lambda *_args: patient._PatientInformationResolution(
+            emr.scope, "", emr.controls["chart"], pending=True,
+        ),
+        timeout_seconds=0.8,
+    )
+    assert not result.success
+    assert emr.windows_calls == 0
+    assert emr.closes == 0
+
+
+def test_new_foreground_popup_supersedes_hidden_cached_popup(emr):
+    assert emr.fetch().success
+    old = emr.scope
+    old.visible = False
+    new = Scope(3)
+    new_chart = Control(20, "chart", "2200", parent=new)
+    new_name = Control(21, "name", "New Test Patient", parent=new)
+    new.controls = [new_chart, new_name]
+    emr.handles.update({c.handle: c for c in (new, new_chart, new_name)})
+    result = emr.fetch(foreground_finder=lambda *_a: patient._PatientInformationResolution(
+        new, "2200", new_chart,
+    ))
+    assert result.success
+    assert result.context.chart_no == "2200"
+    assert result.context.patient_name == "New Test Patient"
+    assert result.context.resident_id == ""
+    assert emr.windows_calls == 1
+    assert patient._PATIENT_INFORMATION_SCOPE_CACHE[(100, "chart")].scope_handle == 3
+
+
+def test_scope_becoming_visible_mid_validation_does_not_read_hidden_controls(emr):
+    assert emr.fetch().success
+    visibility = iter((False, True))
+    emr.scope.is_visible = lambda: next(visibility)
+    emr.controls["name"].visible = False
+    reads = []
+    emr.controls["chart"].on_read = lambda: reads.append(True)
+    result = patient._find_cached_patient_information_scope(
+        emr.desktop, 100, "chart", root_handle=1,
+        selectors={key: patient._field_automation_id_candidates(key, value)
+                   for key, value in SELECTORS.items()},
+    )
+    assert result.pending
+    assert result.chart_value == ""
+    assert reads == []
