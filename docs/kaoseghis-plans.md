@@ -65,6 +65,9 @@ The project has moved beyond scaffold-only status and now contains real guarded 
   access and reviewed operations
 - mandatory: close every source connection immediately after its read, including
   error/timeout/cancellation cleanup; no idle pool or connection held for publishing
+- uncertain physical closure latches the reader unhealthy and blocks further
+  connections; production privilege verification, registered parameterized
+  operations and bounded stuck-driver recovery remain gated
 - preserve fallback reconciliation until signal capture is validated and account
   for independently running legacy pollers during migration
 - requirements and acceptance gates: [KaosEghis-emr](kaoseghis-emr.md)
@@ -162,37 +165,14 @@ The project has moved beyond scaffold-only status and now contains real guarded 
 - must not become a general-purpose password manager
 - detailed plan: `docs/kaoseghis-pw.md`
 
-### KaosEghis-inj (Historical)
+### Earlier Board Directions (Historical)
 
-The following is the superseded local-board proposal, retained as historical context.
-Do not implement its combined local-board processing or Done/Undo UI; use the
-KaosEghis-emr/KaosOrders ownership split above.
-
-- planned immediately after KaosEghis-vaccine
-- patient-centered staff task-board track covering injection, verified laboratory, and
-  optional read-only imaging/PACS updates
-- read-only eGHIS DB polling for `ord_type='07'` and `proc_dept_cd='INJ'`
-- laboratory source classification and completion semantics must be verified against the
-  live eGHIS schema before implementation; do not guess from injection fields
-- imaging status must reuse the existing KaosEghis-pacs/KaosPACS boundary and must not
-  duplicate PACS polling or permit staff-created imaging completion
-- stable order-key reconciliation for new, changed, cancelled, deleted, and restored
-  source orders
-- date-scoped KaosEghis-owned task board with independent category/source/operational
-  states
-- Raspberry Pi kiosk receives a non-PHI reload signal and pulls a complete generation
-  snapshot into memory
-- target a 21-inch touch-screen appliance with kinetic patient-list scrolling, large
-  64-pixel-or-greater Done/Undo controls, no hover/right-click dependency, and no mouse
-  or keyboard required for routine use
-- staff may scroll and confirm Done/Undo; state is persisted only in KaosEghis
-- Done rows remain visible, move below Active rows, and are struck through
-- Raspberry Pi OS Lite kiosk with no mouse exit, automatic recovery, and scheduled
-  display wake/sleep
-- no Raspberry Pi durable PHI storage
-- the current successor direction is a separate KaosOrders service with signal-driven,
-  read-only reconciliation after eGHIS F6/F7 actions; captured target and timing notes:
-  `docs/kaosorders.md`
+The local KaosEghis-inj/KaosInj board and its Done/Undo UI are superseded. The
+September 30 plan then proposed an Acer/LMDE viewer, completed-patient tiles and
+non-clickable diagnostic hold tiles. Those device/board choices are also
+superseded by the October decisions in [KaosOrders](kaosorders.md): KaosClinic
+service, Pi touchscreen viewer, confirmed hold encounters and receiver-owned
+classification/details. Neither older plan authorizes new runtime or UI work.
 
 ### KaosEghis-scan
 
@@ -283,6 +263,8 @@ KaosEghis-emr/KaosOrders ownership split above.
 - keep PR documentation and repo docs current
 - keep the vaccine workflow stable while verifying the shared EMR connector and
   receiver-owned KaosOrders processing; do not implement the superseded local inj board
+- keep the KaosOrders source adapter behind production permission, registered
+  operation, real-schema identity, and complete-read gates
 - define KaosEghis-pw as hidden infrastructure before adding credential-backed
   internal service autofill
 - keep PACS deployment checklist and production-readiness docs current
@@ -290,6 +272,8 @@ KaosEghis-emr/KaosOrders ownership split above.
 - refine flu reporting UX and export/report format
 - agree the KaosOrders normalized-source contract and extend offline lifecycle tests before
   any new live day-wide reader; verify completeness and privacy before publishing
+- carry the supervised source identity/state/removal evidence into complete-read
+  criteria and a reviewed minimum detail allowlist; do not infer unverified cases
 - validate KaosEghis-scan behavior with representative multi-page feeder documents
 - verify the scheduler's real backup artifact paths before implementing the backup
   macro, and capture the eGHIS close/backup dialog before that later macro is built
@@ -314,12 +298,16 @@ KaosEghis-emr/KaosOrders ownership split above.
 - MWL/DICOM write paths
 - arbitrary shell commands or an unattended scheduler service outside the visible app
 - broad macro recorder
+- separate EMR broker process unless independent consumers or bounded stuck-driver
+  recovery prove it necessary
 
 ## Known Mismatches to Reconcile Later
 
 - README current UI list is stale relative to actual tabs
 - `KaosClip` still exists as a tab even though long-term direction is plugin integration
 - some historical macro/config UI work exists outside the newest simplified visible flow
+- `docs/kaoseghis-inj.md` remains historical background; KaosOrders is the
+  current staff-board direction
 
 ## Documentation Rule
 

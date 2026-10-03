@@ -864,7 +864,8 @@ The inventory distinguishes no-order encounters from source removal after restar
 It still contains source identifiers: do not log it or forward it to the Pi.
 Explicit withdrawals remain separate from closure.
 
-Required KaosOrders-side work under the refined ownership split, pending repository review:
+Required KaosOrders-side work under the refined ownership split, following the
+[receiver review](kaoseghis-emr-contract-review.md#kaosorders-receiver-review):
 
 1. Agree a versioned strict normalized-source schema/endpoint: approved source facts
    and normalized meanings, completeness evidence, timestamp checks and size limits.
@@ -923,6 +924,39 @@ Before a later supervised shadow deployment:
   KaosClinic HTTPS endpoint, non-PHI source scope, secret-store token reference and
   bounded idempotent delivery.
   These endpoint/scope/secret settings do not yet exist in this implementation.
+
+## September Plan Reconciliation: 2026-10-03
+
+Remote commit `baa78dc` recorded the September 30 cross-system plan. It is merged
+into the Windows work without reverting October source evidence or decisions.
+Its implemented v1 description is now checked against the actual receiver revision
+in the [contract review](kaoseghis-emr-contract-review.md). Its Acer/LMDE,
+completed-tile and sender-classification designs are historical, not current
+requirements. Neither older v2 route proposal is an approved endpoint.
+
+The following safety and operational requirements remain applicable:
+
+- Keep the source operation registered/reviewed and parameterized. Production
+  privilege verification and bounded stuck-driver recovery remain separate gates;
+  bound parameters alone do not turn the query helper into an operation-only API.
+- Polling never injects F1, manipulates focus/caret or treats F6/F7 as save proof.
+  Preserve the existing day-scoped trigger, follow-up, manual and safety behavior.
+- Keep the service clinic-LAN-only and isolated from PACS/public proxy networks.
+  Deployment, firewall, TLS and viewer-token provisioning require separate review;
+  do not place a long-lived token in a URL, world-readable file or process argument.
+- Define clinic-day logical expiry, physical purge/grace and stale thresholds.
+  The earlier `04:00 Asia/Seoul` suggestion remains unapproved. Failed reads do
+  not authorize current-day deletion. Keep the disposable projection out of
+  general-purpose/cloud backups and persist no patient data on the viewer.
+- Test independent source/receiver restart, full resynchronization, retries,
+  missed delivery, midnight and viewer reconnect. Durable outbox/revisions are
+  design candidates, not implemented capabilities of the in-memory ledger.
+- Keep the kiosk unprivileged, transient and recoverable: review RAM-backed
+  profile, cache/swap/crash controls, power settings, maintenance exit and
+  token reprovisioning on the actual Pi hardware before routine use.
+- Roll back by disabling the Orders publisher and uncertain viewer independently.
+  Preserve EMR/PACS and manual polling; receiver rollback must never write EMR,
+  delete PACS data or change production database settings.
 
 ## Verification
 
