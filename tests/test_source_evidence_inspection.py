@@ -292,7 +292,7 @@ def reception_rows(code="10", hold="N", opd="N", count=1):
 
 @pytest.mark.parametrize("code,hold,opd", [
     ("10", "N", "N"), ("10", "Y", "Y"), ("20", "N", "Y"),
-    ("NULL", "BLANK", "UNREVIEWED"),
+    ("NULL", "BLANK", "UNREVIEWED"), ("20", "N", "UNREVIEWED"),
 ])
 def test_reception_only_scope_is_parameterized_and_processed_after_closure(
         database, monkeypatch, code, hold, opd):

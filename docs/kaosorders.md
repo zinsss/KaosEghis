@@ -395,18 +395,41 @@ and non-test network access were blocked during tests; mutexes were isolated.
 | Operator-confirmed stage | KST observation | Reception count | proc_gb / hold_yn / hold_opd | Connection lifetime |
 | --- | --- | ---: | --- | ---: |
 | Registered and waiting | 2026-10-05 00:43:33 | 1 | 10 / N / N: 1 | 0.152 s |
+| Open for consultation, operator reported ready | 2026-10-05 00:46:30 | 1 | 20 / N / UNREVIEWED: 1 | 0.0523 s |
 
-Exactly one live reception-only operation ran for this baseline. Read-only mode,
-cursor closure and physical connection closure were verified before processing.
+Exactly two live reception-only operations ran, one per operator-confirmed stage,
+without retries. The second reused the unchanged, previously tested query and
+connection boundary. Read-only mode, cursor closure and physical connection
+closure were verified before processing.
 No clicks, typing, focus changes, writes or patient/order exports were performed.
 The operator was asked to open the dummy for consultation without adding orders
-or pressing F6/F7. The in-consultation observation is still pending.
+or pressing F6/F7, then reported ready before the second observation.
 
 This observation is a day aggregate, not an identified-patient lookup. Attribution
 depends on the operator-confirmed isolated visit and an unchanged population; any
 additional reception or unrelated change makes the comparison inconclusive.
-Code-10 waiting versus in-progress remains unresolved. No source mapping, runtime
-reader, serializer, publishing, PACS or board behavior changed. The production
+Both observations contained exactly one reception. The supervised transition
+supports `10` for waiting and `20` for open consultation in this test; it does not
+verify every transition or authorize a complete production state mapping.
+
+**New qualifier blocker:** the in-consultation `hold_opd` value was masked as
+`UNREVIEWED`, meaning it is outside the exact Y/N allowlist and is neither SQL
+NULL nor empty text. The raw value was not returned or inspected. No meaning,
+format or substitute value can be inferred from the mask. In particular, do not
+coerce it to Y/N, interpret it as administration/payment, discard the reception,
+or send the diagnostic marker as a raw qualifier. The current strict-Y/N source
+model and normalized contract cannot represent this source value unchanged.
+It needs a separately reviewed privacy-safe qualifier investigation and, if
+necessary, a coordinated contract decision before enabling the production reader.
+Do not broaden validators merely to obtain parity.
+
+Five additional synthetic regression cases verify masked reception observation
+and rejection of `UNREVIEWED` for each of the four normalized qualifier fields.
+After these additions, **482 focused tests passed in 3.94 s** and **949 related
+isolated tests passed in 41.98 s**. No source-row fixture was exported.
+
+No source mapping, runtime reader, serializer, publishing, PACS or board behavior
+changed. The production
 reader remains UNAVAILABLE and `/api/v1/order-snapshots` remains prohibited.
 
 ### Approved Laboratory Metadata Review: 2026-10-01

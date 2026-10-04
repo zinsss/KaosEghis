@@ -373,7 +373,7 @@ label/layout failures reproduce at the untouched `e12685d` baseline. No unrelate
 UI changes were included. New inspection code has 67 mocked cases; the source
 reader, source model/ledger, serializer, outbox and PACS implementations are unchanged.
 
-## Reception Baseline: 2026-10-05
+## Reception Comparison: 2026-10-05
 
 The operator confirmed one disposable waiting visit dated 2026-10-05 KST.
 A tested reception-only aggregate operation observed one `10/N/N` reception
@@ -382,9 +382,24 @@ closed before interpretation (0.152 s lifetime). It read no patient/order
 identifiers, demographics or orders. See the [supervised comparison](kaosorders.md#supervised-reception-comparison-2026-10-05)
 for scope, limits and the 280-focused/944-related mocked test results.
 
-The in-consultation observation is pending. This baseline alone does not resolve
-code 10 or compound qualifiers. No validators, normalized mappings, runtime reader,
+After the operator opened the dummy for consultation and reported ready, one
+further read at 00:46:30 KST found `20/N/UNREVIEWED`, still exactly one reception.
+Verified read-only mode and cursor/physical closure succeeded again (0.0523 s).
+The same previously tested query was used, with no retry or expanded field access.
+
+The observed `10 -> 20` transition supports waiting versus open consultation for
+this isolated test, not all lifecycle/compound-state mappings. A concrete contract
+blocker remains: `hold_opd` falls outside the exact Y/N allowlist (not null/empty),
+so its source value is not representable by the current strict raw qualifier.
+`UNREVIEWED` is a server-side privacy mask, not the source value. Do not guess Y/N,
+discard this encounter, export the unknown value, or weaken either validator.
+A bounded privacy-safe qualifier investigation and any resulting contract change
+need separate review. No validators, normalized mappings, runtime reader,
 transport or PACS behavior changed. All other source-evidence gates remain open.
+
+Post-observation synthetic regression checks: 482 focused and 949 related isolated
+tests passed. Five added cases preserve the diagnostic mask boundary and verify
+that normalized qualifier validators reject `UNREVIEWED`; no validator was changed.
 
 ## Review Findings
 
@@ -392,7 +407,7 @@ transport or PACS behavior changed. All other source-evidence gates remain open.
 | --- | --- | --- |
 | Shared snapshot is not a drop-in PACS payload | `OrderFacts` has source identity/code/type/department, but no accession, imaging schedule, modality, station or exam description. `kaospacs_client._validate_kaospacs_entry` requires these imaging fields. | Retain the working PACS projection. Review a separate imaging extension/adapter, never invent an accession from the source tuple or reuse `observed_at` as the schedule. |
 | Local PACS checkout and sender API expectations differ | Windows posts to `/orders/upsert` and `/orders/cancel`. The inspected Gateway defines health, imaging-worklist GET and admin completion, not those order routes. | Inspect the actual deployed receiver revision/capabilities before planning migration. This discrepancy does not prove the running clinic API is broken. |
-| State qualifier meanings remain unverified | Fixed hold_yn/hold_opd and dc_yn/act_yn Y/N facts are now retained in the offline model and draft serializer. Compound semantics are still unverified. | Verify combinations before live normalization; presence and synthetic parity do not authorize mapping every row solely by proc_gb/dc_yn. |
+| State qualifier domain and meanings remain unverified | The offline model/contract requires raw Y/N qualifiers. The 2026-10-05 open-consultation observation returned hold_opd outside exact Y/N, masked as UNREVIEWED; raw value/meaning unknown. | Review this source-domain incompatibility before live normalization. Do not coerce/drop the qualifier, omit the encounter, serialize the mask, or weaken validators to obtain parity. |
 | Observation IDs do not solve transport ordering | The ledger has memory-only UUIDs, timestamps and scope-local baselines. They are not durable, monotonic receiver revisions. | Agree duplicate/content checks, stale rejection, authenticated restart ordering and recovery with each receiver. Do not treat a newer UUID or a restart flag as overwrite authority. |
 | Orders v1 is not a normalized-source receiver | The KaosClinic checkout accepts a per-encounter category snapshot, stores only XRAY/BMD/ECG, and has no source-day replacement or distinct consultation/payment completion. | Agree a separately versioned intake with receiver-owned classification. Preserve v1 semantics; do not translate the shared model lossily to the existing route. |
 

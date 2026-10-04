@@ -300,9 +300,14 @@ results are never authoritative normalized snapshots and it has no runtime calle
 
 For the operator-confirmed isolated dummy visit on 2026-10-05, one waiting-state
 observation found `10/N/N` (count 1), closing the connection in 0.152 s. The
-in-consultation comparison is pending; no new state meaning was enabled.
+operator then opened the visit for consultation and reported ready: the second
+observation found `20/N/UNREVIEWED` (count 1), closing in 0.0523 s. This supports
+the waiting/open-consultation distinction in one supervised transition, not a
+complete enabled mapping. `hold_opd` is outside the exact Y/N allowlist; its raw
+value was not returned. The strict-Y/N contract cannot yet represent that source
+value unchanged. Do not guess a flag or serialize the diagnostic mask.
 See the [supervised comparison](kaosorders.md#supervised-reception-comparison-2026-10-05).
-Before that live read, 280 focused and 944 related isolated mocked tests passed.
+Before these live reads, 280 focused and 944 related isolated mocked tests passed.
 The shared DB/queue implementation, PACS, publishing and production reader block
 remain unchanged.
 
