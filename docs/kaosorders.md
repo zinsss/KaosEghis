@@ -19,8 +19,10 @@ The board never infers clinical completion. No board/kiosk UI was changed here.
 The Windows foundation is **disabled and not connected to runtime triggers**. It has
 a blocked reader interface, typed in-memory normalization, synthetic fixtures,
 complete-snapshot comparison, and an offline proposed v2 serializer. There is no
-source SQL, production mapping catalog, HTTP client, outbox, persisted snapshot,
-or production publish path. Enabling settings cannot bypass missing approvals.
+source SQL, production mapping catalog, HTTP client, production outbox, persisted
+production snapshot, or publish path. Enabling settings cannot bypass missing approvals.
+The separate [synthetic delivery outbox](kaoseghis-emr-delivery.md) now tests local
+transaction/restart/retry behavior only; its plaintext fixture store must not hold PHI.
 
 A destination-neutral [offline source model](kaoseghis-emr.md#offline-source-model-2026-10-03)
 now lives in `core/emr_source.py` and `core/emr_source_shadow.py`. This is the new
@@ -72,6 +74,26 @@ existing v1 API and the board untouched until the remaining gates are resolved.
 Verification passed: 317 focused serializer/source-model tests, all 2,424 isolated
 Windows tests, and direct synthetic checks against the pinned receiver's parser
 and in-memory reconciler. Runtime acquisition, publishing and storage remain off.
+
+### Offline Delivery Milestone: 2026-10-04
+
+After reviewing the uncommitted receiver documents at `zin@kaosclinic` on base
+`7c9275fb74680f46e4d459c821c7d501758c6b1c`, the operator approved the next
+sender-side milestone. The serializer parity work was not repeated or changed.
+`core/kaosorders_outbox_shadow.py` implements explicit synthetic store enrollment,
+per-day revisions under one supplied producer epoch, one immutable pending batch
+per day, durable coalesced refresh requests and exact internal receipt checks.
+Its tests exercise process exits before/after seal and acknowledgement commits.
+
+No production epoch allocator, encryption, authenticated acknowledgement/recovery
+protocol, HTTP client, retry worker, source query, settings or runtime importer is
+provided. Internal `SyntheticAcknowledgement` objects are not a new wire contract.
+Missing state is not recreated; paused/receiver-ahead/lost-state recovery requires
+later explicit design. The [delivery document](kaoseghis-emr-delivery.md) is the
+current implementation boundary and receiver handoff; earlier no-outbox statements
+describe the prior parity stage, not production enablement.
+Verification: all **2,496 isolated tests passed**, including **72 new outbox cases**.
+The pure serializer and both pinned contract fixtures are unchanged.
 
 ### Source and Application Ownership: 2026-10-03
 

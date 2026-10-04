@@ -5,6 +5,9 @@ Reviewed: 2026-10-04
 Status: **synthetic parity with the pinned disabled receiver contract implemented**.
 This is not an approved HTTP endpoint, production query or deployment change.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
+The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
+isolated local outbox and crash tests, not production storage or transport. The
+serializer and pinned fixtures are unchanged.
 
 ## Evidence Scope
 
@@ -122,6 +125,28 @@ qualifier combination, same-key edits/reuse, disappearance, explicit null versus
 blank rejection and the sender's stricter numeric bounds. Resolve durable ordering
 and source-evidence gaps on paper before either side adds production transport or
 acquisition. Keep the existing v1 API and board unchanged.
+
+## Delivery Review and Offline Milestone
+
+Read-only SSH review of the three current uncommitted receiver documents on base
+`7c9275f` completed without changing the receiver repository. Sender-side design
+decisions and the operator-approved offline queue milestone are recorded in
+[delivery foundation](kaoseghis-emr-delivery.md). A supplied synthetic epoch spans
+its producer's clinic days; revisions are allocated independently per day in a
+transaction with immutable sealed bytes. Exact retries do not reserialize or reread.
+Refresh requests coalesce behind one unresolved batch, with a pre-read generation
+ticket preserving requests that arrive during a read or pending delivery.
+
+Internal receipts check scope, mapping, receiver generation, epoch/revision,
+batch ID and digest before atomically releasing pending data. They do not define
+an approved HTTP acknowledgement or authenticate a server. The synthetic store
+has no runtime importer, default path, production encryption/ACL provisioning,
+recovery handshake, transport or retry worker. Missing/corrupt state fails closed.
+
+The previous parity-stage verification remains valid; the new queue uses those
+unchanged fixtures. Complete-day source evidence and all production delivery gates
+remain unresolved. Next receiver work is isolated persistence/receipt/recovery
+testing, not a new route, board integration or use of `/api/v1/order-snapshots`.
 
 ## Review Findings
 

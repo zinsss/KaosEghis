@@ -15,7 +15,8 @@ strict synthetic mapping tests and memory-only complete-day comparison. Its actu
 day reader remains blocked: limited key/state/lifecycle evidence is recorded, but
 whole-day identity, mappings and completeness are not fully verified. Both new flags
 default off; there is no runtime trigger subscriber, new source SQL, network publisher
-or persistent outbox.
+or production outbox. A separately invoked synthetic SQLite outbox now has restart
+and exact-retry tests; it is not runtime storage or approved for patient data.
 KaosOrders is hosted on KaosClinic with a Raspberry Pi OS touchscreen viewer; the
 new source-state and deployment decisions in that document supersede older plans.
 
@@ -25,6 +26,14 @@ no production mappings, source SQL, runtime subscribers or delivery path. The
 existing PACS pipeline and its shared connection boundary remain unchanged.
 An offline Orders serializer now matches the pinned receiver's disabled normalized
 contract with synthetic fixtures only; see [synthetic parity](#synthetic-contract-parity-2026-10-04).
+
+The next offline milestone is implemented in `core/kaosorders_outbox_shadow.py`:
+per-day transactional revision allocation, immutable sealed pending batches,
+coalesced refresh tickets and content-bound internal synthetic receipts. See
+[delivery foundation](kaoseghis-emr-delivery.md) for implemented behavior versus
+unresolved production recovery, security, source evidence and transport decisions.
+The pure serializer remains unchanged and has no runtime importer. Plaintext test
+stores are created only by explicit callers with synthetic fixtures.
 
 ## Connector Ownership Decision: 2026-10-03
 
