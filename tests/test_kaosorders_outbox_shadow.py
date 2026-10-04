@@ -1,6 +1,6 @@
 import ast
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
+from dataclasses import fields, make_dataclass, replace
 from datetime import date, timedelta
 import json
 from pathlib import Path
@@ -250,6 +250,108 @@ def test_receiver_ahead_duplicate_does_not_clear_pending(queue, snapshot):
     pending = seal(queue, snapshot)
     with pytest.raises(OutboxRejected, match="^receiver_cursor_mismatch$"):
         queue.acknowledge(ack(pending, outcome="duplicate", committed=replace(pending.cursor, revision=2)))
+    assert queue.pending(DAY) == pending
+
+
+# Field/receipt shapes reviewed against KaosOrders 40c6a496385a4c6fd48c6532554748db23d4e3cb.
+# No receiver module is imported and no HTTP encoding is defined by these tests.
+def test_pinned_receiver_internal_field_layout_matches_sender_models():
+    assert [field.name for field in fields(SyntheticAcknowledgement)] == [
+        "outcome", "receiver_generation", "request", "committed",
+    ]
+    assert [field.name for field in fields(module.BatchCursor)] == [
+        "scope", "source_epoch", "revision", "batch_id", "content_sha256",
+    ]
+    assert [field.name for field in fields(module.DeliveryScope)] == [
+        "clinic_id", "source_id", "projection_id", "clinic_day", "mapping_revision",
+    ]
+
+
+@pytest.mark.parametrize("outcome,change", [
+    ("stale", "newer_revision"), ("stale", "newer_epoch"),
+    ("stale", "same_day_epoch"),  # A newer producer epoch may exist on another day.
+    ("conflict", "different_content"), ("conflict", "different_mapping"),
+])
+def test_negative_receipt_with_committed_cursor_pauses_and_preserves_work(queue, snapshot, path, outcome, change):
+    pending = seal(queue, snapshot)
+    queue.request_refresh(DAY)
+    committed = pending.cursor
+    if change == "newer_revision":
+        committed = replace(committed, revision=3, batch_id=BATCH2, content_sha256="a" * 64)
+    elif change == "newer_epoch":
+        committed = replace(committed, source_epoch=2, batch_id=BATCH2, content_sha256="a" * 64)
+    elif change in ("different_content", "same_day_epoch"):
+        committed = replace(committed, batch_id=BATCH2, content_sha256="a" * 64)
+    elif change == "different_mapping":
+        committed = replace(committed, scope=replace(committed.scope, mapping_revision="synthetic-old"),
+                            batch_id=BATCH2, content_sha256="a" * 64)
+    assert queue.acknowledge(ack(pending, outcome=outcome, committed=committed)) == "paused"
+    restored = reopen(path)
+    assert restored.pending(DAY) == pending
+    state = restored.state(DAY)
+    assert state.paused_reason == outcome and state.acknowledged_revision == 0
+    assert state.requested_generation == 2 and state.refresh_required
+    with pytest.raises(OutboxRejected, match="^scope_paused$"):
+        restored.acknowledge(ack(pending))
+
+
+def test_resync_receipt_for_unsupported_restart_preserves_new_epoch_batch(path, snapshot):
+    queue = create(path, source_epoch=2)
+    first = seal(queue, snapshot)
+    queue.acknowledge(ack(first))
+    pending = seal(queue, snapshot, BATCH2)
+    # The receiver still has epoch 1; epoch 2 revision 2 cannot enroll/restart it.
+    old = replace(first.cursor, source_epoch=1, content_sha256="a" * 64)
+    assert queue.acknowledge(ack(pending, outcome="resync_required", committed=old)) == "paused"
+    restored = reopen(path)
+    assert restored.pending(DAY) == pending
+    assert restored.state(DAY).acknowledged_revision == 1
+    assert restored.state(DAY).paused_reason == "resync_required"
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "duplicate"])
+@pytest.mark.parametrize("change", ["epoch", "batch_id", "digest", "mapping", "day"])
+def test_success_receipt_cannot_hide_a_different_committed_cursor(queue, snapshot, path, outcome, change):
+    pending = seal(queue, snapshot)
+    committed = pending.cursor
+    if change == "epoch":
+        committed = replace(committed, source_epoch=2)
+    elif change == "batch_id":
+        committed = replace(committed, batch_id=BATCH2)
+    elif change == "digest":
+        committed = replace(committed, content_sha256="a" * 64)
+    elif change == "mapping":
+        committed = replace(committed, scope=replace(committed.scope, mapping_revision="synthetic-v2"))
+    else:
+        committed = replace(committed, scope=replace(committed.scope, clinic_day=DAY + timedelta(days=1)))
+    with pytest.raises(OutboxRejected, match="^receiver_cursor_mismatch$"):
+        queue.acknowledge(ack(pending, outcome=outcome, committed=committed))
+    assert reopen(path).pending(DAY) == pending
+    assert queue.state(DAY).acknowledged_revision == 0
+
+
+def test_accepted_receipt_with_receiver_ahead_revision_is_rejected(queue, snapshot):
+    pending = seal(queue, snapshot)
+    with pytest.raises(OutboxRejected, match="^receiver_cursor_mismatch$"):
+        queue.acknowledge(ack(pending, committed=replace(pending.cursor, revision=2)))
+    assert queue.pending(DAY) == pending
+
+
+@pytest.mark.parametrize("location", ["receipt", "cursor", "scope"])
+def test_same_fields_do_not_authorize_foreign_receipt_object_types(queue, snapshot, location):
+    pending = seal(queue, snapshot)
+    receipt = ack(pending)
+    original = {"receipt": receipt, "cursor": receipt.request, "scope": receipt.request.scope}[location]
+    foreign_type = make_dataclass("SyntheticForeignModel", [field.name for field in fields(original)], repr=False)
+    foreign = foreign_type(**vars(original))
+    if location == "receipt":
+        receipt = foreign
+    elif location == "cursor":
+        receipt = replace(receipt, request=foreign)
+    else:
+        receipt = replace(receipt, request=replace(receipt.request, scope=foreign))
+    with pytest.raises(OutboxRejected, match="^invalid_input$"):
+        queue.acknowledge(receipt)
     assert queue.pending(DAY) == pending
 
 

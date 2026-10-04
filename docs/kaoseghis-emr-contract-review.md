@@ -148,6 +148,114 @@ unchanged fixtures. Complete-day source evidence and all production delivery gat
 remain unresolved. Next receiver work is isolated persistence/receipt/recovery
 testing, not a new route, board integration or use of `/api/v1/order-snapshots`.
 
+## Synthetic Receipt Review: 2026-10-04
+
+Sender baseline: `d298ac4c19068f6cf32964e36f75ce83850705bf`.
+Receiver reference: `zinsss/KaosOrders` exact commit
+`40c6a496385a4c6fd48c6532554748db23d4e3cb`, inspected in a new temporary detached
+checkout. Reviewed `app/source_store.py`, `tests/test_source_store.py`, and the
+contract, implementation-plan and architecture documents. Neither store, validator,
+serializer, fixture nor runtime behavior was changed for this compatibility review.
+
+### Internal Field Parity
+
+| Receiver type | Sender type | Exact field order and value shape |
+| --- | --- | --- |
+| SyntheticReceipt | SyntheticAcknowledgement | outcome, receiver_generation, request, committed; committed can be None. |
+| ReceiptCursor | BatchCursor | scope, source_epoch, revision, batch_id, content_sha256. |
+| ReceiptScope | DeliveryScope | clinic_id, source_id, projection_id, clinic_day, mapping_revision. |
+
+The scope day is a Python date; IDs/digests are strings and ordering values are
+strict positive integers. Receiver generation and batch IDs use canonical UUID
+strings. This is field/value compatibility, **not Python type interchangeability**:
+the sender requires its exact dataclass types and rejects an actual foreign receipt
+object. A future approved boundary must explicitly validate/reconstruct sender
+types; no cross-repository runtime import, converter or network schema was added.
+
+### Actual Receiver Semantics
+
+An isolated probe executed only the reference's synthetic contract, authorization
+model and store, with networking blocked and temporary plaintext fixture databases.
+No FastAPI/runtime database/config modules were imported. It confirmed:
+
+| Rule | Observed result at 40c6a49 |
+| --- | --- |
+| Producer epoch | Shared by clinic/source/projection across days. |
+| Day revisions | Independent; a new day or transition to the current/newer epoch requires revision 1. |
+| Established day | A newer complete revision may skip intermediate revisions. |
+| Exact retry after ordinary restart | duplicate, without replacing the projection again. |
+| Older revision/epoch, previously unseen batch | stale, with that day's current cursor or None when the day is absent. |
+| Equal ordering position with changed batch/content | conflict. |
+| Reused batch ID / in-place mapping change | conflict; mapping is fixed across days of a producer. |
+| Unsupported restart ordering | resync_required, with current cursor or None. |
+| Observation-clock regression | A newer revision with an earlier observed_at is accepted; observation time is not ordering authority. |
+
+**Compatibility blocker: historical duplicates hide newer receiver state.**
+In [source_store.py at the pinned duplicate branch](https://github.com/zinsss/KaosOrders/blob/40c6a496385a4c6fd48c6532554748db23d4e3cb/app/source_store.py#L477),
+a recognized historical batch returns `duplicate(request=old, committed=old)`
+before current ordering checks. The probe accepted revision 1, then revision 3,
+then retried revision 1: the projection remained at 3, but the receipt reported 1
+as committed. The same historical retry still returns duplicate after a newer
+producer epoch is accepted. Therefore the stale rule above has an exact-retry
+precedence exception; it is not an unconditional fence for old generations.
+
+The sender rejects a success receipt that *reports* a different current cursor.
+It cannot detect a newer cursor omitted from the receipt, so a rolled-back sender
+with that old batch pending would accept the historical duplicate as ordinary
+success. This is an unresolved recovery/receipt-meaning gap, not permission to
+relax validation. No production path is active.
+
+Recommended receiver-side resolution for joint approval: distinguish proof of a
+batch's historical acceptance from the current day cursor. Return the actual
+current cursor in `committed`, or agree a separate explicitly named current-cursor
+field in a future contract. Also check the active producer epoch/grant before
+ordinary duplicate success: another day can advance the producer epoch while this
+day's cursor remains old. Merely returning this day's current cursor cannot expose
+that global fence. Keep ordinary same-lineage restart retries idempotent.
+
+### Added Sender Coverage
+
+Added only missing acknowledgement tests: exact field layout; negative receipts
+with current/newer/different-mapping cursors; durable pause with coalesced requests
+retained; unsupported-restart resync with an older receiver cursor; success receipts
+with mismatched committed epoch/batch/digest/mapping/day/revision; and rejection of
+same-shaped foreign Python receipt/cursor/scope objects. Existing tests already
+covered ordinary accepted/duplicate, negative receipts with no cursor, wrong request
+binding, receiver generation mismatch and old acknowledgements during newer work.
+No receiver code is imported by these repository tests.
+
+Verification: **21 added receipt cases**; the final focused outbox/source-model/
+serializer group passed **410 tests in 26.20 seconds**. The related source-shadow,
+shared-reader, PACS, flu, patient-context and database-contention regression group
+passed **833 tests in 92.29 seconds**. An isolated direct probe against the exact
+receiver commit confirmed the table above and reproduced the historical-duplicate
+gap. Reference imports were limited to synthetic modules; no runtime/API imports.
+Tests used fixture-only temporary SQLite stores, mocked EMR connections, isolated
+mutexes/application data, blocked network/WebEngine and blocked native operations.
+The full application suite was not rerun for this tests-and-documentation-only
+milestone. All application files remain unchanged from the sender baseline.
+
+### Decisions Still Required
+
+| Area | Decision/recommendation still requiring joint agreement |
+| --- | --- |
+| Epoch grants/fencing | Authenticated durable grant per clinic/source/projection; retire old authority across every day and define duplicate behavior after retirement. No timestamp/UUID-derived epochs. |
+| Receiver generation | Explicit authenticated enrollment and binding; unknown/replaced generation stops delivery, never trust-on-first-response. |
+| Lost sender/receiver state | Pause; reconcile durable receipts/cursors and grant a new lineage only through approved recovery. Never silently recreate state or replay into a blank replacement receiver. |
+| Receiver ahead | Historical acceptance is insufficient. Fix receipt/current-cursor semantics, expose producer fencing, and reconcile before another allocation; do not jump to receiver revision + 1 automatically. |
+| Ack encoding / HTTP | Internal Python objects are not a wire schema. Agree strict versioned encoding, null/type rules, authentication and status mapping; HTTP 2xx alone must never release pending work. No endpoint is selected. |
+| Retry / pause | Only transient transport failures may retry the exact sealed bytes. Keep stale/conflict/resync durably paused; malformed/scope/generation/current-cursor mismatch requires supervision. Agree resume authority and budgets before adding a worker. |
+| Mapping cutover | Preserve pending bytes and fixed mapping. Use a reviewed new projection with explicit cutover/retirement; epoch increments must not bypass mapping compatibility. |
+
+The sender's proposed 2-second initial backoff, 60-second cap, 15-second attempt
+deadline, 5-minute warning and 15-minute/20-attempt pause remain unimplemented and
+not a negotiated transport policy. Stricter decimal bounds remain sender-only.
+Complete-day membership/consistency/verified-empty evidence, code 10, qualifier
+combinations, all-category cancellation and sex/age conventions remain unresolved.
+Both stores remain plaintext-synthetic-only. No transport, token, encryption,
+production persistence, EMR access, PACS change, deployment or service restart.
+`/api/v1/order-snapshots` remains prohibited for normalized source payloads.
+
 ## Review Findings
 
 | Finding | Evidence | Required resolution |

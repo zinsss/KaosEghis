@@ -114,11 +114,18 @@ conventions and clinical units. Existing supervised observations are documented 
 
 ## Next Handoff
 
-KaosOrders should review this isolated outbox behavior, agree the receipt/recovery
-protocol, and build/test atomic receiver cursor/projection/receipt storage in its
-own disconnected synthetic harness. Keep its existing v1 API and board untouched.
-Do not connect the sender store to runtime, use patient data, add transport, or
-implement a production day reader as part of that handoff.
+KaosOrders now has a separate synthetic receiver store at exact commit
+`40c6a496385a4c6fd48c6532554748db23d4e3cb`. The
+[receipt compatibility review](kaoseghis-emr-contract-review.md#synthetic-receipt-review-2026-10-04)
+confirms field parity but records a historical-duplicate recovery gap: the receiver
+returns the old request as committed even when its current cursor/producer epoch
+has advanced. The sender cannot detect information omitted from that receipt.
+
+Next, resolve historical acceptance versus current-cursor/active-epoch semantics
+on the receiver side with synthetic tests; do not relax sender checks or repeat
+serializer work. Agree enrollment, epoch grants, recovery and ack encoding before
+transport. Keep both runtimes, the existing v1 API and board untouched. Do not use
+patient data or implement a production day reader as part of this handoff.
 
 ## Verification
 

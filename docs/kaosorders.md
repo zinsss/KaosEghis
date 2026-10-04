@@ -95,6 +95,12 @@ describe the prior parity stage, not production enablement.
 Verification: all **2,496 isolated tests passed**, including **72 new outbox cases**.
 The pure serializer and both pinned contract fixtures are unchanged.
 
+The subsequent [receipt review](kaoseghis-emr-contract-review.md#synthetic-receipt-review-2026-10-04)
+uses receiver `40c6a496385a4c6fd48c6532554748db23d4e3cb`. Internal fields match,
+but historical duplicate receipts hide a newer current receiver cursor/epoch.
+Recovery compatibility is therefore incomplete. Only missing sender receipt tests
+and review documentation were added; neither store nor validator was changed.
+
 ### Source and Application Ownership: 2026-10-03
 
 [KaosEghis-emr](kaoseghis-emr.md#connector-ownership-decision-2026-10-03) is the
