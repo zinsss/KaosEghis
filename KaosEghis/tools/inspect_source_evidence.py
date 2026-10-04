@@ -9,6 +9,11 @@ REPORT_CAP = 256
 TOKENS = {"NULL", "BLANK", "UNREVIEWED"}
 PROC = ("10", "20", "25", "30", "40", "50")
 FLAGS = ("Y", "N")
+OPD_SHAPES = frozenset({
+    "NULL", "EMPTY", "EXACT_YN", "LOWERCASE_YN", "PADDED_YN",
+    "ASCII_WHITESPACE", "ASCII_DIGITS", "ASCII_LETTERS", "ASCII_ALPHANUMERIC",
+    "OTHER", "OVER_64_CHARS",
+})
 ORDER_TYPES = ("01", "02", "03", "04", "05", "06", "07", "08", "09")
 DEPARTMENTS = ("LAB", "DRUG", "INJ", "XRAY", "BMD", "ECG", "PT")
 SEX = ("M", "F", "O", "1", "2")
@@ -69,6 +74,43 @@ LIMIT 257
 """
 
 # Each CASE masks unreviewed values on the server, before they cross the boundary.
+RECEPTION_SHAPE_SQL = """
+WITH h AS (
+    SELECT proc_gb, hold_yn, hold_opd
+    FROM public.h1opdin WHERE clinic_ymd=%(day)s
+    LIMIT %(encounter_limit)s
+), masked AS (
+    SELECT CASE WHEN proc_gb IS NULL THEN 'NULL'
+                WHEN proc_gb::text='' THEN 'BLANK'
+                WHEN proc_gb::text=ANY(%(proc)s) THEN proc_gb::text
+                ELSE 'UNREVIEWED' END AS code,
+           CASE WHEN hold_yn IS NULL THEN 'NULL'
+                WHEN hold_yn::text='' THEN 'BLANK'
+                WHEN hold_yn::text=ANY(%(flags)s) THEN hold_yn::text
+                ELSE 'UNREVIEWED' END AS hold,
+           CASE WHEN hold_opd IS NULL THEN 'NULL'
+                WHEN hold_opd::text='' THEN 'EMPTY'
+                WHEN length(hold_opd::text)>64 THEN 'OVER_64_CHARS'
+                WHEN hold_opd::text=ANY(%(flags)s) THEN 'EXACT_YN'
+                WHEN hold_opd::text=ANY(%(lower_flags)s) THEN 'LOWERCASE_YN'
+                WHEN btrim(hold_opd::text, %(whitespace)s)='' THEN 'ASCII_WHITESPACE'
+                WHEN btrim(hold_opd::text, %(whitespace)s)=ANY(%(mixed_flags)s)
+                    THEN 'PADDED_YN'
+                WHEN hold_opd::text ~ '^[0-9]+$' THEN 'ASCII_DIGITS'
+                WHEN hold_opd::text ~ '^[A-Za-z]+$' THEN 'ASCII_LETTERS'
+                WHEN hold_opd::text ~ '^[A-Za-z0-9]+$' THEN 'ASCII_ALPHANUMERIC'
+                ELSE 'OTHER' END AS opd_shape
+    FROM h
+)
+SELECT 'summary' AS section, 'encounters' AS a, ''::text AS b, ''::text AS c,
+       ''::text AS d, count(*) AS n FROM h
+UNION ALL SELECT 'reception_shape', code, hold, opd_shape, '', count(*)
+    FROM masked GROUP BY code, hold, opd_shape
+ORDER BY 1, 2, 3, 4, 5
+LIMIT 257
+"""
+
+
 DAY_SQL = """
 WITH h AS (
     SELECT recept_no, ptnt_no, proc_gb, hold_yn, hold_opd
@@ -174,14 +216,19 @@ def _query_spec(operation, clinic_day):
             "order_fields": sorted(SCHEMA_FIELDS["h2opd_doct_ord"]),
             "patient_fields": sorted(SCHEMA_FIELDS["hz_mst_ptnt"]),
         }
-    if operation not in ("day", "reception") or type(clinic_day) is not date:
+    if operation not in ("day", "reception", "reception_shape") or type(clinic_day) is not date:
         raise EvidenceRejected("invalid_scope")
-    if operation == "reception":
-        return RECEPTION_SQL, {
+    if operation in ("reception", "reception_shape"):
+        params = {
             "day": clinic_day.strftime("%Y%m%d"),
             "encounter_limit": ENCOUNTER_CAP + 1,
             "proc": list(PROC), "flags": list(FLAGS),
         }
+        if operation == "reception_shape":
+            params.update(lower_flags=["y", "n"], mixed_flags=["Y", "N", "y", "n"],
+                          whitespace=" \t\r\n\f\v")
+            return RECEPTION_SHAPE_SQL, params
+        return RECEPTION_SQL, params
     return DAY_SQL, {
         "day": clinic_day.strftime("%Y%m%d"),
         "encounter_limit": ENCOUNTER_CAP + 1, "order_limit": ORDER_CAP + 1,
@@ -272,10 +319,12 @@ def _day_findings(rows, expectation):
     return {"counts": summary, "groups": groups}
 
 
-def _reception_findings(rows, expectation):
+def _reception_findings(rows, expectation, *, shape_only=False):
     if not rows or len(rows) > REPORT_CAP:
         raise EvidenceRejected("result_overflow_or_incomplete")
     total, groups, seen = None, [], set()
+    group_section = "reception_shape" if shape_only else "reception"
+    opd_allowed = OPD_SHAPES if shape_only else set(FLAGS) | TOKENS
     for row in rows:
         if (type(row) not in (tuple, list) or len(row) != 6
                 or any(type(value) is not str for value in row[:5])
@@ -286,8 +335,8 @@ def _reception_findings(rows, expectation):
         section, code, hold, opd, extra, count = row
         if tuple(row[:5]) == ("summary", "encounters", "", "", ""):
             total = count
-        elif (section == "reception" and code in set(PROC) | TOKENS
-              and hold in set(FLAGS) | TOKENS and opd in set(FLAGS) | TOKENS
+        elif (section == group_section and code in set(PROC) | TOKENS
+              and hold in set(FLAGS) | TOKENS and opd in opd_allowed
               and extra == "" and count > 0):
             groups.append({"values": [code, hold, opd], "count": count})
         else:
@@ -300,7 +349,7 @@ def _reception_findings(rows, expectation):
         raise EvidenceRejected("inconsistent_result")
     if (expectation == "empty" and total) or (expectation == "populated" and not total):
         raise EvidenceRejected("operator_expectation_mismatch")
-    return {"counts": {"encounters": total}, "groups": {"reception": groups}}
+    return {"counts": {"encounters": total}, "groups": {group_section: groups}}
 
 
 def inspect_evidence(connection_string, *, operation, clinic_day=None,
@@ -312,7 +361,8 @@ def inspect_evidence(connection_string, *, operation, clinic_day=None,
     try:
         if approved is not True:
             raise EvidenceRejected("approval_required")
-        if ((operation in ("day", "reception") and expectation not in ("empty", "populated"))
+        if ((operation in ("day", "reception", "reception_shape")
+             and expectation not in ("empty", "populated"))
                 or (operation == "schema" and expectation is not None)):
             raise EvidenceRejected("invalid_scope")
         query, params = _query_spec(operation, clinic_day)
@@ -324,11 +374,14 @@ def inspect_evidence(connection_string, *, operation, clinic_day=None,
             findings = _schema_findings(rows)
         elif operation == "reception":
             findings = _reception_findings(rows, expectation)
+        elif operation == "reception_shape":
+            findings = _reception_findings(rows, expectation, shape_only=True)
         else:
             findings = _day_findings(rows, expectation)
         report["findings"] = findings
         report["status"] = ("schema_observed" if operation == "schema"
                             else "observed_reception_scope" if operation == "reception"
+                            else "observed_reception_shape" if operation == "reception_shape"
                             else f"observed_{expectation}_scope")
     except (EvidenceRejected, EghisEvidenceRejectedError) as error:
         report["status"] = str(error)

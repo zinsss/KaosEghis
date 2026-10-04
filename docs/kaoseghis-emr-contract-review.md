@@ -401,13 +401,29 @@ Post-observation synthetic regression checks: 482 focused and 949 related isolat
 tests passed. Five added cases preserve the diagnostic mask boundary and verify
 that normalized qualifier validators reject `UNREVIEWED`; no validator was changed.
 
+### Qualifier Shape Follow-Up
+
+The [approved 2026-10-05 shape inspection](kaosorders.md#qualifier-shape-follow-up-2026-10-05)
+returned one `20/N` reception whose `hold_opd` consists of ASCII digits. Only the
+fixed `ASCII_DIGITS` shape label and count crossed the source boundary; the digits,
+numeric value and exact length were not returned. The single live operation at
+00:56:30 KST verified read-only mode and closed the cursor/physical connection
+before processing (0.0519 s), after 529 focused and 996 related mocked tests passed.
+
+This excludes a mere case/whitespace variant of Y/N for that observation, but not
+an identifier or an unverified numeric code. No clinical/boolean meaning was inferred.
+Do not send the shape label in place of raw facts, cast numeric text to Y/N or
+broaden the sender/receiver validators. Source-domain and privacy review must
+precede any coordinated contract revision. No production model/contract was changed,
+no endpoint called and no runtime reader enabled. All other evidence gates remain.
+
 ## Review Findings
 
 | Finding | Evidence | Required resolution |
 | --- | --- | --- |
 | Shared snapshot is not a drop-in PACS payload | `OrderFacts` has source identity/code/type/department, but no accession, imaging schedule, modality, station or exam description. `kaospacs_client._validate_kaospacs_entry` requires these imaging fields. | Retain the working PACS projection. Review a separate imaging extension/adapter, never invent an accession from the source tuple or reuse `observed_at` as the schedule. |
 | Local PACS checkout and sender API expectations differ | Windows posts to `/orders/upsert` and `/orders/cancel`. The inspected Gateway defines health, imaging-worklist GET and admin completion, not those order routes. | Inspect the actual deployed receiver revision/capabilities before planning migration. This discrepancy does not prove the running clinic API is broken. |
-| State qualifier domain and meanings remain unverified | The offline model/contract requires raw Y/N qualifiers. The 2026-10-05 open-consultation observation returned hold_opd outside exact Y/N, masked as UNREVIEWED; raw value/meaning unknown. | Review this source-domain incompatibility before live normalization. Do not coerce/drop the qualifier, omit the encounter, serialize the mask, or weaken validators to obtain parity. |
+| State qualifier domain and meanings remain unverified | The offline model/contract requires raw Y/N qualifiers. The 2026-10-05 open-consultation observation returned hold_opd outside exact Y/N; a bounded follow-up established ASCII-digit text without returning the digits or assigning meaning. | Review this source-domain and privacy incompatibility before live normalization. Do not coerce/drop the qualifier, omit the encounter, serialize the mask/shape, or weaken validators to obtain parity. |
 | Observation IDs do not solve transport ordering | The ledger has memory-only UUIDs, timestamps and scope-local baselines. They are not durable, monotonic receiver revisions. | Agree duplicate/content checks, stale rejection, authenticated restart ordering and recovery with each receiver. Do not treat a newer UUID or a restart flag as overwrite authority. |
 | Orders v1 is not a normalized-source receiver | The KaosClinic checkout accepts a per-encounter category snapshot, stores only XRAY/BMD/ECG, and has no source-day replacement or distinct consultation/payment completion. | Agree a separately versioned intake with receiver-owned classification. Preserve v1 semantics; do not translate the shared model lossily to the existing route. |
 

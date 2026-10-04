@@ -429,8 +429,60 @@ After these additions, **482 focused tests passed in 3.94 s** and **949 related
 isolated tests passed in 41.98 s**. No source-row fixture was exported.
 
 No source mapping, runtime reader, serializer, publishing, PACS or board behavior
-changed. The production
-reader remains UNAVAILABLE and `/api/v1/order-snapshots` remains prohibited.
+changed. The production reader remains UNAVAILABLE and `/api/v1/order-snapshots`
+remains prohibited.
+
+#### Qualifier Shape Follow-Up: 2026-10-05
+
+The operator approved a bounded follow-up while the dummy remained open. The new
+explicit `reception_shape` diagnostic uses one fixed parameterized SELECT for the
+confirmed clinic date. It reads the same three reception fields and returns only
+allowlisted reception code/hold flag, a fixed shape label for `hold_opd`, and counts.
+The raw `hold_opd` text, exact length, numeric value, identifiers, demographics and
+order fields are never returned. There is no arbitrary field/pattern/SQL input.
+
+Shape labels distinguish SQL NULL, empty text, exact Y/N, lowercase y/n, padded
+Y/N in either case, ASCII whitespace, digits, letters, mixed letters/digits, other,
+and over-64-character text. The last guard precedes the regular-expression checks.
+These are diagnostic shapes, not source codes or clinical interpretations. The
+shape section is distinct from the raw-flag aggregate section, and both validators
+reject the other section's rows. No trim/case/boolean conversion is applied to
+source facts or the normalized contract.
+
+The same shared FIFO, machine-wide mutex, verified read-only session, 3-second
+connect timeout, 2-second statement timeout and verified physical closure apply.
+Population/output sentinels and count/allowlist checks remain in force. Validation
+occurs after closure. Errors return fixed redacted reasons without partial findings;
+an empty diagnostic result never becomes an authoritative source snapshot.
+
+Before source access, **529 focused tests passed in 3.03 s** and **996 related
+isolated tests passed in 42.04 s**. The 47 additional synthetic cases cover every
+shape label, fixed query/output review, approval/scope, session/cleanup failures,
+overflow, partial results, section isolation and rejection of raw field values.
+Mocks block live DB, native input/printer and non-test network access, with isolated
+mutexes. Tests do not include a raw live-source value or patient fixture.
+
+Exactly one live shape operation ran, without retries, at **2026-10-05 00:56:30 KST**:
+
+| Receptions | proc_gb | hold_yn | hold_opd shape | Count |
+| ---: | --- | --- | --- | ---: |
+| 1 | 20 | N | ASCII_DIGITS | 1 |
+
+Read-only mode and cursor/physical connection closure were verified before
+interpretation; connection lifetime was **0.0519 s**. No clicks, focus changes,
+typing, writes or application restarts occurred. Live access stopped after this
+one observation; it did not probe individual numeric candidates or export digits.
+
+This rules out exact/lowercase/padded Y/N and whitespace for the observed value.
+It does not establish whether that number is a flag, identifier, counter or another
+code, nor its meaning. In particular, do not treat numeric/nonzero text as true,
+export it as an identifier, replace it with a shape label, or widen the contract
+blindly. The strict-Y/N raw qualifier incompatibility remains a production blocker.
+The next supervised comparison may test whether putting the dummy on hold clears
+the numeric shape; even a reversible transition will not establish its domain or
+authorize export. A source-definition review and coordinated contract decision
+remain necessary. The production reader, mappings, validators, publishing and
+PACS are unchanged and disabled where previously blocked.
 
 ### Approved Laboratory Metadata Review: 2026-10-01
 

@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 import json
 from pathlib import Path
+import re
 import sys
 import threading
 from types import SimpleNamespace
@@ -159,7 +160,7 @@ def test_bad_scope_or_missing_approval_never_connects(database, change):
 @pytest.mark.parametrize("mode", [("off", "2s", "read committed"),
                                   ("on", "0", "read committed"), None,
                                   ("on", "2s", "serializable")])
-@pytest.mark.parametrize("operation", ["day", "reception"])
+@pytest.mark.parametrize("operation", ["day", "reception", "reception_shape"])
 def test_session_verification_precedes_source_read(database, mode, operation):
     database.mode = mode
     result = inspect(operation=operation)
@@ -173,7 +174,7 @@ def test_session_verification_precedes_source_read(database, mode, operation):
     "connect", "readonly", "cursor", "timeout_setup", "mode", "query", "fetch",
     "cursor_close", "cursor_still_open", "connection_close", "connection_still_open",
 ])
-@pytest.mark.parametrize("operation", ["day", "reception"])
+@pytest.mark.parametrize("operation", ["day", "reception", "reception_shape"])
 def test_all_failure_stages_are_redacted_and_never_authoritative_empty(database, stage, operation):
     database.stage = stage
     result = inspect(operation=operation)
@@ -271,7 +272,8 @@ def test_shared_fifo_and_max_one_physical_connection(database):
 
 
 def test_fixed_sql_review_scope_privacy_and_one_statement():
-    for sql in (evidence.DAY_SQL, evidence.SCHEMA_SQL, evidence.RECEPTION_SQL):
+    for sql in (evidence.DAY_SQL, evidence.SCHEMA_SQL, evidence.RECEPTION_SQL,
+                evidence.RECEPTION_SHAPE_SQL):
         assert ";" not in sql
         assert not any(word in sql.lower() for word in (
             "ptnt_nm", "birth_ymd", "jumin", "phone", "address", "diagnosis",
@@ -349,8 +351,9 @@ def test_reception_only_invalid_results_fail_closed(database, rows, status):
     {"approved": False}, {"approved": 1}, {"clinic_day": None},
     {"clinic_day": "2026-10-02"}, {"expectation": None}, {"expectation": "waiting"},
 ])
-def test_reception_scope_requires_approval_date_and_expectation(database, change):
-    arguments = dict(operation="reception", expectation="populated")
+@pytest.mark.parametrize("operation", ["reception", "reception_shape"])
+def test_reception_scope_requires_approval_date_and_expectation(database, change, operation):
+    arguments = dict(operation=operation, expectation="populated")
     arguments.update(change)
     assert inspect(**arguments)["status"] in {"approval_required", "invalid_scope"}
     assert not database.connections
@@ -364,6 +367,87 @@ def test_reception_only_empty_remains_non_authoritative(database):
     assert result["authoritative_snapshot"] is False
     database.rows = reception_rows()
     assert inspect(operation="reception")["status"] == "operator_expectation_mismatch"
+
+
+def shape_rows(shape="ASCII_DIGITS", count=1):
+    return [("summary", "encounters", "", "", "", count)] + (
+        [("reception_shape", "20", "N", shape, "", count)] if count else [])
+
+
+@pytest.mark.parametrize("shape", sorted(evidence.OPD_SHAPES))
+def test_shape_scope_is_fixed_and_only_processed_after_closure(database, monkeypatch, shape):
+    database.rows = shape_rows(shape)
+    original = evidence._reception_findings
+    def validate(rows, expectation, **kwargs):
+        assert database.events[-2:] == ["cursor_closed", "connection_closed"]
+        assert all(c.closed for c in database.connections)
+        assert kwargs == {"shape_only": True}
+        return original(rows, expectation, **kwargs)
+    monkeypatch.setattr(evidence, "_reception_findings", validate)
+    result = inspect(operation="reception_shape", expectation="populated")
+    assert result["status"] == "observed_reception_shape"
+    assert result["findings"] == {
+        "counts": {"encounters": 1},
+        "groups": {"reception_shape": [{"values": ["20", "N", shape], "count": 1}]}}
+    assert result["authoritative_snapshot"] is False
+    query, params = database.statements[-1]
+    assert query == evidence.RECEPTION_SHAPE_SQL
+    assert params == {"day": "20261002", "encounter_limit": 10001,
+                      "proc": list(evidence.PROC), "flags": list(evidence.FLAGS),
+                      "lower_flags": ["y", "n"], "mixed_flags": ["Y", "N", "y", "n"],
+                      "whitespace": " \t\r\n\f\v"}
+    assert len(database.statements) == 3
+
+
+def test_shape_sql_has_only_fixed_opd_labels_no_raw_value_or_exact_length():
+    sql = evidence.RECEPTION_SHAPE_SQL
+    case = sql[sql.index("CASE WHEN hold_opd"):sql.index("END AS opd_shape")]
+    assert set(re.findall(r"(?:THEN|ELSE) '([^']+)'", case)) == evidence.OPD_SHAPES
+    assert not re.search(r"(?:THEN|ELSE)\s+(?!')[^\s]+", case)
+    assert "length(hold_opd::text)>64" in case
+    assert case.index("length(") < case.index(" ~ ")
+    assert "btrim(hold_opd::text, %(whitespace)s)" in case
+    for forbidden in ("recept_no", "ptnt_no", "hz_mst_ptnt", "h2opd", "sex", "JOIN"):
+        assert forbidden not in sql
+    assert "WHERE clinic_ymd=%(day)s" in sql
+    assert "LIMIT %(encounter_limit)s" in sql and "LIMIT 257" in sql
+    output = sql[sql.index("SELECT 'summary'"):]
+    assert "hold_opd" not in output and "length(" not in output
+    assert "FROM masked GROUP BY code, hold, opd_shape" in output
+
+
+@pytest.mark.parametrize("rows,status", [
+    ([], "result_overflow_or_incomplete"),
+    (shape_rows() * 129, "result_overflow_or_incomplete"),
+    (shape_rows(count=10001), "source_overflow"),
+    (shape_rows()[1:], "incomplete_result"),
+    (shape_rows()[:1], "inconsistent_result"),
+    (shape_rows() + [shape_rows()[0]], "invalid_result"),
+    (shape_rows("PRIVATE_MARKER"), "invalid_result"),
+    (shape_rows("12345678"), "invalid_result"),
+    (shape_rows("UNREVIEWED"), "invalid_result"),
+    (shape_rows("Y"), "invalid_result"),
+    (reception_rows(), "invalid_result"),
+    ([("summary", "encounters", "", "", "", True)], "invalid_result"),
+    (shape_rows(count=0), "operator_expectation_mismatch"),
+])
+def test_shape_output_cannot_leak_source_values_or_partial_findings(database, rows, status):
+    database.rows = rows
+    report = inspect(operation="reception_shape", expectation="populated")
+    assert report["status"] == status
+    assert "findings" not in report and report["authoritative_snapshot"] is False
+    assert "PRIVATE_MARKER" not in json.dumps(report) and "12345678" not in json.dumps(report)
+
+
+def test_shape_empty_and_normal_flag_sections_are_not_interchangeable(database):
+    database.rows = shape_rows(count=0)
+    result = inspect(operation="reception_shape")
+    assert result["status"] == "observed_reception_shape"
+    assert result["findings"] == {"counts": {"encounters": 0}, "groups": {"reception_shape": []}}
+    assert result["authoritative_snapshot"] is False
+    database.rows = shape_rows()
+    assert inspect(operation="reception_shape")["status"] == "operator_expectation_mismatch"
+    assert inspect(operation="reception", expectation="populated")["status"] == "invalid_result"
 
 
 def test_evidence_is_disconnected_and_cannot_unblock_runtime_reader():

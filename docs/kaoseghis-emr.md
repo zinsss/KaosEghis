@@ -238,7 +238,8 @@ production query, publisher, settings, trigger, PACS change or deployment was ma
 
 ## Closed-Hours Aggregate Inspection: 2026-10-04
 
-`tools/inspect_source_evidence.py` exposes only fixed schema/day/reception operations with
+`tools/inspect_source_evidence.py` exposes only fixed schema, day, reception and
+reception-shape operations with
 explicit approval and a supplied clinic date/expected population. It has no CLI
 SQL input, startup importer, timer, settings writer, persistence or publisher.
 The new `eghis_db.run_verified_evidence_query` entry point keeps the PostgreSQL
@@ -310,6 +311,19 @@ See the [supervised comparison](kaosorders.md#supervised-reception-comparison-20
 Before these live reads, 280 focused and 944 related isolated mocked tests passed.
 The shared DB/queue implementation, PACS, publishing and production reader block
 remain unchanged.
+
+The separately approved [qualifier shape follow-up](kaosorders.md#qualifier-shape-follow-up-2026-10-05)
+adds a `reception_shape` diagnostic, not a normalizer. One read at 00:56:30 KST
+observed one `20/N` reception with `hold_opd` shaped as ASCII digits. Only a fixed
+shape label and count were returned, never its text, numeric value or exact length.
+The existing verified read-only boundary closed the cursor and physical connection
+before interpretation (0.0519 s). The shape query was reviewed and passed 529
+focused and 996 related isolated mocked tests before that read.
+
+Numeric text does not establish a boolean meaning or a safe raw export. The
+strict-Y/N contract is still incompatible with this observed source domain;
+unknown qualifier semantics and safe representation remain blocked. No production
+model, validator, reader, settings, trigger, delivery, PACS or app was changed.
 
 ## Observation-Only Probe
 
