@@ -1,6 +1,6 @@
 # KaosEghis-emr
 
-Last updated: 2026-10-03
+Last updated: 2026-10-04
 
 Status: the first shared-read stage is implemented. Verified chart clears can now
 refresh the existing whole-day PACS query; Poll Now remains a manual fallback.
@@ -23,6 +23,8 @@ The destination-neutral source model and source comparison are now implemented
 **offline only** in `core/emr_source.py` and `core/emr_source_shadow.py`. They have
 no production mappings, source SQL, runtime subscribers or delivery path. The
 existing PACS pipeline and its shared connection boundary remain unchanged.
+An offline Orders serializer now matches the pinned receiver's disabled normalized
+contract with synthetic fixtures only; see [synthetic parity](#synthetic-contract-parity-2026-10-04).
 
 ## Connector Ownership Decision: 2026-10-03
 
@@ -111,9 +113,10 @@ from this module but remains a separate disabled board-reference prototype.
 | --- | --- |
 | `EmrDayRead` | Detached rows, source/projection/day scope, observation time, read outcome and explicit evidence flags. |
 | `SourcePolicy` | Versioned exact reception/order-state mappings. No default production mapping or category rules. |
-| `EncounterFacts` | Encounter ID, chart number, name, normalized sex/age, source state code and normalized state. Consultation completed and payment completed are distinct. |
+| `EncounterFacts` | Encounter ID, chart number, name, normalized sex/age, source state code and normalized state. Consultation completed and payment completed are distinct. Required fixed raw reception qualifiers added in the parity stage. |
 | `OrderKey` | Encounter ID, order date, order number and sequence as separate fields. Not a lifetime identity or an accession-number replacement. |
-| `OrderFacts` | Key, source order code/type/department, source state code and normalized state; optional exact-decimal quantity/days/frequency behind a separate evidence gate. |
+| `OrderFacts` | Key, source order code/type/department, source state code and normalized state; optional exact-decimal quantity/days/frequency behind a separate evidence gate. Required fixed raw order qualifiers added in the parity stage. |
+| `ReceptionQualifiers` / `OrderQualifiers` | Immutable exact Y/N facts: hold_yn/hold_opd and dc_yn/act_yn. No clinical interpretation, defaults or arbitrary qualifier dictionary. |
 | `SourceSnapshot` | Validated complete scope, mapping revision and immutable encounter/order facts, including cancelled encounters, fee rows and no-order encounters. |
 | `SourceObservation` | Full snapshot, observation ID, changed/added facts and missing keys. Missing means absent from the complete scope, not clinically cancelled. |
 
@@ -161,12 +164,62 @@ Do not activate the old board serializer or replace the existing PACS imaging qu
 The [2026-10-03 contract review](kaoseghis-emr-contract-review.md) records receiver
 field gaps and the next acceptance checklist. The shared model lacks PACS-specific
 accession/schedule/routing data; a separate projection is required. Raw state
-qualifiers and durable delivery ordering also remain unresolved. The corrected
+qualifier meanings and durable delivery ordering also remain unresolved. The corrected
 host is `zin@kaosclinic`, repository `/srv/projects/KaosOrders`, inspected at
 `b5f7ccd8257f29235c90b11499b8ed352fc06d0d`. Its existing v1 per-encounter/category
 API cannot accept the shared day snapshot or preserve its full state/edit facts.
 The review records migration and receiver-test gaps; remote code is unchanged,
 running deployment compatibility is unverified, and the reader gate is not passed.
+
+## Synthetic Contract Parity: 2026-10-04
+
+Compared against `zinsss/KaosOrders` at exact commit
+`7c9275fb74680f46e4d459c821c7d501758c6b1c` in a temporary detached checkout,
+without changing the receiver or this repository's branch/history. The Windows
+base and remote `main` were both `c6b9bc9490d9d84d1e19faabfd0c03c5d25e1cde`.
+
+`core/kaosorders_normalized_source.py` provides `serialize_normalized_source` with
+explicit `SyntheticDeliveryMetadata` (clinic ID, batch UUID, epoch, revision) and
+`synthetic_fixture=True`. It has no defaults for delivery identity/cursors, state
+allocator, settings, persistence, IO, logging, network or runtime imports. It can
+only serialize already detached, validated source facts after physical DB closure.
+It does not read or call either receiving system.
+
+- Required raw qualifiers are retained exactly, validated as Y/N and compared as
+  facts. State meanings still come solely from the explicitly supplied policy;
+  qualifier values do not establish administration/completion or resolve code 10.
+- Explicit `None` sex is now representable as contract null. Existing blank sex
+  remains a distinct source value and fails serialization with `unverified_sex`.
+  No real demographic mapping or age convention is approved by a synthetic null.
+- All rows remain, including no-order encounters, all six reception states,
+  cancelled parents with active children, cancelled child rows, fees and unclassified
+  catalog entries. No category, display detail, visibility, fee or PACS rules exist.
+- Four-part order keys remain separate fields. Encounter IDs and full keys determine
+  canonical row order. Exact Decimal values become fixed strings with no exponent,
+  redundant fractional zeros, negative zero or units; nulls remain explicit.
+- The complete object is hashed as canonical UTF-8 JSON with only content_sha256
+  excluded, Unicode preserved, sorted object keys, compact separators and no NaN.
+  Exact full/empty fixture parity and validation by the pinned receiver parser passed.
+
+The [field compatibility and evidence table](kaoseghis-emr-contract-review.md#field-compatibility)
+records limits, digests, blocked source facts and the next receiver handoff.
+Fixture [provenance](../tests/fixtures/normalized_source_v1_provenance.md) pins the
+reference commit and unchanged synthetic JSON files. Invalid source/metadata values
+produce fixed redacted reasons. Output JSON is not safe to log merely because its
+input model representations are redacted.
+
+Verification: **317 focused tests** passed, then **2,424 tests in the full isolated
+Windows suite** passed. The pinned KaosOrders parser/reconciler accepted the exact
+full/empty outputs and passed synthetic digest/retry/edit/day-isolation/tamper checks.
+No live source, native input, printer or receiver API was used. See the contract
+review for isolation details; these results are not production-read evidence.
+
+This does not approve an endpoint or token. Never send this payload to
+`/api/v1/order-snapshots`. Durable source_epoch/revision allocation, retry storage,
+restart/ack ordering, authenticated scopes and mapping migration remain unresolved.
+The complete-day reader stays UNAVAILABLE; source coverage, code/qualifier meanings,
+sex/age, numeric units and true event-time semantics need separate evidence. No
+production query, publisher, settings, trigger, PACS change or deployment was made.
 
 ## Observation-Only Probe
 

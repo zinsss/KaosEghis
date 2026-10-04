@@ -1,0 +1,20 @@
+{
+  "contract_id": "kaosorders.normalized-source",
+  "contract_version": 1,
+  "batch_id": "22222222-2222-4222-8222-222222222222",
+  "source_epoch": 1,
+  "revision": 1,
+  "scope": {
+    "clinic_id": "fixture-clinic",
+    "source_id": "fixture-eghis",
+    "projection_id": "fixture-all-orders-v1",
+    "clinic_day": "2026-10-02",
+    "mapping_revision": "synthetic-v1"
+  },
+  "observed_at": "2026-10-02T09:00:00+09:00",
+  "snapshot_kind": "FULL",
+  "complete": true,
+  "encounters": [],
+  "orders": [],
+  "content_sha256": "d286948d18b2e7b66f86f1a1b6c7931f58cd1753e8572e1338df85f1f37fecef"
+}

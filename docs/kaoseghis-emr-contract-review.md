@@ -1,9 +1,9 @@
 # EMR Source Contract Review
 
-Reviewed: 2026-10-03
+Reviewed: 2026-10-04
 
-Status: **offline source review recorded; receiver agreement is pending**. This is
-not an approved HTTP schema, new endpoint, production query or deployment change.
+Status: **synthetic parity with the pinned disabled receiver contract implemented**.
+This is not an approved HTTP endpoint, production query or deployment change.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 
 ## Evidence Scope
@@ -21,6 +21,107 @@ The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains off
   not verification of the running container/image or a live API test. The earlier
   `zin@kaosgdd` lookup was the wrong host; KaosReception is a separate application.
 - No pulls, remote edits, service restarts, API calls, patient exports or publishing.
+- Parity stage: Windows `main` was clean at
+  `c6b9bc9490d9d84d1e19faabfd0c03c5d25e1cde`; actual remote `main` matched.
+  Read `zinsss/KaosOrders` at exact commit
+  `7c9275fb74680f46e4d459c821c7d501758c6b1c` in a temporary detached checkout.
+  Reviewed `docs/normalized-source-contract-v1.md`, `app/source_contract.py`,
+  `app/source_shadow.py`, both golden fixtures, and source contract/reconciliation
+  tests. No KaosEghis pull/reset, runtime configuration, commit or push was made.
+
+## Synthetic Parity: 2026-10-04
+
+`core/kaosorders_normalized_source.py` is a pure offline serializer. It accepts a
+validated detached `SourceSnapshot`, required `SyntheticDeliveryMetadata`
+(`clinic_id`, `batch_id`, `source_epoch`, `revision`) and explicit
+`synthetic_fixture=True`. These are caller assertions, not production authorization
+or proof of synthetic content. No metadata is generated, persisted or allocated.
+
+The source model now requires immutable, fixed qualifier objects: reception
+`hold_yn`/`hold_opd`, order `dc_yn`/`act_yn`. Only exact `Y` or `N` values are
+accepted, without trimming, defaulting or inferring state/administration. They
+participate in source fact equality and edit detection. Missing/extra fields or
+unknown flags reject the entire read. No production mapping has been added.
+
+The serializer rechecks types, exact fields, bounds, parent links, duplicates,
+metadata and wire text before producing an allowlisted JSON object. It retains
+every encounter and order: no-order, completed, paid, cancelled, fees and
+unclassified rows included. A cancelled parent never rewrites child state.
+It emits only FULL/complete snapshots, never deltas or disappearance-as-cancellation.
+It has no IO/logging/database/HTTP/trigger dependency or runtime importer.
+
+### Field Compatibility
+
+| Source / input | Contract field | Synthetic compatibility / remaining gate |
+| --- | --- | --- |
+| Constants | `contract_id`, `contract_version`, `snapshot_kind`, `complete` | Exact `kaosorders.normalized-source`, `1`, `FULL`, `true`. Only validated complete source snapshots are inputs. |
+| Explicit metadata | `scope.clinic_id` | Direct strict nonempty text, at most 128 characters; no deployment setting added. Authentication binding unresolved. |
+| Source scope | `scope.source_id`, `projection_id`, `clinic_day`, `mapping_revision` | Direct values and ISO date; no scope inferred from patient data. Day coverage and mapping rollout remain blocked. |
+| `observed_at` | `observed_at` | Offset-preserving ISO timestamp; source observation only, no clinical/edit/payment event time. Clock policy unresolved. |
+| Encounter identity | `encounter_id`, `chart_number`, `patient_name` | Direct, `chart_no` renamed only; 128-character limits, no whitespace trimming. No chart-derived visit key. |
+| Explicit normalized demographics | `sex`, `age` | `M`/`F`/`O` or explicit null, integer 0-130 or null. Source can retain explicit `None`; blank sex fails with `unverified_sex`, never silently becomes null. Real sex/age conventions still unverified. |
+| Reception code/state | `source_state_code`, `state` | All six states, including distinct consultation/payment completion. Only supplied verified policy meanings; no default production code-10 or compound mapping. |
+| `ReceptionQualifiers` | `qualifiers.hold_yn`, `hold_opd` | Required exact raw Y/N facts, immutable and unclassified. Compound clinical meanings remain blocked. |
+| `OrderKey` | `key.encounter_id`, `order_date`, `order_number`, `order_sequence` | All four components retained; date is identity, not event time or accession. Same-key replacement remains possible. |
+| Catalog facts | `order_code`, `order_type`, `department_code` | Exact source facts, including empty department, fees and unknown catalog entries; no category/detail/fee decision. Padded text is rejected rather than altered. |
+| Order code/state | `source_state_code`, `state` | Direct ACTIVE/CANCELLED meaning from supplied policy; no parent-state or qualifier inference. All-category mapping still needs evidence. |
+| `OrderQualifiers` | `qualifiers.dc_yn`, `act_yn` | Required exact raw Y/N facts; `act_yn` does not mean administered/performed here. |
+| `Decimal` or `None` | `quantity`, `days`, `frequency` | Exact fixed decimal strings or explicit null, no exponent/trailing zeros/negative zero/units. Floats rejected. Existing source bounds (absolute value <= 1e9, exponent -12..12, input length <= 32) remain stricter than the receiver draft; not broadened. |
+| Explicit metadata | `batch_id`, `source_epoch`, `revision` | Required canonical UUID text and strict positive integers <= 2^63-1. No defaults or production ordering state; durable allocation/retry/restart remains unresolved. |
+| Canonical complete object | `content_sha256` | Lowercase SHA-256 over UTF-8 JSON without only this top-level member: Unicode preserved, keys sorted, separators comma/colon, NaN/infinity forbidden. |
+| Source row ordering | `encounters`, `orders` | Encounters sorted by ID, orders lexicographically by complete four-part key. No filtering, truncation or category grouping. |
+
+Both [golden fixtures](../tests/fixtures/normalized_source_v1_provenance.md) were
+copied unchanged with exact reference commit and Git-blob provenance. Independent
+synthetic source inputs reproduce the complete parsed objects, including nulls,
+ordering, numeric strings and these content digests:
+
+- Full: `4173c829519b0884a9cca0a7ee216ee8d6bfa05147427de1a16f638bf2c93030`
+- Empty: `d286948d18b2e7b66f86f1a1b6c7931f58cd1753e8572e1338df85f1f37fecef`
+
+The exact reference parser and in-memory reconciler also accepted both outputs in
+an isolated temporary environment using its pinned Pydantic 2.13.4. Digest parity,
+retry, same-key edit, day isolation and tamper rejection passed without API/DB calls.
+This did not install dependencies into the application environment or modify the
+receiver repository. The serializer's returned dictionary contains identifiers;
+redacted input-model representations do not make the JSON safe to log.
+
+### Verification Results
+
+- Focused serializer/source-model group: **317 passed** in 17.19 seconds.
+- Entire isolated Windows test suite: **2,424 passed** in 487.78 seconds. This
+  includes existing source-shadow, FIFO/mutex, PACS, flu, patient-context, UIA,
+  vaccine, scheduler and other regression groups; no tests were excluded.
+- Exact pinned receiver parser/reconciler check: full/empty parity, both digests,
+  exact retry, same-key edit, day isolation and tamper rejection all passed.
+- Tests used temporary application data, mocked DB connections, test-only mutexes,
+  blocked non-test network/WebEngine access, and blocked native desktop/printer
+  operations. Main-thread-only garbage collection avoids the known Qt test hazard.
+  No EMR access, input, source export, API call, live print or service restart occurred.
+
+The full suite verifies offline compatibility and unchanged existing behavior under
+mocks, not production mappings, read permissions or live end-to-end delivery.
+
+### Production Blockers and Handoff
+
+No approved endpoint or token exists. `/api/v1/order-snapshots` remains prohibited
+for this payload. No new production query, publisher, persistent outbox, settings,
+trigger, board change or deployment is added. The source reader stays UNAVAILABLE.
+
+Source gates remain: complete-day membership/consistency/empty proof, all-category
+state mapping, code 10, qualifier combinations, sex/age conventions, numeric units
+and event-time semantics. Raw qualifier retention does not resolve these meanings.
+Delivery gates remain: durable source epoch/revision allocation, exact retry storage,
+authenticated restart/ack recovery, mapping migration, byte limits, accepted days,
+TLS/endpoint/credential provisioning, persistent atomic reconciliation and retention.
+The serializer does not enforce cross-call cursor ordering; it owns no such state.
+
+Next KaosOrders handoff: review these exact serializer outputs against `7c9275f`,
+retain the same synthetic fixtures, and add/confirm receiver cases for every raw
+qualifier combination, same-key edits/reuse, disappearance, explicit null versus
+blank rejection and the sender's stricter numeric bounds. Resolve durable ordering
+and source-evidence gaps on paper before either side adds production transport or
+acquisition. Keep the existing v1 API and board unchanged.
 
 ## Review Findings
 
@@ -28,7 +129,7 @@ The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains off
 | --- | --- | --- |
 | Shared snapshot is not a drop-in PACS payload | `OrderFacts` has source identity/code/type/department, but no accession, imaging schedule, modality, station or exam description. `kaospacs_client._validate_kaospacs_entry` requires these imaging fields. | Retain the working PACS projection. Review a separate imaging extension/adapter, never invent an accession from the source tuple or reuse `observed_at` as the schedule. |
 | Local PACS checkout and sender API expectations differ | Windows posts to `/orders/upsert` and `/orders/cancel`. The inspected Gateway defines health, imaging-worklist GET and admin completion, not those order routes. | Inspect the actual deployed receiver revision/capabilities before planning migration. This discrepancy does not prove the running clinic API is broken. |
-| State qualifiers are not represented by the current shared model | `source_state_code` is a single code. Source evidence also includes reception `hold_yn`/`hold_opd` and order `act_yn`; compound semantics are unverified. | Before live normalization, define the minimal fixed qualifier fields and verified combinations, or prove those qualifiers irrelevant to the selected meaning. Do not silently discard them and map every row solely by `proc_gb`/`dc_yn`. |
+| State qualifier meanings remain unverified | Fixed hold_yn/hold_opd and dc_yn/act_yn Y/N facts are now retained in the offline model and draft serializer. Compound semantics are still unverified. | Verify combinations before live normalization; presence and synthetic parity do not authorize mapping every row solely by proc_gb/dc_yn. |
 | Observation IDs do not solve transport ordering | The ledger has memory-only UUIDs, timestamps and scope-local baselines. They are not durable, monotonic receiver revisions. | Agree duplicate/content checks, stale rejection, authenticated restart ordering and recovery with each receiver. Do not treat a newer UUID or a restart flag as overwrite authority. |
 | Orders v1 is not a normalized-source receiver | The KaosClinic checkout accepts a per-encounter category snapshot, stores only XRAY/BMD/ECG, and has no source-day replacement or distinct consultation/payment completion. | Agree a separately versioned intake with receiver-owned classification. Preserve v1 semantics; do not translate the shared model lossily to the existing route. |
 
@@ -97,11 +198,10 @@ fields, generic validation responses and no sensitive logging. These v1 tests do
 not establish whole-day replacement, conflicting same-time content, quantity
 edits, key reuse across categories, source restart or new snapshot scope behavior.
 
-Next, agree the new normalized-source wire contract and synthetic receiver cases
-against this actual repository. Keep v1 available without semantic changes. No
-new route name, schema version, mapping, query, publisher or live migration is
-approved by this inspection. The reader gate below remains incomplete, including
-the deployed PACS contract and source qualifier/coverage questions.
+The October 4 parity stage above now covers the pinned disabled draft, not this
+older v1 API. Keep v1 available without semantic changes. No production route,
+mapping, query, publisher or live migration is approved. The reader gate below
+remains incomplete, including deployed PACS and source qualifier/coverage questions.
 
 ## Field Boundary
 
@@ -192,7 +292,7 @@ The common source tests exist; these cross-system cases still need receiver test
   Orders never receives PACS-only DOB or imaging payload fields.
 - One receiver being offline does not block source cleanup or the other receiver.
 
-No executable transport/schema is added in this review stage. The KaosClinic
-receiver revision is now recorded; resolve the gaps against its actual code before
-producing shared synthetic wire fixtures and ingestion contract tests. No live API
-request, source query or receiver test execution was performed in this inspection.
+The synthetic serializer/fixtures above implement draft parity only, not runtime
+transport. No live API request or source query was performed. The initial receiver
+inspection did not execute tests; later parity validation used only the pinned
+reference parser/reconciler with synthetic objects, without API/storage integration.

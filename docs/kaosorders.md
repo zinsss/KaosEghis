@@ -1,6 +1,6 @@
 # KaosOrders Source-Side Shadow Foundation
 
-Last updated: 2026-10-03
+Last updated: 2026-10-04
 
 ## Status and Current Decisions
 
@@ -41,6 +41,37 @@ The old normalized v2 proposal remains a superseded offline reference, not the
 agreed source contract. See the [source contract review](kaoseghis-emr-contract-review.md)
 for actual receiver gaps, field boundaries and acceptance cases. This does not
 approve a live day reader or sending the shared snapshot to the v1 endpoint.
+
+### Pinned Normalized Contract Parity: 2026-10-04
+
+KaosOrders reference `7c9275fb74680f46e4d459c821c7d501758c6b1c` now contains a
+disabled normalized-source contract and in-memory receiver tests. It still has no
+production intake route. Its contract version 1 is unrelated to the existing
+per-encounter `/api/v1/order-snapshots`; that route is prohibited for this payload.
+
+The Windows offline serializer `core/kaosorders_normalized_source.py` matches both
+reference fixtures exactly, including full and verified-empty days, nulls, row
+ordering, canonical decimal strings and SHA-256. Source qualifiers are mandatory
+fixed raw Y/N facts (hold_yn/hold_opd, dc_yn/act_yn), never inferred clinical meaning.
+It retains all source encounters/orders and distinct consultation/payment completion,
+with no category, pill, visibility, fee, detail or PACS fields. Explicit null sex
+can be preserved, while blank sex fails with a fixed redacted reason.
+
+Metadata is supplied by synthetic tests only: clinic_id, batch_id, source_epoch
+and revision, with an explicit synthetic gate. The serializer neither creates nor
+persists production ordering. Durable cursor allocation, exact retry storage,
+restart/ack recovery and authenticated source scope still need design. No approved
+endpoint/token, production query, publisher, persistence, settings or trigger was
+added; the reader remains blocked and existing runtime is unchanged.
+
+See [field-by-field compatibility, source blockers and the next handoff](kaoseghis-emr-contract-review.md#synthetic-parity-2026-10-04)
+and [fixture provenance](../tests/fixtures/normalized_source_v1_provenance.md).
+Return these exact outputs to the KaosOrders session for receiver-side synthetic
+parity/edge-case review and durable ordering design. Keep production intake, the
+existing v1 API and the board untouched until the remaining gates are resolved.
+Verification passed: 317 focused serializer/source-model tests, all 2,424 isolated
+Windows tests, and direct synthetic checks against the pinned receiver's parser
+and in-memory reconciler. Runtime acquisition, publishing and storage remain off.
 
 ### Source and Application Ownership: 2026-10-03
 
@@ -101,7 +132,8 @@ Next gates, in order:
    with synthetic lifecycle scenarios. Test acquisition/serialization through the
    shared coordinator using mocked DBs only, including close-before-processing.
    The internal source model/comparison and mocked cleanup tests are implemented;
-   receiver rules, the wire schema and actual day acquisition remain future work.
+   synthetic wire parity with the pinned draft is now implemented. Production
+   receiver rules, durable ordering and actual day acquisition remain future work.
 3. After separate approval, verify a bounded day-wide query and compare shadow
    results without publishing or replacing PACS. Complete-day consistency, payment,
    reception removal/reuse and other-category behavior still need evidence.

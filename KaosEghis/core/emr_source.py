@@ -11,6 +11,10 @@ from enum import StrEnum
 from typing import Mapping, Protocol
 
 
+MAX_ENCOUNTERS = 10000
+MAX_ORDERS = 100000
+
+
 class ReadStatus(StrEnum):
     COMPLETE = "complete"
     PARTIAL = "partial"
@@ -124,14 +128,47 @@ class OrderKey(_PrivateModel):
 
 
 @dataclass(frozen=True, repr=False)
+class ReceptionQualifiers(_PrivateModel):
+    hold_yn: str
+    hold_opd: str
+
+    def __post_init__(self):
+        _source_flag(self.hold_yn)
+        _source_flag(self.hold_opd)
+
+
+@dataclass(frozen=True, repr=False)
+class OrderQualifiers(_PrivateModel):
+    dc_yn: str
+    act_yn: str
+
+    def __post_init__(self):
+        _source_flag(self.dc_yn)
+        _source_flag(self.act_yn)
+
+
+def _source_flag(value):
+    if type(value) is not str or value not in ("Y", "N"):
+        raise SnapshotRejected("invalid_qualifier")
+    return value
+
+
+def _qualifiers(row, kind):
+    names = ("hold_yn", "hold_opd") if kind is ReceptionQualifiers else ("dc_yn", "act_yn")
+    _fields(row, set(names))
+    return kind(*(_source_flag(row[name]) for name in names))
+
+
+@dataclass(frozen=True, repr=False)
 class EncounterFacts(_PrivateModel):
     encounter_id: str
     chart_no: str
     patient_name: str
-    sex: str
+    sex: str | None
     age: int | None
     source_state_code: str
     state: ReceptionState
+    qualifiers: ReceptionQualifiers
 
 
 @dataclass(frozen=True, repr=False)
@@ -142,6 +179,7 @@ class OrderFacts(_PrivateModel):
     department_code: str
     source_state_code: str
     state: OrderState
+    qualifiers: OrderQualifiers
     quantity: Decimal | None = None
     days: Decimal | None = None
     frequency: Decimal | None = None
@@ -167,6 +205,10 @@ def _decimal(value, read):
         return None
     if read.structured_fields_verified is not True:
         raise SnapshotRejected("unverified_structured_fields")
+    return _decimal_value(value)
+
+
+def _decimal_value(value):
     # Exact decimals only: no float rounding or guessed clinical dose conversion.
     if type(value) not in (str, int, Decimal) or len(str(value)) > 32:
         raise SnapshotRejected("invalid_number")
@@ -199,12 +241,12 @@ def normalize_source_day(read: EmrDayRead, policy: SourcePolicy) -> SourceSnapsh
     if None in reception_rules.values() or None in order_rules.values():
         raise SnapshotRejected("invalid_mapping")
     if (not isinstance(read.encounters, tuple) or not isinstance(read.orders, tuple)
-            or len(read.encounters) > 10000 or len(read.orders) > 100000):
+            or len(read.encounters) > MAX_ENCOUNTERS or len(read.orders) > MAX_ORDERS):
         raise SnapshotRejected("invalid_row_bound")
 
     encounters = {}
     for row in read.encounters:
-        _fields(row, {"encounter_id", "chart_no", "patient_name", "sex", "age", "state_code"})
+        _fields(row, {"encounter_id", "chart_no", "patient_name", "sex", "age", "state_code", "qualifiers"})
         identifier = _text(row["encounter_id"])
         if identifier in encounters:
             raise SnapshotRejected("duplicate_encounter")
@@ -213,18 +255,18 @@ def normalize_source_day(read: EmrDayRead, policy: SourcePolicy) -> SourceSnapsh
         if state is None:
             raise SnapshotRejected("unknown_reception_state")
         age, sex = row["age"], row["sex"]
-        if (not isinstance(sex, str) or sex not in {"M", "F", "O", ""}
+        if ((sex is not None and (type(sex) is not str or sex not in {"M", "F", "O", ""}))
                 or (age is not None and (type(age) is not int or not 0 <= age <= 130))):
             raise SnapshotRejected("invalid_demographics")
         encounters[identifier] = EncounterFacts(
             identifier, _text(row["chart_no"]), _text(row["patient_name"]),
-            sex, age, state_code, state,
+            sex, age, state_code, state, _qualifiers(row["qualifiers"], ReceptionQualifiers),
         )
 
     orders = {}
     for row in read.orders:
         _fields(row, {"encounter_id", "order_date", "order_number", "order_sequence",
-                      "order_code", "order_type", "department_code", "state_code"},
+                      "order_code", "order_type", "department_code", "state_code", "qualifiers"},
                 {"quantity", "days", "frequency"})
         encounter_id = _text(row["encounter_id"])
         if encounter_id not in encounters:
@@ -244,7 +286,8 @@ def normalize_source_day(read: EmrDayRead, policy: SourcePolicy) -> SourceSnapsh
             _text(department)
         orders[key] = OrderFacts(
             key, _text(row["order_code"]), _text(row["order_type"]), department,
-            state_code, state, *(_decimal(row.get(name), read)
+            state_code, state, _qualifiers(row["qualifiers"], OrderQualifiers),
+            *(_decimal(row.get(name), read)
                                 for name in ("quantity", "days", "frequency")),
         )
 

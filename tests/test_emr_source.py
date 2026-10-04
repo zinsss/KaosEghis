@@ -36,14 +36,16 @@ def read():
         status=ReadStatus.COMPLETE,
         encounters=({"encounter_id": "fixture-visit", "chart_no": "TEST-0001",
                      "patient_name": "Synthetic patient", "sex": "F", "age": 53,
-                     "state_code": "TEST_ON_HOLD"},),
+                     "state_code": "TEST_ON_HOLD", "qualifiers": {"hold_yn": "N", "hold_opd": "N"}},),
         orders=({"encounter_id": "fixture-visit", "order_date": day,
                  "order_number": "1", "order_sequence": "1", "order_code": "TEST_DRUG",
                  "order_type": "TEST_INJECTION", "department_code": "TEST_INJ",
-                 "state_code": "TEST_ACTIVE", "quantity": "1.00", "days": 1, "frequency": 1},
+                 "state_code": "TEST_ACTIVE", "qualifiers": {"dc_yn": "N", "act_yn": "N"},
+                 "quantity": "1.00", "days": 1, "frequency": 1},
                 {"encounter_id": "fixture-visit", "order_date": day,
                  "order_number": "2", "order_sequence": "1", "order_code": "TEST_FEE",
-                 "order_type": "TEST_FEE", "department_code": "", "state_code": "TEST_ACTIVE"}),
+                 "order_type": "TEST_FEE", "department_code": "", "state_code": "TEST_ACTIVE",
+                 "qualifiers": {"dc_yn": "N", "act_yn": "N"}}),
         keys_verified=True, states_verified=True, whole_day=True, untruncated=True,
         consistent_snapshot=True, connection_closed=True, structured_fields_verified=True,
     )
@@ -490,7 +492,7 @@ def test_shared_models_have_no_runtime_io_or_board_dependency():
             assert not any(name.split(".")[0] in forbidden or "kaosorders" in name for name in names)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 assert node.func.id not in {"open", "print", "exec", "eval"}
-    allowed = {"emr_source.py", "emr_source_shadow.py", "kaosorders_source.py"}
+    allowed = {"emr_source.py", "emr_source_shadow.py", "kaosorders_source.py", "kaosorders_normalized_source.py"}
     for path in Path(source.__file__).parents[1].rglob("*.py"):
         if path.name not in allowed:
             assert "core.emr_source" not in path.read_text(encoding="utf-8-sig")

@@ -1,0 +1,150 @@
+{
+  "contract_id": "kaosorders.normalized-source",
+  "contract_version": 1,
+  "batch_id": "11111111-1111-4111-8111-111111111111",
+  "source_epoch": 1,
+  "revision": 1,
+  "scope": {
+    "clinic_id": "fixture-clinic",
+    "source_id": "fixture-eghis",
+    "projection_id": "fixture-all-orders-v1",
+    "clinic_day": "2026-10-01",
+    "mapping_revision": "synthetic-v1"
+  },
+  "observed_at": "2026-10-01T09:00:00+09:00",
+  "snapshot_kind": "FULL",
+  "complete": true,
+  "encounters": [
+    {
+      "encounter_id": "fixture-cancelled",
+      "chart_number": "TEST-0001",
+      "patient_name": "Synthetic Alpha",
+      "sex": "F",
+      "age": 53,
+      "source_state_code": "TEST_CANCELLED",
+      "state": "CANCELLED",
+      "qualifiers": {"hold_yn": "N", "hold_opd": "N"}
+    },
+    {
+      "encounter_id": "fixture-consultation-completed",
+      "chart_number": "TEST-0002",
+      "patient_name": "Synthetic Beta",
+      "sex": "M",
+      "age": 47,
+      "source_state_code": "TEST_CONSULTATION_COMPLETED",
+      "state": "CONSULTATION_COMPLETED",
+      "qualifiers": {"hold_yn": "N", "hold_opd": "N"}
+    },
+    {
+      "encounter_id": "fixture-hold",
+      "chart_number": "TEST-0003",
+      "patient_name": "Synthetic Gamma",
+      "sex": "F",
+      "age": 38,
+      "source_state_code": "TEST_ON_HOLD",
+      "state": "ON_HOLD",
+      "qualifiers": {"hold_yn": "N", "hold_opd": "N"}
+    },
+    {
+      "encounter_id": "fixture-in-progress",
+      "chart_number": "TEST-0004",
+      "patient_name": "Synthetic Delta",
+      "sex": null,
+      "age": null,
+      "source_state_code": "TEST_IN_PROGRESS",
+      "state": "IN_PROGRESS",
+      "qualifiers": {"hold_yn": "Y", "hold_opd": "Y"}
+    },
+    {
+      "encounter_id": "fixture-no-orders",
+      "chart_number": "TEST-0005",
+      "patient_name": "Synthetic Epsilon",
+      "sex": "O",
+      "age": 29,
+      "source_state_code": "TEST_REGISTERED",
+      "state": "REGISTERED",
+      "qualifiers": {"hold_yn": "N", "hold_opd": "N"}
+    },
+    {
+      "encounter_id": "fixture-payment-completed",
+      "chart_number": "TEST-0006",
+      "patient_name": "Synthetic Zeta",
+      "sex": "M",
+      "age": 61,
+      "source_state_code": "TEST_PAYMENT_COMPLETED",
+      "state": "PAYMENT_COMPLETED",
+      "qualifiers": {"hold_yn": "N", "hold_opd": "N"}
+    }
+  ],
+  "orders": [
+    {
+      "key": {
+        "encounter_id": "fixture-cancelled",
+        "order_date": "2026-10-01",
+        "order_number": "1",
+        "order_sequence": "1"
+      },
+      "order_code": "TEST_CANCELLED_CHILD",
+      "order_type": "TEST_OTHER",
+      "department_code": "",
+      "source_state_code": "TEST_ACTIVE",
+      "state": "ACTIVE",
+      "qualifiers": {"dc_yn": "N", "act_yn": "N"},
+      "quantity": null,
+      "days": null,
+      "frequency": null
+    },
+    {
+      "key": {
+        "encounter_id": "fixture-consultation-completed",
+        "order_date": "2026-10-01",
+        "order_number": "1",
+        "order_sequence": "1"
+      },
+      "order_code": "TEST_FEE",
+      "order_type": "TEST_FEE",
+      "department_code": "",
+      "source_state_code": "TEST_ACTIVE",
+      "state": "ACTIVE",
+      "qualifiers": {"dc_yn": "N", "act_yn": "Y"},
+      "quantity": null,
+      "days": null,
+      "frequency": null
+    },
+    {
+      "key": {
+        "encounter_id": "fixture-hold",
+        "order_date": "2026-10-01",
+        "order_number": "1",
+        "order_sequence": "1"
+      },
+      "order_code": "TEST_LAB",
+      "order_type": "TEST_LAB_TYPE",
+      "department_code": "TEST_LAB",
+      "source_state_code": "TEST_ACTIVE",
+      "state": "ACTIVE",
+      "qualifiers": {"dc_yn": "N", "act_yn": "N"},
+      "quantity": "1",
+      "days": "1",
+      "frequency": "1"
+    },
+    {
+      "key": {
+        "encounter_id": "fixture-hold",
+        "order_date": "2026-10-01",
+        "order_number": "2",
+        "order_sequence": "1"
+      },
+      "order_code": "TEST_CANCELLED_ORDER",
+      "order_type": "TEST_OTHER",
+      "department_code": "TEST_DEPARTMENT",
+      "source_state_code": "TEST_CANCELLED",
+      "state": "CANCELLED",
+      "qualifiers": {"dc_yn": "Y", "act_yn": "N"},
+      "quantity": null,
+      "days": null,
+      "frequency": null
+    }
+  ],
+  "content_sha256": "4173c829519b0884a9cca0a7ee216ee8d6bfa05147427de1a16f638bf2c93030"
+}
