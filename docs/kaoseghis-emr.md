@@ -1,6 +1,6 @@
 # KaosEghis-emr
 
-Last updated: 2026-10-04
+Last updated: 2026-10-05
 
 Status: the first shared-read stage is implemented. Verified chart clears can now
 refresh the existing whole-day PACS query; Poll Now remains a manual fallback.
@@ -34,6 +34,12 @@ coalesced refresh tickets and content-bound internal synthetic receipts. See
 unresolved production recovery, security, source evidence and transport decisions.
 The pure serializer remains unchanged and has no runtime importer. Plaintext test
 stores are created only by explicit callers with synthetic fixtures.
+
+The separately approved [closed-hours evidence review](kaosorders.md#controlled-aggregate-source-evidence-2026-10-04)
+now has a one-shot aggregate inspection tool. It uses the same FIFO/global mutex
+and a stricter diagnostic entry point in `eghis_db.py`; existing reader calls,
+PACS behavior and runtime settings are unchanged. This is not a production day
+reader: `EghisSourceDayReader` still returns UNAVAILABLE.
 
 ## Connector Ownership Decision: 2026-10-03
 
@@ -229,6 +235,48 @@ restart/ack ordering, authenticated scopes and mapping migration remain unresolv
 The complete-day reader stays UNAVAILABLE; source coverage, code/qualifier meanings,
 sex/age, numeric units and true event-time semantics need separate evidence. No
 production query, publisher, settings, trigger, PACS change or deployment was made.
+
+## Closed-Hours Aggregate Inspection: 2026-10-04
+
+`tools/inspect_source_evidence.py` exposes only fixed schema/day operations with
+explicit approval and a supplied clinic date/expected population. It has no CLI
+SQL input, startup importer, timer, settings writer, persistence or publisher.
+The new `eghis_db.run_verified_evidence_query` entry point keeps the PostgreSQL
+driver exclusively in the existing shared connection boundary. Existing
+`run_readonly_query` and its consumers are unchanged.
+
+The inspection uses a 3-second connect timeout, 2-second statement timeout, and
+verified read-only/read-committed session. Session settings are checked before
+the source statement. Cursor and physical connection closed flags are required
+before aggregate validation; uncertain physical closure uses the existing reader
+safety stop and retained mutex. No write is attempted to test restrictions.
+
+The fixed day statement reads reception membership and child/order-date crosschecks
+in one PostgreSQL SELECT/CTE snapshot. Separate dates and the catalog preflight are
+separate observations, never combined into a claimed transaction snapshot. Under
+[PostgreSQL 9.2 read-committed semantics](https://www.postgresql.org/docs/9.2/transaction-iso.html#XACT-READ-COMMITTED),
+a plain SELECT sees one command-start snapshot. This does not establish that the
+EMR saved an entire clinical workflow atomically or that all source tables are known.
+
+The source populations use cap-plus-one sentinels (10,000 encounters and 100,000
+orders); aggregate output has a 256-row limit plus sentinel. Overflow, missing
+summary rows, inconsistent group/count crosschecks, query failure, timeout and
+unverified cleanup yield no findings. Even a successful observed-empty scope is
+always `authoritative_snapshot=false` and cannot construct a runtime snapshot.
+Unknown values are masked server-side; no source identifiers or personal fields
+are returned. The reviewed SQL lives in the tool, not diagnostic logs/reports.
+
+Three approved live operations completed: catalog preflight, populated 2026-10-02,
+and operator-confirmed closed 2026-10-03, all KST. All verified read-only mode and
+cursor/physical closure before interpretation. Only sanitized aggregate/schema
+findings are recorded in [source evidence](kaosorders.md#controlled-aggregate-source-evidence-2026-10-04).
+No source ledger, serializer, outbox, trigger, settings, HTTP, PACS, board, deployment
+or running application was touched. Source mapping/age/membership gates remain open.
+
+Verification: 239 focused and 903 broader related mocked tests passed. The full
+offscreen suite had 2,561 passes and 26 label/layout failures, all reproduced at
+the untouched starting commit; see the evidence document for details. Existing
+runtime consumer implementations and the source reader block are unchanged.
 
 ## Observation-Only Probe
 

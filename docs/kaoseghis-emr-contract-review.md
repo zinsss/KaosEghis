@@ -1,6 +1,6 @@
 # EMR Source Contract Review
 
-Reviewed: 2026-10-04
+Reviewed: 2026-10-05
 
 Status: **synthetic parity with the pinned disabled receiver contract implemented**.
 This is not an approved HTTP endpoint, production query or deployment change.
@@ -325,6 +325,47 @@ verified-empty days, code 10, qualifier combinations, all-category cancellation,
 and sex/age conventions. No production storage, encryption, transport, runtime
 wiring, EMR access, PACS changes, deployment or restart was added.
 `/api/v1/order-snapshots` remains prohibited for normalized-source payloads.
+
+## Controlled Source Evidence: 2026-10-04
+
+The next approved milestone started from sender
+`e12685dde19080d97179c00476362feba9d34c8f`, with receiver reference
+`a837d385ff367e4f72310226d8bc8439fc0c50fe` inspected in a temporary detached
+checkout. The receiver now records completed synthetic acknowledgement/recovery
+proof; those stages were not repeated or turned into runtime transport.
+
+See the [sanitized source evidence](kaosorders.md#controlled-aggregate-source-evidence-2026-10-04)
+for the exact operation boundaries, counts, allowlisted combinations and closure
+timings. The operator confirmed 2026-10-02 as populated and 2026-10-03 as closed
+in KST. Three bounded read-only operations ran: catalog metadata, one populated-day
+statement, and one confirmed-empty-day statement. All closed before interpretation;
+no patient/order identifiers, raw rows, demographic values other than aggregate sex
+tokens, DOB, clinical text or credentials were output/persisted.
+
+| Gate | New evidence | Decision |
+| --- | --- | --- |
+| Day membership including no-order visits | 173 receptions, 17 without orders, no status/category filters | Candidate table scope covered; clinical/day/archive authority not fully approved. |
+| Child coverage and four-part identity | 1,081 linked orders; no invalid/duplicate full keys; no same-date orders outside the day or cross-date children in sample | One-day coverage evidence, not proof of every cross-day/history lifecycle. |
+| Consistency | All reception/order/sex aggregates in one plain SELECT/CTE statement | Single database command snapshot; no claim that separate reads or EMR workflow saves are atomic. |
+| Overflow/failure | Cap-plus-one bounds plus output sentinel; mocked failed/partial/timeout/inconsistent/overflow paths yield no authoritative empty | No silent truncation; runtime reader remains blocked. |
+| Verified empty | Operator-confirmed closed date had zero receptions, linked orders and same-date orders | Verified empty candidate scope, not a normalized complete snapshot. |
+| Reception/qualifiers | 168 at 40/N/N; five at 50/N/N | No new evidence for code 10 or other compound meanings. |
+| Order qualifiers | All dc_yn=N; act_yn=N/Y both present across allowlisted type/department buckets | No all-category cancellation/administration mapping inferred. |
+| Sex | M=62/F=111 per reception; nullable source field, no null/blank sample | Exact normalized mapping awaits operator approval; unseen values stay blocked. |
+| Age | Reviewed candidate ageday column absent from patient table; no DOB/age values queried | Convention and safe derivation remain unresolved. |
+
+**Whole-day production reader remains blocked.** The aggregate acquisition shape
+has evidence for these dates, but it cannot supply the missing source-policy facts.
+Do not remove `EghisSourceDayReader`'s UNAVAILABLE return, declare empty authority
+from a failed read, enable triggers/settings, or wire a serializer/outbox/endpoint.
+PACS, board, transport, deployment and running applications remain untouched.
+Normalized-source payloads must never go to `/api/v1/order-snapshots`.
+
+Verification: 239 focused and 903 related isolated tests passed. The full
+offscreen Qt run returned 2,561 passes and 26 failures; the same 26 vaccine
+label/layout failures reproduce at the untouched `e12685d` baseline. No unrelated
+UI changes were included. New inspection code has 67 mocked cases; the source
+reader, source model/ledger, serializer, outbox and PACS implementations are unchanged.
 
 ## Review Findings
 

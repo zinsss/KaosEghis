@@ -1,6 +1,6 @@
 # KaosOrders Source-Side Shadow Foundation
 
-Last updated: 2026-10-04
+Last updated: 2026-10-05
 
 ## Status and Current Decisions
 
@@ -199,6 +199,152 @@ semantics.
 Relevant files: `core/pacs_polling.py`, `core/weekly_age_reporting.py`,
 `core/kaospacs_patient_context.py`, and historical `docs/kaoseghis-inj.md`.
 The injection plan is historical evidence, not approved current behavior.
+
+### Controlled Aggregate Source Evidence: 2026-10-04
+
+Starting Windows revision: `e12685dde19080d97179c00476362feba9d34c8f`, clean on
+`main...origin/main`. Receiver reference `a837d385ff367e4f72310226d8bc8439fc0c50fe`
+was inspected in a temporary detached checkout. Its acknowledgement/offline-recovery
+stage is complete; this review did not repeat or implement recovery/transport.
+
+The operator approved a bounded closed-hours, read-only review and confirmed
+Friday **2026-10-02** as populated and Saturday **2026-10-03** as having no visits,
+both KST. No weekday was assumed empty. Existing key/index observations and the
+single-visit edit/removal/reuse and `25 -> 30 -> 25 -> 50 -> 10 -> 25` transition
+evidence were inventoried, not repeated with patient-level reads.
+
+Before source access, mocked tests covered each new operation and its failure/
+privacy/closure paths. The fixed parameterized schema and day statements in
+`tools/inspect_source_evidence.py` were reviewed. Identifiers are used only inside
+server-side joins/key counts, never selected into client output. No patient name,
+resident number, DOB, phone, address, diagnosis, notes, order labels or raw patient/
+order rows were queried for output. DOB was not queried at all. The existing
+connection setting was consumed privately through read-only local settings access;
+no credential was displayed, exported, changed or passed on the command line.
+
+#### Scope and Consistency
+
+- Candidate membership: every `h1opdin` reception with exact bound `clinic_ymd`,
+  without status, payment, hold, category or order-existence filters.
+- Child population: every `h2opd_doct_ord` row linked by reception key, without
+  cancellation/category filters and without restricting its order date.
+- Independent crosscheck within the same statement: orders dated that clinic day,
+  including a count not linked to that day's reception population.
+- Four-part duplicate/null/blank-key counts stay on the server. No-order receptions
+  remain in membership. Sex values are counted per reception, not per unique patient.
+- All these aggregates share one reviewed SELECT/CTE command snapshot. The schema
+  read and each day read are separate observations, not one multi-query snapshot.
+- Cap-plus-one bounds are 10,001 receptions and 100,001 orders for detection;
+  257 aggregate rows detect report overflow. No bound was reached. Overflow or
+  invalid/partial output never becomes an empty success.
+
+Catalog preflight confirmed the three reviewed objects are base tables with SELECT
+access. `clinic_ymd` and `ord_ymd` are bpchar; reception/order-parent keys are varchar;
+order number/sequence are numeric. The known full-key columns are NOT NULL.
+Reception date/patient link/status/flags and sex are nullable in the catalog.
+The candidate `hz_mst_ptnt.ageday` column was absent; this is not a search for every
+possible age source or proof that no other age representation exists.
+
+#### Sanitized Counts
+
+| Observation | 2026-10-02 populated | 2026-10-03 confirmed closed |
+| --- | ---: | ---: |
+| Receptions | 173 | 0 |
+| Linked child orders | 1,081 | 0 |
+| Receptions with no orders | 17 | 0 |
+| Orders dated the selected day | 1,081 | 0 |
+| Same-date orders outside the day's reception population | 0 | 0 |
+| Linked orders with a different/null order date | 0 | 0 |
+| Invalid/duplicate encounter keys | 0 | 0 |
+| Invalid/duplicate four-part child keys | 0 | 0 |
+| Missing patient links / duplicate sex-join excess | 0 | 0 |
+
+Populated-day reception combinations: `40/N/N` = **168**, `50/N/N` = **5**
+(`proc_gb/hold_yn/hold_opd`). No code 10, 20, 25 or 30 appeared in this observation;
+this does not resolve code 10 or establish all compound-state meanings.
+
+Order combinations (`ord_type / department / dc_yn / act_yn`):
+
+| Type | Department | dc_yn | act_yn | Count |
+| --- | --- | --- | --- | ---: |
+| 01 | DRUG | N | N | 482 |
+| 03 | LAB | N | N | 1 |
+| 03 | LAB | N | Y | 82 |
+| 05 | BLANK | N | Y | 148 |
+| 06 | BLANK | N | Y | 176 |
+| 07 | INJ | N | N | 98 |
+| UNREVIEWED | BLANK | N | Y | 53 |
+| UNREVIEWED | INJ | N | N | 1 |
+| UNREVIEWED | UNREVIEWED | N | N | 33 |
+| UNREVIEWED | UNREVIEWED | N | Y | 7 |
+
+BLANK represents an empty text value; NULL is a separate bucket. UNREVIEWED is a
+server-side privacy mask for values outside the explicit diagnostic allowlist,
+not a source code/category or inferred clinical meaning. All 1,081 orders had
+`dc_yn=N`; `act_yn=N` totaled 615 and `act_yn=Y` totaled 466. No all-category
+cancellation rule can be verified from this sample. No action flag was interpreted
+as administration, collection, imaging completion or payment.
+
+Sex counts were **M=62, F=111**; no actual null/blank/other value appeared on this
+day. Nullable schema alone does not establish null/blank conventions. Approval of
+exact M/F/null mapping and completed-years-at-clinic-date age was requested from
+the operator; pending that answer these are proposals, not enabled mappings.
+No age or DOB values were read or retained.
+
+#### Closure and Verification
+
+Exactly three live inspection operations ran, without retries or fallback queries.
+Each used the shared one-worker FIFO and `Global\KaosEghis-EMR-read` mutex, a
+3-second connection timeout, and a 2-second statement timeout. Session settings
+were verified as read-only/read-committed before each source statement. Both the
+cursor's closed flag and physical connection's closed flag were checked before
+aggregate processing. Connection-lifetime timings (excluding queue wait):
+
+| Operation | Seconds | Cursor closed | Physical connection closed |
+| --- | ---: | --- | --- |
+| Catalog preflight | 0.2077 | yes | yes |
+| Populated-day aggregates | 0.5806 | yes | yes |
+| Confirmed-empty-day aggregates | 0.0523 | yes | yes |
+
+Focused mocked evidence/shared-reader/source-model tests: **239 passed in 2.32 s**.
+Tests cover finite verified sessions, copied parameters, FIFO/closure, every setup/
+query/fetch/cleanup failure, safety latching, cap-plus-one overflow, missing groups,
+inconsistent crosschecks, expectation mismatch, redaction and the UNAVAILABLE block.
+The original shared `run_readonly_query` path and all existing consumers are unchanged.
+Only the explicit diagnostic entry point and inspection tool can perform these reads.
+
+Final verification after midnight KST: **903 related isolated tests passed in
+41.09 s**, covering evidence/source/shadow/serializer/outbox, shared reader, PACS,
+flu, patient context and contention. The broadest offscreen Qt run completed with
+**2,561 passed and 26 failed in 145.56 s**. All 26 label/font/layout failures were
+reproduced in a temporary untouched checkout at starting commit `e12685d`
+(245 passed, 26 failed for those two test files). They are pre-existing under this
+runner, not new evidence-path failures; no unrelated UI fixes were made. The full
+runner also encountered a test-only WebEngine profile cleanup lock after pytest
+finished. No production file/application was cleaned up or restarted. There are
+**67 new mocked inspection cases**; database/network/native input remained blocked
+in tests, and test mutexes/application data were isolated from the live operation.
+
+#### Remaining Gates
+
+This verifies populated and operator-confirmed empty **candidate table scopes**,
+not a complete production source policy. Clinical authority of reception-day
+membership still needs sign-off, including nullable dates, historical/archive
+coverage and cross-day encounters/orders not present in these two observations.
+No undated reception was assigned a day by inference. The single-statement snapshot
+does not prove that an EMR workflow commits all related changes atomically.
+
+Still unresolved: code-10 waiting versus in-progress distinction; unseen/null/blank
+reception/qualifier combinations; all-category cancellation/deletion/restoration;
+masked type/department catalog coverage; approved demographic mapping and a verified
+age derivation without querying DOB in this milestone. Clinical units and event
+timestamps were not inferred. Existing single-visit findings retain their limited scope.
+
+`authoritative_snapshot` is always false for inspection results, including an
+observed empty scope. `EghisSourceDayReader` remains UNAVAILABLE. No source ledger,
+normalization policy, runtime trigger, settings, outbox, HTTP, board, PACS, application
+restart or deployment was enabled or changed. `/api/v1/order-snapshots` remains
+prohibited for normalized-source payloads. Raw diagnostic files are not committed.
 
 ### Approved Laboratory Metadata Review: 2026-10-01
 

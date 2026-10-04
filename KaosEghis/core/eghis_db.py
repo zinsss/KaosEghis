@@ -24,6 +24,67 @@ class EghisDbQueryRejectedError(RuntimeError):
     """Raised when a configured SQL statement fails the read-only safety gate."""
 
 
+class EghisEvidenceRejectedError(RuntimeError):
+    """Fixed diagnostic reason, without provider text or query values."""
+
+
+def run_verified_evidence_query(connection_string, query, *, params, proof):
+    """Explicit inspection only: trusted aggregate SQL, at most 257 result rows.
+
+    No existing consumer uses this stricter entry point. The caller must reject
+    the 257th sentinel row and may process aggregates only after this returns.
+    """
+    if _WRITE_SQL_PATTERN.search(query):
+        raise EghisEvidenceRejectedError("query_rejected")
+    params = deepcopy(params)
+    return run_serialized_read(lambda: _verified_evidence_read(connection_string, query, params, proof))
+
+
+def _verified_evidence_read(connection_string, query, params, proof):
+    import psycopg2
+
+    started = perf_counter()
+    connection = cursor = None
+    try:
+        connection = psycopg2.connect(
+            connection_string, connect_timeout=3,
+            application_name="KaosEghis-source-evidence",
+        )
+        proof["connection_opened"] = True
+        connection.set_session(readonly=True, autocommit=True,
+                               isolation_level="READ COMMITTED")
+        cursor = connection.cursor()
+        cursor.execute("SET statement_timeout = 2000")
+        cursor.execute("SELECT current_setting('transaction_read_only'), "
+                       "current_setting('statement_timeout'), "
+                       "current_setting('transaction_isolation')")
+        # Session proof must be checked before executing the source statement.
+        if cursor.fetchone() != ("on", "2s", "read committed"):
+            raise EghisEvidenceRejectedError("session_unverified")
+        proof["readonly_verified"] = True
+        cursor.execute(query, params)
+        rows = cursor.fetchmany(257)
+    finally:
+        try:
+            if cursor is not None:
+                cursor.close()
+                if getattr(cursor, "closed", False) is not True:
+                    raise EghisEvidenceRejectedError("cursor_close_unverified")
+                proof["cursor_closed"] = True
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()
+                    closed = getattr(connection, "closed", 0)
+                    if type(closed) is not int or closed <= 0:
+                        raise RuntimeError()
+                    proof["connection_closed"] = True
+                except BaseException:
+                    raise EmrConnectionCloseError("connection_close_unverified") from None
+            proof["elapsed_seconds"] = round(perf_counter() - started, 4)
+    return rows
+
+
 def run_readonly_query(
     connection_string: str,
     query: str,
