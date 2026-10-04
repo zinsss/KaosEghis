@@ -253,7 +253,7 @@ def test_receiver_ahead_duplicate_does_not_clear_pending(queue, snapshot):
     assert queue.pending(DAY) == pending
 
 
-# Field/receipt shapes reviewed against KaosOrders 40c6a496385a4c6fd48c6532554748db23d4e3cb.
+# Field/receipt shapes reviewed against KaosOrders 02acc8a93c0c373d4e53d181058b46ce1fb405c7.
 # No receiver module is imported and no HTTP encoding is defined by these tests.
 def test_pinned_receiver_internal_field_layout_matches_sender_models():
     assert [field.name for field in fields(SyntheticAcknowledgement)] == [
@@ -269,7 +269,10 @@ def test_pinned_receiver_internal_field_layout_matches_sender_models():
 
 @pytest.mark.parametrize("outcome,change", [
     ("stale", "newer_revision"), ("stale", "newer_epoch"),
-    ("stale", "same_day_epoch"),  # A newer producer epoch may exist on another day.
+    ("stale", "same_day_epoch"),
+    ("resync_required", "newer_epoch"),
+    ("resync_required", "same_day_epoch"),
+    ("resync_required", "same_cursor"),  # Another day retired this producer epoch.
     ("conflict", "different_content"), ("conflict", "different_mapping"),
 ])
 def test_negative_receipt_with_committed_cursor_pauses_and_preserves_work(queue, snapshot, path, outcome, change):
@@ -288,11 +291,20 @@ def test_negative_receipt_with_committed_cursor_pauses_and_preserves_work(queue,
     assert queue.acknowledge(ack(pending, outcome=outcome, committed=committed)) == "paused"
     restored = reopen(path)
     assert restored.pending(DAY) == pending
+    assert restored.pending(DAY).body == pending.body
     state = restored.state(DAY)
     assert state.paused_reason == outcome and state.acknowledged_revision == 0
+    assert state.allocated_revision == pending.cursor.revision == 1
+    assert state.acknowledged_generation == 0
     assert state.requested_generation == 2 and state.refresh_required
     with pytest.raises(OutboxRejected, match="^scope_paused$"):
         restored.acknowledge(ack(pending))
+    generation = restored.request_refresh(DAY)
+    with pytest.raises(OutboxRejected, match="^scope_paused$"):
+        restored.seal(snapshot, batch_id=BATCH2, refresh_generation=generation)
+    restored = reopen(path)
+    assert restored.pending(DAY) == pending
+    assert restored.state(DAY) == replace(state, requested_generation=generation)
 
 
 def test_resync_receipt_for_unsupported_restart_preserves_new_epoch_batch(path, snapshot):

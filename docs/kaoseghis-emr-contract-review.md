@@ -150,6 +150,10 @@ testing, not a new route, board integration or use of `/api/v1/order-snapshots`.
 
 ## Synthetic Receipt Review: 2026-10-04
 
+Historical findings at `40c6a49`; the retry blocker below is resolved for the
+synthetic cases in the [02acc8a recheck](#synthetic-acknowledgement-recheck-2026-10-04).
+The production recovery and source-evidence decisions remain open.
+
 Sender baseline: `d298ac4c19068f6cf32964e36f75ce83850705bf`.
 Receiver reference: `zinsss/KaosOrders` exact commit
 `40c6a496385a4c6fd48c6532554748db23d4e3cb`, inspected in a new temporary detached
@@ -255,6 +259,72 @@ combinations, all-category cancellation and sex/age conventions remain unresolve
 Both stores remain plaintext-synthetic-only. No transport, token, encryption,
 production persistence, EMR access, PACS change, deployment or service restart.
 `/api/v1/order-snapshots` remains prohibited for normalized source payloads.
+
+## Synthetic Acknowledgement Recheck: 2026-10-04
+
+Sender reference: `7055e1bd52d8f9dd0d63f7f680dbc17d0d7e014b`.
+Receiver reference: `02acc8a93c0c373d4e53d181058b46ce1fb405c7`, inspected in a
+new temporary detached checkout. Reviewed `app/source_store.py`, its store tests,
+and `docs/normalized-source-contract-v1.md`, including the diff from `40c6a49`.
+Internal receipt/cursor/scope field parity is unchanged. Neither sender validators
+nor either store implementation was changed in this recheck.
+
+### Corrected Retry Outcomes
+
+| Exact retry after receiver reopen | Outcome | Committed cursor |
+| --- | --- | --- |
+| Still current under the active producer epoch | duplicate | request |
+| A newer revision of that day exists in the same epoch | stale | Actual newer day cursor |
+| That day advanced to a newer producer epoch | resync_required | Actual current day cursor in the newer epoch |
+| Another day advanced the producer; requested day did not advance | resync_required | Actual requested-day cursor, even when equal to request |
+| Another day advanced the producer; requested day has a newer old-epoch revision | resync_required | Actual requested-day cursor, not the other day's cursor |
+
+The [accepted-retry check](https://github.com/zinsss/KaosOrders/blob/02acc8a93c0c373d4e53d181058b46ce1fb405c7/app/source_store.py#L542)
+tests the shared producer epoch before current-cursor equality. This closes the
+previous historical-duplicate gap for these synthetic cases. No projection was
+changed by any of the five retry scenarios. Previously unseen retired-epoch
+requests also return resync_required; when that day has no cursor, committed is
+None, as covered by the receiver's store tests. Missing lineage for an already
+accepted retry remains a corruption error, not permission to recreate state.
+
+### Sender Preservation and Verification
+
+An isolated in-process probe used the actual pinned receiver and unchanged sender
+with only temporary plaintext synthetic SQLite stores. It reconstructed receipt
+fields explicitly into the sender's exact dataclass types in test-local code;
+this is not a network schema or runtime adapter. All **five scenarios passed**.
+
+For stale/resync, reopening the sender retained the exact pending bytes, batch,
+epoch, revision, digest and coalesced refresh request. The pause reason persisted;
+acknowledged revision/generation stayed at zero and allocated revision stayed at
+one. A later success receipt could not bypass the pause. Requesting another
+refresh did not clear it, and sealing another batch failed with scope_paused.
+No receiver cursor was adopted and no receiver-next revision was allocated.
+An ordinary current duplicate alone acknowledged its pending batch normally.
+
+Added three sender resync receipt cases and strengthened the existing negative
+receipt cases with explicit byte/counter preservation and blocked-seal assertions.
+Older stale combinations remain as defensive negative-receipt coverage, not claims
+that the revised receiver emits stale for retired epochs. Repository tests import
+no receiver code.
+
+Verification: **413 focused sender outbox/source-model/serializer tests passed in
+5.18 seconds**; **24 pinned receiver store tests passed in 1.77 seconds**; the five
+direct compatibility scenarios above passed separately. Receiver tests skipped
+its runtime conftest imports, not any store test. Network was blocked, sender EMR
+connections mocked, test mutexes/application data isolated, and native desktop/
+printer operations blocked. No receiver API/config/runtime database was imported.
+The broader application suite was not rerun for this tests/docs-only recheck.
+
+The synthetic historical-retry issue is resolved, not the production recovery
+protocol. Still required: authenticated epoch grants/fencing, receiver-generation
+enrollment, lost-state and receiver-ahead reconciliation, acknowledgement encoding/
+HTTP status mapping, retry/backoff and supervised pause/resume, and mapping cutover.
+Source-evidence gates remain unresolved: complete-day membership/consistency,
+verified-empty days, code 10, qualifier combinations, all-category cancellation,
+and sex/age conventions. No production storage, encryption, transport, runtime
+wiring, EMR access, PACS changes, deployment or restart was added.
+`/api/v1/order-snapshots` remains prohibited for normalized-source payloads.
 
 ## Review Findings
 

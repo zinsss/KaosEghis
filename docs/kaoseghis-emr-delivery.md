@@ -114,18 +114,21 @@ conventions and clinical units. Existing supervised observations are documented 
 
 ## Next Handoff
 
-KaosOrders now has a separate synthetic receiver store at exact commit
-`40c6a496385a4c6fd48c6532554748db23d4e3cb`. The
-[receipt compatibility review](kaoseghis-emr-contract-review.md#synthetic-receipt-review-2026-10-04)
-confirms field parity but records a historical-duplicate recovery gap: the receiver
-returns the old request as committed even when its current cursor/producer epoch
-has advanced. The sender cannot detect information omitted from that receipt.
+KaosOrders' synthetic receiver at exact commit
+`02acc8a93c0c373d4e53d181058b46ce1fb405c7` resolves the historical-duplicate
+issue reported against `40c6a49`. The
+[acknowledgement recheck](kaoseghis-emr-contract-review.md#synthetic-acknowledgement-recheck-2026-10-04)
+confirms current active retries give duplicate, same-epoch history gives stale,
+and retired-epoch retries give resync_required even when another day advanced
+the producer. Committed is the requested day's actual current cursor. Negative
+receipts durably pause and preserve pending bytes without adopting that cursor or
+allocating its next revision. No sender validator or runtime change was needed.
 
-Next, resolve historical acceptance versus current-cursor/active-epoch semantics
-on the receiver side with synthetic tests; do not relax sender checks or repeat
-serializer work. Agree enrollment, epoch grants, recovery and ack encoding before
-transport. Keep both runtimes, the existing v1 API and board untouched. Do not use
-patient data or implement a production day reader as part of this handoff.
+Next, agree epoch grants/fencing, receiver enrollment, lost-state/receiver-ahead
+recovery, acknowledgement encoding/status mapping, retry/pause policy and mapping
+cutover. Do not repeat serializer work or enable transport. Keep both runtimes,
+the existing v1 API and board untouched. Source-evidence gates remain unresolved;
+do not use patient data or implement a production day reader in this handoff.
 
 ## Verification
 

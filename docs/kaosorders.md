@@ -95,11 +95,17 @@ describe the prior parity stage, not production enablement.
 Verification: all **2,496 isolated tests passed**, including **72 new outbox cases**.
 The pure serializer and both pinned contract fixtures are unchanged.
 
-The subsequent [receipt review](kaoseghis-emr-contract-review.md#synthetic-receipt-review-2026-10-04)
-uses receiver `40c6a496385a4c6fd48c6532554748db23d4e3cb`. Internal fields match,
-but historical duplicate receipts hide a newer current receiver cursor/epoch.
-Recovery compatibility is therefore incomplete. Only missing sender receipt tests
-and review documentation were added; neither store nor validator was changed.
+The [initial receipt review](kaoseghis-emr-contract-review.md#synthetic-receipt-review-2026-10-04)
+found historical duplicates hiding receiver progress at `40c6a49`. The
+[acknowledgement recheck](kaoseghis-emr-contract-review.md#synthetic-acknowledgement-recheck-2026-10-04)
+against `02acc8a93c0c373d4e53d181058b46ce1fb405c7` confirms the correction:
+current active retry is duplicate, same-epoch history is stale, and retired epochs
+require resync across days. Stale/resync durably preserve pending bytes and pause
+without adopting receiver progress or allocating another revision. Verification:
+413 focused sender tests, 24 receiver store tests, and five direct synthetic
+compatibility scenarios passed. Only sender tests/docs changed; no store,
+validator, runtime or delivery enablement changed. Production recovery decisions
+and all source-evidence gates remain open.
 
 ### Source and Application Ownership: 2026-10-03
 
