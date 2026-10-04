@@ -188,7 +188,7 @@ semantics.
 | Encounter ID | The approved 2026-10-02 catalog inspection found a valid unique index on `public.h1opdin.recept_no`, a NOT NULL column. | Stability, reuse after removal, patient linkage over transitions, encounters without orders, cancellation/removal behavior. |
 | Order ID | The approved 2026-10-02 catalog inspection found a valid unique index on `(recept_no, ord_ymd, ord_no, ord_seq_no)`, all NOT NULL. A supervised follow-up observed a deleted full key reappear with different order code/type/department. | The tuple identifies a current source row, not an immutable lifetime order instance. Restoration/replacement and key-reuse handling must be reviewed before enabling reconciliation. The older three-part PACS join omits `ord_ymd` and is not sufficient evidence for a KaosOrders key. Existing PACS behavior is unchanged. |
 | Chart number | Flu joins `h1opdin.ptnt_no` with `hz_mst_ptnt.ptnt_no`; patient-context SQL reads `hz_mst_ptnt.ptnt_no`. | Reception linkage for a whole-day projection. Chart number cannot substitute for encounter ID. |
-| Name, sex, age | Context reader uses `hz_mst_ptnt.ptnt_nm`, `sex`, `birth_ymd`; flu calculates age at `h1opdin.clinic_ymd`. Older injection notes mention `ageday`. | Exact age convention and sex mapping. The shadow boundary accepts Korean sex plus integer age, never DOB. |
+| Name, sex, age | Context reader uses `hz_mst_ptnt.ptnt_nm`, `sex`, `birth_ymd`; flu calculates age at `h1opdin.clinic_ymd`. Older injection notes mention `ageday`. | Operator approved exact M/F/null and completed-years-at-clinic-date conventions on 2026-10-05; safe age derivation and unseen source values remain unverified. The shadow boundary accepts Korean sex plus integer age, never DOB. |
 | Clinic day | Flu reader uses `h1opdin.clinic_ymd`. | Authoritative day membership for every relevant encounter and order. |
 | Reception state | Flu filters `h1opdin.proc_gb IN ('30', '40')`; supervised 2026-10-01 UI comparisons observed `10` on one 진료대기 encounter, `25` on one 보류 encounter, `40` on five 완료 encounters, and `50` on one 취소 encounter, all with `hold_yn=N`, `hold_opd=N`. Code-30 counts progressed from one to two to three as expected by the operator. Agreed labels: `30` 진료완료 (수납 전), `40` 수납완료. | Not a complete state dictionary or enabled mapping. Other codes, compound-state rules and transitions remain unverified; dictionary access is denied to the configured reader. The 30/40 terminology is operator-confirmed, not dictionary-derived. |
 | Order state | PACS treats `h2opd_doct_ord.dc_yn = 'Y'` as cancellation in its imaging join. | All-category state, withdrawal, replacement, deletion and restoration semantics. Do not generalize automatically. |
@@ -288,8 +288,30 @@ as administration, collection, imaging completion or payment.
 Sex counts were **M=62, F=111**; no actual null/blank/other value appeared on this
 day. Nullable schema alone does not establish null/blank conventions. Approval of
 exact M/F/null mapping and completed-years-at-clinic-date age was requested from
-the operator; pending that answer these are proposals, not enabled mappings.
+the operator during the review and subsequently granted on 2026-10-05 as recorded
+below; this did not enable mappings or prove unobserved source behavior.
 No age or DOB values were read or retained.
+
+#### Demographic Policy Approval: 2026-10-05
+
+The operator approved both proposed conventions:
+
+- Exact source `M` means male and normalizes to contract `M`; exact `F` means
+  female and normalizes to contract `F`. A true database NULL remains null.
+  Blank, whitespace, unknown or other unverified source values remain blocked;
+  they must not be coerced to null or `O`. Contract support for `O` does not
+  establish a source mapping for it.
+- Age means completed years (만 나이) on the encounter's clinic date, not on
+  the observation date or today's date. The convention is approved; a safe,
+  validated derivation is still unverified. No DOB query/export/persistence is
+  authorized by this approval, and the absent candidate `ageday` column does
+  not justify substituting another source or guessing age.
+
+This is a documentation-only policy decision, not source evidence or permission
+for new live operations. No validator, source model, mapping implementation or
+runtime setting changed. Code-10 waiting versus in-progress and the other source
+gates remain unresolved. `EghisSourceDayReader` stays UNAVAILABLE and publishing
+remains disabled.
 
 #### Closure and Verification
 
@@ -336,8 +358,9 @@ does not prove that an EMR workflow commits all related changes atomically.
 
 Still unresolved: code-10 waiting versus in-progress distinction; unseen/null/blank
 reception/qualifier combinations; all-category cancellation/deletion/restoration;
-masked type/department catalog coverage; approved demographic mapping and a verified
-age derivation without querying DOB in this milestone. Clinical units and event
+masked type/department catalog coverage; unseen demographic source values and a
+verified age derivation without querying DOB in this milestone. The conventions
+approved above do not supply missing source evidence. Clinical units and event
 timestamps were not inferred. Existing single-visit findings retain their limited scope.
 
 `authoritative_snapshot` is always false for inspection results, including an

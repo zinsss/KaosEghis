@@ -278,6 +278,18 @@ offscreen suite had 2,561 passes and 26 label/layout failures, all reproduced at
 the untouched starting commit; see the evidence document for details. Existing
 runtime consumer implementations and the source reader block are unchanged.
 
+### Demographic Policy Approval: 2026-10-05
+
+The operator approved exact source `M`/`F` as male/female, preserving contract
+`M`/`F`, and true database NULL as null. Blank/whitespace and other unverified
+values stay blocked, never guessed as null or `O`. Age is completed years (만 나이)
+on the encounter's clinic date. This approves the conventions only: safe age
+derivation and unobserved source behavior still require evidence. It does not
+authorize DOB access, a new live read, or any mapping/runtime implementation.
+See the [policy decision](kaosorders.md#demographic-policy-approval-2026-10-05).
+Code 10 and other source gates remain unresolved; the reader stays UNAVAILABLE
+and serialization/publishing remain disconnected from runtime.
+
 ## Observation-Only Probe
 
 `core/emr_signal_probe.py` starts with runtime services, not workspace construction.

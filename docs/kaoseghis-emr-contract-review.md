@@ -62,7 +62,7 @@ It has no IO/logging/database/HTTP/trigger dependency or runtime importer.
 | Source scope | `scope.source_id`, `projection_id`, `clinic_day`, `mapping_revision` | Direct values and ISO date; no scope inferred from patient data. Day coverage and mapping rollout remain blocked. |
 | `observed_at` | `observed_at` | Offset-preserving ISO timestamp; source observation only, no clinical/edit/payment event time. Clock policy unresolved. |
 | Encounter identity | `encounter_id`, `chart_number`, `patient_name` | Direct, `chart_no` renamed only; 128-character limits, no whitespace trimming. No chart-derived visit key. |
-| Explicit normalized demographics | `sex`, `age` | `M`/`F`/`O` or explicit null, integer 0-130 or null. Source can retain explicit `None`; blank sex fails with `unverified_sex`, never silently becomes null. Real sex/age conventions still unverified. |
+| Explicit normalized demographics | `sex`, `age` | `M`/`F`/`O` or explicit null, integer 0-130 or null. Source can retain explicit `None`; blank sex fails with `unverified_sex`, never silently becomes null. Operator approved exact source M/F/null and completed-years-at-clinic-date conventions on 2026-10-05; other source values and safe age derivation remain unverified. No production mapping enabled. |
 | Reception code/state | `source_state_code`, `state` | All six states, including distinct consultation/payment completion. Only supplied verified policy meanings; no default production code-10 or compound mapping. |
 | `ReceptionQualifiers` | `qualifiers.hold_yn`, `hold_opd` | Required exact raw Y/N facts, immutable and unclassified. Compound clinical meanings remain blocked. |
 | `OrderKey` | `key.encounter_id`, `order_date`, `order_number`, `order_sequence` | All four components retained; date is identity, not event time or accession. Same-key replacement remains possible. |
@@ -351,8 +351,14 @@ tokens, DOB, clinical text or credentials were output/persisted.
 | Verified empty | Operator-confirmed closed date had zero receptions, linked orders and same-date orders | Verified empty candidate scope, not a normalized complete snapshot. |
 | Reception/qualifiers | 168 at 40/N/N; five at 50/N/N | No new evidence for code 10 or other compound meanings. |
 | Order qualifiers | All dc_yn=N; act_yn=N/Y both present across allowlisted type/department buckets | No all-category cancellation/administration mapping inferred. |
-| Sex | M=62/F=111 per reception; nullable source field, no null/blank sample | Exact normalized mapping awaits operator approval; unseen values stay blocked. |
-| Age | Reviewed candidate ageday column absent from patient table; no DOB/age values queried | Convention and safe derivation remain unresolved. |
+| Sex | M=62/F=111 per reception; nullable source field, no null/blank sample | Operator approved exact M/F as male/female preserving M/F, and true NULL as null on 2026-10-05. Blank/whitespace and other unverified values remain blocked, not mapped to null/O. No implementation enabled. |
+| Age | Reviewed candidate ageday column absent from patient table; no DOB/age values queried | Operator approved completed years on the encounter clinic date on 2026-10-05. Safe derivation remains unresolved; no DOB access authorized. |
+
+The [2026-10-05 demographic policy approval](kaosorders.md#demographic-policy-approval-2026-10-05)
+resolves the two operator convention decisions, not missing source evidence.
+Earlier historical references to pending conventions are superseded only in that
+respect. This documentation-only update performs no live operations and changes
+no validator, mapping, source reader or runtime behavior.
 
 **Whole-day production reader remains blocked.** The aggregate acquisition shape
 has evidence for these dates, but it cannot supply the missing source-policy facts.
