@@ -373,6 +373,19 @@ label/layout failures reproduce at the untouched `e12685d` baseline. No unrelate
 UI changes were included. New inspection code has 67 mocked cases; the source
 reader, source model/ledger, serializer, outbox and PACS implementations are unchanged.
 
+## Reception Baseline: 2026-10-05
+
+The operator confirmed one disposable waiting visit dated 2026-10-05 KST.
+A tested reception-only aggregate operation observed one `10/N/N` reception
+at 00:43:33 KST, with verified read-only mode and both cursor/physical connection
+closed before interpretation (0.152 s lifetime). It read no patient/order
+identifiers, demographics or orders. See the [supervised comparison](kaosorders.md#supervised-reception-comparison-2026-10-05)
+for scope, limits and the 280-focused/944-related mocked test results.
+
+The in-consultation observation is pending. This baseline alone does not resolve
+code 10 or compound qualifiers. No validators, normalized mappings, runtime reader,
+transport or PACS behavior changed. All other source-evidence gates remain open.
+
 ## Review Findings
 
 | Finding | Evidence | Required resolution |

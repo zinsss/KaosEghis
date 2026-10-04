@@ -238,7 +238,7 @@ production query, publisher, settings, trigger, PACS change or deployment was ma
 
 ## Closed-Hours Aggregate Inspection: 2026-10-04
 
-`tools/inspect_source_evidence.py` exposes only fixed schema/day operations with
+`tools/inspect_source_evidence.py` exposes only fixed schema/day/reception operations with
 explicit approval and a supplied clinic date/expected population. It has no CLI
 SQL input, startup importer, timer, settings writer, persistence or publisher.
 The new `eghis_db.run_verified_evidence_query` entry point keeps the PostgreSQL
@@ -289,6 +289,22 @@ authorize DOB access, a new live read, or any mapping/runtime implementation.
 See the [policy decision](kaosorders.md#demographic-policy-approval-2026-10-05).
 Code 10 and other source gates remain unresolved; the reader stays UNAVAILABLE
 and serialization/publishing remain disconnected from runtime.
+
+### Reception-Only Evidence: 2026-10-05
+
+The explicit `reception` diagnostic narrows the day scope to grouped
+`proc_gb/hold_yn/hold_opd` counts, without querying identities, demographics or
+orders. It retains the verified read-only FIFO/mutex boundary and closure proof,
+cap-plus-one detection, strict allowlists and count consistency checks. Its
+results are never authoritative normalized snapshots and it has no runtime caller.
+
+For the operator-confirmed isolated dummy visit on 2026-10-05, one waiting-state
+observation found `10/N/N` (count 1), closing the connection in 0.152 s. The
+in-consultation comparison is pending; no new state meaning was enabled.
+See the [supervised comparison](kaosorders.md#supervised-reception-comparison-2026-10-05).
+Before that live read, 280 focused and 944 related isolated mocked tests passed.
+The shared DB/queue implementation, PACS, publishing and production reader block
+remain unchanged.
 
 ## Observation-Only Probe
 

@@ -369,6 +369,46 @@ normalization policy, runtime trigger, settings, outbox, HTTP, board, PACS, appl
 restart or deployment was enabled or changed. `/api/v1/order-snapshots` remains
 prohibited for normalized-source payloads. Raw diagnostic files are not committed.
 
+### Supervised Reception Comparison: 2026-10-05
+
+The operator registered a disposable visit and confirmed its clinic date as
+2026-10-05 KST and that it was the only visit currently in the waiting list.
+Before the live read, `inspect_source_evidence` gained an explicit `reception`
+operation. It selects only `proc_gb`, `hold_yn`, and `hold_opd` from the exact
+bound clinic date, masks unknown values on the server, and returns grouped counts
+and a population total. It does not query patient identifiers, demographics,
+orders, text, or additional tables. One reviewed SELECT/CTE command supplies both
+total and groups; there is no repeated timer or automatic polling.
+
+The operation uses the existing verified evidence boundary, FIFO and machine-wide
+mutex unchanged, including 3-second connect and 2-second statement timeouts.
+The 10,001-reception and 257-result sentinels, strict result allowlists, group-sum
+crosscheck, and expected-population check fail closed. Failure, overflow, partial
+results and unverified closure cannot yield findings or an authoritative snapshot.
+
+Mocked verification before source access: **280 focused tests passed in 2.59 s**
+and **944 related isolated tests passed in 45.75 s**. There are 41 additional
+cases covering reception-only scope, parameterization, result rejection, approval,
+session verification and cleanup failures. Native input, printer, live database
+and non-test network access were blocked during tests; mutexes were isolated.
+
+| Operator-confirmed stage | KST observation | Reception count | proc_gb / hold_yn / hold_opd | Connection lifetime |
+| --- | --- | ---: | --- | ---: |
+| Registered and waiting | 2026-10-05 00:43:33 | 1 | 10 / N / N: 1 | 0.152 s |
+
+Exactly one live reception-only operation ran for this baseline. Read-only mode,
+cursor closure and physical connection closure were verified before processing.
+No clicks, typing, focus changes, writes or patient/order exports were performed.
+The operator was asked to open the dummy for consultation without adding orders
+or pressing F6/F7. The in-consultation observation is still pending.
+
+This observation is a day aggregate, not an identified-patient lookup. Attribution
+depends on the operator-confirmed isolated visit and an unchanged population; any
+additional reception or unrelated change makes the comparison inconclusive.
+Code-10 waiting versus in-progress remains unresolved. No source mapping, runtime
+reader, serializer, publishing, PACS or board behavior changed. The production
+reader remains UNAVAILABLE and `/api/v1/order-snapshots` remains prohibited.
+
 ### Approved Laboratory Metadata Review: 2026-10-01
 
 The operator explicitly approved a limited read-only order-metadata inspection.

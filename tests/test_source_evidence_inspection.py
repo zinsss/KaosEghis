@@ -159,9 +159,10 @@ def test_bad_scope_or_missing_approval_never_connects(database, change):
 @pytest.mark.parametrize("mode", [("off", "2s", "read committed"),
                                   ("on", "0", "read committed"), None,
                                   ("on", "2s", "serializable")])
-def test_session_verification_precedes_source_read(database, mode):
+@pytest.mark.parametrize("operation", ["day", "reception"])
+def test_session_verification_precedes_source_read(database, mode, operation):
     database.mode = mode
-    result = inspect()
+    result = inspect(operation=operation)
     assert result["status"] == "session_unverified"
     assert len(database.statements) == 2
     assert result["closure"]["cursor_closed"] and result["closure"]["connection_closed"]
@@ -172,9 +173,10 @@ def test_session_verification_precedes_source_read(database, mode):
     "connect", "readonly", "cursor", "timeout_setup", "mode", "query", "fetch",
     "cursor_close", "cursor_still_open", "connection_close", "connection_still_open",
 ])
-def test_all_failure_stages_are_redacted_and_never_authoritative_empty(database, stage):
+@pytest.mark.parametrize("operation", ["day", "reception"])
+def test_all_failure_stages_are_redacted_and_never_authoritative_empty(database, stage, operation):
     database.stage = stage
-    result = inspect()
+    result = inspect(operation=operation)
     assert result["status"] not in {"observed_empty_scope", "observed_populated_scope"}
     assert "findings" not in result and not result["authoritative_snapshot"]
     assert "PRIVATE_MARKER" not in json.dumps(result) and "mock-secret" not in json.dumps(result)
@@ -269,7 +271,7 @@ def test_shared_fifo_and_max_one_physical_connection(database):
 
 
 def test_fixed_sql_review_scope_privacy_and_one_statement():
-    for sql in (evidence.DAY_SQL, evidence.SCHEMA_SQL):
+    for sql in (evidence.DAY_SQL, evidence.SCHEMA_SQL, evidence.RECEPTION_SQL):
         assert ";" not in sql
         assert not any(word in sql.lower() for word in (
             "ptnt_nm", "birth_ymd", "jumin", "phone", "address", "diagnosis",
@@ -281,6 +283,87 @@ def test_fixed_sql_review_scope_privacy_and_one_statement():
     assert "FROM h LEFT JOIN public.hz_mst_ptnt" in evidence.DAY_SQL
     assert "ELSE 'UNREVIEWED'" in evidence.DAY_SQL
     assert "LIMIT 257" in evidence.DAY_SQL
+
+
+def reception_rows(code="10", hold="N", opd="N", count=1):
+    return [("summary", "encounters", "", "", "", count)] + (
+        [("reception", code, hold, opd, "", count)] if count else [])
+
+
+@pytest.mark.parametrize("code,hold,opd", [
+    ("10", "N", "N"), ("10", "Y", "Y"), ("20", "N", "Y"),
+    ("NULL", "BLANK", "UNREVIEWED"),
+])
+def test_reception_only_scope_is_parameterized_and_processed_after_closure(
+        database, monkeypatch, code, hold, opd):
+    database.rows = reception_rows(code, hold, opd)
+    original = evidence._reception_findings
+    def validate(*args):
+        assert database.events[-2:] == ["cursor_closed", "connection_closed"]
+        assert all(c.closed for c in database.connections)
+        return original(*args)
+    monkeypatch.setattr(evidence, "_reception_findings", validate)
+    result = inspect(operation="reception", expectation="populated")
+    assert result["status"] == "observed_reception_scope"
+    assert result["findings"] == {
+        "counts": {"encounters": 1},
+        "groups": {"reception": [{"values": [code, hold, opd], "count": 1}]}}
+    assert result["authoritative_snapshot"] is False
+    query, params = database.statements[-1]
+    assert query == evidence.RECEPTION_SQL
+    assert params == {"day": "20261002", "encounter_limit": 10001,
+                      "proc": list(evidence.PROC), "flags": list(evidence.FLAGS)}
+    assert len(database.statements) == 3
+    assert "WHERE clinic_ymd=%(day)s" in query and "LIMIT 257" in query
+    assert "LIMIT %(encounter_limit)s" in query
+    for forbidden in ("recept_no", "ptnt_no", "hz_mst_ptnt", "h2opd", "sex", "JOIN"):
+        assert forbidden not in query
+
+
+@pytest.mark.parametrize("rows,status", [
+    ([], "result_overflow_or_incomplete"),
+    (reception_rows() * 129, "result_overflow_or_incomplete"),
+    (reception_rows(count=10001), "source_overflow"),
+    (reception_rows()[1:], "incomplete_result"),
+    (reception_rows()[:1], "inconsistent_result"),
+    (reception_rows() + [reception_rows()[0]], "invalid_result"),
+    (reception_rows("PRIVATE_MARKER"), "invalid_result"),
+    (reception_rows(hold="PRIVATE_MARKER"), "invalid_result"),
+    (reception_rows(opd="PRIVATE_MARKER"), "invalid_result"),
+    ([("summary", "encounters", "", "", "", True)], "invalid_result"),
+    ([("summary", "encounters", "", "", "", -1)], "invalid_result"),
+    ([("summary", "encounters", "", "", "", "PRIVATE_MARKER")], "invalid_result"),
+    ([("summary", "PRIVATE_MARKER", "", "", "", 0)], "invalid_result"),
+    ([("summary", "encounters")], "invalid_result"),
+    (reception_rows(count=0), "operator_expectation_mismatch"),
+])
+def test_reception_only_invalid_results_fail_closed(database, rows, status):
+    database.rows = rows
+    result = inspect(operation="reception", expectation="populated")
+    assert result["status"] == status
+    assert "findings" not in result and result["authoritative_snapshot"] is False
+    assert "PRIVATE_MARKER" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("change", [
+    {"approved": False}, {"approved": 1}, {"clinic_day": None},
+    {"clinic_day": "2026-10-02"}, {"expectation": None}, {"expectation": "waiting"},
+])
+def test_reception_scope_requires_approval_date_and_expectation(database, change):
+    arguments = dict(operation="reception", expectation="populated")
+    arguments.update(change)
+    assert inspect(**arguments)["status"] in {"approval_required", "invalid_scope"}
+    assert not database.connections
+
+
+def test_reception_only_empty_remains_non_authoritative(database):
+    database.rows = reception_rows(count=0)
+    result = inspect(operation="reception")
+    assert result["status"] == "observed_reception_scope"
+    assert result["findings"] == {"counts": {"encounters": 0}, "groups": {"reception": []}}
+    assert result["authoritative_snapshot"] is False
+    database.rows = reception_rows()
+    assert inspect(operation="reception")["status"] == "operator_expectation_mismatch"
 
 
 def test_evidence_is_disconnected_and_cannot_unblock_runtime_reader():

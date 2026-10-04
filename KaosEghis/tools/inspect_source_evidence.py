@@ -40,6 +40,34 @@ ORDER BY c.relname, a.attnum
 LIMIT 33
 """
 
+RECEPTION_SQL = """
+WITH h AS (
+    SELECT proc_gb, hold_yn, hold_opd
+    FROM public.h1opdin WHERE clinic_ymd=%(day)s
+    LIMIT %(encounter_limit)s
+), masked AS (
+    SELECT CASE WHEN proc_gb IS NULL THEN 'NULL'
+                WHEN proc_gb::text='' THEN 'BLANK'
+                WHEN proc_gb::text=ANY(%(proc)s) THEN proc_gb::text
+                ELSE 'UNREVIEWED' END AS code,
+           CASE WHEN hold_yn IS NULL THEN 'NULL'
+                WHEN hold_yn::text='' THEN 'BLANK'
+                WHEN hold_yn::text=ANY(%(flags)s) THEN hold_yn::text
+                ELSE 'UNREVIEWED' END AS hold,
+           CASE WHEN hold_opd IS NULL THEN 'NULL'
+                WHEN hold_opd::text='' THEN 'BLANK'
+                WHEN hold_opd::text=ANY(%(flags)s) THEN hold_opd::text
+                ELSE 'UNREVIEWED' END AS opd
+    FROM h
+)
+SELECT 'summary' AS section, 'encounters' AS a, ''::text AS b, ''::text AS c,
+       ''::text AS d, count(*) AS n FROM h
+UNION ALL SELECT 'reception', code, hold, opd, '', count(*)
+    FROM masked GROUP BY code, hold, opd
+ORDER BY 1, 2, 3, 4, 5
+LIMIT 257
+"""
+
 # Each CASE masks unreviewed values on the server, before they cross the boundary.
 DAY_SQL = """
 WITH h AS (
@@ -146,8 +174,14 @@ def _query_spec(operation, clinic_day):
             "order_fields": sorted(SCHEMA_FIELDS["h2opd_doct_ord"]),
             "patient_fields": sorted(SCHEMA_FIELDS["hz_mst_ptnt"]),
         }
-    if operation != "day" or type(clinic_day) is not date:
+    if operation not in ("day", "reception") or type(clinic_day) is not date:
         raise EvidenceRejected("invalid_scope")
+    if operation == "reception":
+        return RECEPTION_SQL, {
+            "day": clinic_day.strftime("%Y%m%d"),
+            "encounter_limit": ENCOUNTER_CAP + 1,
+            "proc": list(PROC), "flags": list(FLAGS),
+        }
     return DAY_SQL, {
         "day": clinic_day.strftime("%Y%m%d"),
         "encounter_limit": ENCOUNTER_CAP + 1, "order_limit": ORDER_CAP + 1,
@@ -238,6 +272,37 @@ def _day_findings(rows, expectation):
     return {"counts": summary, "groups": groups}
 
 
+def _reception_findings(rows, expectation):
+    if not rows or len(rows) > REPORT_CAP:
+        raise EvidenceRejected("result_overflow_or_incomplete")
+    total, groups, seen = None, [], set()
+    for row in rows:
+        if (type(row) not in (tuple, list) or len(row) != 6
+                or any(type(value) is not str for value in row[:5])
+                or type(row[5]) is not int or not 0 <= row[5] <= ENCOUNTER_CAP + 1
+                or tuple(row[:5]) in seen):
+            raise EvidenceRejected("invalid_result")
+        seen.add(tuple(row[:5]))
+        section, code, hold, opd, extra, count = row
+        if tuple(row[:5]) == ("summary", "encounters", "", "", ""):
+            total = count
+        elif (section == "reception" and code in set(PROC) | TOKENS
+              and hold in set(FLAGS) | TOKENS and opd in set(FLAGS) | TOKENS
+              and extra == "" and count > 0):
+            groups.append({"values": [code, hold, opd], "count": count})
+        else:
+            raise EvidenceRejected("invalid_result")
+    if total is None:
+        raise EvidenceRejected("incomplete_result")
+    if total > ENCOUNTER_CAP:
+        raise EvidenceRejected("source_overflow")
+    if sum(group["count"] for group in groups) != total:
+        raise EvidenceRejected("inconsistent_result")
+    if (expectation == "empty" and total) or (expectation == "populated" and not total):
+        raise EvidenceRejected("operator_expectation_mismatch")
+    return {"counts": {"encounters": total}, "groups": {"reception": groups}}
+
+
 def inspect_evidence(connection_string, *, operation, clinic_day=None,
                      expectation=None, approved=False):
     """Only fixed reviewed operations; results are never authoritative snapshots."""
@@ -247,7 +312,7 @@ def inspect_evidence(connection_string, *, operation, clinic_day=None,
     try:
         if approved is not True:
             raise EvidenceRejected("approval_required")
-        if ((operation == "day" and expectation not in ("empty", "populated"))
+        if ((operation in ("day", "reception") and expectation not in ("empty", "populated"))
                 or (operation == "schema" and expectation is not None)):
             raise EvidenceRejected("invalid_scope")
         query, params = _query_spec(operation, clinic_day)
@@ -255,10 +320,15 @@ def inspect_evidence(connection_string, *, operation, clinic_day=None,
         if not proof["cursor_closed"] or not proof["connection_closed"]:
             raise EvidenceRejected("cleanup_unverified")
         # No source result validation/aggregation occurs inside the connection slot.
-        findings = (_schema_findings(rows) if operation == "schema"
-                    else _day_findings(rows, expectation))
+        if operation == "schema":
+            findings = _schema_findings(rows)
+        elif operation == "reception":
+            findings = _reception_findings(rows, expectation)
+        else:
+            findings = _day_findings(rows, expectation)
         report["findings"] = findings
         report["status"] = ("schema_observed" if operation == "schema"
+                            else "observed_reception_scope" if operation == "reception"
                             else f"observed_{expectation}_scope")
     except (EvidenceRejected, EghisEvidenceRejectedError) as error:
         report["status"] = str(error)
