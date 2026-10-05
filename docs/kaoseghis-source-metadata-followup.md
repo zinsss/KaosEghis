@@ -169,6 +169,12 @@ security certification.
 
 ## Read-Only Stopping Boundary
 
+The later [current-day memory-only decision](kaosorders.md#current-day-memory-only-decision-2026-10-06)
+removes historical/date-moving tests and durable patient/order persistence from
+the target. The earlier observed catalog counts/privileges remain valid evidence;
+they are not proof of the narrowed current-day scope. Midnight board reset never
+means an EMR deletion.
+
 The two bounded structural/privilege operations are complete. **None of the eight
 full source gates is resolved.** Repeating these counts or reading arbitrary
 clinical rows cannot establish the remaining guarantees. In particular:
@@ -176,9 +182,10 @@ clinical rows cannot establish the remaining guarantees. In particular:
 1. A consistent SELECT is not proof that the EMR saves reception and all orders
    in one transaction. Repeated equal reads, idle UI/caret state and a delay do not
    certify completeness. Authoritative FULL/empty snapshots remain blocked.
-2. Operator-controlled disposable-visit changes are needed for untested date
-   moves, retained-flag/state ambiguities and all-category edit/cancel/restore/key
-   reuse paths. The agent must not perform those writes under read-only approval.
+2. Operator-controlled normal same-day disposable-visit changes are needed for
+   retained-flag/state ambiguities and relevant category edit/cancel/restore/key
+   reuse paths. Artificial date moves are not required. The agent must not perform
+   any of those writes under read-only approval.
    Record aggregate-only before/after checkpoints and explicitly report the limits
    of finite observations. Do not repeat established transitions without a gap.
 3. Completed-years age needs an approved derived source or a separately reviewed

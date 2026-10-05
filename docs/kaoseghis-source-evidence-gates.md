@@ -30,6 +30,18 @@ The final follow-up verification passed 1,124 focused and 1,619 broader tests;
 the full isolated suite had 3,249 passes and the 26 previously documented vaccine
 label/layout failures. See the [full verification record](kaoseghis-source-metadata-followup.md#verification).
 
+## Current-Day Scope Correction
+
+The [2026-10-06 operator decision](kaosorders.md#current-day-memory-only-decision-2026-10-06)
+narrows the source to the current KST clinic day and makes KaosOrders a transient
+in-memory board. The EMR DB is the sole durable patient/order source. At day change,
+clear only the transient board and start the new day; never delete EMR records.
+Historical backfill/archive coverage, past-day rescan and artificial date-moving
+tests are not requirements. Normal same-day changes and complete current-day reads
+still need verification. This narrows gates 1-3; it does not establish their proof.
+The existing dummy is left unchanged pending a normal operator-confirmed action.
+No new live operation or runtime change followed this clarification.
+
 ## Pinned Scope
 
 - Sender starting HEAD and GitHub `main`:
@@ -101,9 +113,9 @@ evidence, and no gate is closed merely because a fixture can represent the resul
 
 | Gate | Evidence already useful | Missing authority / candidate next investigation |
 | --- | --- | --- |
-| 1. Full-day membership/history | Candidate reception table/date predicate and no-order receptions observed. Catalog probes found 4 unique dependent views, 3 shared; 23 additional ordinary-relation links and 5 recorded routine links. No selected inheritance/FK links. | View purpose, filters and scope remain unknown. Operator-controlled date moves/history/restoration and reviewed source-scope acceptance remain necessary; do not infer universal coverage from metadata. |
-| 2. Children and save consistency | Four-part key and linked/same-date counts checked in a sample; one statement uses one database statement snapshot. | Authoritative child coverage across histories/dates and an EMR save transaction/completion boundary. One statement can still observe between two EMR commits. Independent autocommit reads are not one snapshot. |
-| 3. Verified-empty authority | Operator-confirmed closed date and zero candidate counts. | Gates 1/2 plus proof that an empty result covers every authoritative source, not a missing archive, denied source, wrong clinic/date or partial result. Closed-day confirmation alone is insufficient. |
+| 1. Current-day membership | Candidate reception table/date predicate and no-order receptions observed. Catalog probes found 4 unique dependent views, 3 shared; 23 additional ordinary-relation links and 5 recorded routine links. No selected inheritance/FK links. | Coverage of today's scoped encounters, including no-order/cancelled visits. Metadata alone does not establish that scope; historical backfill/archive coverage and artificial date moves are no longer required. |
+| 2. Children and save consistency | Four-part key and linked/same-date counts checked in a sample; one statement uses one database statement snapshot. | Complete children for today's encounter scope and an EMR save transaction/completion boundary. One statement can still observe between two EMR commits. Independent autocommit reads are not one snapshot. |
+| 3. Verified-empty authority | Operator-confirmed closed date and zero candidate counts. | Gates 1/2 plus verified current clinic/date, source access and completeness. A failed read is not empty authority. Midnight clearing is an explicit board lifecycle rule, not an empty-source assertion. |
 | 4. States/retained qualifiers | Supervised codes 10/20/25/30/40/50 and some exact flag combinations. | Versioned state truth table including hold_yn Y/N, transient states, unknown/null/blank combinations and consultation versus payment completion. No default mapping from a column name or sample. |
 | 5. State without excluded field | v2 excludes hold_opd; receiver has no raw-field business requirement. | Compare operator-confirmed states with only approved retained facts; seek ambiguous combinations rather than assume independence. If state remains ambiguous, keep it blocked; a privacy-safe semantic would need separate review. Never retrieve the excluded raw value to guess. |
 | 6. All-category lifecycle | Sampled edits, deletion, restoration, parent cancellation and key reuse. | Definitions and a separately approved category/path matrix for dc_yn/act_yn, physical disappearance, restorations and identity reuse. Neither act_yn nor disappearance proves clinical completion/cancellation. |
@@ -117,14 +129,15 @@ EMR/schema version, relevant source objects, definition revision and reviewer ro
 (vendor or DBA). Do not include account secrets, personal records, database dumps,
 patient examples, actual excluded-field values or screenshots containing them.
 
-1. Define which source objects and clinic-day predicate form the authoritative
-   encounter set. Include no-order, cancelled, moved/backdated and archived visits,
-   timezone/day rollover, clinic partitioning and historical corrections.
+1. Define which source objects and clinic-day predicate form today's authoritative
+   encounter set. Include no-order/cancelled visits, KST rollover and clinic
+   partitioning. Prior-day synchronization and artificial date moves are outside
+   the clarified requirement.
 2. Define the complete child relation and the uniqueness/reuse domain of encounter,
    order date, order number and sequence. Explain whether a save commits reception
    and all children atomically. If not, document an approved stable-read marker or
    completion protocol without providing actual marker values.
-3. Define when that complete set may authoritatively be empty, including history
+3. Define when today's complete set may authoritatively be empty, including source
    access, permissions and recovery/maintenance states. A calendar closure is only
    an operator expectation, not a source completeness guarantee.
 4. Provide the normalized reception-state truth table from permitted source facts,
@@ -145,8 +158,8 @@ patient examples, actual excluded-field values or screenshots containing them.
 These definitions remain useful if they become available, but they are not a
 prerequisite to controlled investigation. Do not replace them with guessed
 meanings, repeated broad queries, permission escalation, longer timeouts or
-inference from an empty-looking UI. Finite observations alone cannot prove all
-historical membership.
+inference from an empty-looking UI. Finite observations alone do not prove today's
+source completeness; historical membership is outside the clarified polling scope.
 
 ## Controlled Observation Path Without Vendor Docs
 
@@ -164,8 +177,8 @@ privacy, serialization and physical-closure rules.
    caps and sanitized output must be mocked and presented before approval.
 2. Build a gap matrix from the existing dummy observations. Do not repeat the
    already observed 10/20/25 and 25/30/50/restoration paths merely to accumulate
-   more samples. Focus on missing retained-flag combinations, date moves/history
-   and the untested category/lifecycle paths. Each live comparison gets its own
+   more samples. Focus on missing retained-flag combinations and normal same-day
+   category/lifecycle paths, not artificial date moves. Each live comparison gets its own
    approval; the operator performs any dummy-record changes, not the reader.
 3. Compare only allowlisted aggregate facts with operator-confirmed UI states and
    counts at a known checkpoint. No patient/order identifiers or row dumps leave
@@ -277,25 +290,27 @@ plugin autoload. No live connection timings or fresh source findings were obtain
 
 ## Exact KaosOrders Handoff
 
-Continue with a **documentation-only source-gate acknowledgement**, not transport
-implementation. Pin the completed sender commit returned with this review and
-receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`.
+Continue with a **design-only current-day memory-board revision**, not production
+transport implementation. Pin the completed sender commit returned with this
+review and inspect the receiver starting state; the last reviewed receiver was
+`890a4dd4ce992f2598c85557513cd2c70b098a2b`.
 
-1. Read this gate matrix and reconcile the stale v2 status paragraphs in the receiver
-   v2 plan and implementation plan. Record synthetic receiver completion separately
-   from source authority. None of the eight source gates is closed by this review.
+1. Read the [current-day memory-only decision](kaosorders.md#current-day-memory-only-decision-2026-10-06).
+   Update receiver architecture/implementation plans: no durable patient/order
+   projection, no history replay, midnight transient reset and fresh current-day
+   reload after restart. Do not delete or change any existing store in this step.
+   Record historical synthetic store proofs separately from the new product target.
 2. Preserve the reader block and v2 exclusion of hold_opd. Do not reinterpret v1
    stores/fixtures or introduce placeholder values. Do not repeat serializer work.
-3. Keep transport design gated on reviewed source evidence. Once that gate is
-   explicitly accepted, a separate design-only milestone must decide authenticated
-   scope/version/mapping/epoch/generation enrollment before body application,
-   acknowledgement encoding/outcome/HTTP mapping, limits/timeouts, retry/backoff and
-   durable pause, storage protection/retention, receiver-ahead/lost-state recovery,
-   historical-day authority and mapping cutover. Internal synthetic receipts are
-   not an approved network schema.
-4. Record that v2 sender sealed outbox/pending-byte/acknowledgement/restart parity
-   does not exist yet. A separately authorized synthetic sender/joint-recovery
-   milestone is required; the receiver-only tests do not prove it.
+3. Design authenticated current-day scope/session fencing, complete-snapshot
+   replacement, stale-response rejection, restart resynchronization, midnight races,
+   bounded volatile retry/backoff and unavailable/stale display semantics. Do not
+   silently repurpose v2 durable epoch/revision/receipt assumptions; decide contract
+   compatibility explicitly. Implementation remains gated by source evidence.
+4. A production patient/order outbox and durable receiver cursor/projection are no
+   longer requirements. Keep existing synthetic stores/fixtures/hashes unchanged.
+   Propose memory-only synthetic tests, including old-day/old-session rejection,
+   no persistence, current-day edits/removals, restart and failure-not-empty behavior.
 5. Add no endpoint, token, HTTP transport, retry worker, source reader/query,
    production storage, runtime wiring, board/PACS change, deployment or restart.
    Never send normalized-source payloads to `/api/v1/order-snapshots`.
@@ -316,17 +331,17 @@ restart the serializer/parity work or repeatedly ask for unavailable vendor docs
 | Work needed | Who/what changes | Acceptance condition |
 | --- | --- | --- |
 | Restrict source identity | DBA/admin reviews effective schema CREATE grant and dedicated reader role; no automatic changes | Reviewed least-privilege effective access, beyond the two sampled tables; no production write tests |
-| Unseen source transitions | Operator changes only a disposable visit during a closed-hours test; agent reads approved aggregate checkpoints | Gap-specific date move/backdate/restore, retained-flag and category/lifecycle evidence; no excluded qualifier or PHI output |
-| Save and full-day authority | Reviewed application/database transaction boundary and explicit source-scope acceptance | Do not treat repeated equal observations or UI readiness as atomic-save proof; keep empty/destructive FULL blocked if unproved |
+| Unseen normal source transitions | Operator performs normal same-day actions on a disposable visit; agent reads approved aggregate checkpoints | Missing retained-flag and category/lifecycle evidence; no artificial date-moving, excluded qualifier or PHI output |
+| Save and current-day authority | Reviewed application/database transaction boundary and explicit current-day scope acceptance | Do not treat repeated equal observations or UI readiness as atomic-save proof; failed reads never imply empty/removal |
 | Safe age | Approve a privacy-safe derived source or separately review a minimal local derivation | Completed years at encounter date, null/invalid policy, boundary tests; no DOB/resident-number retrieval under the present mandate |
 
 For the dummy matrix, already observed 10/20/25/30/40/50 transitions and INJ
 edit/remove/reuse/parent-cancel/restore do not need repetition. Remaining examples
-include clinic-date moves across a month/day boundary, whether retained hold_yn
-changes can alter a code's state, LAB/imaging/other category cancellation and
-restoration, and no-order encounter date/restore paths. Operator confirmation is
-needed before creating each new condition. An observation may reveal a counterexample
-but cannot prove every historical/future path.
+include whether retained hold_yn changes alter a code's state, LAB/imaging/other
+category edits/cancellation/restoration, and normal same-day no-order reception
+paths. Only test paths actually used by the clinic. Operator confirmation is
+needed before each new condition. Do not move the dummy to old dates or demand
+historical coverage. A bounded observation is not universal save-consistency proof.
 
 If authoritative completeness is not obtainable, the decision is a separately
 versioned **non-authoritative observation** design, not permission to ship

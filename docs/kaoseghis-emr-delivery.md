@@ -2,6 +2,18 @@
 
 Updated: 2026-10-04
 
+## Superseding Product Decision
+
+On 2026-10-06 the operator chose a
+[current-day memory-only KaosOrders board](kaosorders.md#current-day-memory-only-decision-2026-10-06).
+The EMR database is the sole durable patient/order source; old-day transient board
+state is cleared and receiver restart reloads today. Production patient/order
+outbox, durable projection and historical replay are no longer target requirements.
+The synthetic implementation/tests below remain unchanged as historical proofs.
+Do not apply their durable-cursor assumptions to a volatile receiver without a
+new design review, delete existing stores, or enable a delivery worker. No live
+data, runtime or PACS behavior was changed by this decision.
+
 ## Current Milestone
 
 The operator approved an offline delivery-queue milestone after the design review,

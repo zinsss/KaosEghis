@@ -1,6 +1,15 @@
 # KaosEghis-emr
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
+
+**Orders target clarified:** the [current-day memory-only decision](kaosorders.md#current-day-memory-only-decision-2026-10-06)
+makes the EMR DB the sole durable patient/order source. KaosOrders keeps only
+today's transient board, clears it at KST midnight and reloads today's source on
+restart. No historical backfill or production patient/order outbox/projection is
+required. Prior synthetic persistence milestones below remain historical proofs,
+not runtime requirements. Same-day source evidence, safe reads and session/rollover
+design remain necessary. This documentation decision changes no running PACS/EMR
+behavior and deletes no data.
 
 Status: the first shared-read stage is implemented. Verified chart clears can now
 refresh the existing whole-day PACS query; Poll Now remains a manual fallback.

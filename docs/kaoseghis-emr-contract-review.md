@@ -5,6 +5,15 @@ Reviewed: 2026-10-05
 Status: **v1 synthetic parity and v2 receiver-only synthetic proofs complete;
 production source authority remains unresolved**.
 This is not an approved HTTP endpoint, production query or deployment change.
+
+**2026-10-06 scope correction:** [current-day memory-only KaosOrders](kaosorders.md#current-day-memory-only-decision-2026-10-06)
+supersedes the prior production durable-projection/outbox/history target. EMR DB
+is the only durable patient/order source; KaosOrders resets transient state at
+KST day change and reloads today after restart. No historical/date-moving test is
+required. The v1/v2 bytes, validators and synthetic stores below remain unchanged;
+their durable cursor assumptions must not be silently reinterpreted as a volatile
+session protocol. Receiver design acknowledgement is needed before implementation.
+Current-day membership/consistency and remaining source gates are still unresolved.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The
@@ -689,19 +698,22 @@ settings, triggers, v1 serializers/outbox/receipts and runtime imports are uncha
 No production SQL, patient export, endpoint, token, delivery, deployment or restart.
 `/api/v1/order-snapshots` remains prohibited for every normalized-source payload.
 
-Source gates remain authoritative full-day membership/history, complete child
+For the original milestone, source gates included full-day membership/history.
+The later current-day decision narrows that to today's membership; complete child
 coverage and clinical-save consistency, verified-empty authority, full state and
 qualifier-combination evidence (including whether state interpretation needs the
 excluded field), all-category cancellation/deletion/restoration, unseen sex values,
-safe completed-years age derivation and least-privilege verification. Isolated
-10/20/25 observations and fixture success do not clear these gates.
+safe completed-years age derivation and least-privilege verification remain
+unresolved. Isolated 10/20/25 observations and fixture success do not clear these gates.
 
-Delivery gates remain durable epoch/revision grants and fencing, receiver-generation
-enrollment, lost-state/receiver-ahead recovery, content-bound acknowledgement encoding
+For that original persistent design, delivery gates included durable epoch/revision
+grants and fencing, receiver-generation enrollment, lost-state/receiver-ahead
+recovery, content-bound acknowledgement encoding
 and HTTP status mapping, retry/backoff/pause policy, mapping cutover, storage security
 and retention. No v1 sealed bytes, batch IDs, cursors or receipts are rewritten.
 Stale/conflict/resync must continue to pause and preserve pending bytes in the
-existing synthetic v1 proof; v2 delivery/storage proof is a later stage.
+existing synthetic v1 proof. The current-day memory-only decision now requires a
+separate volatile-session/restart design instead of a production durable store.
 
 **Next KaosOrders handoff:** inspect the exact resulting sender commit and copy the
 two v2 fixtures with provenance. Implement only a separate pure v2 receiver parser

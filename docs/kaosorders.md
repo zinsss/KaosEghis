@@ -1,8 +1,15 @@
 # KaosOrders Source-Side Shadow Foundation
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 ## Status and Current Decisions
+
+**Latest operator decision:** [current-day, memory-only board](#current-day-memory-only-decision-2026-10-06).
+The EMR database is the sole durable source of patient/order truth. KaosOrders
+must not persist patient/order state; at the KST day change, clear the transient
+board and start the new day. This supersedes the production persistence/history
+requirements below, not the historical synthetic test results. No running system
+or stored data was changed by this documentation update.
 
 The latest [controlled source-evidence review](kaoseghis-source-evidence-gates.md)
 pins receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b` and records completed
@@ -22,6 +29,66 @@ More equal snapshots or successful reads cannot establish save authority. Transp
 gated. The sender still has no v2 outbox or acknowledgement consumer, and its v1
 synthetic outbox is not v2 proof.
 That review's handoff supersedes historical next-step lists below.
+
+### Current-Day Memory-Only Decision: 2026-10-06
+
+The operator clarified that past clinic days are over, the EMR DB is the source
+of truth, and KaosOrders must not save patient/order data. The dummy still exists,
+but artificial date-moving is not part of the normal clinic workflow.
+
+```text
+EMR database (sole durable patient/order source)
+  -> KaosEghis-emr (serialized read-only access, detached validated current-day data)
+  -> KaosOrders (current-day in-memory projection)
+  -> browser board (transient display only)
+```
+
+- Source polling covers the current KST clinic date only. No historical backfill,
+  previous-day rescan or later correction of completed days is required. Remove
+  cross-date move/backdate/history experiments from the acceptance checklist.
+- KaosOrders does not durably store patient/order projections, payloads, a replay
+  history or patient/order-bearing logs. Browser cache/storage/service workers,
+  crash dumps and swap must not become an unintended persistence path. Deployment
+  verification for those controls belongs to a later receiver milestone.
+- At KST midnight, discard the old day's in-memory board state and start the new
+  day. This is an explicit display lifecycle rule, not an authoritative empty EMR
+  snapshot. Do not delete or modify any EMR record.
+- On receiver restart, start without patient/order state and request a fresh
+  validated snapshot for today. No local patient/order database is restored.
+  Until that succeeds, represent unavailable/loading state, not verified emptiness.
+- Same-day additions, edits, cancellation/removal, completion, payment and return
+  to hold must still come from source observations. The receiver must not invent
+  a durable clinical status independent of the EMR.
+- Today's no-order and cancelled encounters and all scoped children remain source
+  coverage requirements. Preserve the four-part order key; this scope decision
+  does not silently change child selection or remove identity fields.
+- A failed/partial/timed-out read must not clear a populated current-day board or
+  imply order deletion. Validated complete replacement remains distinct from
+  availability failure. Old-day or old-session responses must not repopulate a
+  reset board; authentication, session fencing, ordering and rollover races need
+  an explicit memory-only delivery design.
+- A durable patient/order outbox/replay ledger is not required for this workflow.
+  Pending old-day work must not be relabeled as today. Do not mutate existing v1
+  synthetic stores, fixtures or hashes; their durable-cursor/receipt semantics are
+  historical offline proofs, not an approved volatile-session protocol.
+
+This is a new sender-side product decision requiring a KaosOrders design handoff.
+Do not claim receiver implementation/parity already matches it, reinterpret v2
+epoch/revision fields silently, remove validators, or retrofit runtime endpoints.
+The separate synthetic SQLite receiver/outbox tests remain intact but no longer
+define the desired production persistence architecture. Configuration/authentication
+design is separate from the prohibition on patient/order persistence.
+
+No query, EMR UI operation, data deletion, grant change, PACS change, deployment,
+restart or publication was performed for this decision. The production day reader
+stays UNAVAILABLE. `/api/v1/order-snapshots` remains prohibited for normalized data.
+Next validate missing **normal same-day** source workflows and design the
+receiver's volatile reset/resynchronization behavior with synthetic data only.
+
+Documentation-only verification: the existing 29 evidence-to-v2 boundary tests
+passed in 0.84 s, and `git diff --check` passed. These preserve the blocked reader;
+they are not proof of an implemented memory-only receiver. The full suite was not
+repeated because no code/test/fixture changed; its preceding results remain above.
 
 This supersedes the older laptop/LMDE, completed-patient board, PACS-only hold tiles,
 and per-chart F7/20-second designs. KaosOrders runs on **KaosClinic**. The viewer is
