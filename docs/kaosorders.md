@@ -55,6 +55,10 @@ The Windows offline serializer `core/kaosorders_normalized_source.py` matches bo
 reference fixtures exactly, including full and verified-empty days, nulls, row
 ordering, canonical decimal strings and SHA-256. Source qualifiers are mandatory
 fixed raw Y/N facts (hold_yn/hold_opd, dc_yn/act_yn), never inferred clinical meaning.
+The later [qualifier decision proposal](kaoseghis-emr-contract-review.md#qualifier-decision-proposal-2026-10-05)
+does not change this implemented v1 requirement: it proposes consistent exclusion
+of raw `hold_opd` only in a separately versioned future contract, pending receiver
+agreement and source-policy review. No new contract version is implemented.
 It retains all source encounters/orders and distinct consultation/payment completion,
 with no category, pill, visibility, fee, detail or PACS fields. Explicit null sex
 can be preserved, while blank sex fails with a fixed redacted reason.

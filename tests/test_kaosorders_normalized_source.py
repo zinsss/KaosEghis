@@ -191,7 +191,10 @@ def test_raw_qualifiers_are_detached_fixed_facts_not_state_rules(source_read, so
 
 @pytest.mark.parametrize("row_type,field", [("encounters", "hold_yn"), ("encounters", "hold_opd"),
                                            ("orders", "dc_yn"), ("orders", "act_yn")])
-@pytest.mark.parametrize("bad", [None, True, 1, "", "n", " Y", "Y ", "UNKNOWN", "UNREVIEWED", "PRIVATE_TEST_MARKER"])
+@pytest.mark.parametrize("bad", [
+    None, True, 1, "", "n", " Y", "Y ", "UNKNOWN", "UNREVIEWED",
+    "0", "1", "12345678", "ASCII_DIGITS", "PRIVATE_TEST_MARKER",
+])
 def test_unknown_qualifiers_are_not_defaulted(source_read, source_policy, row_type, field, bad):
     getattr(source_read, row_type)[0]["qualifiers"][field] = bad
     with pytest.raises(SnapshotRejected) as error:

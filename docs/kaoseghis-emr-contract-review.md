@@ -9,6 +9,10 @@ The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The
 serializer and pinned fixtures are unchanged.
 
+The [2026-10-05 qualifier decision proposal](#qualifier-decision-proposal-2026-10-05)
+recommends excluding raw `hold_opd` from a separately versioned future contract.
+It is not receiver agreement, an in-place v1 amendment, or an implemented change.
+
 ## Evidence Scope
 
 - Reviewed the Windows working-copy source model, source ledger, current PACS
@@ -432,6 +436,131 @@ The overnight gap was not continuously observed; no precise transition time or
 causal field definition was inferred. Source-definition/privacy review and a
 coordinated contract decision remain required. No validator or runtime changed;
 529 focused mocked tests passed for this documentation-only follow-up.
+
+## Qualifier Decision Proposal: 2026-10-05
+
+**Status: recommendation for joint review, not an agreed or implemented contract.**
+Review started from sender `3801dad3378dad831569c635acfa035887bbb0b9` (clean main).
+The existing clean detached receiver checkout was verified at
+`a837d385ff367e4f72310226d8bc8439fc0c50fe`. This is a pinned reference, not a claim
+about the latest receiver or deployed service. No pull, SSH, live EMR read, metadata
+query, API call, app restart or receiver edit was performed in this review.
+
+### Definition and Usage Findings
+
+| Evidence | Finding | Consequence |
+| --- | --- | --- |
+| Previously recorded catalog comment | `hold_opd` was described as a consultation-in-progress Y flag; the later isolated visit used numeric text while open. | The comment does not define the observed domain. Do not turn it into proof that numeric means Y. |
+| Previously recorded dictionary access | The configured reader was denied SELECT on the candidate code dictionaries. | Do not repeat denied queries, change credentials or request broad grants merely for this review. A narrowly scoped non-patient field definition from the vendor/administrator remains a possible evidence source. |
+| Sender `core/emr_source.py` | `ReceptionQualifiers` and `_source_flag` require exact Y/N. `normalize_source_day` obtains state from the explicit policy for `state_code`, not from either qualifier. | The current failure is intentional validation, not a broken query or parser. This code design is not proof that every production compound state can ignore qualifiers. |
+| Sender `core/emr_source_shadow.py` | Whole encounter equality includes both qualifiers. | Removing a field changes the compared projection and requires a new baseline, not silent reuse of the old ledger. |
+| Sender `core/kaosorders_normalized_source.py` | Qualifiers are revalidated and included in the canonical digest. | Changing the field changes payload bytes and digests; never rewrite a sealed pending batch. |
+| Receiver `app/source_contract.py` | `ReceptionQualifiers` requires `hold_opd: SourceFlag`; extra fields are forbidden and contract version is exactly 1. | Numeric text, null, omission and diagnostic replacement are incompatible with current v1. |
+| Receiver `app/source_shadow.py` and `tests/test_source_reconciliation.py` | Qualifier-only changes count as encounter edits through full-model equality. | Raw qualifier retention is tested behavior, not an optional ignored key. |
+| Receiver `app/source_store.py` | Synthetic storage has a required `hold_opd` column and reconstructs the strict qualifier model after restart. | Parser-only changes would not be sufficient; a future version needs a reviewed storage/reconstruction change too. |
+| Receiver application search at the pinned revision | Uses were confined to the normalized contract and synthetic store; no status derivation, categorization or board rule consuming this field was found. | There is no demonstrated consumer need to export the unknown number. Receiver ownership must still confirm that omission is acceptable. |
+
+The numeric value's role is **still unknown**. Existing metadata and code did not
+identify it as a clinician, lock owner, boolean, counter or other defined code.
+No numeric value or length was retrieved to try to establish such a meaning.
+
+### Recommended Contract Boundary
+
+Prefer an explicitly versioned, minimized projection over relaxing raw-value
+validation. Subject to receiver and source-policy approval, propose:
+
+1. Preserve `kaosorders.normalized-source` contract version 1, its strict validators,
+   fixtures, hashes and stored test behavior unchanged. The currently blocked
+   production reader must not bypass v1 by omitting a required field.
+2. Specify a new normalized-source contract version (proposed version 2, subject
+   to receiver agreement) in which encounter `qualifiers` contains only required
+   exact-Y/N `hold_yn`. `hold_opd` is forbidden for **every** encounter, including
+   those whose source value happens to be N or Y. No optional/null substitute,
+   raw string, numeric ID, hash, shape marker or guessed boolean is sent.
+3. Preserve `source_state_code`, independently verified normalized `state`, all
+   encounters (including in-progress and no-order visits), all child rows and the
+   four-part order key. Order `dc_yn`/`act_yn` remain strict raw Y/N. No category,
+   fee, visibility, display, PACS or clinical-unit behavior is added.
+4. Revise the **approved source projection and matching offline source model**
+   explicitly. Do not feed numeric qualifiers into v1 and catch the error by
+   dropping the encounter or stripping a field. Under a future approved v2 query,
+   raw `hold_opd` would not be selected for transport/persistence. Unknown or extra
+   projected input fields still fail closed; no arbitrary metadata dictionary.
+5. Confirm that excluding this field does not hide evidence needed to normalize
+   a reception state. If it is essential to a compound-state rule, this proposal
+   is insufficient: retain the reader block until a verified, privacy-safe typed
+   semantic can be agreed. The single `10 -> 20 -> 25` test alone does not authorize
+   all production mappings or claim complete-day consistency.
+
+This is an intentional revision of the earlier requirement to retain all four raw
+qualifiers, **not** permission to silently discard a required fact in the current
+contract. The new version number refers to the normalized-source contract, not the
+older superseded board-oriented v2 prototype or an HTTP URL. No endpoint is chosen.
+`/api/v1/order-snapshots` remains prohibited for any normalized-source payload.
+
+Rejected shortcuts: widening to arbitrary strings; numeric/nonzero-to-Y conversion;
+putting `UNREVIEWED`/`ASCII_DIGITS` in a raw-fact field; per-row omission; filtering
+out in-progress visits; inferring a lock/doctor identity; or shipping a partial
+snapshot as complete. Keeping v1 blocked while obtaining an authoritative field
+definition is the safe alternative if the receiver requires raw retention.
+
+### Cutover and Acceptance
+
+- A shape/semantic change needs coordinated contract version, explicit projection
+  scope and mapping revision. A mapping-revision string alone cannot alter the
+  existing v1 schema. Agree any new projection ID and authorized lineage through
+  the existing enrollment/fencing design; no automatic epoch/revision allocation.
+- Do not rewrite pending v1 bytes, reuse their batch IDs/digests for v2, merge
+  baselines, adopt a receiver cursor or reset stores. Existing stale/resync pause
+  rules stand. Any migration/new-store test uses synthetic temporary stores only.
+- Compare changes only within the agreed projection. A `proc_gb`/normalized-state
+  change must still be detected; changes solely to the deliberately excluded
+  field are not promised delivery events. Document that changed comparison scope.
+- Keep v1 golden fixtures and rejection tests intact. Add separate v2 full/empty
+  fixtures, canonical hashes and sender/receiver parity only after joint approval.
+  Test all six states, no-order encounters, cancellation with active children,
+  edits/reused keys, qualifier-only edits for retained fields, and all completeness
+  failures. Reject `hold_opd` even when supplied as Y/N, null, number, string or mask.
+- Test version separation, unsupported-version rejection, sealed retries, stale/
+  resync pause preservation, mapping cutover and restart reconstruction. The
+  receiver's required storage column cannot be left silently defaulted to N.
+- Other source gates remain: authoritative day membership/consistency, full state
+  and cancellation coverage, remaining flag combinations, safe age derivation,
+  demographic source conventions and least-privilege verification. This design
+  decision alone does not approve a live day reader, transport or deployment.
+
+### Receiver Handoff
+
+Ask the KaosOrders session to review this proposal against its current checkout,
+first reporting branch/status/HEAD and preserving existing work. Compare with the
+pinned `a837d385ff367e4f72310226d8bc8439fc0c50fe` reference used here. Return decisions
+only on: whether raw `hold_opd` is required for any business rule; whether to accept
+its consistent exclusion in a new normalized-source version; the exact version/
+projection identity; synthetic store cutover; and the parity acceptance matrix.
+If retention is required, identify the concrete consumer purpose and evidence
+needed to define a safe domain rather than requesting arbitrary raw values.
+
+Do not implement the proposal, change validators, edit v1 fixtures, enable SQL,
+call an API or touch the board/PACS in that review. Sender implementation should
+start only after the receiver returns an explicit agreed specification. No
+receiver agreement or implementation is claimed by this sender document.
+
+### Verification
+
+Added 16 synthetic sender rejection cases covering numeric strings and the
+`ASCII_DIGITS` diagnostic marker across all four current qualifier fields.
+**545 focused tests passed in 3.05 s**; **1,012 related isolated tests passed in
+41.69 s**. Runtime source, normalizer, serializer, ledger and outbox code are unchanged.
+Mocked databases, isolated mutexes and blocked native/non-test network access were
+used. The broad full UI suite was not repeated for this docs/test-only change.
+
+A direct pure-parser check in the unchanged receiver checkout accepted both
+original v1 fixtures and rejected **30/30** re-sealed synthetic invalid cases with
+the fixed reason `invalid_payload`: six invalid values for each of four qualifiers,
+each missing qualifier, one extra diagnostic field, and unsupported version 2.
+Socket/SQLite access was explicitly blocked; only the pure contract module and
+synthetic fixture JSON were used, with bytecode writing disabled. Existing v1
+fixtures/digests were not changed; no proposed v2 payload was declared valid.
 
 ## Review Findings
 

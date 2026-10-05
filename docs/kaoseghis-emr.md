@@ -334,6 +334,26 @@ on hold. This does not identify the numeric field's role or establish an exact
 transition time. No further live reads or runtime changes were made. The
 documentation-only follow-up reran 529 focused mocked tests successfully.
 
+### Qualifier Contract Review: 2026-10-05
+
+Existing schema notes conflict with the observed numeric `hold_opd`; local code
+does not define that numeric domain. The pinned receiver at `a837d385ff367e4f72310226d8bc8439fc0c50fe`
+requires the field in validation, hashing, comparison and synthetic persistence,
+but no business-rule consumer was found. This is reference-code evidence, not a
+claim about the deployed server or proof that every source state can ignore it.
+
+The [joint-review proposal](kaoseghis-emr-contract-review.md#qualifier-decision-proposal-2026-10-05)
+recommends consistently excluding raw `hold_opd` in a separately versioned future
+normalized-source projection, leaving v1 untouched. The source model, mapping,
+comparison baseline, serializer and receiver store would need coordinated changes
+after agreement; dropping the field from current v1 is prohibited. If it is needed
+for verified state semantics, the reader stays blocked pending source definition.
+
+No source queries, receiver edits or runtime changes occurred in this review.
+Only docs and 16 synthetic rejection cases changed: 545 focused and 1,012 related
+isolated tests passed; the pinned pure receiver parser kept both v1 fixtures valid
+and rejected all 30 invalid synthetic cases. Receiver agreement is still pending.
+
 ## Observation-Only Probe
 
 `core/emr_signal_probe.py` starts with runtime services, not workspace construction.
