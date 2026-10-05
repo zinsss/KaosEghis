@@ -24,6 +24,12 @@ The destination-neutral source model and source comparison are now implemented
 **offline only** in `core/emr_source.py` and `core/emr_source_shadow.py`. They have
 no production mappings, source SQL, runtime subscribers or delivery path. The
 existing PACS pipeline and its shared connection boundary remain unchanged.
+The current [source-evidence gate review](kaoseghis-source-evidence-gates.md) pins
+receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`. Its v2 receiver-only
+synthetic persistence/recovery proofs are complete, but all eight source-authority
+gates remain unresolved. This review adds documentation and mocked evidence-to-v2
+boundary tests only; no new live read, query, mapping or runtime path. Vendor/admin
+definitions are the next prerequisite, not another unapproved production probe.
 An offline Orders serializer now matches the pinned receiver's disabled normalized
 contract with synthetic fixtures only; see [synthetic parity](#synthetic-contract-parity-2026-10-04).
 

@@ -1,0 +1,223 @@
+# Controlled Source Evidence Gate Review
+
+Reviewed: 2026-10-05
+
+Status: **source authority unresolved; production day reader remains UNAVAILABLE**.
+This milestone changes documentation and mocked tests only. No new live EMR
+operation was approved, requested or performed. No new query or probe was added.
+
+## Pinned Scope
+
+- Sender starting HEAD and GitHub `main`:
+  `45c233b8e97f0bb0ca511c5ac47a289a0424c791`, clean Windows `main`.
+- Receiver reference: `zinsss/KaosOrders` at
+  `890a4dd4ce992f2598c85557513cd2c70b098a2b`.
+- Receiver inspection used read-only `git show` over SSH against that exact commit
+  in `/srv/projects/KaosOrders`. No receiver working files, service, API or database
+  were changed or exercised.
+- Reviewed sender source/v2 models, shared FIFO/mutex/connection boundary, existing
+  controlled aggregate inspector, mocked-reader tests and historical evidence.
+- Reviewed receiver v2 plan, architecture, implementation plan, recovery policy,
+  v2 store schema/guards and receiver-only recovery tests. Receiver tests were
+  inspected, not executed in this sender milestone.
+
+The receiver reference records exact v2 fixture/hash parity, a strict separate
+parser, in-memory reconciliation, and a synthetic-only SQLite store without the
+excluded encounter qualifier column. Its tests cover receiver restart, lost-ack
+retry, receiver-ahead, cross-day epoch fencing and exits around commit. This is
+**not joint v2 recovery**: the sender has no v2 outbox or acknowledgement consumer.
+The v1 synthetic outbox cannot be reclassified as a v2 implementation.
+
+Receiver documentation contains historical wording that is now stale: the v2 plan's
+opening status says persistence is absent, and the implementation plan's unresolved
+list still includes fixture parity/separate persistence. Later sections and code
+record their synthetic completion. The receiver handoff should reconcile that
+wording without marking source or delivery authority complete.
+
+## Evidence Inventory
+
+These are earlier approved observations, not operations repeated in this review.
+Detailed provenance and limitations remain in
+[contract review](kaoseghis-emr-contract-review.md) and
+[source-side history](kaosorders.md).
+
+- 2026-10-02 was the operator-confirmed populated day: 173 candidate receptions,
+  1,081 linked orders, 17 no-order receptions. The reviewed key/count cross-checks
+  found no invalid/duplicate keys, cross-date children or unmatched same-date
+  orders in that sample. They did not establish an authoritative history boundary.
+- 2026-10-03 was explicitly confirmed closed by the operator. The reviewed candidate
+  scope counted zero receptions and orders. This is an observed empty scope, not
+  approval to emit a destructive FULL empty snapshot.
+- Those two one-statement reads reported verified read-only mode, cursor closure
+  and physical-connection closure before interpretation; elapsed connection work
+  was 0.5806 s and 0.0523 s respectively. The schema preflight was 0.2077 s.
+- A supervised disposable visit supported waiting/in-progress/hold observations
+  for reception codes 10/20/25. Earlier supervised lifecycle checks supported
+  distinct consultation-completed/unpaid (30), payment-completed (40), cancellation
+  (50), and restoration to waiting. These are sampled UI/state associations, not
+  a complete truth table for every retained qualifier combination.
+- Earlier order checks observed same-key edits, disappearance on removal, key
+  reuse on re-add, and cancellation of a parent with active children retained.
+  They did not cover every order category or every cancellation/restoration path.
+- The populated sample observed M/F sex values; it did not observe every possible
+  null/blank/other value. Operator policy approved exact M/F and SQL NULL, with
+  unknown/blank values rejected, and completed-years age at the encounter date.
+  That policy does not prove a safe age source/calculation.
+- Catalog checks showed SELECT access to candidate base tables. They did not prove
+  least privilege. A dictionary permission denial was not bypassed.
+
+No identifiers, raw values, exact excluded-field digits/lengths, clinical rows or
+new patient data are included here. Prior excluded-field shape observations are
+not copied into v2 data or used as a state rule.
+
+## Eight Gates
+
+All eight gates remain **unresolved**. A tested failure boundary is not source
+evidence, and no gate is closed merely because a fixture can represent the result.
+
+| Gate | Evidence already useful | Missing authority / next bounded step |
+| --- | --- | --- |
+| 1. Full-day membership/history | Candidate reception table/date predicate and no-order receptions observed. | Vendor/admin definition of current/history/archive membership, clinic scope, date changes and deleted/moved visits. Only then review one complete scope operation. |
+| 2. Children and save consistency | Four-part key and linked/same-date counts checked in a sample; one statement uses one database statement snapshot. | Authoritative child coverage across histories/dates and an EMR save transaction/completion boundary. One statement can still observe between two EMR commits. Independent autocommit reads are not one snapshot. |
+| 3. Verified-empty authority | Operator-confirmed closed date and zero candidate counts. | Gates 1/2 plus proof that an empty result covers every authoritative source, not a missing archive, denied source, wrong clinic/date or partial result. Closed-day confirmation alone is insufficient. |
+| 4. States/retained qualifiers | Supervised codes 10/20/25/30/40/50 and some exact flag combinations. | Versioned state truth table including hold_yn Y/N, transient states, unknown/null/blank combinations and consultation versus payment completion. No default mapping from a column name or sample. |
+| 5. State without excluded field | v2 excludes hold_opd; receiver has no raw-field business requirement. | Vendor confirmation that verified normalized state is determined from approved fields without hold_opd. If that dependency exists or is unknown, stop; a privacy-safe semantic would need separate review. Never retrieve its raw value to guess. |
+| 6. All-category lifecycle | Sampled edits, deletion, restoration, parent cancellation and key reuse. | Definitions and a separately approved category/path matrix for dc_yn/act_yn, physical disappearance, restorations and identity reuse. Neither act_yn nor disappearance proves clinical completion/cancellation. |
+| 7. Sex/age | Exact M/F/null and completed-years-at-clinic-date policy approved; sampled M/F only. | Vendor sex/null/blank definitions plus a reviewed privacy-safe derived-age source/function and synthetic birthday/leap-day tests. No DOB or resident-number retrieval is authorized. |
+| 8. Least privilege | SELECT capability and read-only session proof. | DBA attestation of effective privileges including inherited/PUBLIC roles, ownership, role switching, RLS/bypass and callable functions. Never test privileges by attempting a production write. |
+
+## Vendor/Admin Definition Request
+
+Request documentation, not a patient export. An acceptable response identifies the
+EMR/schema version, relevant source objects, definition revision and reviewer role
+(vendor or DBA). Do not include account secrets, personal records, database dumps,
+patient examples, actual excluded-field values or screenshots containing them.
+
+1. Define which source objects and clinic-day predicate form the authoritative
+   encounter set. Include no-order, cancelled, moved/backdated and archived visits,
+   timezone/day rollover, clinic partitioning and historical corrections.
+2. Define the complete child relation and the uniqueness/reuse domain of encounter,
+   order date, order number and sequence. Explain whether a save commits reception
+   and all children atomically. If not, document an approved stable-read marker or
+   completion protocol without providing actual marker values.
+3. Define when that complete set may authoritatively be empty, including history
+   access, permissions and recovery/maintenance states. A calendar closure is only
+   an operator expectation, not a source completeness guarantee.
+4. Provide the normalized reception-state truth table from permitted source facts,
+   including transient and retained-flag combinations. Explicitly answer whether
+   hold_opd is required; do not provide its numeric domain, values or lengths.
+5. Define cancellation/deletion/restoration/key reuse across order types, including
+   fees and unknown/new catalog entries. Distinguish parent state from child state
+   and source flags from administration, collection or examination completion.
+6. Define sex codes and null/blank semantics. Propose a minimal derived age in
+   completed years at encounter date, preferably an approved derived view/function,
+   with entirely fictional birthday/leap-day examples. No source DOB values are
+   requested, and no derivation or SQL is approved by this checklist.
+7. Have the DBA attest effective read-only privileges for the intended dedicated
+   reader role: table/view grants, inheritance/PUBLIC grants, ownership, superuser,
+   RLS/bypass, role switching, schema creation and SECURITY DEFINER/callable functions.
+   Record only approved metadata or fixed results, never credentials or role dumps.
+
+If definitions are unavailable, record that blocker. Do not replace them with
+guessed meanings, repeated broad queries, permission escalation, longer timeouts
+or inference from an empty-looking UI. Evidence operations can corroborate a
+definition; finite observations alone cannot prove all historical membership.
+
+## Live Operation Approval Boundary
+
+No next live operation is proposed yet: the existing sample probes cannot resolve
+the missing authority by repetition. No SQL, source columns or parameters have
+been approved for a new live run in this milestone. Historical approvals are not
+standing authorization. New vendor definitions must first make the operation
+specific enough to answer one named gate.
+
+For each future operation, before approval:
+
+1. Add and run mocked success/failure tests for that exact operation.
+2. Present the complete parameterized statement/procedure, every selected source
+   column and every join/filter dependency. Exclude raw hold_opd and prohibited PHI.
+3. List the exact output allowlist: bounded aggregate counts, approved code/flag
+   buckets, metadata, fixed reason codes and connection timing only. No identifiers,
+   raw rows, source payloads, SQL/provider errors or credentials in reports/logs.
+4. State result/source caps and cap-plus-one rejection. Use the existing FIFO and
+   machine-wide Windows mutex. Current evidence defaults are 3 s connect, 2 s
+   statement timeout and 257 result-row sentinel; changes require explicit review.
+5. Verify read-only mode and finite timeout before source access. Verify cursor and
+   physical connection closed before interpreting or emitting detached aggregates.
+   An uncertain physical close stops further reads; no connection pooling.
+6. Explain the one gate it addresses and what it cannot prove. Obtain explicit
+   operator approval for that operation only, including date/expectation if needed.
+
+If consistency cannot be justified with one reviewed statement or a separately
+reviewed read-only snapshot transaction, stop. Even a consistent database snapshot
+requires the vendor's EMR save-boundary evidence before it can certify a complete
+clinical save. Failed, partial, inconsistent, overflowed, unverified and timed-out
+results must never become authoritative empty snapshots.
+
+## Mocked Boundary Verification
+
+`tests/test_source_evidence_v2_boundary.py` adds 29 synthetic-only cases using the
+existing mocked evidence reader, isolated FIFO and test-only mutex:
+
+- successful candidate-empty/populated reports and ten failure/unverified paths
+  cannot enter the v2 normalizer or serializer, and never change the blocked reader;
+- verified physical cleanup plus any read status does not establish the missing
+  whole-day/key/state/consistency assertions for an empty v2 day;
+- sampled reception codes with either retained flag value do not install an
+  implicit production mapping; and
+- fixed rejections emit no diagnostic payload, logs or provider error text.
+
+The existing evidence tests continue to verify finite timeouts, session validation,
+post-closure interpretation, FIFO serialization, cap sentinels and uncertain-cleanup
+stops. All connections are mocked. The suite blocks external networking, real DB
+access, native desktop input and printing; it uses temporary test data and isolated
+mutexes, not the production global mutex.
+
+Verification on 2026-10-05:
+
+- Focused source/v2 serializer/evidence/FIFO tests: **895 passed in 5.95 s**,
+  including all 29 new boundary cases.
+- Broader source-shadow, outbox, shared-reader, PACS, flu/weekly-report,
+  patient-context, runtime-contention and vaccine-post-print selection:
+  **1,390 passed in 48.30 s**.
+- Full isolated `tests` suite: **3,019 passed, 27 failed in 148.45 s**.
+  Twenty-six are the previously documented vaccine font/ink/shortcut-width
+  failures reproduced at the untouched baseline. The additional intermittent
+  `test_pending_handoff_defers_resets_and_blocks_mutation` failure also occurred
+  in the earlier v2 milestone; its entire post-print group passed in this broader
+  rerun. The full suite is not green, and that intermittent failure is not fixed
+  or explained by this evidence review.
+- Application code, existing tests and all v1/v2 fixture bytes remain unchanged
+  from the starting commit. No unrelated UI fix or assertion relaxation was made.
+
+These used the existing guarded isolated runner, offscreen Qt and disabled pytest
+plugin autoload. No live connection timings or fresh source findings were obtained.
+
+## Exact KaosOrders Handoff
+
+Continue with a **documentation-only source-gate acknowledgement**, not transport
+implementation. Pin the completed sender commit returned with this review and
+receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`.
+
+1. Read this gate matrix and reconcile the stale v2 status paragraphs in the receiver
+   v2 plan and implementation plan. Record synthetic receiver completion separately
+   from source authority. None of the eight source gates is closed by this review.
+2. Preserve the reader block and v2 exclusion of hold_opd. Do not reinterpret v1
+   stores/fixtures or introduce placeholder values. Do not repeat serializer work.
+3. Keep transport design gated on reviewed source evidence. Once that gate is
+   explicitly accepted, a separate design-only milestone must decide authenticated
+   scope/version/mapping/epoch/generation enrollment before body application,
+   acknowledgement encoding/outcome/HTTP mapping, limits/timeouts, retry/backoff and
+   durable pause, storage protection/retention, receiver-ahead/lost-state recovery,
+   historical-day authority and mapping cutover. Internal synthetic receipts are
+   not an approved network schema.
+4. Record that v2 sender sealed outbox/pending-byte/acknowledgement/restart parity
+   does not exist yet. A separately authorized synthetic sender/joint-recovery
+   milestone is required; the receiver-only tests do not prove it.
+5. Add no endpoint, token, HTTP transport, retry worker, source reader/query,
+   production storage, runtime wiring, board/PACS change, deployment or restart.
+   Never send normalized-source payloads to `/api/v1/order-snapshots`.
+
+Immediate next action is obtaining the vendor/admin definitions above, then choosing
+one bounded, mocked and explicitly approved evidence operation. A reviewed complete
+production day reader still cannot be implemented from the current evidence.

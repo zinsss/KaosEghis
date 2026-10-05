@@ -2,8 +2,8 @@
 
 Reviewed: 2026-10-05
 
-Status: **v1 synthetic receiver parity complete; separate v2 sender fixtures ready
-for independent receiver review**.
+Status: **v1 synthetic parity and v2 receiver-only synthetic proofs complete;
+production source authority remains unresolved**.
 This is not an approved HTTP endpoint, production query or deployment change.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
@@ -14,6 +14,14 @@ The [2026-10-05 qualifier decision proposal](#qualifier-decision-proposal-2026-1
 was accepted in receiver `6837845`; the separate
 [synthetic v2 sender milestone](#synthetic-v2-sender-2026-10-05) implements that
 offline projection only. This is not an in-place v1 amendment or live source approval.
+
+The current [controlled source-gate review](kaoseghis-source-evidence-gates.md)
+pins receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`. Its v2 parser,
+reconciliation, separate synthetic persistence and receiver recovery tests are now
+present. No joint v2 sender recovery or transport exists. All eight source gates
+remain unresolved; this review adds only documentation and mocked boundary tests,
+with no new live operation. Later historical sections retain their original scope;
+the linked gate matrix and handoff supersede their earlier next-step wording.
 
 ## Evidence Scope
 
