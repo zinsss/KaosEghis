@@ -19,14 +19,17 @@ The current [controlled source-gate review](kaoseghis-source-evidence-gates.md)
 pins receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`. Its v2 parser,
 reconciliation, separate synthetic persistence and receiver recovery tests are now
 present. No joint v2 sender recovery or transport exists. All eight source gates
-remain unresolved; this review adds only documentation and mocked boundary tests,
-with no new live operation. Later historical sections retain their original scope;
+remain unresolved; the initial review added documentation and mocked boundary tests.
+The subsequent approved catalog operation is recorded below. Historical sections
+retain their original scope;
 the linked gate matrix and handoff supersede their earlier next-step wording.
 Vendor information is not expected. The separate
-[source-structure-v1 proposal](kaoseghis-source-structure-probe.md) now presents one
-bounded, mocked catalog-only investigation for gate 1. It is pending operator
-approval, has no runtime importer, and has not connected to EMR. Its preparation
-does not resolve any source gate or approve production snapshot delivery.
+[source-structure-v1 evidence](kaoseghis-source-structure-probe.md#approved-observation)
+records one approved catalog-only investigation for gate 1 at 23:09 KST on
+2026-10-05. It found 4 reception-dependent view links and 3 order-dependent view
+links, no selected inheritance/FK links, and verified physical closure in 0.101 s.
+The view sets may overlap. No clinical rows/definitions were read, no runtime
+importer was added, and no source gate or production snapshot delivery was approved.
 
 ## Evidence Scope
 

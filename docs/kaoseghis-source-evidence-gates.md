@@ -11,10 +11,12 @@ Operator update: vendor information is not expected to be available. The
 below replaces vendor documentation as a prerequisite to further investigation.
 It does not waive source gates or authorize a live read.
 
-The next [metadata-only proposal](kaoseghis-source-structure-probe.md) now has an
-exact catalog statement and mocked review harness under `tests/` only. It targets
-one gate-1 structural question and is awaiting separate operator approval. It has
-not been run against EMR and does not add an application reader or query.
+The [metadata-only operation](kaoseghis-source-structure-probe.md#approved-observation)
+was subsequently approved and executed once at 23:09 KST on 2026-10-05. It found
+4 dependent views for receptions and 3 for orders, with verified physical closure
+in 0.101 s. The structural subquestion is observed, but no complete source gate is
+resolved. The exact statement/harness remains under `tests/` only; no application
+reader or query was added.
 
 ## Pinned Scope
 
@@ -87,7 +89,7 @@ evidence, and no gate is closed merely because a fixture can represent the resul
 
 | Gate | Evidence already useful | Missing authority / candidate next investigation |
 | --- | --- | --- |
-| 1. Full-day membership/history | Candidate reception table/date predicate and no-order receptions observed. | Investigate catalog relationships and operator-controlled date moves/history/restoration against the EMR lists. Document the tested clinic/day/history boundary; names and finite samples do not establish universal coverage. |
+| 1. Full-day membership/history | Candidate reception table/date predicate and no-order receptions observed. Approved metadata probe found 4 reception-view links and 3 order-view links, with no selected inheritance/FK links. | Review dependent-view structure and operator-controlled date moves/history/restoration against the EMR lists. The view sets may overlap; neither their purpose nor universal coverage is established. |
 | 2. Children and save consistency | Four-part key and linked/same-date counts checked in a sample; one statement uses one database statement snapshot. | Authoritative child coverage across histories/dates and an EMR save transaction/completion boundary. One statement can still observe between two EMR commits. Independent autocommit reads are not one snapshot. |
 | 3. Verified-empty authority | Operator-confirmed closed date and zero candidate counts. | Gates 1/2 plus proof that an empty result covers every authoritative source, not a missing archive, denied source, wrong clinic/date or partial result. Closed-day confirmation alone is insufficient. |
 | 4. States/retained qualifiers | Supervised codes 10/20/25/30/40/50 and some exact flag combinations. | Versioned state truth table including hold_yn Y/N, transient states, unknown/null/blank combinations and consultation versus payment completion. No default mapping from a column name or sample. |
@@ -174,9 +176,9 @@ privacy, serialization and physical-closure rules.
    separate sender/receiver design decision; it must not masquerade as FULL/complete
    or infer deletion from missing rows. No such alternative is implemented here.
 
-The single gate-1 metadata probe has now been prepared under `tests/`, with its
-[approval request](kaoseghis-source-structure-probe.md). No source gate is resolved
-by its preparation, and no production behavior is added. The following test result
+The single gate-1 metadata probe was prepared under `tests/`, reviewed, approved
+and run once; see its [sanitized result](kaoseghis-source-structure-probe.md#approved-observation).
+No source gate is resolved and no production behavior is added. The following test result
 belongs to the earlier documentation-only planning correction, not the new probe:
 The documentation-only follow-up reran all 29 evidence-to-v2 boundary tests:
 29 passed in 0.83 s. The full suite was not repeated for this planning correction;
@@ -184,11 +186,11 @@ its prior results and unrelated failures remain recorded below.
 
 ## Live Operation Approval Boundary
 
-The [source-structure-v1 proposal](kaoseghis-source-structure-probe.md) presents one
-exact bounded operation for review. No SQL, source columns or parameters have yet
-been approved for a new live run. Historical approvals are not standing
-authorization. Each operation must address one named evidence question; vendor
-documentation is helpful but is not required to propose that investigation.
+The exact [source-structure-v1 operation](kaoseghis-source-structure-probe.md) was
+approved and executed once. The operator's clarification required read-only work;
+this run did not extend beyond the reviewed operation. Each further investigation
+still needs its exact bounded procedure, mocked failure tests and privacy review
+before execution. Vendor documentation is helpful but not required to propose it.
 
 For each future operation, before approval:
 
@@ -277,8 +279,8 @@ receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`.
    production storage, runtime wiring, board/PACS change, deployment or restart.
    Never send normalized-source payloads to `/api/v1/order-snapshots`.
 
-Vendor information is not expected. Immediate next action is operator review of
-the prepared [source-structure-v1 request](kaoseghis-source-structure-probe.md),
-followed by explicit approval before any execution. Keep any conclusions limited
-to actual evidence. A reviewed complete production day reader still cannot be
+Vendor information is not expected. Record the approved metadata findings without
+promoting them to source authority. Next prepare a bounded review of the dependent
+views' allowlisted structural metadata; no view-row/definition access follows
+automatically. A reviewed complete production day reader still cannot be
 implemented from the current evidence.

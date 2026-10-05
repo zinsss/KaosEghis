@@ -1,12 +1,17 @@
-# Source Structure Probe: Approval Request
+# Source Structure Probe: Approved Evidence
 
 Prepared: 2026-10-05
 
-Status: **mocked proposal only; live execution not approved or performed**.
-Operation ID: `source-structure-v1`. One execution only, no retries or polling.
+Status: **approved one-shot catalog read completed; source authority unresolved**.
+Operation ID: `source-structure-v1`. Executed once, with no retries or polling.
 Prepared against sender `9d15c83ab0f8bc95440e922bc60a6b3bb1bb66cf` on clean
 `main`; GitHub `main` matched. Receiver reference remains
 `890a4dd4ce992f2598c85557513cd2c70b098a2b`, with no receiver changes.
+
+The exact procedure and limits below were presented before execution. The operator
+then clarified approval as "as long as read only". This run used that approval for
+the single presented operation, not additional source discovery. The result is
+recorded under [Approved Observation](#approved-observation).
 
 ## Single Evidence Question
 
@@ -27,8 +32,8 @@ search or recursive dependency walk is included.
 
 The complete parameterized statement is
 [`tests/fixtures/source_structure_v1.sql`](../tests/fixtures/source_structure_v1.sql).
-That file, not a shortened example or generated variant, is the approved-query
-candidate. UTF-8/LF SHA-256:
+That file, not a shortened example or generated variant, is the reviewed statement
+for this operation. UTF-8/LF SHA-256:
 
 `b4541a09068dc41c76f3d32a871d8f2fae4efdeae219c4135c8ad267a5adf1c2`
 
@@ -47,7 +52,7 @@ driver, credentials, settings, CLI, default connection or runtime importer. A
 separately approved one-shot caller must pass the existing
 `core.eghis_db.run_verified_evidence_query` bound to the configured connection.
 The harness never opens a connection itself; callback injection is not permission
-to bypass that shared reader. No live caller is added in this milestone.
+to bypass that shared reader. No persistent live caller or runtime wiring is added.
 An explicit `approved=True` is a caller assertion after operator approval, not
 permission in itself. The harness verifies the pinned query digest before calling
 the reader. A changed query requires a new review.
@@ -163,12 +168,70 @@ Verification on 2026-10-05:
 - `git diff --check` passed. Application modules and v1/v2 fixture contents are
   unchanged. The new SQL fixture's line endings are pinned to LF for its digest.
 
-No query was executed against EMR. No application code, endpoint, transport,
-publisher, board or PACS change is part of this proposal. All source gates remain
-unresolved.
+Those results describe preparation before live approval. No application code,
+endpoint, transport, publisher, board or PACS change is part of this operation.
+All source gates remain unresolved.
 
-Approval requested: **one closed-hours execution of source-structure-v1 exactly
+Approval scope presented: **one closed-hours execution of source-structure-v1 exactly
 as specified above**, followed only by its sanitized metadata counts and cleanup
 results.
 Approval does not cover a second attempt, any clinical-row read, further metadata
 discovery, a new query, privilege changes or production enablement.
+
+## Approved Observation
+
+Recorded on **2026-10-05 at 23:09 KST**, starting from clean sender HEAD/GitHub
+`main` at `bda2933aae172af4bcd9df3c4137daf49cdfa9bd`.
+
+- The exact query digest above was rechecked and unchanged.
+- All **71 proposal tests passed in 0.95 s** with mocked connections before the
+  live call. No code, query, parameter or cap was changed between review and run.
+- The one-shot caller read only the configured connection setting from local
+  SQLite using `mode=ro`, closed that local connection, and did not print or persist
+  the setting. It then called the approved proposal through
+  `run_verified_evidence_query`, using the real shared FIFO and machine-wide mutex.
+- Exactly one fixed catalog operation was attempted, with the previously reviewed
+  session-local read-only/timeout setup and verification. No clinical table, UI,
+  patient record, view contents or view definition was read.
+- Result: `structure_observed`; `authoritative_snapshot=false`.
+- Read-only mode, cursor closure and physical source-connection closure were all
+  verified. Source connection work took **0.101 seconds**. Interpretation and
+  sanitized output occurred only after those closure checks succeeded.
+
+| Sanitized metadata | Receptions | Orders |
+| --- | ---: | ---: |
+| Ordinary relation (`r`) | yes | yes |
+| Direct parent inheritance links | 0 | 0 |
+| Direct child inheritance links | 0 | 0 |
+| Outgoing foreign-key constraints | 0 | 0 |
+| Incoming foreign-key constraints | 0 | 0 |
+| Dependent views | 4 | 3 |
+| Dependent materialized views | 0 | 0 |
+
+The total is **7 scoped target-to-view links**, not necessarily 7 distinct views:
+the two sets may overlap. No OIDs, view names, definitions, patient/order identifiers,
+raw catalog rows or excluded qualifier values were output or persisted.
+
+### Interpretation and Limits
+
+The structural subquestion is now observed: these targets have dependent views
+that merit coverage review, while the selected direct inheritance/foreign-key
+counts were zero. Zero declared constraints do not negate application-managed
+relationships, and zero inheritance links do not rule out independent archives.
+
+No evidence here establishes the views' purpose, filters, membership, history
+coverage, privileges, save atomicity, demographics or normalized state semantics.
+No complete source gate is resolved. `EghisSourceDayReader` remains UNAVAILABLE,
+all publishing remains disabled, and no PACS, receiver or application was changed
+or restarted. The query was not retried or widened after this result.
+
+The next candidate investigation is a separately scoped, mocked review of the
+dependent views' allowlisted structural metadata. Do not read view definitions,
+clinical rows or arbitrary object names as an automatic follow-up. A zero-count
+result must never be reinterpreted as an authoritative empty clinic day.
+
+This evidence update changes documentation only. A follow-up isolated run passed
+all **100 proposal and evidence-to-v2 boundary tests in 1.08 s**. The full isolated
+suite was not repeated for the documentation update; the preparation results above,
+including the 26 existing vaccine-layout failures, remain the latest full-suite
+result. Application modules, query bytes, tests and fixtures remain unchanged.

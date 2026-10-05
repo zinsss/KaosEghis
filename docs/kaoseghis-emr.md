@@ -27,8 +27,10 @@ existing PACS pipeline and its shared connection boundary remain unchanged.
 The current [source-evidence gate review](kaoseghis-source-evidence-gates.md) pins
 receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`. Its v2 receiver-only
 synthetic persistence/recovery proofs are complete, but all eight source-authority
-gates remain unresolved. This review adds documentation and mocked evidence-to-v2
-boundary tests only; no new live read, query, mapping or runtime path. Vendor
+gates remain unresolved. Its later approved catalog-only probe found 4 reception
+view links and 3 order view links, with physical closure verified in 0.101 s;
+see [sanitized evidence](kaoseghis-source-structure-probe.md#approved-observation).
+No clinical rows were read, and no source mapping or runtime path was added. Vendor
 information is not expected, so controlled metadata/dummy-workflow investigation
 will continue with individual approval. No observation substitutes for unproved
 whole-day or save-consistency guarantees; see the linked alternative evidence path.
