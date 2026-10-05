@@ -286,6 +286,55 @@ def test_digest_errors_are_redacted(bad):
         calculate_content_sha256_v2(bad)
 
 
+@pytest.mark.parametrize("location", ["root", "scope", "encounter", "encounter_flags",
+                                      "order", "order_key", "order_flags", "nested_list", "nested_tuple"])
+@pytest.mark.parametrize("bad", ["Y", "N", None, 1, True, "12345678", "PRIVATE_TEST_MARKER",
+                                 "a" * 64, "ASCII_DIGITS", "UNREVIEWED"])
+def test_digest_helper_rejects_excluded_field_before_encoding(
+    snapshot, metadata, monkeypatch, capsys, caplog, location, bad,
+):
+    from KaosEghis.core import kaosorders_normalized_source_v2 as module
+
+    payload = serialize(snapshot, metadata)
+    targets = {
+        "root": payload, "scope": payload["scope"], "encounter": payload["encounters"][0],
+        "encounter_flags": payload["encounters"][0]["qualifiers"], "order": payload["orders"][0],
+        "order_key": payload["orders"][0]["key"], "order_flags": payload["orders"][0]["qualifiers"],
+    }
+    if location in ("nested_list", "nested_tuple"):
+        nested = {"hold_opd": bad}
+        payload["unexpected"] = [nested] if location == "nested_list" else (nested,)
+    else:
+        targets[location]["hold_opd"] = bad
+
+    def prohibited(*_args, **_kwargs):
+        pytest.fail("Excluded input reached JSON encoding or hashing")
+
+    monkeypatch.setattr(module.json, "dumps", prohibited)
+    monkeypatch.setattr(module.hashlib, "sha256", prohibited)
+    with pytest.raises(SnapshotRejected) as error:
+        calculate_content_sha256_v2(payload)
+    assert str(error.value) == "invalid_payload"
+    assert repr(error.value) == "SnapshotRejected('invalid_payload')"
+    assert not caplog.records
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("shape", ["cyclic_dict", "cyclic_list", "non_text_key"])
+def test_digest_guard_failures_do_not_leak_input(shape):
+    payload = {}
+    if shape == "cyclic_dict":
+        payload["loop"] = payload
+    elif shape == "cyclic_list":
+        rows = []
+        rows.append(rows)
+        payload["loop"] = rows
+    else:
+        payload["nested"] = {1: "PRIVATE_TEST_MARKER"}
+    with pytest.raises(SnapshotRejected, match="^invalid_payload$"):
+        calculate_content_sha256_v2(payload)
+
+
 @pytest.mark.parametrize("flag", [False, None, 1, "true"])
 def test_explicit_synthetic_gate(read, policy, snapshot, metadata, flag):
     with pytest.raises(SnapshotRejected, match="^synthetic_fixture_required$"):
@@ -399,6 +448,17 @@ def test_direct_tampering_is_revalidated(snapshot, metadata):
 def test_v1_committed_fixture_bytes_stay_unchanged(kind, blob):
     # V1's existing Git text conversion is not changed by the v2 LF-only rule.
     body = (FIXTURES / f"normalized_source_v1_{kind}.json").read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha1(f"blob {len(body)}\0".encode() + body).hexdigest() == blob
+
+
+@pytest.mark.parametrize("name,blob", [
+    ("emr_source.py", "bc94159d6d5b48b4caaae3d794c55f3a6e8a1c35"),
+    ("kaosorders_normalized_source.py", "fc75780553faac8e5e3ccef81edb626f9a03c26d"),
+    ("kaosorders_outbox_shadow.py", "9e1212a6cef434a4df75aece0f4367dbaaba35aa"),
+])
+def test_v1_model_serializer_outbox_match_starting_commit_bytes(name, blob):
+    path = Path(__file__).parents[1] / "KaosEghis" / "core" / name
+    body = path.read_bytes().replace(b"\r\n", b"\n")
     assert hashlib.sha1(f"blob {len(body)}\0".encode() + body).hexdigest() == blob
 
 

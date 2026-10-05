@@ -680,10 +680,51 @@ existing synthetic v1 proof; v2 delivery/storage proof is a later stage.
 
 **Next KaosOrders handoff:** inspect the exact resulting sender commit and copy the
 two v2 fixtures with provenance. Implement only a separate pure v2 receiver parser
-and independent canonical digest/negative parity tests against the agreed identity.
-Reject excluded `hold_opd` and invalid/missing retained flags, preserve v1 behavior,
-and report exact fixture equality. Do this before v2 persistence, transport or board
-work; do not weaken validators, migrate v1 stores, use live data or enable intake.
+and in-memory reconciliation tests, with independent canonical digest/negative
+parity tests against the agreed identity. Reject excluded `hold_opd` and
+invalid/missing retained flags, preserve v1 behavior, and report exact fixture
+equality. Reconciliation must retain every source fact, replace same-key and
+retained-qualifier edits, distinguish disappearance from explicit cancellation,
+preserve other days/scopes, and leave accepted state unchanged after rejected input.
+Use synthetic fixtures and blocked network access only. Do this before v2
+persistence, transport or board work; do not weaken validators, migrate v1 stores,
+use live data or enable intake.
+
+### Exact Checklist Recheck: 2026-10-05
+
+The repeated implementation request named the older `51d7601` reference, but the
+working tree was already clean and pushed at
+`609961e3f28c5528d1ae93389ddf3247d6a9c48a`. Existing work was preserved, not repeated
+or reset. All four requested receiver documents were read at exact commit
+`6837845fc4c691075bab41c6e07ef69e8562580b`: the v2 plan and handoff, v1 contract,
+architecture and implementation plan. No receiver files or services were changed.
+
+One narrow direct-helper gap was corrected: the standalone v2 digest function now
+rejects an excluded field at any nested dictionary/list/tuple location before JSON
+encoding or SHA-256. It neither strips the field nor hashes a replacement. Ninety
+synthetic location/value cases prove rejection before either encoder or hasher is
+called, with fixed `invalid_payload` errors and no diagnostic output/logs. Cycle and
+non-text-key failures are also fixed and redacted. This privacy guard is not a wire
+parser or full schema validator; the serializer still validates the complete source
+snapshot first. Valid fixture bytes and both content hashes remain unchanged.
+
+Three new Git-blob assertions pin the v1 model, serializer and synthetic outbox to
+their exact `51d7601` reference bytes, complementing the existing v1 fixture blob
+and digest tests. No v1 validator, serializer, fixture, hash or outbox was changed.
+The receiver handoff now explicitly includes **in-memory reconciliation only**, with
+no v2 persistence or runtime integration. All previously listed source-evidence and
+delivery gates remain unresolved, including any reception-state dependency on the
+excluded qualifier. The live reader remains UNAVAILABLE.
+
+Recheck verification: **866 focused tests passed in 3.79 s**, including all 321 v2
+cases. The full isolated rerun finished with **2,991 passed and 26 failed in
+140.91 s**. The failures are exactly the previously reproduced vaccine font/ink
+and shortcut-width cases; the intermittent post-print failure did not recur.
+This is not a green full suite, and no vaccine assertions or code were changed.
+Mocked databases, test mutexes, temporary app data, blocked external network/native
+input/printer access and offscreen Qt were retained. A Git comparison against
+`51d7601` also confirmed no changes to the v1 model, ledger, serializer, outbox or
+either v1 fixture. No live EMR operations, publishing or service restarts occurred.
 
 ## Review Findings
 

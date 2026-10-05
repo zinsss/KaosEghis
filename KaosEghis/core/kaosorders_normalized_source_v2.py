@@ -35,13 +35,26 @@ def _sequence(value):
     return value
 
 
+def _check_digest_input(value):
+    # Also protect direct helper callers before JSON bytes or a digest are made.
+    if isinstance(value, dict):
+        if any(type(key) is not str or key == "hold_opd" for key in value):
+            raise SnapshotRejected("invalid_payload")
+        for child in value.values():
+            _check_digest_input(child)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            _check_digest_input(child)
+
+
 def calculate_content_sha256_v2(payload: dict) -> str:
-    """Canonical content hash, not schema validation or delivery authorization."""
+    """Privacy-checked content hash, not full schema validation or authorization."""
     if type(payload) is not dict:
         raise SnapshotRejected("invalid_payload")
     content = dict(payload)
     content.pop("content_sha256", None)
     try:
+        _check_digest_input(content)
         encoded = json.dumps(content, ensure_ascii=False, sort_keys=True,
                              separators=(",", ":"), allow_nan=False).encode("utf-8")
     except (TypeError, ValueError, OverflowError, UnicodeError, RecursionError):
