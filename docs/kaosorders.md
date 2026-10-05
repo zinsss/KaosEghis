@@ -11,10 +11,14 @@ source authority. A subsequent approved catalog-only operation found 4 reception
 view links and 3 order view links, with physical closure verified in 0.101 s;
 see [sanitized evidence](kaoseghis-source-structure-probe.md#approved-observation).
 No clinical rows, definitions or identifiers were returned.
-All eight source gates remain blocked, including normalization without hold_opd;
-vendor information is not expected, so the next step is a bounded review of the
-dependent views' allowlisted structural metadata followed by targeted controlled
-observations, without claiming universal coverage from samples. Transport remains
+The [follow-up metadata review](kaoseghis-source-metadata-followup.md#results)
+confirmed four unique views (three shared) and an effective public-schema CREATE
+privilege, with verified closure in 0.0717 s and 0.0750 s. No clinical rows or
+definitions were read and no privilege was exercised or changed. All eight source
+gates remain blocked, including normalization without hold_opd and now a concrete
+least-privilege finding. Vendor information is not expected; see the
+[operator/admin next decisions](kaoseghis-source-evidence-gates.md#next-practical-decision).
+More equal snapshots or successful reads cannot establish save authority. Transport remains
 gated. The sender still has no v2 outbox or acknowledgement consumer, and its v1
 synthetic outbox is not v2 proof.
 That review's handoff supersedes historical next-step lists below.

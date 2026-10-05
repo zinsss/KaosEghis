@@ -18,6 +18,18 @@ in 0.101 s. The structural subquestion is observed, but no complete source gate 
 resolved. The exact statement/harness remains under `tests/` only; no application
 reader or query was added.
 
+The subsequent [metadata follow-up](kaoseghis-source-metadata-followup.md#results)
+ran two bounded operations under the operator's standing read-only authorization.
+There are four unique dependent views (three shared by both sources), 23 other
+ordinary-relation dependency links and five recorded routine dependency links.
+The reader lacks selected write capabilities on the two source tables but has
+CREATE capability in `public`, a concrete gate-8 least-privilege blocker. Both
+physical connections closed, in 0.0717 s and 0.0750 s. No clinical rows or source
+definitions were retrieved. All eight complete gates remain unresolved.
+The final follow-up verification passed 1,124 focused and 1,619 broader tests;
+the full isolated suite had 3,249 passes and the 26 previously documented vaccine
+label/layout failures. See the [full verification record](kaoseghis-source-metadata-followup.md#verification).
+
 ## Pinned Scope
 
 - Sender starting HEAD and GitHub `main`:
@@ -89,14 +101,14 @@ evidence, and no gate is closed merely because a fixture can represent the resul
 
 | Gate | Evidence already useful | Missing authority / candidate next investigation |
 | --- | --- | --- |
-| 1. Full-day membership/history | Candidate reception table/date predicate and no-order receptions observed. Approved metadata probe found 4 reception-view links and 3 order-view links, with no selected inheritance/FK links. | Review dependent-view structure and operator-controlled date moves/history/restoration against the EMR lists. The view sets may overlap; neither their purpose nor universal coverage is established. |
+| 1. Full-day membership/history | Candidate reception table/date predicate and no-order receptions observed. Catalog probes found 4 unique dependent views, 3 shared; 23 additional ordinary-relation links and 5 recorded routine links. No selected inheritance/FK links. | View purpose, filters and scope remain unknown. Operator-controlled date moves/history/restoration and reviewed source-scope acceptance remain necessary; do not infer universal coverage from metadata. |
 | 2. Children and save consistency | Four-part key and linked/same-date counts checked in a sample; one statement uses one database statement snapshot. | Authoritative child coverage across histories/dates and an EMR save transaction/completion boundary. One statement can still observe between two EMR commits. Independent autocommit reads are not one snapshot. |
 | 3. Verified-empty authority | Operator-confirmed closed date and zero candidate counts. | Gates 1/2 plus proof that an empty result covers every authoritative source, not a missing archive, denied source, wrong clinic/date or partial result. Closed-day confirmation alone is insufficient. |
 | 4. States/retained qualifiers | Supervised codes 10/20/25/30/40/50 and some exact flag combinations. | Versioned state truth table including hold_yn Y/N, transient states, unknown/null/blank combinations and consultation versus payment completion. No default mapping from a column name or sample. |
 | 5. State without excluded field | v2 excludes hold_opd; receiver has no raw-field business requirement. | Compare operator-confirmed states with only approved retained facts; seek ambiguous combinations rather than assume independence. If state remains ambiguous, keep it blocked; a privacy-safe semantic would need separate review. Never retrieve the excluded raw value to guess. |
 | 6. All-category lifecycle | Sampled edits, deletion, restoration, parent cancellation and key reuse. | Definitions and a separately approved category/path matrix for dc_yn/act_yn, physical disappearance, restorations and identity reuse. Neither act_yn nor disappearance proves clinical completion/cancellation. |
-| 7. Sex/age | Exact M/F/null and completed-years-at-clinic-date policy approved; sampled M/F only. | Vendor sex/null/blank definitions plus a reviewed privacy-safe derived-age source/function and synthetic birthday/leap-day tests. No DOB or resident-number retrieval is authorized. |
-| 8. Least privilege | SELECT capability and read-only session proof. | DBA attestation of effective privileges including inherited/PUBLIC roles, ownership, role switching, RLS/bypass and callable functions. Never test privileges by attempting a production write. |
+| 7. Sex/age | Exact M/F/null and completed-years-at-clinic-date policy approved; sampled M/F only. | Controlled source-domain evidence, unknown/null/blank rejection and a reviewed privacy-safe derived-age source/function with synthetic birthday/leap-day tests. Vendor definitions are optional, not expected. No DOB or resident-number retrieval is authorized. |
+| 8. Least privilege | Verified read-only sessions; selected table/column non-SELECT capabilities absent on the two sources; no observed superuser/admin/owner-role capabilities. | Effective CREATE capability in public was observed and remains a blocker. Admin review of a restricted reader identity/grants is needed; other schemas/functions and effective paths are not fully audited. Never test with a production write or change shared grants automatically. |
 
 ## Vendor/Admin Definition Request
 
@@ -192,6 +204,15 @@ this run did not extend beyond the reviewed operation. Each further investigatio
 still needs its exact bounded procedure, mocked failure tests and privacy review
 before execution. Vendor documentation is helpful but not required to propose it.
 
+Later the operator explicitly authorized continuing necessary read-only evidence
+work until ready. The two [metadata follow-up operations](kaoseghis-source-metadata-followup.md)
+were reviewed/tested and run under that authorization, without repeated prompts.
+This replaces the per-operation prompt requirement for those bounded read-only
+checks; it does not authorize arbitrary SQL, PHI retrieval, writes or production
+enablement. The historical checklist below still defines each operation's review
+requirements. Further sensitive-data scope or operator/admin writes require a new
+specific decision, not an interpretation of this standing read-only authorization.
+
 For each future operation, before approval:
 
 1. Add and run mocked success/failure tests for that exact operation.
@@ -280,7 +301,35 @@ receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`.
    Never send normalized-source payloads to `/api/v1/order-snapshots`.
 
 Vendor information is not expected. Record the approved metadata findings without
-promoting them to source authority. Next prepare a bounded review of the dependent
-views' allowlisted structural metadata; no view-row/definition access follows
-automatically. A reviewed complete production day reader still cannot be
-implemented from the current evidence.
+promoting them to source authority. The bounded dependent-view/privilege follow-up
+is now complete. Its four distinct views and effective schema CREATE capability
+are observed facts, not source approval. No view rows/definitions or clinical rows
+were read. A reviewed complete production day reader still cannot be implemented
+from the current evidence.
+
+## Next Practical Decision
+
+Read-only structural automation has reached a boundary that more of the same
+queries cannot remove. This is **not ready for production ingestion**. Do not
+restart the serializer/parity work or repeatedly ask for unavailable vendor docs.
+
+| Work needed | Who/what changes | Acceptance condition |
+| --- | --- | --- |
+| Restrict source identity | DBA/admin reviews effective schema CREATE grant and dedicated reader role; no automatic changes | Reviewed least-privilege effective access, beyond the two sampled tables; no production write tests |
+| Unseen source transitions | Operator changes only a disposable visit during a closed-hours test; agent reads approved aggregate checkpoints | Gap-specific date move/backdate/restore, retained-flag and category/lifecycle evidence; no excluded qualifier or PHI output |
+| Save and full-day authority | Reviewed application/database transaction boundary and explicit source-scope acceptance | Do not treat repeated equal observations or UI readiness as atomic-save proof; keep empty/destructive FULL blocked if unproved |
+| Safe age | Approve a privacy-safe derived source or separately review a minimal local derivation | Completed years at encounter date, null/invalid policy, boundary tests; no DOB/resident-number retrieval under the present mandate |
+
+For the dummy matrix, already observed 10/20/25/30/40/50 transitions and INJ
+edit/remove/reuse/parent-cancel/restore do not need repetition. Remaining examples
+include clinic-date moves across a month/day boundary, whether retained hold_yn
+changes can alter a code's state, LAB/imaging/other category cancellation and
+restoration, and no-order encounter date/restore paths. Operator confirmation is
+needed before creating each new condition. An observation may reveal a counterexample
+but cannot prove every historical/future path.
+
+If authoritative completeness is not obtainable, the decision is a separately
+versioned **non-authoritative observation** design, not permission to ship
+`FULL/complete=true` or infer deletion from absence. KaosOrders must explicitly
+accept that different contract before any implementation. Current v2 and its
+validators, fixtures/hashes, source block and transport restrictions stay intact.

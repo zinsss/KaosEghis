@@ -31,6 +31,15 @@ links, no selected inheritance/FK links, and verified physical closure in 0.101 
 The view sets may overlap. No clinical rows/definitions were read, no runtime
 importer was added, and no source gate or production snapshot delivery was approved.
 
+The [subsequent metadata follow-up](kaoseghis-source-metadata-followup.md#results)
+resolved the overlap: four distinct dependent views, three shared, with 23 other
+ordinary-relation links and five recorded routine links. It also found effective
+CREATE capability in `public`, despite no detected non-SELECT privileges on the
+two scoped source tables. This is a concrete least-privilege blocker; no privilege
+was exercised or changed. Both read-only connections closed before interpretation
+(0.0717 s and 0.0750 s). No complete source gate is resolved. See the
+[operator/admin next decisions](kaoseghis-source-evidence-gates.md#next-practical-decision).
+
 ## Evidence Scope
 
 - Reviewed the Windows working-copy source model, source ledger, current PACS

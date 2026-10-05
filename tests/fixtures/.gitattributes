@@ -1,2 +1,4 @@
 normalized_source_v2_*.json text eol=lf
 source_structure_v1.sql text eol=lf
+source_view_dependencies_v1.sql text eol=lf
+source_privileges_v1.sql text eol=lf

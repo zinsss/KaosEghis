@@ -32,8 +32,14 @@ view links and 3 order view links, with physical closure verified in 0.101 s;
 see [sanitized evidence](kaoseghis-source-structure-probe.md#approved-observation).
 No clinical rows were read, and no source mapping or runtime path was added. Vendor
 information is not expected, so controlled metadata/dummy-workflow investigation
-will continue with individual approval. No observation substitutes for unproved
+will continue under the operator's bounded read-only authorization. No observation substitutes for unproved
 whole-day or save-consistency guarantees; see the linked alternative evidence path.
+The [follow-up metadata evidence](kaoseghis-source-metadata-followup.md#results)
+now confirms four distinct views and effective CREATE capability in `public`.
+The latter blocks least-privilege approval despite no detected non-SELECT
+capability on the two source tables. No grant/source/PACS setting changed. The
+remaining [operator/admin decisions](kaoseghis-source-evidence-gates.md#next-practical-decision)
+cannot be completed by more unsupervised read-only queries alone.
 An offline Orders serializer now matches the pinned receiver's disabled normalized
 contract with synthetic fixtures only; see [synthetic parity](#synthetic-contract-parity-2026-10-04).
 
