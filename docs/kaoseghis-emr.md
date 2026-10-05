@@ -28,8 +28,10 @@ The current [source-evidence gate review](kaoseghis-source-evidence-gates.md) pi
 receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`. Its v2 receiver-only
 synthetic persistence/recovery proofs are complete, but all eight source-authority
 gates remain unresolved. This review adds documentation and mocked evidence-to-v2
-boundary tests only; no new live read, query, mapping or runtime path. Vendor/admin
-definitions are the next prerequisite, not another unapproved production probe.
+boundary tests only; no new live read, query, mapping or runtime path. Vendor
+information is not expected, so controlled metadata/dummy-workflow investigation
+will continue with individual approval. No observation substitutes for unproved
+whole-day or save-consistency guarantees; see the linked alternative evidence path.
 An offline Orders serializer now matches the pinned receiver's disabled normalized
 contract with synthetic fixtures only; see [synthetic parity](#synthetic-contract-parity-2026-10-04).
 

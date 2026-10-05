@@ -9,9 +9,11 @@ pins receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b` and records completed
 v2 receiver-only synthetic parity/persistence/recovery separately from unresolved
 source authority. No new EMR operation was approved or performed in this review.
 All eight source gates remain blocked, including normalization without hold_opd;
-the next step is vendor/admin definitions followed by one separately approved,
-mocked evidence operation. Transport remains gated. The sender still has no v2
-outbox or acknowledgement consumer, and its v1 synthetic outbox is not v2 proof.
+vendor information is not expected, so the next step is one separately approved,
+mocked structural-metadata investigation followed by targeted controlled
+observations, without claiming universal coverage from samples. Transport remains
+gated. The sender still has no v2 outbox or acknowledgement consumer, and its v1
+synthetic outbox is not v2 proof.
 That review's handoff supersedes historical next-step lists below.
 
 This supersedes the older laptop/LMDE, completed-patient board, PACS-only hold tiles,

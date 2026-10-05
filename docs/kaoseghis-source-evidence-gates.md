@@ -3,8 +3,13 @@
 Reviewed: 2026-10-05
 
 Status: **source authority unresolved; production day reader remains UNAVAILABLE**.
-This milestone changes documentation and mocked tests only. No new live EMR
+The initial milestone changed documentation and mocked tests only. No new live EMR
 operation was approved, requested or performed. No new query or probe was added.
+
+Operator update: vendor information is not expected to be available. The
+[controlled-observation path](#controlled-observation-path-without-vendor-docs)
+below replaces vendor documentation as a prerequisite to further investigation.
+It does not waive source gates or authorize a live read.
 
 ## Pinned Scope
 
@@ -75,13 +80,13 @@ not copied into v2 data or used as a state rule.
 All eight gates remain **unresolved**. A tested failure boundary is not source
 evidence, and no gate is closed merely because a fixture can represent the result.
 
-| Gate | Evidence already useful | Missing authority / next bounded step |
+| Gate | Evidence already useful | Missing authority / candidate next investigation |
 | --- | --- | --- |
-| 1. Full-day membership/history | Candidate reception table/date predicate and no-order receptions observed. | Vendor/admin definition of current/history/archive membership, clinic scope, date changes and deleted/moved visits. Only then review one complete scope operation. |
+| 1. Full-day membership/history | Candidate reception table/date predicate and no-order receptions observed. | Investigate catalog relationships and operator-controlled date moves/history/restoration against the EMR lists. Document the tested clinic/day/history boundary; names and finite samples do not establish universal coverage. |
 | 2. Children and save consistency | Four-part key and linked/same-date counts checked in a sample; one statement uses one database statement snapshot. | Authoritative child coverage across histories/dates and an EMR save transaction/completion boundary. One statement can still observe between two EMR commits. Independent autocommit reads are not one snapshot. |
 | 3. Verified-empty authority | Operator-confirmed closed date and zero candidate counts. | Gates 1/2 plus proof that an empty result covers every authoritative source, not a missing archive, denied source, wrong clinic/date or partial result. Closed-day confirmation alone is insufficient. |
 | 4. States/retained qualifiers | Supervised codes 10/20/25/30/40/50 and some exact flag combinations. | Versioned state truth table including hold_yn Y/N, transient states, unknown/null/blank combinations and consultation versus payment completion. No default mapping from a column name or sample. |
-| 5. State without excluded field | v2 excludes hold_opd; receiver has no raw-field business requirement. | Vendor confirmation that verified normalized state is determined from approved fields without hold_opd. If that dependency exists or is unknown, stop; a privacy-safe semantic would need separate review. Never retrieve its raw value to guess. |
+| 5. State without excluded field | v2 excludes hold_opd; receiver has no raw-field business requirement. | Compare operator-confirmed states with only approved retained facts; seek ambiguous combinations rather than assume independence. If state remains ambiguous, keep it blocked; a privacy-safe semantic would need separate review. Never retrieve the excluded raw value to guess. |
 | 6. All-category lifecycle | Sampled edits, deletion, restoration, parent cancellation and key reuse. | Definitions and a separately approved category/path matrix for dc_yn/act_yn, physical disappearance, restorations and identity reuse. Neither act_yn nor disappearance proves clinical completion/cancellation. |
 | 7. Sex/age | Exact M/F/null and completed-years-at-clinic-date policy approved; sampled M/F only. | Vendor sex/null/blank definitions plus a reviewed privacy-safe derived-age source/function and synthetic birthday/leap-day tests. No DOB or resident-number retrieval is authorized. |
 | 8. Least privilege | SELECT capability and read-only session proof. | DBA attestation of effective privileges including inherited/PUBLIC roles, ownership, role switching, RLS/bypass and callable functions. Never test privileges by attempting a production write. |
@@ -118,18 +123,66 @@ patient examples, actual excluded-field values or screenshots containing them.
    RLS/bypass, role switching, schema creation and SECURITY DEFINER/callable functions.
    Record only approved metadata or fixed results, never credentials or role dumps.
 
-If definitions are unavailable, record that blocker. Do not replace them with
-guessed meanings, repeated broad queries, permission escalation, longer timeouts
-or inference from an empty-looking UI. Evidence operations can corroborate a
-definition; finite observations alone cannot prove all historical membership.
+These definitions remain useful if they become available, but they are not a
+prerequisite to controlled investigation. Do not replace them with guessed
+meanings, repeated broad queries, permission escalation, longer timeouts or
+inference from an empty-looking UI. Finite observations alone cannot prove all
+historical membership.
+
+## Controlled Observation Path Without Vendor Docs
+
+The operator reports that vendor information cannot be expected. Do not repeatedly
+ask for the same unavailable documentation or silently convert that absence into
+approval. Proceed with evidence-only work under the same per-operation approval,
+privacy, serialization and physical-closure rules.
+
+1. Prepare a **metadata-only structural probe** first, scoped to the already
+   identified reception/order objects. Review key/constraint, relation kind and
+   dependency/partition relationships without reading clinical rows or comments
+   that could contain arbitrary text. This can identify missing structural evidence
+   for gate 1; it cannot prove that an undocumented archive does not exist. Missing
+   catalog permissions are reported, never bypassed. Exact catalog columns, SQL,
+   caps and sanitized output must be mocked and presented before approval.
+2. Build a gap matrix from the existing dummy observations. Do not repeat the
+   already observed 10/20/25 and 25/30/50/restoration paths merely to accumulate
+   more samples. Focus on missing retained-flag combinations, date moves/history
+   and the untested category/lifecycle paths. Each live comparison gets its own
+   approval; the operator performs any dummy-record changes, not the reader.
+3. Compare only allowlisted aggregate facts with operator-confirmed UI states and
+   counts at a known checkpoint. No patient/order identifiers or row dumps leave
+   the database. If aggregate output cannot distinguish two explanations, report
+   the ambiguity instead of exporting more detail or declaring the mapping proven.
+4. A bounded save-observation experiment may reveal intermediate states, but a
+   negative result does not prove atomic saves. Two equal observations, elapsed
+   time, caret readiness or chart-clear events are not commit/completeness proof.
+   Keep each independent statement's observation separate; never combine them as
+   one snapshot or run unapproved background sampling.
+5. Review effective privileges separately through allowlisted catalog results and
+   operator/admin action where needed. No write test, privilege escalation or
+   automatic role/grant change is permitted. Do not retrieve DOB to settle the
+   remaining age question; any privacy-safe derived-age proposal needs its own
+   review and synthetic boundary cases.
+6. Record each result as an observed fact, an unverified hypothesis, or a limitation.
+   Only explicit review can approve a tested source scope. If authoritative FULL
+   coverage still cannot be established, the present v2 production reader stays
+   blocked. A narrower observation-only/non-authoritative contract would require a
+   separate sender/receiver design decision; it must not masquerade as FULL/complete
+   or infer deletion from missing rows. No such alternative is implemented here.
+
+Immediate next engineering step: prepare and mock the single gate-1 metadata probe,
+then present it for explicit approval. No source gate is resolved by this revised
+plan, and no new SQL, probe implementation or production behavior is added here.
+The documentation-only follow-up reran all 29 evidence-to-v2 boundary tests:
+29 passed in 0.83 s. The full suite was not repeated for this planning correction;
+its prior results and unrelated failures remain recorded below.
 
 ## Live Operation Approval Boundary
 
-No next live operation is proposed yet: the existing sample probes cannot resolve
-the missing authority by repetition. No SQL, source columns or parameters have
-been approved for a new live run in this milestone. Historical approvals are not
-standing authorization. New vendor definitions must first make the operation
-specific enough to answer one named gate.
+No executable live operation is proposed yet: the existing sample probes cannot
+resolve the missing authority by repetition. No SQL, source columns or parameters
+have been approved for a new live run. Historical approvals are not standing
+authorization. A candidate operation must address one named evidence question;
+vendor documentation is helpful but is not required to propose that investigation.
 
 For each future operation, before approval:
 
@@ -150,8 +203,8 @@ For each future operation, before approval:
 
 If consistency cannot be justified with one reviewed statement or a separately
 reviewed read-only snapshot transaction, stop. Even a consistent database snapshot
-requires the vendor's EMR save-boundary evidence before it can certify a complete
-clinical save. Failed, partial, inconsistent, overflowed, unverified and timed-out
+does not establish a complete clinical save without independently reviewed
+save-boundary evidence. Failed, partial, inconsistent, overflowed, unverified and timed-out
 results must never become authoritative empty snapshots.
 
 ## Mocked Boundary Verification
@@ -218,6 +271,8 @@ receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`.
    production storage, runtime wiring, board/PACS change, deployment or restart.
    Never send normalized-source payloads to `/api/v1/order-snapshots`.
 
-Immediate next action is obtaining the vendor/admin definitions above, then choosing
-one bounded, mocked and explicitly approved evidence operation. A reviewed complete
-production day reader still cannot be implemented from the current evidence.
+Vendor information is not expected. Immediate next action follows the controlled
+observation path above: prepare one bounded metadata operation, mock its failure
+cases and request explicit approval before execution. Keep any conclusions limited
+to actual evidence. A reviewed complete production day reader still cannot be
+implemented from the current evidence.
