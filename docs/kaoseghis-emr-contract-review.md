@@ -22,6 +22,11 @@ present. No joint v2 sender recovery or transport exists. All eight source gates
 remain unresolved; this review adds only documentation and mocked boundary tests,
 with no new live operation. Later historical sections retain their original scope;
 the linked gate matrix and handoff supersede their earlier next-step wording.
+Vendor information is not expected. The separate
+[source-structure-v1 proposal](kaoseghis-source-structure-probe.md) now presents one
+bounded, mocked catalog-only investigation for gate 1. It is pending operator
+approval, has no runtime importer, and has not connected to EMR. Its preparation
+does not resolve any source gate or approve production snapshot delivery.
 
 ## Evidence Scope
 

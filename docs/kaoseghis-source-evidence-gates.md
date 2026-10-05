@@ -11,6 +11,11 @@ Operator update: vendor information is not expected to be available. The
 below replaces vendor documentation as a prerequisite to further investigation.
 It does not waive source gates or authorize a live read.
 
+The next [metadata-only proposal](kaoseghis-source-structure-probe.md) now has an
+exact catalog statement and mocked review harness under `tests/` only. It targets
+one gate-1 structural question and is awaiting separate operator approval. It has
+not been run against EMR and does not add an application reader or query.
+
 ## Pinned Scope
 
 - Sender starting HEAD and GitHub `main`:
@@ -169,20 +174,21 @@ privacy, serialization and physical-closure rules.
    separate sender/receiver design decision; it must not masquerade as FULL/complete
    or infer deletion from missing rows. No such alternative is implemented here.
 
-Immediate next engineering step: prepare and mock the single gate-1 metadata probe,
-then present it for explicit approval. No source gate is resolved by this revised
-plan, and no new SQL, probe implementation or production behavior is added here.
+The single gate-1 metadata probe has now been prepared under `tests/`, with its
+[approval request](kaoseghis-source-structure-probe.md). No source gate is resolved
+by its preparation, and no production behavior is added. The following test result
+belongs to the earlier documentation-only planning correction, not the new probe:
 The documentation-only follow-up reran all 29 evidence-to-v2 boundary tests:
 29 passed in 0.83 s. The full suite was not repeated for this planning correction;
 its prior results and unrelated failures remain recorded below.
 
 ## Live Operation Approval Boundary
 
-No executable live operation is proposed yet: the existing sample probes cannot
-resolve the missing authority by repetition. No SQL, source columns or parameters
-have been approved for a new live run. Historical approvals are not standing
-authorization. A candidate operation must address one named evidence question;
-vendor documentation is helpful but is not required to propose that investigation.
+The [source-structure-v1 proposal](kaoseghis-source-structure-probe.md) presents one
+exact bounded operation for review. No SQL, source columns or parameters have yet
+been approved for a new live run. Historical approvals are not standing
+authorization. Each operation must address one named evidence question; vendor
+documentation is helpful but is not required to propose that investigation.
 
 For each future operation, before approval:
 
@@ -271,8 +277,8 @@ receiver `890a4dd4ce992f2598c85557513cd2c70b098a2b`.
    production storage, runtime wiring, board/PACS change, deployment or restart.
    Never send normalized-source payloads to `/api/v1/order-snapshots`.
 
-Vendor information is not expected. Immediate next action follows the controlled
-observation path above: prepare one bounded metadata operation, mock its failure
-cases and request explicit approval before execution. Keep any conclusions limited
+Vendor information is not expected. Immediate next action is operator review of
+the prepared [source-structure-v1 request](kaoseghis-source-structure-probe.md),
+followed by explicit approval before any execution. Keep any conclusions limited
 to actual evidence. A reviewed complete production day reader still cannot be
 implemented from the current evidence.
