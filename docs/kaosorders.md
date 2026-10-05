@@ -396,9 +396,11 @@ and non-test network access were blocked during tests; mutexes were isolated.
 | --- | --- | ---: | --- | ---: |
 | Registered and waiting | 2026-10-05 00:43:33 | 1 | 10 / N / N: 1 | 0.152 s |
 | Open for consultation, operator reported ready | 2026-10-05 00:46:30 | 1 | 20 / N / UNREVIEWED: 1 | 0.0523 s |
+| On hold after operator F6, isolation reconfirmed | 2026-10-05 11:27:12 | 1 | 25 / N / N: 1 | 0.0545 s |
 
-Exactly two live reception-only operations ran, one per operator-confirmed stage,
-without retries. The second reused the unchanged, previously tested query and
+Exactly three live reception-only operations ran, one per operator-confirmed stage,
+without retries, plus the separately documented single shape operation below.
+The subsequent reads reused the unchanged, previously tested query and
 connection boundary. Read-only mode, cursor closure and physical connection
 closure were verified before processing.
 No clicks, typing, focus changes, writes or patient/order exports were performed.
@@ -408,8 +410,8 @@ or pressing F6/F7, then reported ready before the second observation.
 This observation is a day aggregate, not an identified-patient lookup. Attribution
 depends on the operator-confirmed isolated visit and an unchanged population; any
 additional reception or unrelated change makes the comparison inconclusive.
-Both observations contained exactly one reception. The supervised transition
-supports `10` for waiting and `20` for open consultation in this test; it does not
+All three observations contained exactly one reception. The supervised sequence
+supports `10` for waiting, `20` for open consultation and `25` for hold in this test; it does not
 verify every transition or authorize a complete production state mapping.
 
 **New qualifier blocker:** the in-consultation `hold_opd` value was masked as
@@ -478,11 +480,37 @@ It does not establish whether that number is a flag, identifier, counter or anot
 code, nor its meaning. In particular, do not treat numeric/nonzero text as true,
 export it as an identifier, replace it with a shape label, or widen the contract
 blindly. The strict-Y/N raw qualifier incompatibility remains a production blocker.
-The next supervised comparison may test whether putting the dummy on hold clears
-the numeric shape; even a reversible transition will not establish its domain or
-authorize export. A source-definition review and coordinated contract decision
+The hold-return comparison below found N again, but does not establish the numeric
+domain or authorize its export. A source-definition review and coordinated contract decision
 remain necessary. The production reader, mappings, validators, publishing and
 PACS are unchanged and disabled where previously blocked.
+
+#### Hold Return: 2026-10-05
+
+After being asked to press F6 and leave the dummy on hold, the operator reported
+ready. Because the previous observation was just after midnight, no live read was
+performed until the operator reconfirmed that the same isolated dummy remained
+and normal clinic work had not resumed (operator reported a holiday).
+
+One existing `reception` operation then ran for the confirmed 2026-10-05 clinic
+date at **11:27:12 KST**, returning exactly one **25/N/N** reception. Verified
+read-only mode, cursor closure and physical connection closure all succeeded;
+connection lifetime was **0.0545 s**. No retry, additional shape query, UI action,
+write, patient identifier or raw numeric qualifier retrieval occurred.
+
+The sampled states now show `10/N/N -> 20/N/(numeric text) -> 25/N/N` for this
+operator-confirmed isolated workflow. Thus N was observed again on hold. The
+overnight gap was not continuously monitored, and these samples cannot determine
+the exact update time or prove the numeric value's role. They do not justify
+casting numeric text to Y or assuming that it is a lock owner, clinician ID,
+boolean or other known code. The strict-Y/N contract blocker remains.
+
+This follow-up changes only documentation. **529 focused mocked tests passed in
+6.54 s**; the broader 996-test result above belongs to the preceding code change
+and was not rerun for this documentation-only observation. Source/model/validator
+code, production reader block, publishing and PACS are unchanged. The next useful
+step is a source-definition review and coordinated representation decision, not
+an automatic export of the unknown numeric field.
 
 ### Approved Laboratory Metadata Review: 2026-10-01
 

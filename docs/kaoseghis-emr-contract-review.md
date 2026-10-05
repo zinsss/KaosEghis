@@ -417,6 +417,22 @@ broaden the sender/receiver validators. Source-domain and privacy review must
 precede any coordinated contract revision. No production model/contract was changed,
 no endpoint called and no runtime reader enabled. All other evidence gates remain.
 
+### Hold Return
+
+After the operator reported the dummy on hold and reconfirmed that it remained
+the only reception, one existing bounded read at 2026-10-05 11:27:12 KST returned
+`25/N/N` (count 1). Read-only session, cursor closure and physical closure were
+verified before interpretation (0.0545 s). No additional field, raw value or
+identifier was queried for output; see [hold return](kaosorders.md#hold-return-2026-10-05).
+
+The `10 -> 20 -> 25` sequence and return of `hold_opd` to N support the sampled
+waiting/open-consultation/hold distinction for this isolated workflow. They do
+not explain the earlier numeric value or remove its strict-Y/N incompatibility.
+The overnight gap was not continuously observed; no precise transition time or
+causal field definition was inferred. Source-definition/privacy review and a
+coordinated contract decision remain required. No validator or runtime changed;
+529 focused mocked tests passed for this documentation-only follow-up.
+
 ## Review Findings
 
 | Finding | Evidence | Required resolution |

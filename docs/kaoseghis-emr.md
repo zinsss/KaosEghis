@@ -325,6 +325,15 @@ strict-Y/N contract is still incompatible with this observed source domain;
 unknown qualifier semantics and safe representation remain blocked. No production
 model, validator, reader, settings, trigger, delivery, PACS or app was changed.
 
+The operator subsequently put the dummy on hold and reconfirmed isolation after
+the overnight gap. One unchanged reception query at 11:27:12 KST found `25/N/N`
+(count 1), with read-only mode and cursor/physical closure verified in 0.0545 s.
+See [hold return](kaosorders.md#hold-return-2026-10-05). The observed sequence is
+waiting `10`, open consultation `20`, then hold `25`; the qualifier was N again
+on hold. This does not identify the numeric field's role or establish an exact
+transition time. No further live reads or runtime changes were made. The
+documentation-only follow-up reran 529 focused mocked tests successfully.
+
 ## Observation-Only Probe
 
 `core/emr_signal_probe.py` starts with runtime services, not workspace construction.
