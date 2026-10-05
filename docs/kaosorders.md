@@ -56,9 +56,10 @@ reference fixtures exactly, including full and verified-empty days, nulls, row
 ordering, canonical decimal strings and SHA-256. Source qualifiers are mandatory
 fixed raw Y/N facts (hold_yn/hold_opd, dc_yn/act_yn), never inferred clinical meaning.
 The later [qualifier decision proposal](kaoseghis-emr-contract-review.md#qualifier-decision-proposal-2026-10-05)
-does not change this implemented v1 requirement: it proposes consistent exclusion
-of raw `hold_opd` only in a separately versioned future contract, pending receiver
-agreement and source-policy review. No new contract version is implemented.
+does not change this implemented v1 requirement. Receiver `6837845` subsequently
+accepted consistent exclusion of raw `hold_opd` in a separate v2 projection; the
+sender-only synthetic implementation is described below. Source-policy and
+production delivery gates remain unresolved.
 It retains all source encounters/orders and distinct consultation/payment completion,
 with no category, pill, visibility, fee, detail or PACS fields. Explicit null sex
 can be preserved, while blank sex fails with a fixed redacted reason.
@@ -70,7 +71,18 @@ restart/ack recovery and authenticated source scope still need design. No approv
 endpoint/token, production query, publisher, persistence, settings or trigger was
 added; the reader remains blocked and existing runtime is unchanged.
 
-See [field-by-field compatibility, source blockers and the next handoff](kaoseghis-emr-contract-review.md#synthetic-parity-2026-10-04)
+The separate v2 sender modules now use `kaosorders.normalized-source` version 2,
+`kaosorders-all-orders-v2`, and `synthetic-v2`. Encounter qualifiers contain exactly
+required Y/N `hold_yn`; `hold_opd` is always forbidden. Order flags remain strict
+Y/N. No v1 conversion, outbox migration, production mapping or live reader is
+provided. Full/empty v2 synthetic fixtures match independently constructed sender
+output byte-for-byte; **receiver v2 parity is still the next step**, before any
+receiver storage work. See [v2 compatibility and handoff](kaoseghis-emr-contract-review.md#synthetic-v2-sender-2026-10-05)
+and [fixture provenance](../tests/fixtures/normalized_source_v2_provenance.md).
+The earlier board-oriented v2 proposal remains superseded and unrelated to this
+normalized-source version. No endpoint or token has been approved.
+
+See [v1 field-by-field compatibility and source blockers](kaoseghis-emr-contract-review.md#synthetic-parity-2026-10-04)
 and [fixture provenance](../tests/fixtures/normalized_source_v1_provenance.md).
 Return these exact outputs to the KaosOrders session for receiver-side synthetic
 parity/edge-case review and durable ordering design. Keep production intake, the

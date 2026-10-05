@@ -493,7 +493,7 @@ def test_shared_models_have_no_runtime_io_or_board_dependency():
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 assert node.func.id not in {"open", "print", "exec", "eval"}
     allowed = {"emr_source.py", "emr_source_shadow.py", "kaosorders_source.py", "kaosorders_normalized_source.py",
-               "kaosorders_outbox_shadow.py"}
+               "kaosorders_outbox_shadow.py", "emr_source_v2.py", "kaosorders_normalized_source_v2.py"}
     for path in Path(source.__file__).parents[1].rglob("*.py"):
         if path.name not in allowed:
             assert "core.emr_source" not in path.read_text(encoding="utf-8-sig")

@@ -352,7 +352,30 @@ for verified state semantics, the reader stays blocked pending source definition
 No source queries, receiver edits or runtime changes occurred in this review.
 Only docs and 16 synthetic rejection cases changed: 545 focused and 1,012 related
 isolated tests passed; the pinned pure receiver parser kept both v1 fixtures valid
-and rejected all 30 invalid synthetic cases. Receiver agreement is still pending.
+and rejected all 30 invalid synthetic cases. Receiver agreement was pending at
+that point; the following milestone supersedes that planning status.
+
+### Separate Synthetic V2: 2026-10-05
+
+KaosOrders accepted consistent exclusion of `hold_opd` at
+`6837845fc4c691075bab41c6e07ef69e8562580b`. The separate offline
+`core/emr_source_v2.py` and `core/kaosorders_normalized_source_v2.py` now implement
+contract version 2, projection `kaosorders-all-orders-v2` and synthetic mapping
+`synthetic-v2`. V1 model, normalization, fixtures, serializers and outbox are unchanged.
+
+V2 requires only `hold_yn` in encounter qualifiers and exact Y/N `dc_yn` / `act_yn`
+in orders. Excluded and extra fields fail, not disappear silently. Complete-read
+assertions, graph validation, all six states, all child rows, exact decimals and
+redacted failures are covered by synthetic tests. Metadata must be supplied
+explicitly; nothing allocates durable ordering or migrates v1 pending batches.
+
+The [full/empty fixture candidates](../tests/fixtures/normalized_source_v2_provenance.md)
+are ready for independent KaosOrders parser/digest parity, not production intake.
+See [compatibility and next handoff](kaoseghis-emr-contract-review.md#synthetic-v2-sender-2026-10-05).
+The real reader stays UNAVAILABLE. Source completeness, full state/flag semantics,
+safe age derivation and delivery/enrollment gates remain unresolved. No live reads,
+PACS changes, settings/triggers, publishing, endpoint, token, deployment or restart.
+The existing `/api/v1/order-snapshots` route remains prohibited for this payload.
 
 ## Observation-Only Probe
 

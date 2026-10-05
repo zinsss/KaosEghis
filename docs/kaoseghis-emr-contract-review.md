@@ -2,16 +2,18 @@
 
 Reviewed: 2026-10-05
 
-Status: **synthetic parity with the pinned disabled receiver contract implemented**.
+Status: **v1 synthetic receiver parity complete; separate v2 sender fixtures ready
+for independent receiver review**.
 This is not an approved HTTP endpoint, production query or deployment change.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The
-serializer and pinned fixtures are unchanged.
+v1 serializer and pinned fixtures are unchanged.
 
 The [2026-10-05 qualifier decision proposal](#qualifier-decision-proposal-2026-10-05)
-recommends excluding raw `hold_opd` from a separately versioned future contract.
-It is not receiver agreement, an in-place v1 amendment, or an implemented change.
+was accepted in receiver `6837845`; the separate
+[synthetic v2 sender milestone](#synthetic-v2-sender-2026-10-05) implements that
+offline projection only. This is not an in-place v1 amendment or live source approval.
 
 ## Evidence Scope
 
@@ -561,6 +563,127 @@ each missing qualifier, one extra diagnostic field, and unsupported version 2.
 Socket/SQLite access was explicitly blocked; only the pure contract module and
 synthetic fixture JSON were used, with bytecode writing disabled. Existing v1
 fixtures/digests were not changed; no proposed v2 payload was declared valid.
+
+## Synthetic V2 Sender: 2026-10-05
+
+Receiver acceptance was read from exact KaosOrders commit
+`6837845fc4c691075bab41c6e07ef69e8562580b`,
+`docs/normalized-source-contract-v2-plan.md`. Sender work began from clean main at
+`51d7601327ab4db58155960b8e0be75ea029e43f`. The earlier proposal above is historical;
+receiver agreement now exists for the minimized projection, not for production use.
+
+### Implemented Boundary
+
+- `core/emr_source_v2.py`: separate frozen/slotted read, encounter, qualifier and
+  snapshot types, complete-read assertions, closed input fields, strict retained
+  flags, graph/bounds validation and canonical sorting. V1 snapshots/encounter
+  qualifiers are not accepted as v2. Unchanged order identity/fact primitives are
+  shared; v1 validation, normalization and serialization are not bypassed or edited.
+- `core/kaosorders_normalized_source_v2.py`: pure serializer with an explicit
+  `synthetic_fixture=True` gate and separately typed, explicitly supplied clinic,
+  batch, epoch and revision metadata. No UUID, revision, epoch or time is generated.
+  Directly constructed snapshots are revalidated before serialization.
+- Only the exact agreed synthetic projection/mapping pair is accepted. This is
+  not a production mapper, parser endpoint, authorization mechanism or evidence
+  that caller assertions certify a live complete-day read.
+- No `hold_opd` field exists on the v2 encounter qualifier type. Supplying it in
+  source aliases fails rather than stripping it, whatever its value. The slotted
+  qualifier cannot carry an extra attribute. Retained flags remain exact Y/N.
+- V2 fact equality preserves retained-qualifier, state and order edits. Tests
+  distinguish explicit cancellation, disappearance and reuse of the complete key.
+  No new ledger, source subscription, ordering allocator, outbox or storage is added.
+  A new observation timestamp/digest is not itself a business-fact edit.
+
+### Field Compatibility
+
+| Field | V2 sender behavior | Receiver status / remaining decision |
+| --- | --- | --- |
+| Contract identity | `kaosorders.normalized-source`, integer version `2` | Agreed plan; independent receiver parser verification next. |
+| Projection / mapping | Exactly `kaosorders-all-orders-v2` / `synthetic-v2` | Production mapping, enrollment and fencing not approved. |
+| Clinic / source / day | Explicit scope, strict text and calendar date | Source day membership/consistency remains gated. |
+| Batch / epoch / revision | Explicit UUID and integers 1 through 2^63-1 | No durable allocation or adoption of a receiver cursor. |
+| Full / complete | Always `FULL` / `true`, only after validated fixture input | Failed, partial, unavailable, timed-out, unverified and overflowed input cannot normalize as empty. |
+| Encounter identity / demographics | Same facts as v1; explicit null retained, blank sex rejected | M/F source policy approved; unseen values and safe age derivation unresolved. Synthetic O is not source approval. |
+| Reception code / state | Explicit synthetic policy, all six states including separate consultation/payment completion | No production mapping enabled; dependence on excluded qualifier remains an evidence gate. |
+| Encounter qualifiers | Exactly required `hold_yn`, strict Y/N | `hold_opd` forbidden for every encounter, including Y/N source cases. |
+| Order identity | Encounter ID + order date + order number + order sequence | Same four-part identity; no manufactured stable-ID substitute. |
+| Order facts / qualifiers | Every child retained, including fees/unclassified; `dc_yn` and `act_yn` required Y/N | No category, fee, visibility, display or clinical interpretation. |
+| Quantity / days / frequency | Null or exact canonical decimal string, no units, no float coercion | Sender limit: magnitude <= 10^9, exponent -12..12, input/output text <= 32; contract adoption still undecided. |
+| Observation time | Aware source observation time only | Not ordering authority or a clinical event timestamp. |
+| Digest | UTF-8, Unicode preserved, sorted keys, compact separators, no NaN/infinity, SHA-256 without digest field | Receiver must independently verify exact hashes. |
+
+### Fixture Candidates
+
+See [v2 provenance](../tests/fixtures/normalized_source_v2_provenance.md) for exact
+file-byte hashes, construction and references. Canonical files use UTF-8 plus one
+LF, pinned by fixture-scoped Git attributes. Existing v1 fixture Git blobs and
+content hashes remain unchanged.
+
+| Fixture | Contents | Content SHA-256 |
+| --- | --- | --- |
+| Full | Six encounters, five orders; all six reception states; no-order, cancelled-parent/active-child, cancelled-child, fee and unclassified cases | `a6b7e348c734c7af4c1f7467e0f66ec84dfaa4904fe53d53a1a389ddc9b17c2d` |
+| Empty | Separate synthetic complete day, zero encounters/orders | `f03a8a244b8c3d324d6011d0c15f49c49ce2567872665ba1e4e1efb8413daf16` |
+
+Sender tests independently construct input aliases and match parsed objects,
+canonical file bytes and independently calculated digests. This is **sender
+fixture parity**, not a claim of completed receiver v2 parser/storage parity.
+
+### Verification Results
+
+- 225 new v2 cases; full and empty fixtures both match exact parsed objects,
+  canonical bytes and independent digests. V1 committed fixture blobs are pinned
+  and unchanged. The existing source-import boundary test permits only the two
+  new offline modules; a separate v2 test forbids runtime importers and IO dependencies.
+- Focused v2/v1 source/serializer, evidence and shared-reader group: **770 passed
+  in 3.51 s**.
+- Related source-shadow, receipt/outbox, shared-reader, PACS, flu/weekly-age,
+  patient-context and database-contention group: **1,237 passed in 41.31 s**.
+- Full isolated suite: **2,894 passed, 27 failed in 142.83 s**. Twenty-six failures
+  are existing vaccine label font/ink and shortcut-width assertions. They were
+  reproduced in a clean detached `e12685dde19080d97179c00476362feba9d34c8f`
+  baseline: **273 passed, 26 failed in 17.43 s** for the three vaccine test files.
+  Their test files and corresponding vaccine/printing code are unchanged since
+  that baseline.
+- The extra full-suite failure was
+  `test_pair_notes_do_not_leak_into_next_patient_after_skip`; the complete post-print
+  file passed on isolated retry (**28 passed in 6.52 s**) and in the baseline run.
+  This is an unresolved intermittent suite failure, not a claimed fix or a green
+  full suite. No unrelated vaccine behavior or assertions were changed.
+
+Tests used mocked database connections, isolated test mutexes, a temporary data
+directory, offscreen Qt and blocked external network/native input/printer access.
+The mock cleanup check verifies zero live connections and cursor/connection close
+events before serialization. No production connection or live cleanup assertion
+was attempted. No raw diagnostic output was added to the repository.
+
+### Unresolved Gates and Handoff
+
+No live operation was performed in this milestone. The `EghisSourceDayReader`
+UNAVAILABLE block, shared reader, physical-connection boundary, PACS, flu reports,
+settings, triggers, v1 serializers/outbox/receipts and runtime imports are unchanged.
+No production SQL, patient export, endpoint, token, delivery, deployment or restart.
+`/api/v1/order-snapshots` remains prohibited for every normalized-source payload.
+
+Source gates remain authoritative full-day membership/history, complete child
+coverage and clinical-save consistency, verified-empty authority, full state and
+qualifier-combination evidence (including whether state interpretation needs the
+excluded field), all-category cancellation/deletion/restoration, unseen sex values,
+safe completed-years age derivation and least-privilege verification. Isolated
+10/20/25 observations and fixture success do not clear these gates.
+
+Delivery gates remain durable epoch/revision grants and fencing, receiver-generation
+enrollment, lost-state/receiver-ahead recovery, content-bound acknowledgement encoding
+and HTTP status mapping, retry/backoff/pause policy, mapping cutover, storage security
+and retention. No v1 sealed bytes, batch IDs, cursors or receipts are rewritten.
+Stale/conflict/resync must continue to pause and preserve pending bytes in the
+existing synthetic v1 proof; v2 delivery/storage proof is a later stage.
+
+**Next KaosOrders handoff:** inspect the exact resulting sender commit and copy the
+two v2 fixtures with provenance. Implement only a separate pure v2 receiver parser
+and independent canonical digest/negative parity tests against the agreed identity.
+Reject excluded `hold_opd` and invalid/missing retained flags, preserve v1 behavior,
+and report exact fixture equality. Do this before v2 persistence, transport or board
+work; do not weaken validators, migrate v1 stores, use live data or enable intake.
 
 ## Review Findings
 
