@@ -46,6 +46,18 @@ evidence by themselves of incomplete order storage. Retain them with an empty
 order list, without inventing a vaccination order or classifying empty visits as
 flu. The 122 total was not attributed entirely to vaccination. Broader access is
 not required solely because of that count; other source gates remain separate.
+The operator then chose a new no-billing/no-payment EMR item for a disposable
+test and clarified [source-faithful display](kaosorders.md#source-faithful-order-display-2026-10-06):
+preserve the actual EMR order code/name, not a special national-flu label mapping.
+The current offline order facts lack a name field, so a reviewed source-name
+field and explicit contract/catalog extension remain design work. No schema,
+validator, fixture/hash or runtime is changed by this decision, and arbitrary
+clinical text remains excluded. Zero-charge status alone is not a fee exclusion.
+The operator reaffirmed the existing UI requirement: clicking a patient grid item
+opens all scoped source orders with their original names/codes. Summary categories
+or fee exclusions do not prune this complete detail list. A new national-flu item
+appears as itself, not as a separate translated label. The missing name field is
+an implementation gap against that agreed requirement, not a new UI proposal.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The

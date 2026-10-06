@@ -30,6 +30,44 @@ gated. The sender still has no v2 outbox or acknowledgement consumer, and its v1
 synthetic outbox is not v2 proof.
 That review's handoff supersedes historical next-step lists below.
 
+### Source-Faithful Order Display: 2026-10-06
+
+The operator clarified that KaosOrders should show the actual EMR orders as they
+are, rather than substitute a special code-to-business-label translation. Preserve
+the source order code and the EMR's order name. Do not rename a national-flu order
+to a different fixed label, synthesize a vaccination order from an empty child
+list, or replace one code with another. UI grouping/badges, if retained, organize
+the source facts; they must not rewrite the order's identity or name. This does
+not approve new category/fee/visibility rules or discard previously reviewed rules.
+
+The operator reaffirmed the already-agreed interaction: the patient grid is a
+summary; selecting a patient opens that encounter's **complete order list**.
+Show the actual source orders with their original codes/names in that detail view,
+including non-billing and unclassified orders. Summary categorization or reviewed
+fee exclusions must not silently remove rows from the complete detail list. Retain
+the supplied state of cancelled child rows rather than present them as active.
+This does not bring cancelled encounters back into the agreed encounter scope.
+The new national-flu item should simply appear as itself in this list; no special
+vaccine-code-to-label mapping or new overview pill is requested by this decision.
+
+The operator plans to create a new national-flu item with no billing or payment,
+then use it on a disposable dummy visit. This supersedes the assistant's earlier
+recommendation to test only a no-order dummy first. The intended check is whether
+the actual entered order is represented faithfully, not mapped to an invented
+label. No-charge status alone must not be used to assume it is an irrelevant fee
+or hide it. Do not assume an amount of zero guarantees non-billing behavior;
+the EMR configuration remains operator-controlled and is not changed here.
+
+The existing offline `OrderFacts`/v2 wire facts contain order code, type and
+department but no order-name field. Source-faithful name display is therefore
+required by the agreed complete-order detail view, not an already implemented
+capability. This is a source/contract implementation gap, not a newly proposed UI
+feature or a reason to replace the agreed detail view with category labels. Review
+the exact source field and a separate bounded catalog-name/contract design before
+implementation. This is not authorization for arbitrary clinical text, notes,
+diagnoses or raw-row export. Keep existing v1/v2 models, strict validators,
+fixtures/hashes and runtime unchanged until that separate change is approved.
+
 ### Current-Day Memory-Only Decision: 2026-10-06
 
 The operator clarified that past clinic days are over, the EMR DB is the source
@@ -253,6 +291,9 @@ Windows is allowed; source interpretation and application decisions are separate
   and grid/details. It validates and applies source observations idempotently,
   rejects stale updates and maintains its own application state. A source transition
   to 보류 is a fact from Windows; whether it creates a tile is a KaosOrders decision.
+  Under the later source-faithful display decision, these presentation decisions
+  must not substitute order codes or rename the EMR's actual order. Name transport
+  still needs a separately reviewed field/contract design.
 - KaosPACS receives directly from the sibling PACS adapter, not through KaosOrders.
   KaosOrders filtering or availability must not determine PACS order delivery.
 - Read the approved day's encounter/order facts across relevant states, including

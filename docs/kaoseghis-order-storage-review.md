@@ -254,19 +254,25 @@ contracts, fixtures and runtime behavior are unchanged.
 ### Planned Dummy Checkpoint
 
 The operator offered a disposable national-flu-like dummy case for tomorrow,
-2026-10-07 KST. The useful first checkpoint is a dummy reception with **no EMR
-orders**, following the stated workflow, not a newly invented vaccination order
-or order code. Wait for the operator to leave it ready and confirm its current-day
-state; nothing is scheduled or executed automatically.
+2026-10-07 KST, then clarified the plan: create an EMR order item with no billing
+or payment and enter it on the disposable visit. This supersedes the assistant's
+earlier no-order-only checkpoint recommendation; the earlier explanation of
+today's legitimate no-order visits remains valid and is not retroactively changed.
 
-The later read-only comparison should verify reception presence independently of
-child presence and retain a valid empty order list. If a concrete coverage gap
-remains, a separately confirmed ordinary test-order add/remove comparison can
-follow under operator control. Do not repeat already-established lifecycle tests
-without a question to answer, change a real record, print, submit a claim or
-perform an EMR write. Review the exact bounded aggregate operation and mocked
-failure/closure tests before any new live check. No patient details need to be
-posted, logged or added to this documentation.
+The read-only checkpoint should verify how that actual order appears in the source,
+preserving its original code and EMR name rather than translating it to a special
+national-flu display label. See the [source-faithful display decision](kaosorders.md#source-faithful-order-display-2026-10-06).
+No-charge status alone must not cause omission as an irrelevant fee. Source-name
+transport still requires a separately reviewed field/contract design; no raw
+clinical text retrieval is authorized by this planned test.
+
+The operator creates/configures the item and confirms the dummy is ready; nothing
+is scheduled or executed automatically. The agent must not change a real record,
+create a code, print, submit a claim or write to EMR. Review the exact bounded
+aggregate/metadata operation and mocked failure/closure tests before any new live
+check. No patient details need to be posted, logged or added to this documentation.
+No-order encounters remain a supported independent case, not a mandatory extra
+live test unless a specific gap needs it.
 
 ## KaosOrders Handoff
 
@@ -276,7 +282,14 @@ do not implement transport, wire fixtures, endpoint, token or board integration.
 No source snapshot was produced. Do not send anything to
 `/api/v1/order-snapshots`. Carry the operator-confirmed national-flu no-order
 workflow into scope review: retain those encounters with empty order lists, not
-fabricated orders or inferred vaccine labels. Expanded source access is conditional
+fabricated orders or inferred vaccine labels. For actual orders, preserve EMR
+codes/names; do not substitute a fixed vaccine label. The existing order facts
+have no name field, so agree a separate bounded source-name design without silently
+changing v1/v2. The established patient-grid interaction remains:
+click a patient to see all scoped orders with their original names/codes, without
+summary-category or fee filtering of the detail list. A new no-billing national-flu
+order appears there as itself; no vaccine-specific code translation or new summary
+pill is implied. Further source access is conditional
 on an actual missing-order case, not the no-order count. Remaining scope and
 save-boundary evidence is still required; an observation-only alternative needs
 an explicit separate contract decision. Do not
@@ -307,3 +320,8 @@ documentation-only updates. Focused source/v2/order-evidence regressions passed
 **694 tests in 2.60 s**. No live database/UI operation was performed for that
 clarification. The full-suite result above is the preceding milestone's result,
 not a new full run; no application code, tests or fixture bytes changed afterward.
+
+The subsequent non-billing dummy plan and source-faithful complete-order detail
+clarifications also change documentation only. `git diff --check` passed; no live
+operation or runtime/contract implementation was performed, and tests were not
+rerun for those prose-only changes.
