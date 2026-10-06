@@ -20,6 +20,11 @@ visits. All child orders of included encounters remain in scope, including cance
 orders. Exclusion/restoration must be recognized from verified source states and
 applied only through complete successful snapshots. This narrows the proposed
 session scope, not the unchanged shared v1/v2 models, fixtures or PACS behavior.
+The [current-day aggregate proposal](kaoseghis-current-day-counts-proposal.md)
+is now prepared under tests only for a candidate membership/UI-count comparison.
+It retains no-order/count buckets without retrieving the excluded qualifier or
+applying a production state mapping. No live evidence or source approval follows
+from those mocked tests; the reader and all delivery remain blocked.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The

@@ -52,6 +52,13 @@ to reappear. This Orders-only scope does not alter shared source models, PACS,
 existing v1/v2 fixtures or the synthetic receiver. Recognizing cancellation and
 proving completeness/save consistency remain necessary; no evidence gate is closed.
 
+The subsequent [current-day count proposal](kaoseghis-current-day-counts-proposal.md)
+prepares one aggregate-only gate-1 checkpoint under tests: reception code/retained
+flag counts split by any-child presence, including no-order visits. It does not
+retrieve excluded qualifiers or identifiers, implement a cancellation filter, or
+repeat a live dummy transition. Mocked tests cover cleanup, strict bounds and day
+rollover; no live operation has been performed for this proposal and no gate closes.
+
 ## Pinned Scope
 
 - Sender starting HEAD and GitHub `main`:
