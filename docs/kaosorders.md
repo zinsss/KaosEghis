@@ -78,12 +78,22 @@ fixtures/hashes and runtime unchanged until that separate change is approved.
 The later operator-scoped [catalog check](kaoseghis-named-order-observation.md#approved-single-catalog-follow-up)
 found one linked child with an empty catalog code and NULL standard-name field.
 An operator-supplied screenshot shows the expected code/name in the prescription
-grid, but the storage/linkage supplying those display fields is not established
-from the two queried columns. This is a source/contract gap to investigate,
+grid, but the two queried columns did not establish the display source.
+This exposed a source/contract gap,
 not permission to substitute the operator's expected label, discard the child
 as a fee, or weaken v2's nonempty-code requirement. No category, financial,
-transport or board behavior changed. Read the actual display-name source through
-a separately reviewed operation before proposing the contract extension.
+transport or board behavior changed.
+
+The subsequent [reviewed display-source check](kaoseghis-order-display-source.md)
+confirmed an exact `user_cd` code match and `user_nm` name match for the same
+approved singleton. Only aggregate equality counts were returned, after verified
+physical closure in 0.0507 s. This answers the immediate field-location question,
+not universal source semantics or the existing v2 representation gap. Keep the
+original catalog facts distinct; do not silently replace `order_code`, infer a
+label or alter v1/v2 fixtures/hashes. The next receiver discussion is a separate
+bounded original user/display-code and name representation with explicit
+null/blank rules. Cross-category coverage, safe bounds and source authority remain
+unresolved. No new runtime query, transport, board or PACS change is enabled.
 
 ### Current-Day Memory-Only Decision: 2026-10-06
 

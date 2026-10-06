@@ -295,6 +295,14 @@ inclusion criterion and is not investigated. Next evidence should identify the
 standard user-code/display-name field or catalog linkage via reviewed metadata,
 without an unrestricted clinical-text or raw-row dump.
 
+Follow-up: the [display-source review](kaoseghis-order-display-source.md) performed
+a bounded metadata read and an exact equality-count check for the same approved
+singleton. Both `user_cd` and `user_nm` matched the supplied screen pair; the
+second physical connection closed in 0.0507 s. This supplies the missing field
+location for this case, without retrieving source strings or identifiers. The
+earlier blank/NULL catalog observations remain distinct facts; broader mapping
+coverage and a separate display-name contract decision are still unresolved.
+
 ## Contract Boundary
 
 This observation does not add an order-name field to existing v1/v2 models,

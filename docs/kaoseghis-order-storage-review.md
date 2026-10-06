@@ -288,6 +288,12 @@ not request additional permissions based on these zero matches alone. Do not
 alter the real visit for testing. Billing/insurance/payment eligibility is outside
 KaosOrders' order-viewing purpose and is not a source-display gate.
 
+Subsequent [display-source evidence](kaoseghis-order-display-source.md) found the
+expected pair in the already readable table's `user_cd`/`user_nm`, using only
+exact comparison counts for that same approved singleton. No alternate-table
+grant was needed for this case. This does not establish coverage or storage
+authority for all other categories, and no runtime mapping was added.
+
 Review this completed sender milestone as a source-blocker update only. Preserve
 the current-day memory-only session design and existing synthetic coordinator;
 do not implement transport, wire fixtures, endpoint, token or board integration.

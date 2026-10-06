@@ -70,13 +70,21 @@ catalog-field lookup after midnight: it found an empty `ord_cd` and NULL
 `medfee_nm`, with physical closure verified in 0.0602 s. These fields do not
 establish the screen's actual label or identify the child as the reported new
 item. Existing v2 requires nonempty order code and lacks a name field: do not
-invent one, discard the child or weaken the validator. Actual display-name source
-evidence and an explicit contract decision remain necessary. No gate is resolved;
-the current-day runtime restriction and production reader block are unchanged.
+invent one, discard the child or weaken the validator. At that stage, display-name
+source evidence and an explicit contract decision remained necessary. No gate was
+resolved; the current-day runtime restriction and production reader block are unchanged.
 An operator-supplied screenshot subsequently confirms the expected code/name in
 the prescription grid. This establishes the UI spelling, not which source
 field/linkage stores it; do not omit that displayed order because the two queried
 catalog fields are blank or because of a financial checkbox.
+The later [display-source follow-up](kaoseghis-order-display-source.md) verified
+the exact expected code in `user_cd` and name in `user_nm` for the same approved
+single child, returning only equality counts. Physical closure passed in
+0.0507 s; the preceding metadata-only read closed in 0.0553 s. This bounded result
+resolves the immediate field-location question. It does not authorize overwriting
+the distinct catalog fields, reinterpreting v2 `order_code`, or adding names to
+an existing contract. A separately agreed display-fact representation, broader
+null/bounds/category evidence and all source-authority gates remain unresolved.
 KaosOrders is an order-viewing tool, not a claims/insurance/payment workbench;
 billing eligibility is not a prerequisite for showing the complete order list.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.

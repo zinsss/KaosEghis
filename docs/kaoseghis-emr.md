@@ -1,6 +1,6 @@
 # KaosEghis-emr
 
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 
 **Orders target clarified:** the [current-day memory-only decision](kaosorders.md#current-day-memory-only-decision-2026-10-06)
 makes the EMR DB the sole durable patient/order source. KaosOrders keeps only
@@ -23,11 +23,11 @@ three narrow current-day name/code checks following an operator-entered order on
 a real visit. No match was found; all physical connections closed before result
 interpretation. A subsequent operator-scoped aggregate found one current-day
 reception and one same-day child, but no match to the supplied name/code. Its
-actual display-label source remains unknown. An explicitly approved singleton follow-up
-found an empty catalog code and NULL standard name, with closure verified in
-0.0602 s. Do not guess that the order failed to save or that this child is the
-reported new item; actual display-name source evidence is still needed. Existing
-v2 rejects an empty order code and has no name fact; no validator is weakened.
+actual display-label source was not established by that check. An explicitly
+approved singleton follow-up found an empty catalog code and NULL standard name,
+with closure verified in 0.0602 s. Do not guess that the order failed to save or
+that this child is the reported new item from those fields alone. Existing v2
+rejects an empty order code and has no name fact; no validator is weakened.
 The operator's subsequent screenshot shows the expected code/name in the EMR
 grid, so source-to-display field linkage must be verified rather than treating
 the row as absent or filtering it by financial status.
@@ -35,6 +35,16 @@ No patient identifiers or raw rows were
 returned. KaosOrders displays actual orders, not claims/insurance/payment tasks;
 those financial decisions are not prerequisites for its complete detail list.
 No production source or runtime behavior changes follow from this evidence.
+
+The subsequent [display-source follow-up](kaoseghis-order-display-source.md)
+resolved the immediate field-location question for that same approved singleton:
+both `h2opd_doct_ord.user_cd` and `user_nm` exactly matched the operator-supplied
+screen code/name. Only equality counts were returned. Physical connection closure
+was verified in 0.0507 s after a separate metadata-only read closed in 0.0553 s.
+Preserve these facts separately from empty `ord_cd` and NULL `medfee_nm`; do not
+silently change existing v2 code semantics or invent a label. A separately agreed
+bounded display-code/name representation and broader coverage/null evidence are
+still needed. All broader source-authority gates and the UNAVAILABLE block remain.
 
 Status: the first shared-read stage is implemented. Verified chart clears can now
 refresh the existing whole-day PACS query; Poll Now remains a manual fallback.
