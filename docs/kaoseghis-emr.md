@@ -2,6 +2,13 @@
 
 Last updated: 2026-10-07
 
+The latest [current-day complete-order decision](kaoseghis-current-day-orders-design.md)
+is documentation-only. Receiver `3813b52` accepts the four synthetic code/name
+fields; a separate complete order is designed under `kaosorders.current-day-orders`
+version 1 / `kaosorders-current-day-orders-v1`, with mapping revision unassigned.
+The existing text component, v1/v2 code, fixtures and runtime remain untouched.
+All source-evidence gates and the production reader block remain in force.
+
 **Orders target clarified:** the [current-day memory-only decision](kaosorders.md#current-day-memory-only-decision-2026-10-06)
 makes the EMR DB the sole durable patient/order source. KaosOrders keeps only
 today's transient board, clears it at KST midnight and reloads today's source on

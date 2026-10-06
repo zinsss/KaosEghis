@@ -4,6 +4,13 @@ Last updated: 2026-10-07
 
 ## Status and Current Decisions
 
+**Current implementation handoff:** the [2026-10-07 complete-order design](kaoseghis-current-day-orders-design.md)
+records receiver `3813b52` acceptance of the four synthetic text facts and the
+sender decision for a separate `kaosorders.current-day-orders` version 1 /
+`kaosorders-current-day-orders-v1` identity. The production mapping revision is
+unassigned. Receiver review must precede a new complete synthetic model; v2 and
+the existing coordinator cannot accept it. This milestone is documentation-only.
+
 **Latest operator decision:** [current-day, memory-only board](#current-day-memory-only-decision-2026-10-06).
 The EMR database is the sole durable source of patient/order truth. KaosOrders
 must not persist patient/order state; at the KST day change, clear the transient
@@ -101,7 +108,9 @@ order key, without altering v1/v2. It is an offline component only, not a sessio
 schema or approved source mapping. Receiver `fd5e4b8` was reviewed read-only; its
 existing v2/session facts cannot yet carry these fields. The linked next handoff
 requests receiver field-policy agreement and a separate synthetic proof, with no
-wire, transport or board implementation. All live source gates remain open.
+wire, transport or board implementation. That field-policy/proof handoff is now
+complete at receiver `3813b52`; the full-model design linked above supersedes it.
+All live source gates remain open.
 
 ### Current-Day Memory-Only Decision: 2026-10-06
 

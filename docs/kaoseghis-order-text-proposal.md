@@ -10,6 +10,15 @@ delivery is introduced. The operator asked to proceed after the bounded
 
 ## Receiver Compatibility Review
 
+Update at receiver `3813b52587ce5b2f7c0a81c17d7d9a60dd1ef3c3`: the four
+separate fields, explicit null/empty/whitespace/padding policy and provisional
+128/256-code-point limits are now jointly accepted **for synthetic modeling only**.
+Receiver reports 315 focused compatibility and 709 full isolated tests passed.
+No field-policy conflict was found; its independent key class is only a Python
+structure difference. The historical review below remains unchanged provenance.
+The [complete current-day design](kaoseghis-current-day-orders-design.md) is the
+current next-step decision; source mappings and production use remain unapproved.
+
 Read-only SSH review of `/srv/projects/KaosOrders` found a clean `main` at
 `fd5e4b8b68e6efb06025b2696fd9b50553199ded`, with origin
 `git@github.com:zinsss/KaosOrders.git`. Reviewed `current-day-memory-design.md`,
@@ -111,7 +120,11 @@ settings, triggers, publisher, token, HTTP endpoint, persistence, deployment or
 restart occurred. No normalized-source payload may go to
 `/api/v1/order-snapshots`. All current-day source-authority gates remain unresolved.
 
-## Exact Next Receiver Handoff
+## Historical Receiver Field Handoff
+
+Completed by receiver `3813b52`. The current next handoff is the
+[complete-order design review](kaoseghis-current-day-orders-design.md#exact-next-receiver-handoff),
+not another implementation of these four companion fields.
 
 Review this sender commit and the field model/tests against receiver
 `fd5e4b8b68e6efb06025b2696fd9b50553199ded`:

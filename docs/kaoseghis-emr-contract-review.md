@@ -6,6 +6,16 @@ Status: **v1 synthetic parity and v2 receiver-only synthetic proofs complete;
 production source authority remains unresolved**.
 This is not an approved HTTP endpoint, production query or deployment change.
 
+**2026-10-07 current design:** receiver `3813b52` accepts the four independent
+nullable order-text facts for synthetic use (reported 315 focused / 709 full
+tests). The sender's [complete current-day order design](kaoseghis-current-day-orders-design.md)
+accepts `kaosorders.current-day-orders` version 1 and
+`kaosorders-current-day-orders-v1` as separate design identities, with no mapping
+revision allocated. It proposes one independent order containing all four text
+facts, key, type/department, state and strict retained flags; numeric fields are
+deferred. This update changes documents only, not v1/v2, the text model, source
+authority or any wire/runtime behavior. Full-model receiver review is still needed.
+
 **2026-10-06 scope correction:** [current-day memory-only KaosOrders](kaosorders.md#current-day-memory-only-decision-2026-10-06)
 supersedes the prior production durable-projection/outbox/history target. EMR DB
 is the only durable patient/order source; KaosOrders resets transient state at

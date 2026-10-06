@@ -3,6 +3,14 @@
 Reviewed: 2026-10-05
 
 Status: **source authority unresolved; production day reader remains UNAVAILABLE**.
+
+The [2026-10-07 current-day full-order design](kaoseghis-current-day-orders-design.md)
+records receiver agreement on synthetic order-text representation only. All eight
+gates below remain unresolved, including normalization without the excluded
+qualifier. An additional order-text coverage/content-safety gate remains open:
+one screen-pair match does not approve all-category source mapping, NULL/blank
+domains, maximum lengths or freedom from patient-entered clinical text. No source
+operation, mapping or reader enablement follows from the new design identity.
 The initial milestone changed documentation and mocked tests only. No new live EMR
 operation was approved, requested or performed. No new query or probe was added.
 
