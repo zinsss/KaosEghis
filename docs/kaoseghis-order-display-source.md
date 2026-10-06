@@ -169,3 +169,9 @@ existing JSON-fixture changes. Existing v1/v2 serializers, validators, fixture
 bytes/hashes, synthetic stores and runtime behavior are unchanged. Only test-only
 inspection helpers/statements, mocked tests and sanitized documentation are added
 or updated. No identifying diagnostic artifact is committed.
+
+Subsequent milestone: the [synthetic order-text proposal](kaoseghis-order-text-proposal.md)
+uses this bounded finding to test four distinct nullable code/name facts offline.
+It performs no further live reads and leaves this evidence, v1/v2 and runtime
+behavior unchanged. Receiver agreement is required before a new complete fact or
+session contract can carry these fields.

@@ -1,6 +1,6 @@
 # KaosOrders Source-Side Shadow Foundation
 
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 
 ## Status and Current Decisions
 
@@ -94,6 +94,14 @@ label or alter v1/v2 fixtures/hashes. The next receiver discussion is a separate
 bounded original user/display-code and name representation with explicit
 null/blank rules. Cross-category coverage, safe bounds and source authority remain
 unresolved. No new runtime query, transport, board or PACS change is enabled.
+
+The [2026-10-07 synthetic order-text proposal](kaoseghis-order-text-proposal.md)
+now preserves separate catalog code/name and user code/name facts with the full
+order key, without altering v1/v2. It is an offline component only, not a session
+schema or approved source mapping. Receiver `fd5e4b8` was reviewed read-only; its
+existing v2/session facts cannot yet carry these fields. The linked next handoff
+requests receiver field-policy agreement and a separate synthetic proof, with no
+wire, transport or board implementation. All live source gates remain open.
 
 ### Current-Day Memory-Only Decision: 2026-10-06
 

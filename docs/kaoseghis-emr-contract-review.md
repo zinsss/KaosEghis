@@ -85,6 +85,13 @@ resolves the immediate field-location question. It does not authorize overwritin
 the distinct catalog fields, reinterpreting v2 `order_code`, or adding names to
 an existing contract. A separately agreed display-fact representation, broader
 null/bounds/category evidence and all source-authority gates remain unresolved.
+The next [synthetic order-text milestone](kaoseghis-order-text-proposal.md)
+implements only a separate bounded field model and tests. Four explicit nullable
+text facts preserve catalog and user code/name independently, with no conversion
+into existing v2 or runtime use. Receiver `fd5e4b8` still requires a nonempty v2
+code and lacks name facts; compatibility is therefore a proposed new fact model,
+not claimed v2/session parity. Field policies and production source evidence remain
+unapproved beyond the synthetic proof.
 KaosOrders is an order-viewing tool, not a claims/insurance/payment workbench;
 billing eligibility is not a prerequisite for showing the complete order list.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.

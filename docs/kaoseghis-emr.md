@@ -46,6 +46,13 @@ silently change existing v2 code semantics or invent a label. A separately agree
 bounded display-code/name representation and broader coverage/null evidence are
 still needed. All broader source-authority gates and the UNAVAILABLE block remain.
 
+The separate [synthetic text-fact proposal](kaoseghis-order-text-proposal.md)
+implements an offline four-field component for that gap: catalog code/name and
+user code/name stay distinct, with strict full-key binding and no fallback.
+It has no reader, serializer, runtime importer or production mapping. Receiver
+field/bounds agreement and a new current-day fact contract remain separate;
+existing v1/v2 and PACS behavior are unchanged.
+
 Status: the first shared-read stage is implemented. Verified chart clears can now
 refresh the existing whole-day PACS query; Poll Now remains a manual fallback.
 PACS, flu-report, health, and patient-context reads share one FIFO worker per
