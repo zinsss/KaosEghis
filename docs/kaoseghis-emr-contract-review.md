@@ -40,6 +40,12 @@ existing doctor-order object. None of the other 59 has table- or column-level
 SELECT. This is a concrete limit on investigating alternate storage, not proof
 that those objects are relevant or empty. No complete source or normalized
 snapshot can be claimed from these metadata observations; production remains blocked.
+The operator subsequently confirmed that today's national-flu vaccination visits
+have no EMR orders. No-order encounters are therefore an expected workflow, not
+evidence by themselves of incomplete order storage. Retain them with an empty
+order list, without inventing a vaccination order or classifying empty visits as
+flu. The 122 total was not attributed entirely to vaccination. Broader access is
+not required solely because of that count; other source gates remain separate.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The

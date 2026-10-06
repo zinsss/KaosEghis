@@ -64,6 +64,13 @@ EMR database (sole durable patient/order source)
   cancelled encounters and their child rows from that future Orders projection.
   Keep all scoped children of included encounters, including cancelled child orders,
   fees and unclassified rows, with the four-part order key intact.
+- The operator further confirmed on 2026-10-06 that today's national-influenza
+  vaccination visits have no EMR orders. This is an expected no-order workflow:
+  retain each otherwise-scoped encounter with an empty order list. Do not invent
+  a vaccine order or infer vaccination type from the absence of orders. This does
+  not attribute all 122 observed no-child receptions to vaccination, and does not
+  generalize to private influenza, COVID or other visits. No-order counts alone
+  are not evidence of missing storage or grounds for broader database grants.
 - A previously included encounter becoming cancelled is omitted from the next
   verified complete current-day Orders projection, removing its prior board state.
   A restored non-cancelled encounter can reappear in a later complete snapshot.

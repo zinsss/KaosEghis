@@ -180,6 +180,11 @@ connection work **0.1020 s**, local settings connection already closed.
 
 ## Decision And Stopping Point
 
+The initial decision below is amended by the operator's subsequent
+[national-flu workflow clarification](#operator-workflow-clarification). The access
+observations remain valid, but expanded permissions are not a prerequisite merely
+because some receptions have no order rows.
+
 The alternate-storage investigation has reached a concrete access boundary.
 The current identity can read only the already-inspected doctor-order object
 among these candidates. Other ordinary objects with similar columns exist, but
@@ -187,19 +192,20 @@ neither their current-day contents nor their clinical role has been established.
 The 59 objects are structural candidates, not 59 proven independent order sources;
 do not request blanket access or infer semantics from names.
 
-It is not possible under the present access/privacy rules to determine whether
-the 122 receptions with no doctor-order rows truly have no orders or have relevant
-facts elsewhere. No metadata count proves one alternative. More reads of the same
-accessible table would repeat evidence without resolving this question.
+The catalog review did not determine the workflow of the 122 receptions with no
+doctor-order rows. No metadata count proves that they need another order source.
+The operator later provided relevant no-order workflow evidence below. More reads
+of the same accessible table cannot substitute for clinical workflow context.
 
 **Not ready to enable an authoritative FULL source reader.** The bounded
 subquestions (candidate existence and effective candidate SELECT capability) are
 observed; none of the eight full source gates is closed. In particular:
 
-- A narrowly scoped admin review is needed to identify a relevant complete source
-  and, if appropriate, provide an approved read-only view/column grant. Do not grant
-  all candidates or change shared EMR grants automatically. The separately observed
-  effective CREATE capability in public also remains a least-privilege blocker.
+- If a concrete expected order is missing from the accessible source, review its
+  source and seek narrow read-only access only if justified. Do not grant all
+  candidates or treat expected empty child lists as evidence that new grants are
+  needed. The separately observed effective CREATE capability in public remains
+  a distinct least-privilege issue; no shared EMR grant is changed automatically.
 - Save consistency/completion cannot be proved by these metadata reads, repeated
   equal counts, UI readiness, or arbitrary delays. Source completion evidence or a
   separately accepted non-authoritative observation contract is still required.
@@ -214,15 +220,66 @@ block, not authorization to enable an incomplete reader, claim verified-empty
 authority, use app credentials from another process, bypass permissions, change
 PACS or relax v2. No clinical row was queried in any of these three operations.
 
+## Operator Workflow Clarification
+
+After the catalog review, the operator stated that today's national-influenza
+vaccination patients have no EMR orders. Record this as operator-confirmed
+workflow evidence for 2026-10-06, not as a new database observation or a universal
+rule for every vaccination type/date.
+
+This corrects the earlier emphasis on alternate storage: an encounter without
+children can be entirely valid. The count alone never established missing orders,
+and broader database permissions are not the next required step solely because
+122 child lists were empty. The aggregate includes four earlier code-50/N
+candidates; neither 122 nor the other 118 is automatically a national-flu count.
+No patient identifiers, vaccination-record join or new live query is needed to
+record this clarification.
+
+For the agreed future Orders scope:
+
+- Keep otherwise-included non-cancelled receptions even when they have no orders.
+- Use an empty child-order list; do not fabricate vaccination or other orders.
+- Do not classify a visit as national flu merely because its child list is empty.
+- Preserve verified cancelled-encounter exclusion as a separate rule.
+- Keep source failure/partial-read handling distinct from a valid empty child
+  list. The clarification does not turn a failed whole-day read into an empty day.
+
+The next useful validation is source scope/consistency and remaining normal
+order-category lifecycle evidence, not speculative alternate-table access driven
+by this count. Existing supervised transitions need not be repeated without a
+specific gap. Save completion, retained qualifiers, safe age derivation and
+least-privilege review remain separate unresolved matters. The production reader,
+contracts, fixtures and runtime behavior are unchanged.
+
+### Planned Dummy Checkpoint
+
+The operator offered a disposable national-flu-like dummy case for tomorrow,
+2026-10-07 KST. The useful first checkpoint is a dummy reception with **no EMR
+orders**, following the stated workflow, not a newly invented vaccination order
+or order code. Wait for the operator to leave it ready and confirm its current-day
+state; nothing is scheduled or executed automatically.
+
+The later read-only comparison should verify reception presence independently of
+child presence and retain a valid empty order list. If a concrete coverage gap
+remains, a separately confirmed ordinary test-order add/remove comparison can
+follow under operator control. Do not repeat already-established lifecycle tests
+without a question to answer, change a real record, print, submit a claim or
+perform an EMR write. Review the exact bounded aggregate operation and mocked
+failure/closure tests before any new live check. No patient details need to be
+posted, logged or added to this documentation.
+
 ## KaosOrders Handoff
 
 Review this completed sender milestone as a source-blocker update only. Preserve
 the current-day memory-only session design and existing synthetic coordinator;
 do not implement transport, wire fixtures, endpoint, token or board integration.
 No source snapshot was produced. Do not send anything to
-`/api/v1/order-snapshots`. The next joint decision is either obtaining a reviewed
-complete source with narrow read-only access and save-boundary evidence, or
-explicitly designing a different non-authoritative observation contract. Do not
+`/api/v1/order-snapshots`. Carry the operator-confirmed national-flu no-order
+workflow into scope review: retain those encounters with empty order lists, not
+fabricated orders or inferred vaccine labels. Expanded source access is conditional
+on an actual missing-order case, not the no-order count. Remaining scope and
+save-boundary evidence is still required; an observation-only alternative needs
+an explicit separate contract decision. Do not
 silently change FULL/complete=true or interpret missing rows as authoritative
 deletions. Keep existing v1/v2 validators, hashes and synthetic stores intact.
 
@@ -244,3 +301,9 @@ test mutexes, offscreen Qt, disabled plugin autoload and temporary test data.
 fixture bytes/hashes remain unchanged from the starting commit.
 Only tests, SQL fixtures under tests, and sanitized documentation are changed.
 The production reader, runtime triggers/settings, publishing and PACS stay untouched.
+
+The later national-flu clarification and planned dummy checkpoint are
+documentation-only updates. Focused source/v2/order-evidence regressions passed
+**694 tests in 2.60 s**. No live database/UI operation was performed for that
+clarification. The full-suite result above is the preceding milestone's result,
+not a new full run; no application code, tests or fixture bytes changed afterward.
