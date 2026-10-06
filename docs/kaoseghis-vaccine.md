@@ -26,6 +26,10 @@ Current implemented pieces:
 - EMR-target-based patient context fetch into the Vaccine page
 - one fetched patient context can create separate simultaneous-vaccination records
 - visible same-day `Influenza` and `COVID-19` counts
+- a separate `예외` count under each daily-cap counter, derived from completed
+  national records with `counts_toward_cap = false` on today's completion date;
+  excludes private shots, unfinished records and cancellations, with no change
+  to cap accounting or printed labels
 - structured single-current-year Influenza and COVID schedule settings
 - date-picker-based program windows and inclusive birth-date ranges
 - configuration-driven national influenza program preview

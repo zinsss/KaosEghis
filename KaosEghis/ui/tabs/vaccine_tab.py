@@ -83,6 +83,7 @@ from KaosEghis.db.repositories import (
     get_today_national_influenza_total,
     get_today_national_covid_totals,
     get_today_vaccine_counts,
+    get_today_vaccine_exception_counts,
     get_active_emr_target_profile,
     get_emr_ui_target_by_key,
     get_settings,
@@ -332,7 +333,7 @@ class VaccineTab(QWidget):
         for counter in (self.today_influenza_count_label, self.today_covid_count_label):
             counter.setWordWrap(True)
             counter.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            counter.setMinimumHeight(52)
+            counter.setMinimumHeight(76)
         self.influenza_check_button = QPushButton("Check influenza program")
         self.influenza_check_button.clicked.connect(self.check_influenza_program)
         self.influenza_check_result = QLabel("Influenza program: Not checked.")
@@ -541,20 +542,22 @@ class VaccineTab(QWidget):
             self.nav_buttons[name].setChecked(button_index == index)
 
     def refresh_view(self) -> None:
+        today = datetime.now().date().isoformat()
         with connect(self._db_path) as connection:
             vaccine_types = list_vaccine_types(connection)
             records = list_vaccine_records(connection)
             settings = get_settings(connection)
             counts = get_today_vaccine_counts(
                 connection,
-                datetime.now().date().isoformat(),
+                today,
             )
+            exception_counts = get_today_vaccine_exception_counts(connection, today)
         self._populate_vaccine_types(vaccine_types)
         self._populate_records(self.records_table, records)
         self._populate_records(self.general_records_table, self._filter_records(records, "general"))
         self._populate_records(self.flu_records_table, self._filter_records(records, "flu"))
         self._populate_records(self.covid_records_table, self._filter_records(records, "covid"))
-        self._update_today_counts(settings, counts)
+        self._update_today_counts(settings, counts, exception_counts)
         self._refresh_previews()
         self._refresh_today_record_menu()
 
@@ -1542,13 +1545,15 @@ class VaccineTab(QWidget):
 
     def _handle_vaccine_settings_changed(self) -> None:
         initialize_database(self._db_path)
+        today = datetime.now().date().isoformat()
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
             counts = get_today_vaccine_counts(
                 connection,
-                datetime.now().date().isoformat(),
+                today,
             )
-        self._update_today_counts(settings, counts)
+            exception_counts = get_today_vaccine_exception_counts(connection, today)
+        self._update_today_counts(settings, counts, exception_counts)
         self._reset_influenza_check()
         self._update_session_reset_reminder()
         self.status_label.setText("Vaccine settings loaded.")
@@ -1917,14 +1922,17 @@ class VaccineTab(QWidget):
         self,
         settings: dict[str, str],
         counts: dict[str, int],
+        exception_counts: dict[str, int],
     ) -> None:
         influenza_cap = settings.get("vaccine_influenza_daily_cap", "100").strip() or "100"
         covid_cap = settings.get("vaccine_covid_daily_cap", "100").strip() or "100"
         self.today_influenza_count_label.setText(
             f"Influenza today: {counts.get('flu', 0)}\u00a0/\u00a0{influenza_cap}"
+            f"\n예외: {exception_counts.get('flu', 0)}"
         )
         self.today_covid_count_label.setText(
             f"COVID-19 today: {counts.get('covid', 0)}\u00a0/\u00a0{covid_cap}"
+            f"\n예외: {exception_counts.get('covid', 0)}"
         )
 
     def _reset_program_checks(self) -> None:

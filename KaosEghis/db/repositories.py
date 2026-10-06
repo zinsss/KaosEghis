@@ -3212,6 +3212,31 @@ def get_today_vaccine_counts(
     return counts
 
 
+def get_today_vaccine_exception_counts(
+    connection: sqlite3.Connection,
+    target_date: str,
+) -> dict[str, int]:
+    """Count completed national exceptions separately from the daily caps."""
+
+    rows = connection.execute(
+        """
+        SELECT program_type, COUNT(*)
+        FROM vaccine_records
+        WHERE status = 'completed'
+          AND counts_toward_cap = 0
+          AND completed_on = ?
+          AND program_type IN ('national_influenza', 'national_covid')
+        GROUP BY program_type
+        """,
+        (target_date,),
+    ).fetchall()
+    counts = {"flu": 0, "covid": 0}
+    for program_type, count in rows:
+        bucket = "flu" if program_type == "national_influenza" else "covid"
+        counts[bucket] = int(count)
+    return counts
+
+
 def get_today_national_influenza_total(
     connection: sqlite3.Connection,
     target_date: str,
