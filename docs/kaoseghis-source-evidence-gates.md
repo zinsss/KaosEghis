@@ -64,12 +64,15 @@ Of the 263 code-40 candidates, 118 had no linked child in the inspected table;
 this does not prove absence of orders elsewhere. Verified physical closure took
 0.0733 s. No full source gate closes and the runtime reader remains blocked.
 
-The next [order-coverage proposal](kaoseghis-order-coverage-proposal.md) is prepared
-and mocked only, not run live. Built-in PACS is imaging/MWL-scoped and flu-report
-does not read orders. The proposed single statement compares children of today's
-receptions with orders dated today, returning only fixed counts and key/link
-anomalies. No-order receptions stay in the diagnostic. It neither proves alternate
-storage absent nor resolves EMR-save consistency or any complete source gate.
+The next [order-coverage check](kaoseghis-order-coverage-proposal.md#approved-observation-2026-10-06)
+was prepared and mocked, then explicitly approved and run once at 20:52:15 KST.
+It observed 267 receptions (145 with children, 122 without), 938 linked orders and
+938 today-dated orders, with zero unmatched, off-day, null/blank-key or duplicate
+four-part-key anomalies. Verified physical closure took 0.0731 s. Built-in PACS is
+imaging/MWL-scoped and flu-report does not read orders; neither proves all-order
+coverage. No-order receptions stay in the diagnostic. The bounded comparison is
+complete, but it neither proves alternate storage absent nor resolves EMR-save
+consistency or any complete source gate. The runtime reader remains UNAVAILABLE.
 
 ## Pinned Scope
 

@@ -28,10 +28,12 @@ child in the inspected table, not proof of no orders elsewhere. Physical closure
 was verified in 0.0733 s. No excluded qualifier, patient identifier or demographic
 was returned. This sampled match does not approve a production state mapping or
 prove child/save completeness; the reader and all delivery remain blocked.
-The following [order-coverage proposal](kaoseghis-order-coverage-proposal.md)
-reviews the different built-in PACS/flu query scopes and prepares one aggregate
-four-part-key/link diagnostic with mocked failures and cleanup tests. It has not
-run live and does not establish full source authority or change this contract.
+The following [order-coverage checkpoint](kaoseghis-order-coverage-proposal.md#approved-observation-2026-10-06)
+was explicitly approved and run once at 20:52:15 KST after 118 mocked tests passed.
+Its 938 linked children and 938 today-dated orders agree, with zero key/link
+anomalies; 267 receptions split into 145 with children and 122 without. Physical
+closure was verified in 0.0731 s. This does not prove absence of alternate order
+storage, resolve save consistency or change the contract/source reader block.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The

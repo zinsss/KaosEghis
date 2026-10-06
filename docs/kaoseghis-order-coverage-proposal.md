@@ -2,10 +2,12 @@
 
 Prepared: 2026-10-06 from sender `053c2a764a18e4a3aa0eee387da34d9515e09262`.
 
-Status: **mocked preparation only; no live operation performed**. This is a
-bounded aggregate diagnostic for gate 2, not a full-day reader or normalized
-snapshot. All eight source gates remain unresolved. The production reader stays
-UNAVAILABLE, and nothing here authorizes publishing or patient-data export.
+Status: **one approved aggregate checkpoint completed; full source authority
+unresolved**. This is a bounded aggregate diagnostic for gate 2, not a full-day
+reader or normalized snapshot. All eight complete source gates remain unresolved.
+The production reader stays UNAVAILABLE, and nothing here authorizes publishing
+or patient-data export. Initial preparation was mocked only; the later observation
+is recorded below.
 
 ## Why This Check
 
@@ -131,13 +133,13 @@ that alternate order storage is absent, or that source membership is authoritati
 The previously reviewed unique index and dummy key-reuse observations are not
 repeated or upgraded into immutable lifetime identity claims.
 
-## Live Checkpoint Still Pending
+## Live Checkpoint Procedure
 
-This milestone performs no live DB, screen, input or service operation. A later
-checkpoint must review this exact statement and confirm the then-current KST day
-under the bounded read-only authorization. Run it once using the shared verified
-reader; retain only sanitized aggregate findings, closure results and limitations.
-Do not run it against the previous observed day after midnight.
+Initial preparation performed no live DB, screen, input or service operation.
+A live checkpoint must review this exact statement and confirm the then-current
+KST day under the bounded read-only authorization. Run it once using the shared
+verified reader; retain only sanitized aggregate findings, closure results and
+limitations. Do not run it against a previous observed day after midnight.
 
 This can answer whether the two candidate sets agree at that checkpoint and
 whether key/link anomalies need investigation. It cannot resolve the whole gate
@@ -146,13 +148,78 @@ authorize a FULL reader. If the check is clean, the next decision is source
 membership/save consistency, not automatic publishing. Receiver transport remains
 design-only; never use `/api/v1/order-snapshots` for normalized-source payloads.
 
+## Approved Observation: 2026-10-06
+
+The operator said `go` to the explicit next step of running this reviewed read-only
+check once for the current clinic day. The sender was clean at
+`bf71a4879d49686df3407a23064e8ac699fa291c`. Host and UTC clock checks confirmed
+that the current KST date was still `2026-10-06`, the date already confirmed by the
+operator for the earlier membership comparison. All **118 mocked preflight tests
+passed again in 1.22 s** before source access.
+
+At **20:52:15 KST**, the unchanged hash-pinned statement ran exactly once through
+the shared FIFO and machine-wide Windows mutex. The local connection setting was
+read in memory using SQLite `mode=ro`; its cursor and physical connection were
+closed and their closed state checked before source access. No credential or
+other local setting was output. The source report was `order_counts_observed`,
+with `review_required=[]` and `authoritative_snapshot=false`.
+
+| Aggregate | Observed count |
+| --- | ---: |
+| Server current-day match | 1 |
+| Candidate receptions | 267 |
+| Receptions with any linked child | 145 |
+| Receptions without a matching child | 122 |
+| Null/blank reception keys | 0 |
+| Duplicate reception-key groups | 0 |
+| All linked order rows | 938 |
+| Orders dated today | 938 |
+| Linked orders dated today | 938 |
+| Linked orders dated outside today or null | 0 |
+| Today-dated orders with a current-day reception | 938 |
+| Today-dated orders without a current-day reception | 0 |
+| Linked rows with null/blank key components | 0 |
+| Today-dated rows with null/blank key components | 0 |
+| Duplicate four-part-key groups in linked rows | 0 |
+| Duplicate four-part-key groups in today-dated rows | 0 |
+| Linked three-part groups spanning multiple order dates | 0 |
+
+| Session/cleanup evidence | Result |
+| --- | --- |
+| Local settings connection closed before source | true |
+| Source connection opened | true |
+| Read-only mode, finite timeout and isolation verified | true |
+| Source cursor closed | true |
+| Physical source connection closed before interpretation/output | true |
+| Connection work | 0.0731 s |
+
+The linked and today-dated sets have matching cardinalities and no unmatched-date,
+null/blank-key or duplicate-key anomalies in this one statement. No source or
+output cap was reached. The reception/child-presence totals also match the earlier
+membership observation, but those separate operations are not one atomic snapshot.
+This query did not reread reception states, qualifiers, categories or UI counts.
+
+The 122 count still means only no matching child in `h2opd_doct_ord`. It does not
+establish no orders elsewhere, explain the earlier 118 code-40/N missing matches,
+or justify dropping no-order encounters. No active/cancelled meaning was inferred
+for any child. The observed four-part keys are unique at this checkpoint, not
+proved immutable across deletion/reuse or complete across other storage.
+
+This completes the bounded key/link comparison, not the whole child-coverage
+gate. Alternate storage, save consistency, authoritative membership/empty days,
+retained-state combinations, category lifecycles, demographics/age policy and
+least-privilege permissions remain unresolved. No second source statement, retry, source
+row export, UI action, dummy modification, production reader, delivery, PACS
+change, service restart or deployment was performed.
+
 ## Verification
 
 - New probe: **118 mocked tests passed in 1.41 s**.
 - Focused source/shadow/serialization/outbox/shared-reader, PACS, flu-report and
   patient-context regressions: **1,701 passed in 43.71 s**.
-- The synthetic aggregate oracle is not a SQL engine. PostgreSQL execution and
-  performance have not been tested; SQL review is static and hash-pinned.
+- The synthetic aggregate oracle is not a SQL engine. Initial preparation used
+  static hash-pinned SQL review only; the single later PostgreSQL observation
+  and its limited connection timing are recorded above, not a performance guarantee.
 - Full isolated suite: **3,577 passed, 26 failed in 178.09 s**. The failures match
   the preceding [baseline record](kaoseghis-current-day-counts-proposal.md#verification):
   20 label-area/font-size cases at 203 dpi, three title-font cases, one pill-ink
@@ -160,8 +227,12 @@ design-only; never use `/api/v1/order-snapshots` for normalized-source payloads.
   unrelated vaccine change was made. The full suite is not green.
 - Tests used mocked DB connections, isolated test mutexes, blocked external
   networking, offscreen Qt, disabled pytest plugin autoload and temporary local
-  data. No live connection timing or new source findings were obtained.
+  data. Those test runs obtained no live connection timing or source findings;
+  the separate approved observation above did.
 - `git diff --check` passed. Application code and all four existing v1/v2 JSON
   fixture bytes remain unchanged from the starting commit.
 - Application source, v1/v2 fixtures/hashes, runtime settings, triggers, publishing,
   receiver, PACS and flu report remain unchanged. No production reader is enabled.
+- The observation follow-up changes only this document and two evidence-summary
+  links. Its preflight reran 118 tests; the focused/full results above are the
+  immediately preceding preparation runs, not additional post-observation runs.
