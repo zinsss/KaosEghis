@@ -2,10 +2,12 @@
 
 Prepared: 2026-10-06, from sender `b1a0ad53dc625ed270b8a5f8cadab475baeebe02`.
 
-Status: **prepared and mocked only; no live operation performed**. This is one
-bounded candidate-membership check for source gate 1, not a production reader,
-normalized snapshot, clinical state mapping or approval to publish. The operator's
-latest `ok` was to prepare tests and the exact query for review, not to execute it.
+Status: **one aggregate observation completed; production authority unresolved**.
+This is a bounded candidate-membership check for source gate 1, not a production
+reader, normalized snapshot, clinical state mapping or approval to publish. The
+initial `ok` authorized preparation only. The later observation below used the
+operator's standing bounded read-only authorization, after passive screen reading
+and explicit confirmation that the displayed tab counts were for today.
 
 ## Question And Limits
 
@@ -120,18 +122,67 @@ observation, never authority for an empty FULL snapshot or board removal.
   snapshots. One statement gives one database snapshot, not proof of an atomic EMR
   save across potentially separate commits.
 
-## Next Live Checkpoint
+## Checkpoint Procedure
 
-After review, request the operator's current-day EMR tab counts and explicit approval
-for **this one statement**, once, on that current KST date. Hidden tabs and each
-tab's date/filter must be accounted for. No names, screenshots with patient details,
-or patient/order identifiers are needed. Do not infer an empty day from a holiday
-or the old dummy; no date-moving source experiment is authorized.
+Use **this one reviewed statement**, once, on the operator-confirmed current KST
+date under bounded read-only authorization. Obtain the current-day EMR tab counts
+by passive screen reading or operator report. Hidden tabs and each tab's date/filter
+remain comparison limitations until verified. No names, screenshots with patient
+details, or patient/order identifiers are needed. Do not infer an empty day from a
+holiday or the old dummy; no date-moving source experiment is authorized.
 
 If no comparable current-day UI checkpoint is available, defer the live operation.
 Any normal dummy cancellation/restoration comparison is a later separately reviewed
 checkpoint performed by the operator, not an automatic action in this proposal.
 Only sanitized aggregates, closure evidence and limitations may later be recorded.
+
+## Observed Checkpoint: 2026-10-06
+
+The operator requested screen reading rather than manually transcribing counts.
+A narrow reception-tab screenshot showed completed **263** and cancelled **4**.
+Waiting was selected; waiting and hold had no displayed numeric counts. The date
+was not readable through the passive controls, so the operator explicitly confirmed
+these were today's counts. No zero was inferred from a missing tab count. Hidden
+tabs were not exposed or switched. No patient rows were read or captured.
+
+At **19:17:36 KST**, the pinned statement ran once for `2026-10-06`, after its
+106 mocked tests passed again in **1.23 s**. The local connection setting was read
+in memory from SQLite opened with `mode=ro`; that local cursor and connection
+closed before the shared EMR reader was called. No credential was output.
+
+| Observed aggregate bucket | Linked child rows present | No linked child rows | Total |
+| --- | --- | --- | --- |
+| `proc_gb=40`, `hold_yn=N` | 145 | 118 | 263 |
+| `proc_gb=50`, `hold_yn=N` | 0 | 4 | 4 |
+| Total candidate receptions | 145 | 122 | 267 |
+
+Only these code/retained-flag combinations occurred in this statement. The accepted
+report passed the current-day, source-cap, unique/valid reception-key and aggregate
+sum checks. It is `counts_observed` with `authoritative_snapshot=false`.
+
+| Read/cleanup evidence | Result |
+| --- | --- |
+| Local settings connection closed before source access | true |
+| EMR connection opened | true |
+| Read-only session/finite timeout verified | true |
+| Cursor closed | true |
+| Physical connection closed before interpretation/output | true |
+| Connection work | 0.0733 s |
+
+The source buckets match the two visible tab totals, consistent with the earlier
+supervised 40/50 associations for this observed retained-flag combination. Applying
+the requested scope to this sample would retain 263 candidate encounters and omit
+the four cancelled candidates; requiring child presence would incorrectly omit
+118 of the 263 candidates as well. This is evidence that the reception side must
+drive membership, not an approved production cancellation filter.
+
+Crucially, the 118 count means **no matching child in the inspected order table**,
+not proof of no clinical orders elsewhere. Alternate order storage, the complete
+child relation, global identity/reuse and EMR save consistency were not investigated
+by this statement. UI and DB observations are not one atomic snapshot. The absence
+of other source buckets does not prove hidden UI tab counts or all state mappings.
+No full gate is closed, no empty-day authority established, and no runtime reader
+enabled. No second query, retry, date-moving test or dummy transition was performed.
 
 ## Verification
 
@@ -146,7 +197,9 @@ Only sanitized aggregates, closure evidence and limitations may later be recorde
   Those unrelated failures are not fixed; the full suite is not green.
 - `git diff --check` passed. Application code and all four existing v1/v2 canonical
   JSON fixtures remain unchanged from the starting commit.
-- Live operations: **none**. No credentials/settings loaded or EMR UI manipulated.
+- Initial preparation had no live operations. The later single observation and
+  verified closure are recorded above; only sanitized aggregate evidence is saved.
+  No EMR input, record write, application restart, publishing or deployment occurred.
 - `EghisSourceDayReader` remains UNAVAILABLE. No application imports the proposal.
   Existing v1/v2 fixtures/hashes, PACS, receiver, settings, triggers, transport,
   endpoints and runtime behavior are unchanged. All source-evidence gates remain

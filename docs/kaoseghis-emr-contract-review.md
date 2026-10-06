@@ -20,11 +20,14 @@ visits. All child orders of included encounters remain in scope, including cance
 orders. Exclusion/restoration must be recognized from verified source states and
 applied only through complete successful snapshots. This narrows the proposed
 session scope, not the unchanged shared v1/v2 models, fixtures or PACS behavior.
-The [current-day aggregate proposal](kaoseghis-current-day-counts-proposal.md)
-is now prepared under tests only for a candidate membership/UI-count comparison.
-It retains no-order/count buckets without retrieving the excluded qualifier or
-applying a production state mapping. No live evidence or source approval follows
-from those mocked tests; the reader and all delivery remain blocked.
+The test-only [current-day aggregate operation](kaoseghis-current-day-counts-proposal.md#observed-checkpoint-2026-10-06)
+was subsequently run once after passive UI reading and operator confirmation of
+today's date. Its 263 code-40/N and four code-50/N candidates match the visible
+completed/cancelled tab totals. The 263 include 118 candidates with no matching
+child in the inspected table, not proof of no orders elsewhere. Physical closure
+was verified in 0.0733 s. No excluded qualifier, patient identifier or demographic
+was returned. This sampled match does not approve a production state mapping or
+prove child/save completeness; the reader and all delivery remain blocked.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The

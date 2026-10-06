@@ -57,7 +57,12 @@ prepares one aggregate-only gate-1 checkpoint under tests: reception code/retain
 flag counts split by any-child presence, including no-order visits. It does not
 retrieve excluded qualifiers or identifiers, implement a cancellation filter, or
 repeat a live dummy transition. Mocked tests cover cleanup, strict bounds and day
-rollover; no live operation has been performed for this proposal and no gate closes.
+rollover. Its [later observation](kaoseghis-current-day-counts-proposal.md#observed-checkpoint-2026-10-06)
+ran once at 19:17:36 KST: 267 candidate receptions, split into code-40/N total 263
+and code-50/N total 4, matching the two visible operator-confirmed-today UI counts.
+Of the 263 code-40 candidates, 118 had no linked child in the inspected table;
+this does not prove absence of orders elsewhere. Verified physical closure took
+0.0733 s. No full source gate closes and the runtime reader remains blocked.
 
 ## Pinned Scope
 
