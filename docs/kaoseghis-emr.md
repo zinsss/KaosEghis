@@ -21,8 +21,17 @@ fixtures retain their original full scope until a separate session scope is agre
 The [exact named-order observation](kaoseghis-named-order-observation.md) records
 three narrow current-day name/code checks following an operator-entered order on
 a real visit. No match was found; all physical connections closed before result
-interpretation. Visit-date/source representation confirmation is needed, not a
-guess that the order failed to save. No patient identifiers or raw rows were
+interpretation. A subsequent operator-scoped aggregate found one current-day
+reception and one same-day child, but no match to the supplied name/code. Its
+actual display-label source remains unknown. An explicitly approved singleton follow-up
+found an empty catalog code and NULL standard name, with closure verified in
+0.0602 s. Do not guess that the order failed to save or that this child is the
+reported new item; actual display-name source evidence is still needed. Existing
+v2 rejects an empty order code and has no name fact; no validator is weakened.
+The operator's subsequent screenshot shows the expected code/name in the EMR
+grid, so source-to-display field linkage must be verified rather than treating
+the row as absent or filtering it by financial status.
+No patient identifiers or raw rows were
 returned. KaosOrders displays actual orders, not claims/insurance/payment tasks;
 those financial decisions are not prerequisites for its complete detail list.
 No production source or runtime behavior changes follow from this evidence.

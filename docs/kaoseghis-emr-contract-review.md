@@ -62,8 +62,21 @@ The operator subsequently entered the item on an actual vaccinated patient's
 visit, not a disposable record. Three bounded current-day
 [exact name/code checks](kaoseghis-named-order-observation.md#observation) found
 no match; physical closure was verified for all three. This does not prove that
-the order was not saved or that it lives in another table. Confirm the visit date
-and exact source representation before any further operation. No gate is resolved.
+the order was not saved or that it lives in another table. A subsequent
+operator-scoped aggregate found one current-day reception and one same-day child,
+without a name/code match. Closure was verified in 0.0554 s. No actual label was
+retrieved by that aggregate. The operator then separately approved a singleton
+catalog-field lookup after midnight: it found an empty `ord_cd` and NULL
+`medfee_nm`, with physical closure verified in 0.0602 s. These fields do not
+establish the screen's actual label or identify the child as the reported new
+item. Existing v2 requires nonempty order code and lacks a name field: do not
+invent one, discard the child or weaken the validator. Actual display-name source
+evidence and an explicit contract decision remain necessary. No gate is resolved;
+the current-day runtime restriction and production reader block are unchanged.
+An operator-supplied screenshot subsequently confirms the expected code/name in
+the prescription grid. This establishes the UI spelling, not which source
+field/linkage stores it; do not omit that displayed order because the two queried
+catalog fields are blank or because of a financial checkbox.
 KaosOrders is an order-viewing tool, not a claims/insurance/payment workbench;
 billing eligibility is not a prerequisite for showing the complete order list.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.

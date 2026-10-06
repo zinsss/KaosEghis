@@ -75,6 +75,16 @@ implementation. This is not authorization for arbitrary clinical text, notes,
 diagnoses or raw-row export. Keep existing v1/v2 models, strict validators,
 fixtures/hashes and runtime unchanged until that separate change is approved.
 
+The later operator-scoped [catalog check](kaoseghis-named-order-observation.md#approved-single-catalog-follow-up)
+found one linked child with an empty catalog code and NULL standard-name field.
+An operator-supplied screenshot shows the expected code/name in the prescription
+grid, but the storage/linkage supplying those display fields is not established
+from the two queried columns. This is a source/contract gap to investigate,
+not permission to substitute the operator's expected label, discard the child
+as a fee, or weaken v2's nonempty-code requirement. No category, financial,
+transport or board behavior changed. Read the actual display-name source through
+a separately reviewed operation before proposing the contract extension.
+
 ### Current-Day Memory-Only Decision: 2026-10-06
 
 The operator clarified that past clinic days are over, the EMR DB is the source

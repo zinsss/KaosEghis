@@ -279,8 +279,11 @@ live test unless a specific gap needs it.
 Later operator update: the item was entered/sent on an actual vaccinated patient's
 visit on 2026-10-06, superseding the disposable-test setup described above. See the
 [bounded exact-name/code observations](kaoseghis-named-order-observation.md).
-No match was found in the inspected current-day candidate. Verify the visit date
-and exact source representation before attributing it to alternate storage; do
+No name/code match was found in the inspected current-day candidate. The later
+operator-scoped aggregate did find one current-day reception with one same-day
+child. A separately approved singleton read found an empty catalog code and NULL
+standard name, not the actual display label. Verify the exact source
+representation before attributing the earlier zero matches to alternate storage; do
 not request additional permissions based on these zero matches alone. Do not
 alter the real visit for testing. Billing/insurance/payment eligibility is outside
 KaosOrders' order-viewing purpose and is not a source-display gate.
