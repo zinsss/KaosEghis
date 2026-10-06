@@ -276,6 +276,15 @@ live test unless a specific gap needs it.
 
 ## KaosOrders Handoff
 
+Later operator update: the item was entered/sent on an actual vaccinated patient's
+visit on 2026-10-06, superseding the disposable-test setup described above. See the
+[bounded exact-name/code observations](kaoseghis-named-order-observation.md).
+No match was found in the inspected current-day candidate. Verify the visit date
+and exact source representation before attributing it to alternate storage; do
+not request additional permissions based on these zero matches alone. Do not
+alter the real visit for testing. Billing/insurance/payment eligibility is outside
+KaosOrders' order-viewing purpose and is not a source-display gate.
+
 Review this completed sender milestone as a source-blocker update only. Preserve
 the current-day memory-only session design and existing synthetic coordinator;
 do not implement transport, wire fixtures, endpoint, token or board integration.

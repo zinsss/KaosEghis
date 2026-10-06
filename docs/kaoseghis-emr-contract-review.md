@@ -58,6 +58,14 @@ opens all scoped source orders with their original names/codes. Summary categori
 or fee exclusions do not prune this complete detail list. A new national-flu item
 appears as itself, not as a separate translated label. The missing name field is
 an implementation gap against that agreed requirement, not a new UI proposal.
+The operator subsequently entered the item on an actual vaccinated patient's
+visit, not a disposable record. Three bounded current-day
+[exact name/code checks](kaoseghis-named-order-observation.md#observation) found
+no match; physical closure was verified for all three. This does not prove that
+the order was not saved or that it lives in another table. Confirm the visit date
+and exact source representation before any further operation. No gate is resolved.
+KaosOrders is an order-viewing tool, not a claims/insurance/payment workbench;
+billing eligibility is not a prerequisite for showing the complete order list.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The

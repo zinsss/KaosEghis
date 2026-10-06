@@ -50,13 +50,20 @@ This does not bring cancelled encounters back into the agreed encounter scope.
 The new national-flu item should simply appear as itself in this list; no special
 vaccine-code-to-label mapping or new overview pill is requested by this decision.
 
-The operator plans to create a new national-flu item with no billing or payment,
-then use it on a disposable dummy visit. This supersedes the assistant's earlier
-recommendation to test only a no-order dummy first. The intended check is whether
+The operator initially planned a new national-flu item with no billing or payment
+on a disposable visit, then reported adding/sending it on one actual vaccinated
+patient's visit on 2026-10-06. See the narrow read-only
+[named-order observation](kaoseghis-named-order-observation.md). Do not treat this
+as a disposable record or change it for testing. The intended check is whether
 the actual entered order is represented faithfully, not mapped to an invented
-label. No-charge status alone must not be used to assume it is an irrelevant fee
-or hide it. Do not assume an amount of zero guarantees non-billing behavior;
-the EMR configuration remains operator-controlled and is not changed here.
+label. No-charge status must not be used to hide it.
+
+The operator explicitly clarified that KaosOrders views today's actual orders;
+it is not an insurance, claims or payment workbench. Do not make billing
+eligibility/insurance/payment configuration a prerequisite for displaying an
+order, and do not filter the complete detail list on those grounds. This does
+not silently remove previously agreed reception-state facts or change the
+cancelled-encounter exclusion. EMR configuration remains operator-controlled.
 
 The existing offline `OrderFacts`/v2 wire facts contain order code, type and
 department but no order-name field. Source-faithful name display is therefore

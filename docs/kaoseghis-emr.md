@@ -18,6 +18,15 @@ formerly included encounters after cancellation and can restore them after recep
 restoration; failures never imply removal. Existing v1/v2 contracts and synthetic
 fixtures retain their original full scope until a separate session scope is agreed.
 
+The [exact named-order observation](kaoseghis-named-order-observation.md) records
+three narrow current-day name/code checks following an operator-entered order on
+a real visit. No match was found; all physical connections closed before result
+interpretation. Visit-date/source representation confirmation is needed, not a
+guess that the order failed to save. No patient identifiers or raw rows were
+returned. KaosOrders displays actual orders, not claims/insurance/payment tasks;
+those financial decisions are not prerequisites for its complete detail list.
+No production source or runtime behavior changes follow from this evidence.
+
 Status: the first shared-read stage is implemented. Verified chart clears can now
 refresh the existing whole-day PACS query; Poll Now remains a manual fallback.
 PACS, flu-report, health, and patient-context reads share one FIFO worker per
