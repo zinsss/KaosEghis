@@ -447,6 +447,13 @@ performed by these tests, and the running application was not restarted.
 
 ### DB Record Patient Lookup (2026-10-06)
 
+DB table grouping follows the saved record's program only: `national_influenza`
+belongs to Flu, `national_covid` to COVID, and general/private records (including
+`general_influenza`) to General / private. Vaccine names do not override that
+classification. This is a display filter only; existing records and counters are
+not rewritten. The grouping correction passed 116 targeted vaccine DB, lifecycle,
+lookup and exception-counter tests with temporary data and mocked system input.
+
 Double-click a row in the vaccine DB's General, Flu, or COVID table to focus the
 saved record's corresponding system, enter its resident number and send Enter.
 National influenza goes to Flu, national COVID to COVID, and general/private

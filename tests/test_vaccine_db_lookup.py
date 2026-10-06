@@ -74,7 +74,7 @@ def page(tmp_path, monkeypatch):
 
 
 def record_row(panel, program):
-    bucket = {"general_influenza": "flu", "national_influenza": "flu", "national_covid": "covid"}.get(program, "general")
+    bucket = {"national_influenza": "flu", "national_covid": "covid"}.get(program, "general")
     table = getattr(panel, bucket + "_records_table")
     record = panel.test_records[program]
     row = next(row for row in range(table.rowCount()) if table.item(row, 0).text() == str(record.id))
@@ -88,6 +88,33 @@ def form_snapshot(panel):
         panel._prepared_pair_ids, panel.vaccine_types_combo.currentIndex(),
         panel.charting_text_preview.toPlainText(),
     )
+
+
+@pytest.mark.parametrize("program,bucket", [
+    ("general", "general"), ("general_influenza", "general"),
+    ("national_influenza", "flu"), ("national_covid", "covid"),
+    (None, "general"), ("", "general"), ("unknown", "general"),
+])
+@pytest.mark.parametrize("name", ["Influenza", "flu", "COVID-19", "Custom vaccine"])
+def test_db_bucket_uses_saved_program_not_vaccine_name(program, bucket, name):
+    record = SimpleNamespace(program_type=program, vaccine_type_name=name)
+    assert vaccine_tab.VaccineTab._record_bucket(record) == bucket
+
+
+def test_db_tables_separate_private_flu_without_changing_records(page):
+    with connect(page._db_path) as connection:
+        before = list_vaccine_records(connection)
+    page.refresh_view()
+    expected = {
+        "general": {page.test_records["general"].id, page.test_records["general_influenza"].id},
+        "flu": {page.test_records["national_influenza"].id},
+        "covid": {page.test_records["national_covid"].id},
+    }
+    for bucket, ids in expected.items():
+        table = getattr(page, bucket + "_records_table")
+        assert {int(table.item(row, 0).text()) for row in range(table.rowCount())} == ids
+    with connect(page._db_path) as connection:
+        assert list_vaccine_records(connection) == before
 
 
 @pytest.mark.parametrize("program,system", [

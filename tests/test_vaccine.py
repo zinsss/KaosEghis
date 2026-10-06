@@ -1330,7 +1330,7 @@ def test_prepare_flu_and_covid_creates_two_separate_records_from_one_context(tmp
     ]
 
 
-def test_vaccine_tab_db_buckets_split_records_by_type(tmp_path) -> None:
+def test_vaccine_tab_db_buckets_split_records_by_program(tmp_path) -> None:
     _app()
 
     from KaosEghis.db.database import connect, initialize_database
@@ -1344,12 +1344,14 @@ def test_vaccine_tab_db_buckets_split_records_by_type(tmp_path) -> None:
             connection,
             vaccine_type_id=None,
             vaccine_type_name="Influenza",
+            program_type="national_influenza",
             patient_name="홍길동",
         )
         create_vaccine_record(
             connection,
             vaccine_type_id=None,
             vaccine_type_name="COVID-19",
+            program_type="national_covid",
             patient_name="김민수",
         )
         tdap = create_vaccine_type(connection, name="Tdap", code="tdap")

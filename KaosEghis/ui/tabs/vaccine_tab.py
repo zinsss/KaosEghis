@@ -2515,7 +2515,7 @@ class VaccineTab(QWidget):
 
         layout = QVBoxLayout(page)
         layout.addLayout(controls)
-        layout.addWidget(QLabel("General"))
+        layout.addWidget(QLabel("General / private"))
         layout.addWidget(self.general_records_table, 1)
         layout.addWidget(QLabel("Flu (national workflow records)"))
         layout.addWidget(self.flu_records_table, 1)
@@ -2600,19 +2600,10 @@ class VaccineTab(QWidget):
 
     @staticmethod
     def _record_bucket(record) -> str:
-        if getattr(record, "program_type", "") in {
-            "general_influenza",
-            "national_influenza",
-        }:
-            return "flu"
-        if getattr(record, "program_type", "") == "national_covid":
-            return "covid"
-        code = (getattr(record, "vaccine_type_name", "") or "").strip().lower()
-        if code in {"influenza", "flu"}:
-            return "flu"
-        if code in {"covid-19", "covid19", "covid"}:
-            return "covid"
-        return "general"
+        return {
+            "national_influenza": "flu",
+            "national_covid": "covid",
+        }.get(getattr(record, "program_type", ""), "general")
 
     def _filter_records(self, records: list, bucket: str) -> list:
         return [record for record in records if self._record_bucket(record) == bucket]
