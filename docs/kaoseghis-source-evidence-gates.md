@@ -74,6 +74,15 @@ coverage. No-order receptions stay in the diagnostic. The bounded comparison is
 complete, but it neither proves alternate storage absent nor resolves EMR-save
 consistency or any complete source gate. The runtime reader remains UNAVAILABLE.
 
+The subsequent [order-storage review](kaoseghis-order-storage-review.md) completed
+three bounded catalog operations under continued read-only approval. It found 60
+structural candidates, with 44 reviewed profiles and 16 masked names; only the
+existing doctor-order object has SELECT. A separate aggregate inquiry confirmed
+that none of the other 59 has even column-level SELECT. No candidate contents were
+read or permissions bypassed. The 122 missing child matches remain unexplained;
+alternate-storage authority now has a concrete access blocker. All connections
+closed (0.1007/0.0639/0.1020 s). Full source gates and the reader block remain intact.
+
 ## Pinned Scope
 
 - Sender starting HEAD and GitHub `main`:

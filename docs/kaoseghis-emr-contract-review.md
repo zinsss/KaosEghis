@@ -34,6 +34,12 @@ Its 938 linked children and 938 today-dated orders agree, with zero key/link
 anomalies; 267 receptions split into 145 with children and 122 without. Physical
 closure was verified in 0.0731 s. This does not prove absence of alternate order
 storage, resolve save consistency or change the contract/source reader block.
+The [later catalog-only storage review](kaoseghis-order-storage-review.md)
+found 60 structurally plausible candidates but SELECT capability on only the
+existing doctor-order object. None of the other 59 has table- or column-level
+SELECT. This is a concrete limit on investigating alternate storage, not proof
+that those objects are relevant or empty. No complete source or normalized
+snapshot can be claimed from these metadata observations; production remains blocked.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The
