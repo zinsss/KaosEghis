@@ -18,7 +18,7 @@ from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
     create_vaccine_record, create_vaccine_type, delete_vaccine_record,
     get_vaccine_record, list_vaccine_records, mark_vaccine_record_cancelled,
-    mark_vaccine_record_completed,
+    mark_vaccine_record_completed, mark_vaccine_record_printed,
 )
 from KaosEghis.ui.tabs import vaccine_tab
 
@@ -301,3 +301,133 @@ def test_stop_during_mouse_release_delay_sends_nothing(page):
     assert page.test_entered == []
     assert not page._db_lookup_in_progress and page._pending_handoffs == []
     assert form_snapshot(page) == before
+
+
+def visible_record_ids(table):
+    return {
+        int(table.item(row, 0).text()) for row in range(table.rowCount())
+        if not table.isRowHidden(row)
+    }
+
+
+@pytest.fixture
+def exception_page(page):
+    ids = {"exception": page.test_records["national_influenza"].id}
+    with connect(page._db_path) as connection:
+        mark_vaccine_record_completed(
+            connection, ids["exception"], counts_toward_cap=False,
+            completed_at="2026-10-06T09:00:00+09:00",
+        )
+        for name in ("counted", "prepared", "printed", "cancelled", "older_exception", "error"):
+            record = create_vaccine_record(
+                connection, vaccine_type_id=None, vaccine_type_name="Synthetic " + name,
+                program_type="national_influenza", patient_name="Synthetic filter patient",
+                patient_resident_id="700101-1000099",
+            )
+            ids[name] = record.id
+            if name == "printed":
+                mark_vaccine_record_printed(connection, record.id)
+            elif name != "prepared":
+                day = "05" if name == "older_exception" else "06"
+                mark_vaccine_record_completed(
+                    connection, record.id, counts_toward_cap=name == "counted",
+                    completed_at=f"2026-10-{day}T09:00:00+09:00",
+                )
+                if name == "cancelled":
+                    mark_vaccine_record_cancelled(connection, record.id)
+                elif name == "error":
+                    connection.execute("UPDATE vaccine_records SET status = 'error' WHERE id = ?", (record.id,))
+                    connection.commit()
+        for program in ("general", "general_influenza", "national_covid"):
+            mark_vaccine_record_completed(connection, page.test_records[program].id, counts_toward_cap=False)
+    page.refresh_view()
+    page.test_flu_ids = ids
+    return page
+
+
+def test_exception_filter_defaults_off_and_includes_all_national_flu(exception_page):
+    page = exception_page
+    assert not page.flu_exceptions_only_checkbox.isChecked()
+    assert visible_record_ids(page.flu_records_table) == set(page.test_flu_ids.values())
+
+
+def test_exception_filter_is_local_to_flu_and_does_not_query_or_change_form(exception_page, monkeypatch):
+    page = exception_page
+    form = form_snapshot(page)
+    other_ids = (visible_record_ids(page.general_records_table), visible_record_ids(page.covid_records_table))
+    counts = (page.today_influenza_count_label.text(), page.today_covid_count_label.text())
+    with connect(page._db_path) as connection:
+        records = list_vaccine_records(connection)
+        audit_count = connection.execute("SELECT count(*) FROM vaccine_audit_events").fetchone()[0]
+    monkeypatch.setattr(vaccine_tab, "connect", lambda *_a, **_kw: pytest.fail("Filter should not read or write the DB"))
+    page.flu_exceptions_only_checkbox.click()
+    assert visible_record_ids(page.flu_records_table) == {
+        page.test_flu_ids["exception"], page.test_flu_ids["older_exception"],
+    }
+    assert other_ids == (visible_record_ids(page.general_records_table), visible_record_ids(page.covid_records_table))
+    assert form_snapshot(page) == form
+    assert counts == (page.today_influenza_count_label.text(), page.today_covid_count_label.text())
+    assert page.test_entered == []
+    page.flu_exceptions_only_checkbox.click()
+    assert visible_record_ids(page.flu_records_table) == set(page.test_flu_ids.values())
+    with connect(page._db_path) as connection:
+        assert list_vaccine_records(connection) == records
+        assert connection.execute("SELECT count(*) FROM vaccine_audit_events").fetchone()[0] == audit_count
+
+
+@pytest.mark.parametrize("selected", ["exception", "counted"])
+def test_filter_clears_only_a_selection_that_becomes_hidden(exception_page, selected):
+    page = exception_page
+    table = page.flu_records_table
+    record_id = page.test_flu_ids[selected]
+    row = next(row for row in range(table.rowCount()) if int(table.item(row, 0).text()) == record_id)
+    table.selectRow(row)
+    page.flu_exceptions_only_checkbox.setChecked(True)
+    if selected == "exception":
+        assert page._selected_record_id() == record_id
+        assert not table.isRowHidden(row)
+    else:
+        assert page._selected_record_id() is None
+        assert table.currentRow() == -1
+        assert table.isRowHidden(row)
+
+
+def test_exception_filter_stays_enabled_and_rechecks_lifecycle_after_refresh(exception_page):
+    page = exception_page
+    page.flu_exceptions_only_checkbox.setChecked(True)
+    with connect(page._db_path) as connection:
+        mark_vaccine_record_cancelled(connection, page.test_flu_ids["exception"])
+        mark_vaccine_record_completed(connection, page.test_flu_ids["prepared"], counts_toward_cap=False)
+    page.refresh_view()
+    page.show_page(0)
+    page.show_page(1)
+    assert page.flu_exceptions_only_checkbox.isChecked()
+    assert visible_record_ids(page.flu_records_table) == {
+        page.test_flu_ids["older_exception"], page.test_flu_ids["prepared"],
+    }
+    page.flu_exceptions_only_checkbox.setChecked(False)
+    assert visible_record_ids(page.flu_records_table) == set(page.test_flu_ids.values())
+
+
+def test_filtered_exception_double_click_looks_up_the_visible_saved_record(exception_page):
+    page = exception_page
+    before = form_snapshot(page)
+    page.flu_exceptions_only_checkbox.setChecked(True)
+    table = page.flu_records_table
+    record_id = page.test_flu_ids["older_exception"]
+    row = next(row for row in range(table.rowCount()) if int(table.item(row, 0).text()) == record_id)
+    assert not table.isRowHidden(row)
+    table.cellDoubleClicked.emit(row, 3)
+    wait_for_lookup(page)
+    assert page.test_entered == [VaccineHandoffRequest("influenza", "700101-1000099")]
+    assert form_snapshot(page) == before
+    assert page.flu_exceptions_only_checkbox.isChecked()
+
+
+def test_exception_filter_with_no_matches_can_be_cleared(page):
+    expected = visible_record_ids(page.flu_records_table)
+    assert expected
+    page.flu_exceptions_only_checkbox.setChecked(True)
+    assert visible_record_ids(page.flu_records_table) == set()
+    page.flu_exceptions_only_checkbox.setChecked(False)
+    assert visible_record_ids(page.flu_records_table) == expected

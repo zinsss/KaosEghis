@@ -454,6 +454,17 @@ classification. This is a display filter only; existing records and counters are
 not rewritten. The grouping correction passed 116 targeted vaccine DB, lifecycle,
 lookup and exception-counter tests with temporary data and mocked system input.
 
+The national Flu table has an `예외 only` checkbox, off by default. It shows only
+completed national influenza records with `counts_toward_cap=false`, matching the
+exception counter's classification but covering all dates displayed in the DB.
+Prepared, printed-only, cancelled and errored records are excluded. The checkbox
+filters existing rows locally without a DB query, changes no records/counts/forms,
+and leaves General/private and COVID tables unchanged. Its state survives refresh
+and page navigation in the current app session; refresh reapplies current record
+states. A selected row that becomes hidden is deselected before further DB actions.
+Filter verification passed all 123 targeted vaccine DB, lookup, lifecycle and
+exception-counter tests, including filtered-row double-click and no-match recovery.
+
 Double-click a row in the vaccine DB's General, Flu, or COVID table to focus the
 saved record's corresponding system, enter its resident number and send Enter.
 National influenza goes to Flu, national COVID to COVID, and general/private

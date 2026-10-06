@@ -1996,6 +1996,12 @@ class VaccineTab(QWidget):
         table.setRowCount(len(records))
         for row, record in enumerate(records):
             table.setItem(row, 0, QTableWidgetItem(str(record.id)))
+            if table is self.flu_records_table:
+                table.item(row, 0).setData(
+                    Qt.ItemDataRole.UserRole,
+                    record.program_type == "national_influenza"
+                    and record.status == "completed" and not record.counts_toward_cap,
+                )
             table.setItem(row, 1, QTableWidgetItem(record.vaccine_type_name))
             table.setItem(
                 row,
@@ -2023,6 +2029,19 @@ class VaccineTab(QWidget):
             table.setItem(row, 6, QTableWidgetItem(record.status))
             table.setItem(row, 7, QTableWidgetItem(record.completed_on or ""))
         table.resizeColumnsToContents()
+        if table is self.flu_records_table:
+            self._apply_flu_exception_filter()
+
+    def _apply_flu_exception_filter(self) -> None:
+        table = self.flu_records_table
+        exceptions_only = self.flu_exceptions_only_checkbox.isChecked()
+        for row in range(table.rowCount()):
+            item = table.item(row, 0)
+            hidden = exceptions_only and not bool(item.data(Qt.ItemDataRole.UserRole))
+            if hidden and (item.isSelected() or table.currentRow() == row):
+                table.clearSelection()
+                table.setCurrentItem(None)
+            table.setRowHidden(row, hidden)
 
     def _select_vaccine_type(
         self, vaccine_type_id: int | None, vaccine_type_name: str | None
@@ -2517,7 +2536,13 @@ class VaccineTab(QWidget):
         layout.addLayout(controls)
         layout.addWidget(QLabel("General / private"))
         layout.addWidget(self.general_records_table, 1)
-        layout.addWidget(QLabel("Flu (national workflow records)"))
+        flu_header = QHBoxLayout()
+        flu_header.addWidget(QLabel("Flu (national workflow records)"))
+        self.flu_exceptions_only_checkbox = QCheckBox("예외 only")
+        self.flu_exceptions_only_checkbox.toggled.connect(self._apply_flu_exception_filter)
+        flu_header.addWidget(self.flu_exceptions_only_checkbox)
+        flu_header.addStretch()
+        layout.addLayout(flu_header)
         layout.addWidget(self.flu_records_table, 1)
         layout.addWidget(QLabel("COVID"))
         layout.addWidget(self.covid_records_table, 1)
