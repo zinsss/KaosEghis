@@ -445,6 +445,29 @@ group passed 549 tests (the two baseline shortcut-layout cases were deselected).
 No real EMR interaction, resident-number entry, clipboard update, or printing was
 performed by these tests, and the running application was not restarted.
 
+### DB Record Patient Lookup (2026-10-06)
+
+Double-click a row in the vaccine DB's General, Flu, or COVID table to focus the
+saved record's corresponding system, enter its resident number and send Enter.
+National influenza goes to Flu, national COVID to COVID, and general/private
+vaccines (including private influenza) to General. The clicked row determines the
+record even if another table also has a selection. The current form is not used.
+
+This lookup reuses the guarded system input worker. It does not print, update the
+record or counts, change the clipboard, paste EMR charting, or clear/edit the form.
+It requires an already open, uniquely identified system and a complete resident
+number. Missing records, unknown program mappings and invalid numbers stop before
+input; other active vaccine operations block the lookup. A short cancellable delay
+allows the double-click's mouse button to release before the input safety checks.
+Failures leave the form/record unchanged and allow a fresh double-click to retry.
+Success means lookup input was sent, not that the external patient result was verified.
+
+Verification: all 27 new DB lookup tests passed with mocked system input, printing,
+clipboard and EMR access. The complete vaccine test group reported 774 passed and
+26 existing rendering/layout failures; the same 24 label and two shortcut-width
+failures were reproduced on untouched base `97363b6`. No running application was
+restarted and no live lookup or print was performed.
+
 ### External System Handoff
 
 The post-print handoff uses the printed vaccine's configured external system,

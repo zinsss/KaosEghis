@@ -273,6 +273,7 @@ class VaccineTab(QWidget):
         self._prepared_pair_ids: tuple[int, int] | None = None
         self._kdca_thread: threading.Thread | None = None
         self._handoff_thread: threading.Thread | None = None
+        self._db_lookup_in_progress = False
         self._pending_handoffs: list[VaccineHandoffRequest] = []
         self._completed_handoff_charting_texts: list[str] = []
         self._print_in_progress = False
@@ -1228,6 +1229,7 @@ class VaccineTab(QWidget):
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
         requests = tuple(self._pending_handoffs)
+        database_lookup = self._db_lookup_in_progress
         self._handoff_cancel.clear()
 
         def worker() -> None:
@@ -1239,6 +1241,9 @@ class VaccineTab(QWidget):
 
                 pythoncom.CoInitializeEx(pythoncom.COINIT_MULTITHREADED)
                 initialized = True
+                if database_lookup:
+                    # Qt emits the double-click on mouse-down; allow its release.
+                    self._handoff_cancel.wait(0.2)
                 for request in requests:
                     if self._handoff_cancel.is_set():
                         result = VaccineHandoffResult(False, "Entry stopped. Review the system before retrying.")
@@ -1267,6 +1272,15 @@ class VaccineTab(QWidget):
 
     def _finish_handoff(self, completed: int, result: VaccineHandoffResult) -> None:
         self._handoff_thread = None
+        if self._db_lookup_in_progress:
+            self._db_lookup_in_progress = False
+            self._pending_handoffs.clear()
+            self._set_kdca_busy(False)
+            message = result.message
+            if not result.success or completed != 1:
+                message += " Double-click the record to retry."
+            self.status_label.setText(message + " Saved record and form unchanged.")
+            return
         if self._shortcut_lookup_records:
             self._finish_shortcut_lookup(completed, result)
             return
@@ -1407,6 +1421,49 @@ class VaccineTab(QWidget):
         can_retry = pending and not active and not self._print_in_progress and not self._shortcut_in_progress
         self.retry_handoff_button.setEnabled(can_retry)
         self.skip_handoff_button.setEnabled(can_retry)
+
+    def _lookup_database_record(self, table: QTableWidget, row: int) -> None:
+        if (self._pending_handoffs or self._handoff_thread is not None
+                or self._kdca_thread is not None or self._print_in_progress
+                or self._shortcut_in_progress or self._session_reset_in_progress):
+            self.status_label.setText("Finish the current vaccine operation before opening another patient.")
+            return
+        item = table.item(row, 0)
+        if item is None:
+            return
+        try:
+            record_id = int(item.text())
+        except ValueError:
+            self.status_label.setText("Vaccine record not found. Refresh the DB list.")
+            return
+        try:
+            with connect(self._db_path) as connection:
+                record = get_vaccine_record(connection, record_id)
+        except Exception:
+            self.status_label.setText("Vaccine record could not be read. No system input was sent.")
+            return
+        if record is None:
+            self.status_label.setText("Vaccine record not found. Refresh the DB list.")
+            return
+        request = handoff_request_for_record(record)
+        if request.system not in SYSTEM_LABELS:
+            self.status_label.setText("Vaccine system mapping is not configured. No system input was sent.")
+            return
+        digits = resident_id_for_vaccine_system(request.resident_id)
+        if len(digits) != 13 or not digits.isascii() or not digits.isdigit():
+            self.status_label.setText("A complete 13-digit resident number is required. No system input was sent.")
+            return
+        self._db_lookup_in_progress = True
+        self._pending_handoffs = [request]
+        self.status_label.setText(f"Opening patient lookup in {SYSTEM_LABELS[request.system]}...")
+        try:
+            self._start_handoff()
+        except Exception:
+            self._handoff_thread = None
+            self._db_lookup_in_progress = False
+            self._pending_handoffs.clear()
+            self._set_kdca_busy(False)
+            self.status_label.setText("Patient lookup could not start. Saved record and form unchanged.")
 
     def load_selected_record(self) -> None:
         if self._pending_handoffs or self._handoff_thread is not None or self._print_in_progress:
@@ -2466,8 +2523,7 @@ class VaccineTab(QWidget):
         layout.addWidget(self.covid_records_table, 1)
         return page
 
-    @staticmethod
-    def _create_records_table() -> QTableWidget:
+    def _create_records_table(self) -> QTableWidget:
         table = QTableWidget(0, 8)
         table.setHorizontalHeaderLabels(
             [
@@ -2484,6 +2540,9 @@ class VaccineTab(QWidget):
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.cellDoubleClicked.connect(
+            lambda row, _column, source=table: self._lookup_database_record(source, row)
+        )
         return table
 
     def _selected_record_id(self) -> int | None:
