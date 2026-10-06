@@ -14,6 +14,12 @@ required. The v1/v2 bytes, validators and synthetic stores below remain unchange
 their durable cursor assumptions must not be silently reinterpreted as a volatile
 session protocol. Receiver design acknowledgement is needed before implementation.
 Current-day membership/consistency and remaining source gates are still unresolved.
+The later same-day clarification excludes cancelled encounters only from the future
+Orders projection and retains every non-cancelled encounter, including no-order
+visits. All child orders of included encounters remain in scope, including cancelled
+orders. Exclusion/restoration must be recognized from verified source states and
+applied only through complete successful snapshots. This narrows the proposed
+session scope, not the unchanged shared v1/v2 models, fixtures or PACS behavior.
 The [source model](kaoseghis-emr.md#offline-source-model-2026-10-03) remains offline.
 The subsequent [synthetic delivery milestone](kaoseghis-emr-delivery.md) adds an
 isolated local outbox and crash tests, not production storage or transport. The

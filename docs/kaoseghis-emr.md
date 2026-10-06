@@ -11,6 +11,13 @@ not runtime requirements. Same-day source evidence, safe reads and session/rollo
 design remain necessary. This documentation decision changes no running PACS/EMR
 behavior and deletes no data.
 
+The later 2026-10-06 scope clarification retains no-order encounters but excludes
+cancelled encounters from the future Orders projection. This is Orders-specific,
+not a change to shared source facts or PACS. Verified complete snapshots remove
+formerly included encounters after cancellation and can restore them after reception
+restoration; failures never imply removal. Existing v1/v2 contracts and synthetic
+fixtures retain their original full scope until a separate session scope is agreed.
+
 Status: the first shared-read stage is implemented. Verified chart clears can now
 refresh the existing whole-day PACS query; Poll Now remains a manual fallback.
 PACS, flu-report, health, and patient-context reads share one FIFO worker per

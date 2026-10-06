@@ -59,9 +59,17 @@ EMR database (sole durable patient/order source)
 - Same-day additions, edits, cancellation/removal, completion, payment and return
   to hold must still come from source observations. The receiver must not invent
   a durable clinical status independent of the EMR.
-- Today's no-order and cancelled encounters and all scoped children remain source
-  coverage requirements. Preserve the four-part order key; this scope decision
-  does not silently change child selection or remove identity fields.
+- Today's non-cancelled encounters remain in the proposed Orders scope even when
+  they have no orders. The later 2026-10-06 operator clarification excludes
+  cancelled encounters and their child rows from that future Orders projection.
+  Keep all scoped children of included encounters, including cancelled child orders,
+  fees and unclassified rows, with the four-part order key intact.
+- A previously included encounter becoming cancelled is omitted from the next
+  verified complete current-day Orders projection, removing its prior board state.
+  A restored non-cancelled encounter can reappear in a later complete snapshot.
+  Absence means out of the agreed scope, not proof of a particular clinical event.
+  The source must still recognize verified cancellation to apply this scope; unknown
+  or ambiguous states must not be silently excluded.
 - A failed/partial/timed-out read must not clear a populated current-day board or
   imply order deletion. Validated complete replacement remains distinct from
   availability failure. Old-day or old-session responses must not repopulate a
@@ -78,6 +86,13 @@ epoch/revision fields silently, remove validators, or retrofit runtime endpoints
 The separate synthetic SQLite receiver/outbox tests remain intact but no longer
 define the desired production persistence architecture. Configuration/authentication
 design is separate from the prohibition on patient/order persistence.
+
+The cancelled-encounter clarification is a **future Orders-only scope decision**,
+not a filter added to the shared destination-neutral source or KaosPACS. Existing
+v1/v2 models, six-state synthetic fixtures/hashes and the receiver's pure session
+proof remain unchanged. The future current-day session contract must explicitly
+declare its narrower encounter scope before any reader or publisher is enabled.
+No order-level cancellation rule was removed. All source-evidence gates remain open.
 
 No query, EMR UI operation, data deletion, grant change, PACS change, deployment,
 restart or publication was performed for this decision. The production day reader

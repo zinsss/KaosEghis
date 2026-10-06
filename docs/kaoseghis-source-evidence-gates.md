@@ -42,6 +42,16 @@ still need verification. This narrows gates 1-3; it does not establish their pro
 The existing dummy is left unchanged pending a normal operator-confirmed action.
 No new live operation or runtime change followed this clarification.
 
+Later on 2026-10-06 the operator excluded cancelled encounters from the future
+Orders projection while explicitly retaining no-order encounters. Current-day
+membership now means all non-cancelled encounters, whether or not they have orders.
+All children of included encounters remain covered, including cancelled child
+orders. Verified cancellation removes a formerly included encounter from the next
+complete projection; failed/partial reads cannot do so. Restoration must allow it
+to reappear. This Orders-only scope does not alter shared source models, PACS,
+existing v1/v2 fixtures or the synthetic receiver. Recognizing cancellation and
+proving completeness/save consistency remain necessary; no evidence gate is closed.
+
 ## Pinned Scope
 
 - Sender starting HEAD and GitHub `main`:
@@ -113,7 +123,7 @@ evidence, and no gate is closed merely because a fixture can represent the resul
 
 | Gate | Evidence already useful | Missing authority / candidate next investigation |
 | --- | --- | --- |
-| 1. Current-day membership | Candidate reception table/date predicate and no-order receptions observed. Catalog probes found 4 unique dependent views, 3 shared; 23 additional ordinary-relation links and 5 recorded routine links. No selected inheritance/FK links. | Coverage of today's scoped encounters, including no-order/cancelled visits. Metadata alone does not establish that scope; historical backfill/archive coverage and artificial date moves are no longer required. |
+| 1. Current-day membership | Candidate reception table/date predicate and no-order receptions observed. Catalog probes found 4 unique dependent views, 3 shared; 23 additional ordinary-relation links and 5 recorded routine links. No selected inheritance/FK links. | Coverage of today's non-cancelled Orders encounters, including no-order visits, with verified exclusion/restoration of cancelled encounters. Metadata alone does not establish that scope; historical backfill/archive coverage and artificial date moves are no longer required. |
 | 2. Children and save consistency | Four-part key and linked/same-date counts checked in a sample; one statement uses one database statement snapshot. | Complete children for today's encounter scope and an EMR save transaction/completion boundary. One statement can still observe between two EMR commits. Independent autocommit reads are not one snapshot. |
 | 3. Verified-empty authority | Operator-confirmed closed date and zero candidate counts. | Gates 1/2 plus verified current clinic/date, source access and completeness. A failed read is not empty authority. Midnight clearing is an explicit board lifecycle rule, not an empty-source assertion. |
 | 4. States/retained qualifiers | Supervised codes 10/20/25/30/40/50 and some exact flag combinations. | Versioned state truth table including hold_yn Y/N, transient states, unknown/null/blank combinations and consultation versus payment completion. No default mapping from a column name or sample. |
@@ -130,7 +140,8 @@ EMR/schema version, relevant source objects, definition revision and reviewer ro
 patient examples, actual excluded-field values or screenshots containing them.
 
 1. Define which source objects and clinic-day predicate form today's authoritative
-   encounter set. Include no-order/cancelled visits, KST rollover and clinic
+   encounter set. Include no-order visits, verified cancelled-encounter exclusion
+   and restoration, KST rollover and clinic
    partitioning. Prior-day synchronization and artificial date moves are outside
    the clarified requirement.
 2. Define the complete child relation and the uniqueness/reuse domain of encounter,
