@@ -11,11 +11,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QMessageBox
 
 from KaosEghis.core.printer_service import VaccineLabelPrintResult
+from KaosEghis.core.vaccine_eligibility import CovidEligibilityResult, InfluenzaEligibilityResult
 from KaosEghis.core.vaccine_patient_context import VaccinePatientContext, VaccinePatientFetchResult
 from KaosEghis.core.vaccine_system_input import VaccineHandoffResult
 from KaosEghis.db.database import connect, initialize_database
 from KaosEghis.db.repositories import (
-    create_vaccine_record, create_vaccine_type, get_today_vaccine_counts,
+    create_vaccine_record, create_vaccine_type, get_today_vaccine_counts, get_today_vaccine_exception_counts,
     list_vaccine_records, list_vaccine_types, mark_vaccine_record_cancelled,
     mark_vaccine_record_completed, update_vaccine_type,
 )
@@ -99,13 +100,14 @@ def _types(page, program):
     ("national_pair", ["national_influenza", "national_covid"], ["influenza", "covid"]),
     ("general_flu", ["general_influenza"], ["general"]),
 ])
-def test_shortcuts_confirm_fetch_print_and_handoff(shortcut_page, key, programs, systems):
+def test_shortcuts_confirm_fetch_lookup_check_print_and_chart(shortcut_page, key, programs, systems):
     page = shortcut_page
     page.patient_name_input.setText("Stale Patient")
     page.shortcut_buttons[key].click()
     _wait(page)
     events = page.test_events
     assert events[:2] == ["confirm", "fetch"]
+    assert [e[0] for e in events[2:]] == ["entry", "check", "print"] * len(programs) + ["copy", "charting"]
     assert [e[1] for e in events if isinstance(e, tuple) and e[0] == "check"] == programs
     entries = [e[1] for e in events if isinstance(e, tuple) and e[0] == "entry"]
     assert [entry.system for entry in entries] == systems
@@ -256,7 +258,9 @@ def test_eligibility_rejection_keeps_form_without_print(shortcut_page, monkeypat
     page = shortcut_page
     monkeypatch.setattr(page, "_confirm_program_printing", lambda *_a: (False, False))
     page.run_vaccine_shortcut("national_flu")
-    assert page.test_events == ["confirm", "fetch"]
+    _wait(page)
+    assert page.test_events[:2] == ["confirm", "fetch"]
+    assert [e[0] for e in page.test_events[2:]] == ["entry"]
     assert _records(page)[0].status == "prepared"
     assert page.patient_name_input.text() == "Test Patient"
     assert page._session_reminder_started_at is None
@@ -264,7 +268,7 @@ def test_eligibility_rejection_keeps_form_without_print(shortcut_page, monkeypat
 
 
 @pytest.mark.parametrize("key,fail_on", [("national_flu", 1), ("national_pair", 1), ("national_pair", 2)])
-def test_print_failure_keeps_record_and_never_hands_off(shortcut_page, monkeypatch, key, fail_on):
+def test_print_failure_keeps_record_after_lookup_without_charting(shortcut_page, monkeypatch, key, fail_on):
     page = shortcut_page
     attempts = []
     def print_label(*_a, **_kw):
@@ -272,14 +276,16 @@ def test_print_failure_keeps_record_and_never_hands_off(shortcut_page, monkeypat
         return VaccineLabelPrintResult(len(attempts) != fail_on, "Synthetic print failure")
     monkeypatch.setattr(vaccine_tab, "print_vaccine_label", print_label)
     page.run_vaccine_shortcut(key)
-    assert not any(isinstance(e, tuple) and e[0] == "entry" for e in page.test_events)
+    _wait(page)
+    assert len([e for e in page.test_events if isinstance(e, tuple) and e[0] == "entry"]) == fail_on
+    assert not any(isinstance(e, tuple) and e[0] in {"copy", "charting"} for e in page.test_events)
     assert sum(r.status == "completed" for r in _records(page)) == fail_on - 1
     assert page.patient_name_input.text() == "Test Patient"
     assert "failure" in page.status_label.text()
     assert not page._shortcut_in_progress
 
 
-def test_entry_failure_retains_form_and_retry_does_not_reprint(shortcut_page, monkeypatch):
+def test_entry_failure_retains_form_and_retry_prints_only_after_success(shortcut_page, monkeypatch):
     page = shortcut_page
     monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", lambda *_a, **_kw:
                         VaccineHandoffResult(False, "Synthetic entry failure"))
@@ -292,13 +298,169 @@ def test_entry_failure_retains_form_and_retry_does_not_reprint(shortcut_page, mo
     assert page.open_influenza_system_button.isEnabled()
     assert page.kdca_login_button.isEnabled()
     before = _records(page)
+    assert all(r.status == "prepared" for r in before)
+    assert not any(isinstance(e, tuple) and e[0] in {"print", "check", "copy", "charting"} for e in page.test_events)
     monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", lambda *_a, **_kw:
                         VaccineHandoffResult(True, "Sent."))
     page.retry_handoff_button.click()
     _wait(page)
-    assert _records(page) == before
+    after = _records(page)
+    assert [r.id for r in after] == [r.id for r in before]
+    assert all(r.status == "completed" for r in after)
     assert len([e for e in page.test_events if isinstance(e, tuple) and e[0] == "print"]) == 1
     assert page.patient_name_input.text() == ""
+
+
+@pytest.mark.parametrize("key", ["national_flu", "national_covid", "national_pair"])
+@pytest.mark.parametrize("accepted", [False, True])
+def test_exception_review_is_after_lookup_and_before_print(shortcut_page, monkeypatch, key, accepted):
+    page = shortcut_page
+    monkeypatch.setattr(page, "_confirm_program_printing",
+                        vaccine_tab.VaccineTab._confirm_program_printing.__get__(page))
+    for name, result_type in (
+        ("evaluate_influenza_program", InfluenzaEligibilityResult),
+        ("evaluate_covid_program", CovidEligibilityResult),
+    ):
+        result = result_type(
+            status="manual_verification_required", allowed=False,
+            message="Synthetic exception review.", group_key=None, group_label=None,
+            schedule_start=None, schedule_end=None, counted=False,
+            today_count=0, daily_cap=100, remaining=100, requires_operator_confirmation=True,
+        )
+        monkeypatch.setattr(vaccine_tab, name, lambda *_a, result=result, **_kw: result)
+
+    def confirm_exception(*args):
+        assert page.test_events[-1][0] == "entry"
+        assert "address" in args[2] and "qualifies for the exception" in args[2]
+        assert args[-1] == QMessageBox.StandardButton.No
+        assert not page.print_button.isEnabled()
+        assert not page.fetch_button.isEnabled()
+        assert not page.retry_handoff_button.isEnabled()
+        assert not page.skip_handoff_button.isEnabled()
+        page._start_handoff()
+        page._skip_handoff()
+        assert page._handoff_thread is None
+        assert len(page._pending_handoffs) == 1
+        assert not any(isinstance(e, tuple) and e[0] in {"copy", "charting"} for e in page.test_events)
+        page.test_events.append(("exception", args[1]))
+        return QMessageBox.StandardButton.Yes if accepted else QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(QMessageBox, "question", confirm_exception)
+    page.run_vaccine_shortcut(key)
+    _wait(page)
+    if accepted:
+        total = 2 if key == "national_pair" else 1
+        assert [e[0] for e in page.test_events[2:]] == ["entry", "exception", "print"] * total + ["copy", "charting"]
+        assert all(r.status == "completed" and not r.counts_toward_cap for r in _records(page))
+    else:
+        assert [e[0] for e in page.test_events[2:]] == ["entry", "exception"]
+        assert all(r.status == "prepared" for r in _records(page))
+        assert page.patient_name_input.text() == "Test Patient"
+    with connect(page._db_path) as connection:
+        today = vaccine_tab.datetime.now().date().isoformat()
+        assert get_today_vaccine_counts(connection, today) == {"flu": 0, "covid": 0}
+        assert get_today_vaccine_exception_counts(connection, today) == {
+            "flu": int(accepted and key != "national_covid"),
+            "covid": int(accepted and key != "national_flu"),
+        }
+
+
+def test_pair_second_entry_failure_retries_only_second_lookup_and_label(shortcut_page, monkeypatch):
+    page = shortcut_page
+    attempts = []
+
+    def enter(_s, request, **_kw):
+        attempts.append(request.system)
+        return VaccineHandoffResult(len(attempts) != 2, "Synthetic second entry failure")
+
+    monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", enter)
+    page.run_vaccine_shortcut("national_pair")
+    _wait(page)
+    assert attempts == ["influenza", "covid"]
+    assert sorted(r.status for r in _records(page)) == ["completed", "prepared"]
+    assert len([e for e in page.test_events if isinstance(e, tuple) and e[0] == "print"]) == 1
+    assert not any(isinstance(e, tuple) and e[0] in {"copy", "charting"} for e in page.test_events)
+    page.retry_handoff_button.click()
+    _wait(page)
+    assert attempts == ["influenza", "covid", "covid"]
+    assert len([e for e in page.test_events if isinstance(e, tuple) and e[0] == "print"]) == 2
+    assert all(r.status == "completed" for r in _records(page))
+    assert page.test_events[-1][0] == "charting"
+
+
+def test_cancel_after_entry_failure_never_prints_or_clears_patient(shortcut_page, monkeypatch):
+    page = shortcut_page
+    monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", lambda *_a, **_kw:
+                        VaccineHandoffResult(False, "Synthetic entry failure"))
+    page.run_vaccine_shortcut("national_pair")
+    _wait(page)
+    assert page.skip_handoff_button.text() == "Cancel shortcut"
+    page.skip_handoff_button.click()
+    assert all(r.status == "prepared" for r in _records(page))
+    assert page.patient_name_input.text() == "Test Patient"
+    assert not page._pending_handoffs
+    assert not page._shortcut_lookup_records
+    assert page.fetch_button.isEnabled()
+    assert page.skip_handoff_button.text() == "Skip and clear"
+    assert page.test_events == ["confirm", "fetch"]
+
+
+@pytest.mark.parametrize("interruption", ["stopped", "record_cancelled", "provider_error"])
+def test_interrupted_lookup_does_not_print(shortcut_page, monkeypatch, interruption):
+    page = shortcut_page
+
+    def enter(*_a, **_kw):
+        if interruption == "stopped":
+            page._handoff_cancel.set()
+        elif interruption == "record_cancelled":
+            with connect(page._db_path) as connection:
+                entry = list_vaccine_records(connection)[0]
+                mark_vaccine_record_cancelled(connection, entry.id)
+        else:
+            raise RuntimeError("secret patient information")
+        return VaccineHandoffResult(True, "Input sent")
+
+    monkeypatch.setattr(vaccine_tab, "enter_vaccine_resident", enter)
+    page.run_vaccine_shortcut("national_flu")
+    _wait(page)
+    assert page.test_events == ["confirm", "fetch"]
+    assert all(r.status != "completed" for r in _records(page))
+    assert page.patient_name_input.text() == "Test Patient"
+    assert "secret" not in page.status_label.text()
+
+
+def test_second_program_decline_preserves_first_completed_record(shortcut_page, monkeypatch):
+    page = shortcut_page
+    monkeypatch.setattr(page, "_confirm_program_printing", lambda record, *_a:
+                        (record.program_type == "national_influenza", True))
+    page.run_vaccine_shortcut("national_pair")
+    _wait(page)
+    assert [e[0] for e in page.test_events[2:]] == ["entry", "print", "entry"]
+    records = {r.program_type: r for r in _records(page)}
+    assert records["national_influenza"].status == "completed"
+    assert records["national_covid"].status == "prepared"
+    assert "1 label(s) completed" in page.status_label.text()
+    assert page.charting_text_preview.toPlainText()
+    assert not page._pending_handoffs
+    assert not page._shortcut_lookup_records
+
+
+def test_print_exception_after_lookup_is_redacted_and_does_not_chart(shortcut_page, monkeypatch):
+    page = shortcut_page
+
+    def fail(*_a, **_kw):
+        raise RuntimeError("secret patient information")
+
+    monkeypatch.setattr(vaccine_tab, "print_vaccine_label", fail)
+    page.run_vaccine_shortcut("national_flu")
+    _wait(page)
+    assert [e[0] for e in page.test_events[2:]] == ["entry", "check"]
+    assert all(r.status == "prepared" for r in _records(page))
+    assert not page._print_in_progress
+    assert not page._shortcut_in_progress
+    assert not page._pending_handoffs
+    assert page.print_button.isEnabled()
+    assert "secret" not in page.status_label.text()
 
 
 @pytest.mark.parametrize("busy", ["_shortcut_in_progress", "_print_in_progress", "_session_reset_in_progress",
@@ -352,7 +514,9 @@ def test_shortcut_keeps_real_program_configuration_guard(shortcut_page, monkeypa
     monkeypatch.setattr(page, "_confirm_program_printing",
                         vaccine_tab.VaccineTab._confirm_program_printing.__get__(page))
     page.run_vaccine_shortcut("national_flu")
-    assert page.test_events == ["confirm", "fetch"]
+    _wait(page)
+    assert page.test_events[:2] == ["confirm", "fetch"]
+    assert [e[0] for e in page.test_events[2:]] == ["entry"]
     assert not page._pending_handoffs
     assert _records(page)[0].status == "prepared"
     assert page._session_reminder_started_at is None

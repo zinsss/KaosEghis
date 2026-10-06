@@ -1,4 +1,4 @@
-"""Explicit, guarded patient lookup after vaccine-label printing."""
+"""Explicit, guarded patient lookup for vaccine workflows."""
 
 from __future__ import annotations
 

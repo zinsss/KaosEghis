@@ -226,8 +226,9 @@ class VaccineShortcutDialog(QDialog):
             self.combos.append(combo)
         layout.addLayout(form)
         confirmation = QLabel(
-            "Fetch the current EMR patient, check eligibility, print the selected label(s), "
-            "enter the resident number into the corresponding vaccine system(s), "
+            "Fetch the current EMR patient and enter the resident number into each "
+            "vaccine system before its label is printed. Check the address and confirm "
+            "eligibility when an exception requires review. Print approved label(s) "
             "and paste charting text into EMR?"
         )
         confirmation.setWordWrap(True)
@@ -276,6 +277,8 @@ class VaccineTab(QWidget):
         self._completed_handoff_charting_texts: list[str] = []
         self._print_in_progress = False
         self._shortcut_in_progress = False
+        self._shortcut_lookup_records: list[VaccineRecord] = []
+        self._shortcut_printed_count = 0
         self._session_reset_in_progress = False
         self._session_reset_thread: threading.Thread | None = None
         self._session_reset_cancel = threading.Event()
@@ -664,6 +667,7 @@ class VaccineTab(QWidget):
             return
         title, programs = VACCINE_SHORTCUTS[key]
         self._shortcut_in_progress = True
+        self._shortcut_printed_count = 0
         self._update_handoff_controls()
         try:
             with connect(self._db_path) as connection:
@@ -709,16 +713,90 @@ class VaccineTab(QWidget):
             chosen = selected[-1]
             self._select_vaccine_type(chosen.id, chosen.name)
             if len(selected) == 2:
-                if self._prepare_flu_and_covid(flu_type_id=selected[0].id) is not None:
-                    self._print_prepared_pair(confirmed=True)
+                records = self._prepare_flu_and_covid(flu_type_id=selected[0].id)
             else:
-                self._print_label(handoff_confirmed=True)
+                record = self.save_record()
+                records = (record,) if record is not None else None
+            if records:
+                self._shortcut_lookup_records = list(records)
+                self._completed_handoff_charting_texts.clear()
+                self._queue_shortcut_lookup()
         except Exception:
             # Never expose patient data from provider exceptions in status/logs.
-            self.status_label.setText("Vaccine shortcut stopped. Check printed labels and saved records before retrying; form retained.")
+            self._stop_shortcut_lookup("Vaccine shortcut stopped. Check printed labels and saved records before retrying.")
         finally:
             self._shortcut_in_progress = False
             self._update_handoff_controls()
+
+    def _queue_shortcut_lookup(self) -> None:
+        record = self._shortcut_lookup_records[0]
+        self._current_record_id = record.id
+        self._select_vaccine_type(record.vaccine_type_id, record.vaccine_type_name)
+        with connect(self._db_path) as connection:
+            vaccine_type = get_vaccine_type(connection, record.vaccine_type_id)
+        charting_text = _charting_text(
+            record.vaccine_type_name,
+            vaccine_type.chart_note_template if vaccine_type is not None else None,
+        )
+        self._pending_handoffs = [handoff_request_for_record(record, charting_text=charting_text)]
+        self._start_handoff()
+
+    def _finish_shortcut_lookup(self, completed: int, result: VaccineHandoffResult) -> None:
+        self._shortcut_in_progress = True
+        self._set_kdca_busy(False)
+        try:
+            if self._handoff_cancel.is_set() or completed != 1 or not result.success:
+                message = "Entry stopped." if self._handoff_cancel.is_set() else result.message
+                self.status_label.setText(
+                    f"{message} No label printed for this vaccine. Retry entry or cancel shortcut; form retained."
+                )
+                return
+            expected = self._shortcut_lookup_records[0]
+            with connect(self._db_path) as connection:
+                current = get_vaccine_record(connection, expected.id)
+            if current != expected or current.status != "prepared":
+                self._stop_shortcut_lookup("Prepared record changed during system lookup. Review it before printing.")
+                return
+            # The system stays on this patient while the operator reviews exceptions.
+            self._current_record_id = expected.id
+            self._select_vaccine_type(expected.vaccine_type_id, expected.vaccine_type_name)
+            self._print_in_progress = True
+            try:
+                printed = self._print_current_label()
+            finally:
+                self._print_in_progress = False
+            if printed is None:
+                self._stop_shortcut_lookup(self.status_label.text())
+                return
+            self._shortcut_printed_count += 1
+            self._shortcut_lookup_records.pop(0)
+            if self._shortcut_lookup_records:
+                self._completed_handoff_charting_texts.extend(
+                    request.charting_text for request in self._pending_handoffs if request.charting_text
+                )
+                self._pending_handoffs.clear()
+                self._queue_shortcut_lookup()
+            else:
+                # Reuse the existing clipboard/charting path, without entering twice.
+                self._finish_post_print_handoff(completed, result)
+        except Exception:
+            self._stop_shortcut_lookup("Shortcut stopped. Check printed labels and saved records before retrying.")
+        finally:
+            self._shortcut_in_progress = False
+            self._update_handoff_controls()
+
+    def _stop_shortcut_lookup(self, message: str) -> None:
+        printed_charting_text = "\n".join(self._completed_handoff_charting_texts)
+        self._shortcut_lookup_records.clear()
+        self._pending_handoffs.clear()
+        self._completed_handoff_charting_texts.clear()
+        self._set_kdca_busy(False)
+        self.status_label.setText(
+            f"{message} {self._shortcut_printed_count} label(s) completed in this shortcut. "
+            "No further labels or EMR charting sent; form and saved records retained."
+        )
+        if printed_charting_text:
+            self.charting_text_preview.setPlainText(printed_charting_text)
 
     def log_in_to_kdca(self) -> bool:
         return self._start_kdca_operation()
@@ -1144,7 +1222,8 @@ class VaccineTab(QWidget):
             self._skip_handoff()
 
     def _start_handoff(self) -> None:
-        if not self._pending_handoffs or self._handoff_thread is not None or self._kdca_thread is not None:
+        if (not self._pending_handoffs or self._handoff_thread is not None
+                or self._kdca_thread is not None or self._print_in_progress):
             return
         with connect(self._db_path) as connection:
             settings = get_settings(connection)
@@ -1188,6 +1267,12 @@ class VaccineTab(QWidget):
 
     def _finish_handoff(self, completed: int, result: VaccineHandoffResult) -> None:
         self._handoff_thread = None
+        if self._shortcut_lookup_records:
+            self._finish_shortcut_lookup(completed, result)
+            return
+        self._finish_post_print_handoff(completed, result)
+
+    def _finish_post_print_handoff(self, completed: int, result: VaccineHandoffResult) -> None:
         self._completed_handoff_charting_texts.extend(
             request.charting_text for request in self._pending_handoffs[:completed] if request.charting_text
         )
@@ -1267,7 +1352,10 @@ class VaccineTab(QWidget):
             self.charting_text_preview.setPlainText(charting_text)
 
     def _skip_handoff(self) -> None:
-        if self._handoff_thread is not None or self._kdca_thread is not None:
+        if self._handoff_thread is not None or self._kdca_thread is not None or self._print_in_progress:
+            return
+        if self._shortcut_lookup_records:
+            self._stop_shortcut_lookup("Vaccine shortcut cancelled.")
             return
         self._pending_handoffs.clear()
         self._completed_handoff_charting_texts.clear()
@@ -1314,9 +1402,11 @@ class VaccineTab(QWidget):
         )
         self.print_prepared_pair_button.setEnabled(not blocked and self._prepared_pair_ids is not None)
         self.retry_handoff_button.setVisible(pending)
+        self.skip_handoff_button.setText("Cancel shortcut" if self._shortcut_lookup_records else "Skip and clear")
         self.skip_handoff_button.setVisible(pending)
-        self.retry_handoff_button.setEnabled(pending and not active)
-        self.skip_handoff_button.setEnabled(pending and not active)
+        can_retry = pending and not active and not self._print_in_progress and not self._shortcut_in_progress
+        self.retry_handoff_button.setEnabled(can_retry)
+        self.skip_handoff_button.setEnabled(can_retry)
 
     def load_selected_record(self) -> None:
         if self._pending_handoffs or self._handoff_thread is not None or self._print_in_progress:
@@ -2146,8 +2236,9 @@ class VaccineTab(QWidget):
     def _confirm_rural_exception_printing(self, program: str, result) -> tuple[bool, bool]:
         confirmation = (
             f"{result.message}\n\n"
-            "Proceed only after manually verifying the individual patient's "
-            "rural-area exception in the national vaccination system."
+            "Check the patient's address and exception eligibility in the national "
+            "vaccination system. Print this label only after confirming that the "
+            "patient qualifies for the exception. Proceed?"
         )
         if (
             QMessageBox.question(

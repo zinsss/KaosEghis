@@ -377,7 +377,7 @@ engine remains compatible.
 KaosEghis must never submit the final vaccination record without an explicit operator
 action.
 
-### Vaccine Shortcuts (2026-10-01)
+### Vaccine Shortcuts (lookup-first revision 2026-10-06)
 
 The Main page has four explicit actions: `National Influenza`, `National COVID`,
 `National Flu+COVID`, and `General Influenza`.
@@ -398,12 +398,30 @@ The Main page has four explicit actions: `National Influenza`, `National COVID`,
 - Existing age, schedule, cap, general/private target warnings, and explicit
   exception confirmations remain in force. The pair fetches once, creates two
   separate records, and checks/prints each independently.
-- Successful label printing/checkpointing proceeds directly to the corresponding
-  resident-number entry and EMR chart-text handoff, without repeating the generic
-  post-print confirmation. Normal manual printing retains its existing prompts.
-- Print failure retains the form; partial pair printing sends no system input.
-  Entry failure keeps `Retry entry` / `Skip and clear`. Login/launch remains
-  available for recovery, and retry does not reprint or increment counters.
+- Each selected vaccine now runs in this order: resident-number lookup in its
+  corresponding system, existing program check/operator exception confirmation,
+  then label printing/completion. Normal eligible cases print without another
+  confirmation; existing child-dose and general/private warnings still apply.
+- Exception confirmation occurs only after lookup input succeeds. The operator
+  checks the address and exception eligibility in the external national system
+  before choosing Yes; No is the default and stops further printing. Input success
+  means that the resident number and Enter were sent, not that a patient result
+  loaded or an address/exception was automatically verified.
+- For Flu+COVID, perform lookup/review/printing for Flu first, then COVID, so each
+  review takes place before changing to the next system. No second resident-number
+  insertion occurs after printing. Clipboard/EMR charting follows only after all
+  selected labels complete. Normal manual printing retains its existing workflow.
+- Entry failure retains the form and prepared record without printing/counting
+  that vaccine. `Retry entry` retries that system, then resumes checking/printing
+  only after success; `Cancel shortcut` stops without clearing the patient form.
+  Login/launch stays available for recovery. A successful earlier pair label is
+  not reprinted or counted again when the second system is retried.
+- Declined/blocked checks, changed records, stopped lookup, and print failures
+  stop further labels/charting and retain the form and saved records. A partial
+  pair keeps its completed first record and uncompleted second record; status
+  reports the completed-label count. Charting text for already completed labels
+  remains available for manual recovery. No automatic retry, clinical registration,
+  or address-based eligibility decision is introduced.
 - Conflicting actions and repeated shortcut activation are blocked during the
   workflow. No new automatic login, reset, clinical registration, or EMR database
   query is introduced. Keep the same patient selected in EMR throughout.
@@ -414,9 +432,18 @@ restart an already-running reminder.
 
 Validation uses synthetic patients, temporary local databases, and mocked EMR,
 printer, clipboard, and system input. Live end-to-end verification is still needed.
-The Windows regression run passed 2,026 tests, including 49 shortcut cases;
+The initial shortcut implementation's Windows regression run passed 2,026 tests,
+including 49 shortcut cases;
 native Qt previews were checked at 1280x900 and 1920x1080 without opening the live
 app or sending printer/EMR input.
+
+Lookup-first revision validation (2026-10-06): 88 focused workflow tests passed.
+The full isolated run passed 3,290 tests with 26 existing label-rendering/layout
+failures; all 26 were reproduced with the unchanged `10afd0c` VaccineTab source.
+After the final review-dialog reentry guards, the non-renderer vaccine regression
+group passed 549 tests (the two baseline shortcut-layout cases were deselected).
+No real EMR interaction, resident-number entry, clipboard update, or printing was
+performed by these tests, and the running application was not restarted.
 
 ### External System Handoff
 
