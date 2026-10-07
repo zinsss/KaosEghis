@@ -1,6 +1,6 @@
 # Reception current-day patient source
 
-- Status: **accepted logical contract aligned; production reader remains blocked**
+- Status: **bounded source adapter implemented with synthetic DB proof; live activation blocked**
 - Last updated: **2026-10-07**
 - Owning project: **KaosEghis**
 - Affected projects: **KaosEghis, KaosReception, orchestration**
@@ -75,8 +75,33 @@ A separate Eghis source-reader review must approve one parameterized, bounded,
 read-only day query through the existing serialized reader and credential path.
 It must prove unique encounter membership, patient-name join cardinality, complete
 zero-row authority, row bounds, snapshot consistency, cleanup, and no output of
-chart number or other patient data. No SQL reader, publisher, endpoint, UI,
-trigger, persistence, or deployment is authorized by this change.
+chart number or other patient data. No live source invocation, publisher,
+endpoint, UI, trigger, persistence, or deployment is authorized by this change.
+
+### Bounded source adapter gate
+
+`KaosEghis/core/reception_current_day_reader.py` now implements the reviewed
+production-shaped query and an unwired `BoundedReceptionDayProvider`. The provider
+accepts a caller-supplied query callable matching the existing serialized
+`run_readonly_query` boundary; it never imports settings, discovers credentials,
+or opens a connection itself. No runtime module constructs this provider.
+
+The single parameterized CTE SELECT applies a server-side `Asia/Seoul` day guard,
+filters exactly `proc_gb IN ('30', '40')`, joins the patient master internally,
+and emits one META proof plus deterministic DATA rows. The META proof fails closed
+for the 10,001st included encounter, duplicate encounter identity, patient-master
+join cardinality other than one, invalid name/identity, or a 16 MiB result-byte
+sentinel. A complete META row with zero DATA rows is verified-empty authority.
+The adapter independently revalidates the closed columns, row/byte bounds,
+timestamps, freshness, duplicate conflicts, fixed status mapping, and ordered
+cleanup timings. Connection and statement limits are 3 and 2 seconds; completion
+proof over 6 seconds is rejected.
+
+Tests execute this exact SQL against an in-memory synthetic SQLite schema. This
+proves relational and adapter behavior, parameter separation, and fail-closed
+cleanup handling. It does not prove the live database plan, permissions, data
+domains, capacity, latency, or join cardinality. The existing credential owner
+and serialized reader remain unchanged and are not invoked by the tests.
 
 ## Evidence and validation
 
@@ -87,12 +112,20 @@ trigger, persistence, or deployment is authorized by this change.
 - New synthetic tests cover literal mappings, clinic-time boundary, freshness,
   completeness, unknown-state exclusion, deduplication, deterministic ordering,
   redaction, closed fields, and absence of I/O imports.
+- Source-adapter synthetic DB tests cover the exact parameterized query, 30/40
+  filtering, verified empty, encounter and patient-join cardinality, row/byte/time
+  bounds, cleanup proof, injection separation, fixed errors, and no credential or
+  runtime surface.
 
 ## Open questions and next action
 
-1. Eghis may propose the bounded production query and synthetic DB tests;
-   no live read is implied or approved.
-2. Transport/runtime work remains blocked on the production gates in the
+1. Integration review must accept the bounded query/adapter and synthetic DB
+   evidence before any live-source request.
+2. A separately approved, bounded non-patient/live shadow preflight must still
+   verify the actual PostgreSQL plan/types, SELECT privilege, expected domains,
+   cleanup, latency, and complete-day/join assumptions. This commit does not
+   authorize or perform that operation.
+3. Transport/runtime work remains blocked on the production gates in the
    accepted central contract and separate authorization.
 
 ## Revision history
@@ -102,3 +135,6 @@ trigger, persistence, or deployment is authorized by this change.
   and production-reader gates; no live source or Reception runtime was touched.
 - **2026-10-07:** Aligned the provider source ID and fixed 300-second freshness
   ceiling with the accepted central contract and Reception consumer.
+- **2026-10-07:** Added the unwired bounded parameterized source adapter and
+  synthetic SQLite proof. Kept credential access, live reads, transport, runtime,
+  persistence, logging, UI, printing, and deployment disabled.
