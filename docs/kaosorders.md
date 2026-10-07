@@ -11,7 +11,11 @@ now includes `qty`/`divide`/`days` as independent candidate source facts. A sepa
 [approved one-row check](kaoseghis-order-grid-numeric-evidence.md) confirmed exact
 grid name/number correspondence and PostgreSQL `numeric` types on 2026-10-07.
 All-category coverage, numeric null/domain/scale policy and production approval
-remain unresolved. The full-row draft itself has not been executed or enabled.
+remain unresolved. A [separate bounded full-field diagnostic](kaoseghis-current-day-read-evidence.md)
+subsequently read 269 current-day candidate receptions and 1,025 linked orders,
+including 7 no-order receptions, with verified closure in 74.467 ms. Only sanitized
+counts/timings were reported. This is a one-shot observation, not runtime enablement
+or complete source authority; the original draft SQL remains unchanged.
 This does not add fields to a receiver model or silently assign dose semantics.
 
 **Current implementation handoff:** the [2026-10-07 complete-order design](kaoseghis-current-day-orders-design.md)

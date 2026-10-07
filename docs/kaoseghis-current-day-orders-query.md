@@ -3,6 +3,13 @@
 Prepared 2026-10-07 from sender `22550e6733e87b497bf311249d06d3a795a4bb6c`.
 **This full-row draft remains offline. No live execution or polling enablement.**
 
+A [separate capped one-shot diagnostic copy](kaoseghis-current-day-read-evidence.md)
+was approved and executed on 2026-10-07. It observed 269 candidate receptions,
+1,025 orders and 7 no-order receptions in 1,032 rows, with verified physical
+closure in 74.467 ms and aggregate-only output. That copy adds diagnostic numeric
+and reception-code length guards. This original SQL/hash remains unchanged; no
+runtime day reader or polling was enabled.
+
 ## Operator Requirement
 
 The requested details are the values populated in the EMR orders grid when a

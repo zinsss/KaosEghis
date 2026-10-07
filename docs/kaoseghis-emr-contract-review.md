@@ -6,6 +6,15 @@ Status: **v1 synthetic parity and v2 receiver-only synthetic proofs complete;
 production source authority remains unresolved**.
 This is not an approved HTTP endpoint, production query or deployment change.
 
+**2026-10-07 full-field checkpoint:** a separately approved, capped
+[one-shot current-day diagnostic](kaoseghis-current-day-read-evidence.md) observed
+269 candidate receptions, 1,025 orders and 7 no-order receptions. The selected
+name/number fields were read transiently; only aggregate findings/timings were
+reported after verified cursor/physical closure (74.467 ms connection lifecycle).
+This establishes successful full-field extraction and internal structural checks
+for one statement scope, not authoritative membership or multi-commit save
+consistency. All production gates and the UNAVAILABLE runtime block remain.
+
 **2026-10-07 current design:** receiver `3813b52` accepts the four independent
 nullable order-text facts for synthetic use (reported 315 focused / 709 full
 tests). The sender's [complete current-day order design](kaoseghis-current-day-orders-design.md)
