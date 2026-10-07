@@ -1,12 +1,12 @@
 # Current-Day Orders Query Draft
 
 Prepared 2026-10-07 from sender `22550e6733e87b497bf311249d06d3a795a4bb6c`.
-**Offline candidate SQL only. No live execution or polling enablement.**
+**This full-row draft remains offline. No live execution or polling enablement.**
 
 ## Operator Requirement
 
 The requested details are the values populated in the EMR orders grid when a
-patient is selected: prescription name, daily administered quantity (the operator
+patient is selected: prescription name, displayed daily quantity (the operator
 confirmed the meaning of the UI label), frequency/count and days. Preserve those
 displayed facts rather than substituting categories, billing eligibility or a
 computed medication instruction. Do not multiply or divide quantity by frequency,
@@ -24,15 +24,16 @@ The screenshot identifies the UI columns, not their database-column mapping.
 
 | Requested grid column | Candidate source | Draft output | Evidence / remaining question |
 | --- | --- | --- | --- |
-| Prescription name | `user_nm` | `user_name` | One earlier supervised screen/name match; all-category grid correspondence unverified |
-| Daily quantity | `qty` | `source_qty` | Column/change observations exist; exact correspondence to the daily UI value still requires comparison |
-| Frequency/count | `divide` | `source_divide` | Column/change observations exist; exact UI mapping, numeric type and domain unverified |
-| Days | `days` | `source_days` | Column/change observations exist; exact UI mapping, numeric type and domain unverified |
+| Prescription name | `user_nm` | `user_name` | Earlier name evidence plus one exact current-day grid comparison; all-category correspondence unverified |
+| Daily quantity | `qty` | `source_qty` | One approved grid equality; source type `numeric`; all-category domain/null/scale/units unverified |
+| Frequency/count | `divide` | `source_divide` | One approved grid equality; source type `numeric`; all-category domain/null/scale unverified |
+| Days | `days` | `source_days` | One approved grid equality; source type `numeric`; all-category domain/null/scale unverified |
 
-Confirming that the UI label means daily quantity does not prove that `qty` is
-already daily quantity rather than another quantity. Until a supervised match,
-the query exposes the three candidate columns independently under source names,
-not normalized `quantity`/`frequency` or clinical dose semantics. Raw values are
+The separate [approved single-row comparison](kaoseghis-order-grid-numeric-evidence.md)
+found exact code/name and three numeric equalities on 2026-10-07. This is evidence
+for the displayed correspondence in that sample, not a universal dose definition.
+The query still exposes the three candidate columns independently under source
+names, not normalized `quantity`/`frequency` or clinical dose semantics. Raw values are
 selected without casts, rounding, defaults, arithmetic or unit suffixes. Future
 numeric handling must preserve exact values, reject binary-float approximations,
 and approve null/domain/scale/bounds from source evidence, not the old v2 contract.
@@ -157,19 +158,17 @@ adds a distinct candidate SQL fixture. `git diff --check` passed. No production 
 UI, API or service was accessed or changed. The unrelated full UI suite was not
 rerun for this offline SQL/test/documentation change.
 
-Next bounded source check should match one operator-selected grid row's four
-displayed values to these candidate columns, with source types/null/scale reviewed
-and no patient identifiers or raw clinical rows in output. This request to write
-SQL is not approval to run that check or a new full-day field export.
-
 The separate [one-row numeric comparison](kaoseghis-order-grid-numeric-evidence.md)
-documents the exact bounded statement, mocked tests and passive elevated UIA
-inspection. It does not enable this full-row draft or certify numeric mappings.
+documents the exact bounded statement, mocked tests and one approved live result.
+It confirmed the screen equalities and source `numeric` types, with all source
+connections closed, but did not establish null/scale/domain or all-category rules.
+It does not enable this full-row draft or authorize a new full-day field export.
 
 The [earlier complete-model design](kaoseghis-current-day-orders-design.md) deferred
 numeric fields. The operator now requests their grid display explicitly; this draft
 prepares candidate retrieval only. It does not silently change a normalized model,
 v1/v2 validator, receiver contract, fixture/hash, session coordinator or serializer.
-All source-evidence gates remain unresolved, including numeric/grid correspondence.
+All production source-evidence gates remain unresolved, including all-category
+numeric/grid correspondence and numeric bounds/null/scale policy.
 No runtime/settings/trigger, publishing, transport, persistent store, board/PACS,
 deployment or restart is introduced. `/api/v1/order-snapshots` remains prohibited.

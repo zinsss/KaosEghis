@@ -1,6 +1,6 @@
 # Controlled Order Grid Numeric Comparison
 
-Date: 2026-10-07, Asia/Seoul. Evidence preparation only, not a runtime reader.
+Date: 2026-10-07, Asia/Seoul. One approved evidence comparison, not a runtime reader.
 
 ## Purpose And UI Check
 
@@ -66,11 +66,58 @@ validation; SQL also checks the current server KST day. Midnight invalidates the
 operation. This is one-row candidate correspondence only, not save consistency,
 selected-visit authority or full-day completeness proof.
 
-## Status And Limits
+## Approved Live Result
 
-The operator approved elevated passive inspection. A separate explicit approval
-was requested for the exact one-statement live numeric comparison after the
-focused mocked tests passed. No live database comparison has been performed yet.
+The operator separately approved the exact one-statement comparison with "go"
+after the focused mocked tests passed. It was performed once on the current KST
+clinic day, 2026-10-07. The parameterized SQL and its hash were unchanged.
+
+Two initial UI capture attempts stopped before opening a source connection because
+the TreeItem row had no UIA runtime ID. The chart and grid runtime IDs were present.
+The successful capture used the verified chart/grid identities plus a bounded
+row position/rectangle and exact code/name/three-number comparison before and
+after the read. This is a transient UI position, NOT a source-order identity.
+The DB still had to establish exactly one current-day reception and exactly one
+code/name child with valid four-part keys. The comparator validator was unchanged.
+Eight additional synthetic checks covered the temporary row-position guard.
+
+Sanitized result: `one_row_numeric_match`, `authoritative_snapshot=false`.
+
+| Screen fact | Compared source | Result for this sample |
+| --- | --- | --- |
+| Code | `user_cd` | Exact match in the singleton lookup |
+| Code name / prescription name | `user_nm` | Exact match in the singleton lookup |
+| Daily amount | `qty` | Equal; PostgreSQL type `numeric` |
+| Frequency/count | `divide` | Equal; PostgreSQL type `numeric` |
+| Days | `days` | Equal; PostgreSQL type `numeric` |
+
+All three screen numbers were different, so the equalities distinguish their
+column positions. None of their actual values or prescription text is recorded.
+The approved result contains only booleans, allowlisted source types, closure
+proof and timings. No identifiers, raw rows, query parameters or provider errors
+were output or persisted by the inspection helper or in these reports.
+
+- Source statement calls: **1**, through the shared FIFO and global Windows mutex.
+- Read-only session verified before the SELECT: **true**.
+- Cursor closed and verified: **true**.
+- Physical connection closed and verified before interpretation: **true**.
+- Connection lifecycle: **0.0622 s (62.2 ms)**, including connect/session setup,
+  SELECT/fetch and cleanup. This is NOT isolated SQL execution time or server CPU.
+- Passive UI captures: **5,409.1 ms before**, **4,124.6 ms after**. These include
+  discovery/provider access and are separate from database connection time.
+- UI actions sent: **0**. No click, typing, focus change or database write.
+
+The transient UI helper has an existing-report guard against accidental rerun;
+no source-reading helper was added to application runtime. No second DB query,
+execution-plan call or historical-day access was performed for this operation.
+
+## Limits And Verification
+
+This is a controlled single-row correspondence observation. It does not establish
+all-category name/number coverage, source precision/scale/null/domain limits,
+clinical units, actual administration, save consistency, durable UI row identity,
+key lifecycle or whole-day authority. A matching row must not be generalized into
+an approved clinical dose calculation. All production evidence gates stay open.
 
 Focused coverage includes synthetic relational execution of the actual SELECT
 (PostgreSQL-specific syntax/type introspection adapted to in-memory SQLite),
@@ -78,9 +125,10 @@ strict Decimal input, ambiguous/missing rows, key/date guards, UI changes, midni
 unknown types, read-only/cleanup failures, queue poisoning and redacted reporting.
 SQLite adaptation is not PostgreSQL type or execution-plan certification.
 
-Verification: 97 focused tests passed. The broader isolated source/shadow,
+Verification before the live query: 97 focused tests passed again in 1.14 s.
+After recording the live findings, the broader isolated source/shadow,
 serializer/outbox/shared-reader, PACS, flu and patient-context group passed
-2,737 tests in 50.29 s (one existing pywinauto COM threading warning). Source DB
+2,737 tests in 47.81 s (one existing pywinauto COM threading warning). Source DB
 connections are mocked, test mutexes are isolated and external network is blocked.
 The unrelated full UI suite and its previously known failures were not modified
 or rerun for this test-only change.

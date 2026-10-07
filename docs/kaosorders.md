@@ -7,8 +7,11 @@ Last updated: 2026-10-07
 **Latest grid-detail request:** the operator wants the EMR-selected patient's
 prescription name, daily quantity, frequency/count and days as shown in its orders
 grid. An [offline current-day query draft](kaoseghis-current-day-orders-query.md)
-now includes `qty`/`divide`/`days` as independent candidate source facts. Exact grid
-correspondence, source numeric types and production approval remain unresolved.
+now includes `qty`/`divide`/`days` as independent candidate source facts. A separate
+[approved one-row check](kaoseghis-order-grid-numeric-evidence.md) confirmed exact
+grid name/number correspondence and PostgreSQL `numeric` types on 2026-10-07.
+All-category coverage, numeric null/domain/scale policy and production approval
+remain unresolved. The full-row draft itself has not been executed or enabled.
 This does not add fields to a receiver model or silently assign dose semantics.
 
 **Current implementation handoff:** the [2026-10-07 complete-order design](kaoseghis-current-day-orders-design.md)
