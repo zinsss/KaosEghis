@@ -6,6 +6,15 @@ Status: **v1 synthetic parity and v2 receiver-only synthetic proofs complete;
 production source authority remains unresolved**.
 This is not an approved HTTP endpoint, production query or deployment change.
 
+**2026-10-07 full-field checkpoint:** a separately approved, capped
+[one-shot current-day diagnostic](kaoseghis-current-day-read-evidence.md) observed
+269 candidate receptions, 1,025 orders and 7 no-order receptions. The selected
+name/number fields were read transiently; only aggregate findings/timings were
+reported after verified cursor/physical closure (74.467 ms connection lifecycle).
+This establishes successful full-field extraction and internal structural checks
+for one statement scope, not authoritative membership or multi-commit save
+consistency. All production gates and the UNAVAILABLE runtime block remain.
+
 **2026-10-07 current design:** receiver `3813b52` accepts the four independent
 nullable order-text facts for synthetic use (reported 315 focused / 709 full
 tests). The sender's [complete current-day order design](kaoseghis-current-day-orders-design.md)
@@ -947,7 +956,7 @@ is not a complete universal imaging model.
 | Reception state | Approved raw code/qualifiers plus distinct normalized waiting, in-progress, hold, consultation-completed, payment-completed and cancelled meanings. Unknown/ambiguous combinations block dependent authority. | Apply imaging eligibility independently; payment or hidden board state is not imaging completion/cancellation. |
 | Order state | Approved raw cancellation/qualifier facts plus normalized meaning. Keep cancelled encounters and unchanged active child orders in the complete source scope. | Preserve explicit source cancellation separately from imaging completion/expiry and disappearance evidence. |
 | Catalog metadata | Exact code/type/department, including fee and currently unclassified rows within the approved source scope. No raw notes/descriptions. KaosOrders owns category and fee rules. | Reviewed imaging metadata and exam-description allowlist only; no board-category assumptions. |
-| Quantity/days/frequency | Proposed exact-decimal edit fields. Source observations verified that `qty`/`days`/`divide` can change, not that they are a clinical dose/route specification. No float conversion or inferred units. | Do not add these fields to imaging delivery unless that receiver requires and approves them. |
+| Quantity/days/frequency | Source observations verified edits. A separate [approved one-row grid comparison](kaoseghis-order-grid-numeric-evidence.md) on 2026-10-07 found daily amount=`qty`, frequency=`divide`, days=`days`, all source type `numeric`. This is not all-category coverage or a clinical dose/route specification; null/domain/scale and units remain unresolved. No float conversion or inferred units. | Do not add these fields to imaging delivery unless that receiver requires and approves them. |
 | Time | Timezone-aware `observed_at` only until source event-time semantics are verified. Never claim actual edit/cancel time. | Retain verified imaging schedule separately; read time cannot substitute for it. |
 | Birth date | No DOB in the Orders payload; a reviewed local age calculation may use/discard it transiently. | Existing PACS identity contract permits DOB. Keep this destination-specific; do not add it to the common Orders export. |
 | Other personal/clinical data | No resident ID, phone, address, diagnosis, notes, credentials or arbitrary rows. | Same prohibitions; existing approved PACS demographic fields are the narrow exception to the Orders DOB restriction. |

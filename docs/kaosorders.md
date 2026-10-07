@@ -4,6 +4,34 @@ Last updated: 2026-10-07
 
 ## Status and Current Decisions
 
+**Latest grid-detail request:** the operator wants the EMR-selected patient's
+prescription name, daily quantity, frequency/count and days as shown in its orders
+grid. An [offline current-day query draft](kaoseghis-current-day-orders-query.md)
+now includes `qty`/`divide`/`days` as independent candidate source facts. A separate
+[approved one-row check](kaoseghis-order-grid-numeric-evidence.md) confirmed exact
+grid name/number correspondence and PostgreSQL `numeric` types on 2026-10-07.
+All-category coverage, numeric null/domain/scale policy and production approval
+remain unresolved. A [separate bounded full-field diagnostic](kaoseghis-current-day-read-evidence.md)
+subsequently read 269 current-day candidate receptions and 1,025 linked orders,
+including 7 no-order receptions, with verified closure in 74.467 ms. Only sanitized
+counts/timings were reported. This is a one-shot observation, not runtime enablement
+or complete source authority; the original draft SQL remains unchanged.
+This does not add fields to a receiver model or silently assign dose semantics.
+
+**Preferred polling direction, not enabled:** the
+[full-snapshot recommendation](kaoseghis-current-day-read-evidence.md#full-snapshot-polling-recommendation)
+uses a fresh bounded whole-current-day read for each refresh, with serialized
+connections, coalesced requests and post-close validation. The one-shot total was
+146.837 ms; server load and repeated clinical-hours impact remain unmeasured.
+Full-fact comparison can detect observed edits/removals and state changes without
+inventing edit timestamps, but cannot capture every transient change. Suppressing
+unchanged delivery is only appropriate when the receiver already holds matching
+valid state in the active current-day session/generation. Restart, rollover or a
+fresh-snapshot request requires a fresh full snapshot. Keep state memory-only,
+preserve valid same-day state on source failure, and leave session/transport and
+all production source-evidence gates unresolved. No receiver or runtime change is
+authorized by this recommendation.
+
 **Current implementation handoff:** the [2026-10-07 complete-order design](kaoseghis-current-day-orders-design.md)
 records receiver `3813b52` acceptance of the four synthetic text facts and the
 sender decision for a separate `kaosorders.current-day-orders` version 1 /

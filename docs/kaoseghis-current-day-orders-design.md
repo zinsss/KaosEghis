@@ -11,6 +11,11 @@ the parent boundary was still open: its included waiting state is `WAITING`,
 closed nested objects. See
 [the current implementation matrix](kaoseghis-orders-source-semantics-matrix.md).
 
+Subsequent operator request: mirror the selected patient's EMR order-grid name,
+daily quantity, frequency/count and days. The [offline query draft](kaoseghis-current-day-orders-query.md)
+prepares candidate source columns for that request without changing this model or
+its numeric-field deferral into a production mapping approval.
+
 ## Pinned Review
 
 - Sender: clean `main` at `1cc3a984957539b2ca5919f98f5f8fad458c37ae`,
