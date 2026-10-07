@@ -11,6 +11,13 @@ sender decision for a separate `kaosorders.current-day-orders` version 1 /
 unassigned. Receiver review must precede a new complete synthetic model; v2 and
 the existing coordinator cannot accept it. This milestone is documentation-only.
 
+The [source semantics matrix](kaoseghis-orders-source-semantics-matrix.md) pins
+the receiver's disabled memory-only read-gate milestone
+`37713151070abe835fc89a16b0c401bd06794931` and separates repository facts,
+recorded product decisions and unresolved production source meanings. It proposes
+the same new identity for explicit Orders acceptance; it closes no source gate and
+authorizes no parser, serializer, HTTP/auth or runtime integration.
+
 **Latest operator decision:** [current-day, memory-only board](#current-day-memory-only-decision-2026-10-06).
 The EMR database is the sole durable source of patient/order truth. KaosOrders
 must not persist patient/order state; at the KST day change, clear the transient

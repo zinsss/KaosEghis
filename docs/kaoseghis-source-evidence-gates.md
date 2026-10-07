@@ -4,6 +4,12 @@ Reviewed: 2026-10-05
 
 Status: **source authority unresolved; production day reader remains UNAVAILABLE**.
 
+The [current-day source semantics matrix](kaoseghis-orders-source-semantics-matrix.md)
+records the Eghis proposal against KaosOrders read-gate commit
+`37713151070abe835fc89a16b0c401bd06794931`. It assigns no production mapping
+revision and closes none of the gates below; existing v1/v2 fixtures and endpoints
+remain incompatible with the proposed new fact identity.
+
 The [2026-10-07 current-day full-order design](kaoseghis-current-day-orders-design.md)
 records receiver agreement on synthetic order-text representation only. All eight
 gates below remain unresolved, including normalization without the excluded
