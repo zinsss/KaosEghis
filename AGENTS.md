@@ -24,7 +24,7 @@ record the starting branch, commit, upstream, and worktree status. Run
 and the update is fast-forward-safe. Otherwise preserve all existing work and
 report the blocker; never stash, discard, reset, rebase, or force-push it. This
 preflight never authorizes access to or changes on a live clinic checkout. See
-the central `architecture/repository-sync-policy-v1.md`.
+the central `/srv/projects/KaosClinic/orchestration/architecture/repository-sync-policy-v1.md`.
 
 ## Durable documentation
 
@@ -41,4 +41,4 @@ evidence, open questions, next action, and a dated revision history. Never recor
 credentials, patient information, live clinical payloads, or unredacted
 production logs. The structured handoff must name changed Markdown documents or
 explain why none was needed. See the central
-`architecture/documentation-policy-v1.md`.
+`/srv/projects/KaosClinic/orchestration/architecture/documentation-policy-v1.md`.
