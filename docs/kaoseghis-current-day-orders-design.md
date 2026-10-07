@@ -4,6 +4,11 @@ Date: 2026-10-07. **Design and documentation only.** No model code, parser,
 serializer, canonical fixture, wire schema, source query or runtime connection is
 implemented by this decision.
 
+Subsequent operator request: mirror the selected patient's EMR order-grid name,
+daily quantity, frequency/count and days. The [offline query draft](kaoseghis-current-day-orders-query.md)
+prepares candidate source columns for that request without changing this model or
+its numeric-field deferral into a production mapping approval.
+
 ## Pinned Review
 
 - Sender: clean `main` at `1cc3a984957539b2ca5919f98f5f8fad458c37ae`,

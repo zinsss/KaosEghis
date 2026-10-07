@@ -4,6 +4,13 @@ Last updated: 2026-10-07
 
 ## Status and Current Decisions
 
+**Latest grid-detail request:** the operator wants the EMR-selected patient's
+prescription name, daily quantity, frequency/count and days as shown in its orders
+grid. An [offline current-day query draft](kaoseghis-current-day-orders-query.md)
+now includes `qty`/`divide`/`days` as independent candidate source facts. Exact grid
+correspondence, source numeric types and production approval remain unresolved.
+This does not add fields to a receiver model or silently assign dose semantics.
+
 **Current implementation handoff:** the [2026-10-07 complete-order design](kaoseghis-current-day-orders-design.md)
 records receiver `3813b52` acceptance of the four synthetic text facts and the
 sender decision for a separate `kaosorders.current-day-orders` version 1 /
