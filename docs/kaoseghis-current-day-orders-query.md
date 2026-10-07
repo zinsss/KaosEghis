@@ -162,6 +162,10 @@ displayed values to these candidate columns, with source types/null/scale review
 and no patient identifiers or raw clinical rows in output. This request to write
 SQL is not approval to run that check or a new full-day field export.
 
+The separate [one-row numeric comparison](kaoseghis-order-grid-numeric-evidence.md)
+documents the exact bounded statement, mocked tests and passive elevated UIA
+inspection. It does not enable this full-row draft or certify numeric mappings.
+
 The [earlier complete-model design](kaoseghis-current-day-orders-design.md) deferred
 numeric fields. The operator now requests their grid display explicitly; this draft
 prepares candidate retrieval only. It does not silently change a normalized model,
