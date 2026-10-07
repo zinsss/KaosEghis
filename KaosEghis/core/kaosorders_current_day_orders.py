@@ -16,7 +16,8 @@ PROJECTION_ID = "kaosorders-current-day-orders-v1"
 MAX_PARENTS = 10_000
 MAX_CHILDREN = 100_000
 CODE_LIMIT = 128
-NAME_LIMIT = 256
+PATIENT_NAME_LIMIT = 128
+CHILD_NAME_LIMIT = 256
 
 PARENT_FIELDS = (
     "encounter_id",
@@ -25,8 +26,9 @@ PARENT_FIELDS = (
     "sex",
     "age",
     "state",
-    "hold_yn",
+    "qualifiers",
 )
+PARENT_QUALIFIER_FIELDS = ("hold_yn",)
 KEY_FIELDS = ("encounter_id", "order_date", "order_number", "order_sequence")
 CHILD_TEXT_FIELDS = (
     "catalog_code",
@@ -36,7 +38,8 @@ CHILD_TEXT_FIELDS = (
     "order_type",
     "department_code",
 )
-CHILD_FIELDS = ("key", *CHILD_TEXT_FIELDS, "state", "dc_yn", "act_yn")
+CHILD_QUALIFIER_FIELDS = ("dc_yn", "act_yn")
+CHILD_FIELDS = ("key", *CHILD_TEXT_FIELDS, "state", "qualifiers")
 
 
 class CurrentDayFactRejected(ValueError):
@@ -44,7 +47,7 @@ class CurrentDayFactRejected(ValueError):
 
 
 class IncludedParentState(StrEnum):
-    REGISTERED = "REGISTERED"
+    WAITING = "WAITING"
     IN_PROGRESS = "IN_PROGRESS"
     ON_HOLD = "ON_HOLD"
     CONSULTATION_COMPLETED = "CONSULTATION_COMPLETED"
@@ -108,6 +111,30 @@ def _exact_model(value: object, kind: type, reason: str) -> None:
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class ParentQualifiers(_RedactedModel):
+    hold_yn: str
+    synthetic_fixture: InitVar[bool] = False
+
+    def __post_init__(self, synthetic_fixture: bool) -> None:
+        if synthetic_fixture is not True:
+            raise CurrentDayFactRejected("synthetic_fixture_required")
+        _flag(self.hold_yn)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ChildQualifiers(_RedactedModel):
+    dc_yn: str
+    act_yn: str
+    synthetic_fixture: InitVar[bool] = False
+
+    def __post_init__(self, synthetic_fixture: bool) -> None:
+        if synthetic_fixture is not True:
+            raise CurrentDayFactRejected("synthetic_fixture_required")
+        _flag(self.dc_yn)
+        _flag(self.act_yn)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class SyntheticCurrentDayParent(_RedactedModel):
     encounter_id: str
     chart_number: str
@@ -115,7 +142,7 @@ class SyntheticCurrentDayParent(_RedactedModel):
     sex: str | None
     age: int | None
     state: IncludedParentState
-    hold_yn: str
+    qualifiers: ParentQualifiers
     synthetic_fixture: InitVar[bool] = False
 
     def __post_init__(self, synthetic_fixture: bool) -> None:
@@ -123,7 +150,7 @@ class SyntheticCurrentDayParent(_RedactedModel):
             raise CurrentDayFactRejected("synthetic_fixture_required")
         _required_text(self.encounter_id, CODE_LIMIT)
         _required_text(self.chart_number, CODE_LIMIT)
-        _required_text(self.patient_name, NAME_LIMIT)
+        _required_text(self.patient_name, PATIENT_NAME_LIMIT)
         if self.sex not in {None, "M", "F"} or (
             self.age is not None
             and (type(self.age) is not int or not 0 <= self.age <= 130)
@@ -131,7 +158,8 @@ class SyntheticCurrentDayParent(_RedactedModel):
             raise CurrentDayFactRejected("invalid_demographics")
         if type(self.state) is not IncludedParentState:
             raise CurrentDayFactRejected("invalid_parent_state")
-        _flag(self.hold_yn)
+        _exact_model(self.qualifiers, ParentQualifiers, "invalid_qualifiers")
+        self.qualifiers.__post_init__(True)
 
 
 @dataclass(frozen=True, slots=True, order=True, repr=False)
@@ -162,8 +190,7 @@ class SyntheticCurrentDayChild(_RedactedModel):
     order_type: str | None
     department_code: str | None
     state: ChildState
-    dc_yn: str
-    act_yn: str
+    qualifiers: ChildQualifiers
     synthetic_fixture: InitVar[bool] = False
 
     def __post_init__(self, synthetic_fixture: bool) -> None:
@@ -172,16 +199,17 @@ class SyntheticCurrentDayChild(_RedactedModel):
         _exact_model(self.key, CurrentDayOrderKey, "invalid_key")
         self.key.__post_init__(True)
         for name in CHILD_TEXT_FIELDS:
-            limit = NAME_LIMIT if name.endswith("name") else CODE_LIMIT
+            limit = CHILD_NAME_LIMIT if name.endswith("name") else CODE_LIMIT
             _nullable_exact_text(getattr(self, name), limit)
         if type(self.state) is not ChildState:
             raise CurrentDayFactRejected("invalid_child_state")
-        _flag(self.dc_yn)
-        _flag(self.act_yn)
+        _exact_model(self.qualifiers, ChildQualifiers, "invalid_qualifiers")
+        self.qualifiers.__post_init__(True)
 
 
 @dataclass(frozen=True, slots=True, repr=False)
 class SyntheticCurrentDayFacts(_RedactedModel):
+    source_id: str
     clinic_day: date
     parents: tuple[SyntheticCurrentDayParent, ...]
     children: tuple[SyntheticCurrentDayChild, ...]
@@ -190,6 +218,7 @@ class SyntheticCurrentDayFacts(_RedactedModel):
     def __post_init__(self, synthetic_fixture: bool) -> None:
         if synthetic_fixture is not True:
             raise CurrentDayFactRejected("synthetic_fixture_required")
+        _required_text(self.source_id, CODE_LIMIT)
         if type(self.clinic_day) is not date:
             raise CurrentDayFactRejected("invalid_day")
         if (
@@ -221,6 +250,10 @@ class SyntheticCurrentDayFacts(_RedactedModel):
         object.__setattr__(self, "parents", tuple(sorted(self.parents, key=lambda row: row.encounter_id)))
         object.__setattr__(self, "children", tuple(sorted(self.children, key=lambda row: row.key)))
 
+    @property
+    def scope(self) -> tuple[str, str, date]:
+        return self.source_id, PROJECTION_ID, self.clinic_day
+
 
 @dataclass(frozen=True, slots=True, repr=False)
 class CurrentDayComparison(_RedactedModel):
@@ -236,8 +269,14 @@ def build_synthetic_parent(row: object, *, synthetic_fixture: bool = False) -> S
     if synthetic_fixture is not True:
         raise CurrentDayFactRejected("synthetic_fixture_required")
     values = _closed_dict(row, PARENT_FIELDS)
+    qualifier_values = _closed_dict(values["qualifiers"], PARENT_QUALIFIER_FIELDS)
+    qualifiers = ParentQualifiers(
+        qualifier_values["hold_yn"], synthetic_fixture=True
+    )
     return SyntheticCurrentDayParent(
-        *(values[name] for name in PARENT_FIELDS), synthetic_fixture=True
+        *(values[name] for name in PARENT_FIELDS[:-1]),
+        qualifiers,
+        synthetic_fixture=True,
     )
 
 
@@ -249,17 +288,22 @@ def build_synthetic_child(row: object, *, synthetic_fixture: bool = False) -> Sy
     key = CurrentDayOrderKey(
         *(key_values[name] for name in KEY_FIELDS), synthetic_fixture=True
     )
+    qualifier_values = _closed_dict(values["qualifiers"], CHILD_QUALIFIER_FIELDS)
+    qualifiers = ChildQualifiers(
+        *(qualifier_values[name] for name in CHILD_QUALIFIER_FIELDS),
+        synthetic_fixture=True,
+    )
     return SyntheticCurrentDayChild(
         key,
         *(values[name] for name in CHILD_TEXT_FIELDS),
         values["state"],
-        values["dc_yn"],
-        values["act_yn"],
+        qualifiers,
         synthetic_fixture=True,
     )
 
 
 def validate_synthetic_collection(
+    source_id: str,
     clinic_day: date,
     parents: tuple[SyntheticCurrentDayParent, ...],
     children: tuple[SyntheticCurrentDayChild, ...],
@@ -269,6 +313,7 @@ def validate_synthetic_collection(
     """Validate one detached synthetic complete fact set; no source authority implied."""
 
     return SyntheticCurrentDayFacts(
+        source_id,
         clinic_day,
         parents,
         children,
@@ -280,14 +325,14 @@ def compare_synthetic_collections(
     previous: SyntheticCurrentDayFacts | None,
     current: SyntheticCurrentDayFacts,
 ) -> CurrentDayComparison:
-    """Compare two already validated same-day facts without retaining state."""
+    """Describe a FULL replacement and its derived same-scope content changes."""
 
     _exact_model(current, SyntheticCurrentDayFacts, "invalid_collection")
     current.__post_init__(True)
     if previous is not None:
         _exact_model(previous, SyntheticCurrentDayFacts, "invalid_collection")
         previous.__post_init__(True)
-        if previous.clinic_day != current.clinic_day:
+        if previous.scope != current.scope:
             raise CurrentDayFactRejected("scope_mismatch")
 
     old_parents = {} if previous is None else {
@@ -297,7 +342,7 @@ def compare_synthetic_collections(
     new_parents = {row.encounter_id: row for row in current.parents}
     new_children = {row.key: row for row in current.children}
     return CurrentDayComparison(
-        previous is None,
+        True,
         current,
         tuple(row for key, row in new_parents.items() if old_parents.get(key) != row),
         tuple(row for key, row in new_children.items() if old_children.get(key) != row),

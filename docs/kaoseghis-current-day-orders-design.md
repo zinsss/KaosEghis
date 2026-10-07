@@ -4,6 +4,13 @@ Date: 2026-10-07. **Design and documentation only.** No model code, parser,
 serializer, canonical fixture, wire schema, source query or runtime connection is
 implemented by this decision.
 
+The later Orders-owned accepted contract at
+`182db514b5404b69d4d10c2b30fbc2bb2ce3725d` supersedes this proposal wherever
+the parent boundary was still open: its included waiting state is `WAITING`,
+`patient_name` is bounded to 128 code points, and parent/child qualifiers are
+closed nested objects. See
+[the current implementation matrix](kaoseghis-orders-source-semantics-matrix.md).
+
 ## Pinned Review
 
 - Sender: clean `main` at `1cc3a984957539b2ca5919f98f5f8fad458c37ae`,

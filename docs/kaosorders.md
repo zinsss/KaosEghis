@@ -13,6 +13,10 @@ Eghis now has a separate pure synthetic immutable model and in-memory collection
 validator/comparator in `core/kaosorders_current_day_orders.py`. The production
 mapping revision remains unassigned; v2 and the existing coordinator cannot accept
 the new model, and no parser, serializer, fixture or runtime hookup exists.
+The accepted parent vocabulary uses `WAITING` (not `REGISTERED`), bounds
+`patient_name` to 128 code points, and represents parent and child qualifiers as
+closed nested objects. Every valid same-source/day comparison is a FULL replacement;
+its upsert/missing results are derived content summaries only.
 
 The [source semantics matrix](kaoseghis-orders-source-semantics-matrix.md) pins
 the receiver's disabled memory-only read-gate and accepted logical-contract

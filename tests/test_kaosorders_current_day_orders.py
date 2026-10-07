@@ -20,7 +20,7 @@ def parent_row():
         "sex": "F",
         "age": 53,
         "state": model.IncludedParentState.ON_HOLD,
-        "hold_yn": "N",
+        "qualifiers": {"hold_yn": "N"},
     }
 
 
@@ -40,8 +40,7 @@ def child_row():
         "order_type": "TEST-TYPE",
         "department_code": "",
         "state": model.ChildState.ACTIVE,
-        "dc_yn": "N",
-        "act_yn": "N",
+        "qualifiers": {"dc_yn": "N", "act_yn": "N"},
     }
 
 
@@ -53,24 +52,45 @@ def child(row):
     return model.build_synthetic_child(row, synthetic_fixture=True)
 
 
-def collection(parents, children, *, day=DAY):
+def collection(parents, children, *, day=DAY, source_id="synthetic-eghis"):
     return model.validate_synthetic_collection(
-        day, tuple(parents), tuple(children), synthetic_fixture=True
+        source_id, day, tuple(parents), tuple(children), synthetic_fixture=True
     )
 
 
 def test_new_identity_is_independent_and_mapping_remains_unassigned():
-    assert model.CONTRACT_ID == "kaosorders.current-day-orders"
-    assert model.CONTRACT_VERSION == 1
-    assert model.PROJECTION_ID == "kaosorders-current-day-orders-v1"
+    expected_contract = "kaosorders.current-day-orders"
+    expected_version = 1
+    expected_projection = "kaosorders-current-day-orders-v1"
+    assert model.CONTRACT_ID == expected_contract
+    assert model.CONTRACT_VERSION == expected_version
+    assert model.PROJECTION_ID == expected_projection
     assert not hasattr(model, "MAPPING_REVISION")
     assert not hasattr(model, "PRODUCTION_MAPPING_REVISION")
 
 
 def test_closed_model_fields_match_accepted_parent_and_child_boundaries(parent_row, child_row):
-    assert [field.name for field in fields(parent(parent_row))] == list(model.PARENT_FIELDS)
-    assert [field.name for field in fields(child(child_row))] == list(model.CHILD_FIELDS)
-    assert [field.name for field in fields(child(child_row).key)] == list(model.KEY_FIELDS)
+    assert [field.name for field in fields(parent(parent_row))] == [
+        "encounter_id", "chart_number", "patient_name", "sex", "age", "state", "qualifiers",
+    ]
+    assert [field.name for field in fields(parent(parent_row).qualifiers)] == ["hold_yn"]
+    assert [field.name for field in fields(child(child_row))] == [
+        "key", "catalog_code", "catalog_name", "user_code", "user_name",
+        "order_type", "department_code", "state", "qualifiers",
+    ]
+    assert [field.name for field in fields(child(child_row).qualifiers)] == ["dc_yn", "act_yn"]
+    assert [field.name for field in fields(child(child_row).key)] == [
+        "encounter_id", "order_date", "order_number", "order_sequence",
+    ]
+
+
+def test_contract_values_are_literal_not_derived_from_implementation_enums():
+    assert {state.value for state in model.IncludedParentState} == {
+        "WAITING", "IN_PROGRESS", "ON_HOLD", "CONSULTATION_COMPLETED", "PAYMENT_COMPLETED",
+    }
+    assert {state.value for state in model.ChildState} == {"ACTIVE", "CANCELLED"}
+    assert "REGISTERED" not in {state.value for state in model.IncludedParentState}
+    assert "CANCELLED" not in {state.value for state in model.IncludedParentState}
 
 
 @pytest.mark.parametrize("state", list(model.IncludedParentState))
@@ -110,7 +130,7 @@ def test_required_parent_text_rejects_null_blank_padding_type_and_controls(paren
         parent(parent_row)
 
 
-@pytest.mark.parametrize("field,limit", [("encounter_id", model.CODE_LIMIT), ("chart_number", model.CODE_LIMIT), ("patient_name", model.NAME_LIMIT)])
+@pytest.mark.parametrize("field,limit", [("encounter_id", 128), ("chart_number", 128), ("patient_name", 128)])
 def test_parent_text_exact_bounds_are_not_truncated(parent_row, field, limit):
     parent_row[field] = "S" * limit
     assert getattr(parent(parent_row), field) == parent_row[field]
@@ -121,14 +141,24 @@ def test_parent_text_exact_bounds_are_not_truncated(parent_row, field, limit):
 
 @pytest.mark.parametrize("flag", ["Y", "N"])
 def test_parent_flag_is_strict(parent_row, flag):
-    parent_row["hold_yn"] = flag
-    assert parent(parent_row).hold_yn == flag
+    parent_row["qualifiers"]["hold_yn"] = flag
+    assert parent(parent_row).qualifiers.hold_yn == flag
 
 
 @pytest.mark.parametrize("invalid", [None, "", "y", " Y", "Y ", True, 1, "UNKNOWN"])
 def test_parent_flag_rejects_coercion(parent_row, invalid):
-    parent_row["hold_yn"] = invalid
+    parent_row["qualifiers"]["hold_yn"] = invalid
     with pytest.raises(model.CurrentDayFactRejected, match="^invalid_flag$"):
+        parent(parent_row)
+
+
+@pytest.mark.parametrize("change", ["missing", "extra"])
+def test_parent_qualifiers_are_a_closed_object(parent_row, change):
+    if change == "missing":
+        parent_row["qualifiers"].clear()
+    else:
+        parent_row["qualifiers"]["hold_opd"] = "N"
+    with pytest.raises(model.CurrentDayFactRejected, match="^invalid_fields$"):
         parent(parent_row)
 
 
@@ -150,7 +180,7 @@ def test_child_text_wrong_types_and_controls_fail_without_echo(child_row, field,
 
 @pytest.mark.parametrize("field", model.CHILD_TEXT_FIELDS)
 def test_child_text_exact_bounds_are_not_truncated(child_row, field):
-    limit = model.NAME_LIMIT if field.endswith("name") else model.CODE_LIMIT
+    limit = 256 if field.endswith("name") else 128
     child_row[field] = "합" * limit
     assert getattr(child(child_row), field) == child_row[field]
     child_row[field] += "합"
@@ -161,16 +191,26 @@ def test_child_text_exact_bounds_are_not_truncated(child_row, field):
 @pytest.mark.parametrize("state", list(model.ChildState))
 @pytest.mark.parametrize("dc,act", [("N", "N"), ("N", "Y"), ("Y", "N"), ("Y", "Y")])
 def test_child_state_and_flags_are_independent_exact_facts(child_row, state, dc, act):
-    child_row.update(state=state, dc_yn=dc, act_yn=act)
+    child_row.update(state=state, qualifiers={"dc_yn": dc, "act_yn": act})
     result = child(child_row)
-    assert (result.state, result.dc_yn, result.act_yn) == (state, dc, act)
+    assert (result.state, result.qualifiers.dc_yn, result.qualifiers.act_yn) == (state, dc, act)
 
 
 @pytest.mark.parametrize("field", ["dc_yn", "act_yn"])
 @pytest.mark.parametrize("invalid", [None, "", "y", " Y", "Y ", True, 1, "UNKNOWN"])
 def test_child_flags_reject_coercion(child_row, field, invalid):
-    child_row[field] = invalid
+    child_row["qualifiers"][field] = invalid
     with pytest.raises(model.CurrentDayFactRejected, match="^invalid_flag$"):
+        child(child_row)
+
+
+@pytest.mark.parametrize("change", ["missing", "extra"])
+def test_child_qualifiers_are_a_closed_object(child_row, change):
+    if change == "missing":
+        child_row["qualifiers"].pop("act_yn")
+    else:
+        child_row["qualifiers"]["other"] = "N"
+    with pytest.raises(model.CurrentDayFactRejected, match="^invalid_fields$"):
         child(child_row)
 
 
@@ -234,9 +274,13 @@ def test_models_are_immutable_detached_and_redacted(parent_row, child_row):
     assert built_child.key.encounter_id == "synthetic-encounter-1"
     assert built_child.user_name == "Synthetic order"
     assert repr(built_parent) == "<SyntheticCurrentDayParent: redacted>"
+    assert repr(built_parent.qualifiers) == "<ParentQualifiers: redacted>"
     assert repr(built_child) == "<SyntheticCurrentDayChild: redacted>"
+    assert repr(built_child.qualifiers) == "<ChildQualifiers: redacted>"
     with pytest.raises(FrozenInstanceError):
         built_parent.age = 1
+    with pytest.raises(FrozenInstanceError):
+        built_parent.qualifiers.hold_yn = "Y"
     with pytest.raises(AttributeError):
         object.__setattr__(built_child, "notes", "PRIVATE_MARKER")
 
@@ -250,9 +294,18 @@ def test_collection_sorts_deterministically_and_keeps_no_order_parent(parent_row
     child_row["key"].update(order_number="1")
     first_child = child(child_row)
     result = collection((first, no_order), (second_child, first_child))
+    assert [field.name for field in fields(result)] == [
+        "source_id", "clinic_day", "parents", "children",
+    ]
     assert [row.encounter_id for row in result.parents] == ["synthetic-encounter-0", "synthetic-encounter-1"]
     assert [row.key.order_number for row in result.children] == ["1", "2"]
     assert not any(row.key.encounter_id == no_order.encounter_id for row in result.children)
+
+
+@pytest.mark.parametrize("invalid", [None, "", " ", " padded ", 1, "A\nB", "x" * 129])
+def test_collection_source_id_is_exact_and_bounded(invalid):
+    with pytest.raises(model.CurrentDayFactRejected, match="^invalid_text$"):
+        collection((), (), source_id=invalid)
 
 
 def test_collection_keeps_cancelled_fee_unclassified_and_blank_facts(parent_row, child_row):
@@ -260,7 +313,8 @@ def test_collection_keeps_cancelled_fee_unclassified_and_blank_facts(parent_row,
     child_row.update(
         catalog_code="", catalog_name=None, user_code=None, user_name="",
         order_type="TEST-FEE", department_code=None,
-        state=model.ChildState.CANCELLED, dc_yn="Y", act_yn="N",
+        state=model.ChildState.CANCELLED,
+        qualifiers={"dc_yn": "Y", "act_yn": "N"},
     )
     result = collection((p,), (child(child_row),))
     assert result.children[0].state is model.ChildState.CANCELLED
@@ -291,7 +345,9 @@ def test_collection_bounds_and_types_are_exact(monkeypatch, parent_row, child_ro
     with pytest.raises(model.CurrentDayFactRejected, match="^invalid_row_bound$"):
         collection((p,), (c,))
     with pytest.raises(model.CurrentDayFactRejected, match="^invalid_row_bound$"):
-        model.validate_synthetic_collection(DAY, [p], (), synthetic_fixture=True)
+        model.validate_synthetic_collection(
+            "synthetic-eghis", DAY, [p], (), synthetic_fixture=True
+        )
 
 
 def test_same_key_any_child_fact_change_is_full_replacement(parent_row, child_row):
@@ -302,19 +358,36 @@ def test_same_key_any_child_fact_change_is_full_replacement(parent_row, child_ro
         ("catalog_code", "OTHER"), ("catalog_name", "Other name"),
         ("user_code", "OTHER-USER"), ("user_name", "Other user name"),
         ("order_type", None), ("department_code", "OTHER-DEPT"),
-        ("state", model.ChildState.CANCELLED), ("dc_yn", "Y"), ("act_yn", "Y"),
+        ("state", model.ChildState.CANCELLED),
     ):
         changed = replace(original, **{field: value}, synthetic_fixture=True)
         comparison = model.compare_synthetic_collections(previous, collection((p,), (changed,)))
+        assert comparison.full_replacement is True
         assert comparison.child_upserts == (changed,)
         assert comparison.missing_child_keys == ()
+    for field in ("dc_yn", "act_yn"):
+        qualifiers = replace(
+            original.qualifiers, **{field: "Y"}, synthetic_fixture=True
+        )
+        changed = replace(original, qualifiers=qualifiers, synthetic_fixture=True)
+        comparison = model.compare_synthetic_collections(
+            previous, collection((p,), (changed,))
+        )
+        assert comparison.full_replacement is True
+        assert comparison.child_upserts == (changed,)
 
 
 def test_explicit_cancellation_absence_and_reappearance_are_distinct(parent_row, child_row):
     p = parent(parent_row)
     active = child(child_row)
     baseline = collection((p,), (active,))
-    cancelled = replace(active, state=model.ChildState.CANCELLED, dc_yn="Y", synthetic_fixture=True)
+    qualifiers = model.ChildQualifiers("Y", "N", synthetic_fixture=True)
+    cancelled = replace(
+        active,
+        state=model.ChildState.CANCELLED,
+        qualifiers=qualifiers,
+        synthetic_fixture=True,
+    )
     cancellation = model.compare_synthetic_collections(baseline, collection((p,), (cancelled,)))
     assert cancellation.child_upserts == (cancelled,) and not cancellation.missing_child_keys
     absent_facts = collection((p,), ())
@@ -336,13 +409,24 @@ def test_parent_removal_and_restoration_include_child_absence_and_reappearance(p
     assert restored.parent_upserts == (p,) and restored.child_upserts == (c,)
 
 
-def test_initial_comparison_is_full_and_same_day_is_required(parent_row, child_row):
+def test_every_comparison_is_full_and_exact_same_scope_is_required(parent_row, child_row):
     facts = collection((parent(parent_row),), (child(child_row),))
+    assert facts.scope == (
+        "synthetic-eghis", "kaosorders-current-day-orders-v1", DAY
+    )
     initial = model.compare_synthetic_collections(None, facts)
     assert initial.full_replacement is True
     assert initial.parent_upserts == facts.parents and initial.child_upserts == facts.children
+    unchanged = model.compare_synthetic_collections(facts, facts)
+    assert unchanged.full_replacement is True
+    assert unchanged.current is facts
+    assert unchanged.parent_upserts == unchanged.child_upserts == ()
     with pytest.raises(model.CurrentDayFactRejected, match="^scope_mismatch$"):
         model.compare_synthetic_collections(facts, collection((), (), day=date(2026, 10, 8)))
+    with pytest.raises(model.CurrentDayFactRejected, match="^scope_mismatch$"):
+        model.compare_synthetic_collections(
+            facts, collection((), (), source_id="synthetic-other-source")
+        )
 
 
 def test_no_io_runtime_wire_reader_or_mapping_surface():
