@@ -1,6 +1,6 @@
 # Reception current-day patient source
 
-- Status: **active; pure synthetic provider boundary implemented, production reader blocked**
+- Status: **accepted logical contract aligned; production reader remains blocked**
 - Last updated: **2026-10-07**
 - Owning project: **KaosEghis**
 - Affected projects: **KaosEghis, KaosReception, orchestration**
@@ -46,7 +46,10 @@ production query.
 `KaosEghis/core/reception_current_day_patients.py` defines an immutable,
 redacted provider protocol and a synthetic-only projection. It requires:
 
-- an aware observation time and caller-supplied positive freshness limit;
+- source ID `kaoseghis-reception-day-v1` and projection ID
+  `reception-current-day-patients-v1`;
+- an aware observation time and a positive freshness limit no greater than the
+  accepted 300-second maximum;
 - current `Asia/Seoul` clinic-day equality for both scope and observation;
 - a complete, whole-day, untruncated, consistent read with the connection closed;
 - exact source aliases and a maximum of 10,000 detached rows;
@@ -55,18 +58,18 @@ redacted provider protocol and a synthetic-only projection. It requires:
 - only codes 30 and 40 in output; every other state is excluded;
 - fixed/redacted errors and no database, network, file, runtime, log, or UI I/O.
 
-No default staleness number is invented. The pure boundary requires an explicit
-`freshness_limit`; a stale/future/wrong-day/incomplete read produces no list.
-Reception must treat that as unavailable and must not retain an older name/list.
+The pure boundary requires an explicit `freshness_limit`; callers may choose a
+stricter value but values over 300 seconds are rejected. A stale/future/wrong-day/
+incomplete read produces no list. Reception must treat that as unavailable and
+must not retain an older name/list.
 
 ## Dependencies, impact, and safety constraints
 
-Before production use, orchestration needs a new central contract, proposed as
-`contracts/reception-current-day-patients-v1.md`, jointly accepted by Eghis and
-Reception. It must freeze provider/projection IDs, source mapping revision,
-freshness limit, complete-read evidence, error/unavailable behavior, ephemeral
-delivery/session shape, memory clearing, print lifecycle, and the prohibition on
-name persistence/logging/history.
+The accepted central contract is
+`/srv/projects/KaosClinic/orchestration/contracts/reception-current-day-patients-v1.md`.
+It freezes the provider/projection IDs, source mapping revision, 300-second
+freshness ceiling, complete-read and unavailable behavior, ephemeral selection
+and print lifecycle, and the prohibition on name persistence/logging/history.
 
 A separate Eghis source-reader review must approve one parameterized, bounded,
 read-only day query through the existing serialized reader and credential path.
@@ -87,15 +90,15 @@ trigger, persistence, or deployment is authorized by this change.
 
 ## Open questions and next action
 
-1. Reception and Eghis must agree the maximum freshness age and unavailable UI
-   behavior; this is an operational decision, not a clinical-state mapping.
-2. Orchestration should draft and review the central v1 contract before wire,
-   runtime, or source-reader work.
-3. Eghis may then propose the bounded production query and synthetic DB tests;
+1. Eghis may propose the bounded production query and synthetic DB tests;
    no live read is implied or approved.
+2. Transport/runtime work remains blocked on the production gates in the
+   accepted central contract and separate authorization.
 
 ## Revision history
 
 - **2026-10-07:** Recorded the status-based product decision and implemented the
   pure synthetic provider/projection boundary. Identified the central contract
   and production-reader gates; no live source or Reception runtime was touched.
+- **2026-10-07:** Aligned the provider source ID and fixed 300-second freshness
+  ceiling with the accepted central contract and Reception consumer.

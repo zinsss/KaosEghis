@@ -15,8 +15,9 @@ from zoneinfo import ZoneInfo
 
 CLINIC_TIME_ZONE_NAME = "Asia/Seoul"
 CLINIC_TIME_ZONE = ZoneInfo(CLINIC_TIME_ZONE_NAME)
-PROVIDER_ID = "eghis.reception-current-day-patients"
+PROVIDER_ID = "kaoseghis-reception-day-v1"
 PROJECTION_ID = "reception-current-day-patients-v1"
+MAX_FRESHNESS_SECONDS = 300
 MAX_ROWS = 10_000
 TEXT_LIMIT = 128
 
@@ -213,7 +214,11 @@ def project_synthetic_current_day(
     _exact_model(read, SyntheticReceptionDayRead, "invalid_read")
     read.__post_init__(True)
     current_time = _aware(now)
-    if type(freshness_limit) is not timedelta or freshness_limit <= timedelta(0):
+    if (
+        type(freshness_limit) is not timedelta
+        or freshness_limit <= timedelta(0)
+        or freshness_limit > timedelta(seconds=MAX_FRESHNESS_SECONDS)
+    ):
         raise CurrentDayPatientsRejected("invalid_freshness")
     clinic_day = current_time.astimezone(CLINIC_TIME_ZONE).date()
     if (

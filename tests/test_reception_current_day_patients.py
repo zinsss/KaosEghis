@@ -50,8 +50,9 @@ def project(candidate, *, now=NOW, freshness=timedelta(seconds=30)):
 
 def test_exact_source_fields_and_literal_status_contract():
     assert source.CLINIC_TIME_ZONE_NAME == "Asia/Seoul"
-    assert source.PROVIDER_ID == "eghis.reception-current-day-patients"
+    assert source.PROVIDER_ID == "kaoseghis-reception-day-v1"
     assert source.PROJECTION_ID == "reception-current-day-patients-v1"
+    assert source.MAX_FRESHNESS_SECONDS == 300
     assert source.SOURCE_STATUS_MAPPING == (
         ("10", None),
         ("25", None),
@@ -61,6 +62,7 @@ def test_exact_source_fields_and_literal_status_contract():
     assert [item.name for item in fields(row())] == [
         "clinic_day", "selection_id", "display_name", "source_status_code"
     ]
+    assert project(read(row())).source_id == "kaoseghis-reception-day-v1"
 
 
 def test_only_consultation_and_payment_completed_are_included():
@@ -99,9 +101,21 @@ def test_freshness_is_explicit_and_stale_or_future_reads_fail_closed():
         project(read(row()), freshness=timedelta(seconds=4))
     with pytest.raises(source.CurrentDayPatientsRejected, match="^future_observation$"):
         project(read(row(), observed_at=NOW + timedelta(microseconds=1)))
-    for invalid in (timedelta(0), timedelta(seconds=-1), 30, None):
+    for invalid in (
+        timedelta(0), timedelta(seconds=-1), timedelta(seconds=301), 30, None
+    ):
         with pytest.raises(source.CurrentDayPatientsRejected, match="^invalid_freshness$"):
             project(read(row()), freshness=invalid)
+
+
+def test_fixed_300_second_contract_ceiling_cannot_be_bypassed():
+    at_ceiling = read(row(), observed_at=NOW - timedelta(seconds=300))
+    assert project(at_ceiling, freshness=timedelta(seconds=300)).patients
+    too_old = read(row(), observed_at=NOW - timedelta(seconds=301))
+    with pytest.raises(source.CurrentDayPatientsRejected, match="^stale_read$"):
+        project(too_old, freshness=timedelta(seconds=300))
+    with pytest.raises(source.CurrentDayPatientsRejected, match="^invalid_freshness$"):
+        project(too_old, freshness=timedelta(seconds=600))
 
 
 @pytest.mark.parametrize(
