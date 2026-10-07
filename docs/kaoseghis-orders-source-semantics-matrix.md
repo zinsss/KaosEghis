@@ -1,27 +1,33 @@
 # KaosOrders Current-Day Source Semantics Matrix
 
-Date: 2026-10-07. Status: **Eghis contract proposal; production source authority
-remains blocked.**
+Date: 2026-10-07. Status: **logical boundary accepted and synthetic model
+implemented; production source authority remains blocked.**
 
-This is the Eghis-owned response to the KaosOrders disabled
+This began as the Eghis-owned response to the KaosOrders disabled
 `CurrentDayRuntimeReadGate` milestone at
 `37713151070abe835fc89a16b0c401bd06794931`. KaosOrders reported 582 passed and
 2 skipped. Those receiver results were supplied in the handoff and were not rerun
 or independently inspected in this repository.
 
+KaosOrders accepted/counterproposed the closed logical boundary at
+`182db514b5404b69d4d10c2b30fbc2bb2ce3725d`. The resulting Eghis implementation
+is isolated in `KaosEghis/core/kaosorders_current_day_orders.py`, with synthetic
+tests in `tests/test_kaosorders_current_day_orders.py`. It contains immutable
+parent, key, child, collection and comparison models only. It adds no reader,
+mapping, parser, serializer, fixture, persistence, transport or runtime hook.
+
 The matrix separates committed Eghis facts and synthetic proofs, recorded product
-decisions, and source or clinical meanings that still lack evidence. It introduces
-no model, parser, serializer, fixture, SQL, HTTP route, authentication rule or
-runtime hook. `EghisSourceDayReader` remains `UNAVAILABLE`, and no payload described
-here may be sent to `/api/v1/order-snapshots`.
+decisions, and source or clinical meanings that still lack evidence.
+`EghisSourceDayReader` remains `UNAVAILABLE`, and no fact described here may be
+sent to `/api/v1/order-snapshots`.
 
 ## Proposed Fact Identity
 
 | Item | Eghis proposal | Status |
 | --- | --- | --- |
-| Contract ID | `kaosorders.current-day-orders` | Proposed for explicit Orders acceptance |
-| Contract version | `1` | Proposed; independent of normalized-source v1/v2 |
-| Projection ID | `kaosorders-current-day-orders-v1` | Proposed for explicit Orders acceptance |
+| Contract ID | `kaosorders.current-day-orders` | Accepted logical identity; synthetic model only |
+| Contract version | `1` | Accepted; independent of normalized-source v1/v2 |
+| Projection ID | `kaosorders-current-day-orders-v1` | Accepted logical identity; no runtime enrollment |
 | Mapping revision | No value assigned | Blocked on source-evidence-bound production mapping |
 | Fact kind | One closed, complete current-day encounter/order fact set | Proposed; not a wire envelope |
 | Replacement authority | Only a validated FULL current-day fact may replace same-day in-memory state | Product decision recorded in `docs/kaosorders.md`; source proof unresolved |
@@ -53,10 +59,9 @@ semantics. The new fact is not an optional text companion attached to a v2 order
 | Session/runtime | Orders reports a disabled memory-only `CurrentDayRuntimeReadGate`; existing v1/API/UI remain unchanged. | New parser/serializer, session fencing, authentication, freshness, retry and atomic replacement are not agreed. | No hookup from Eghis; existing v1/v2 coordinator and outbox remain untouched. |
 | PACS/Reception | PACS consumes its sibling adapter and owns imaging lifecycle. Reception states here are Eghis source facts; KaosReception is a separate application. | No shared PACS or KaosReception contract is approved by this proposal. | Orders work must not alter PACS delivery or infer KaosReception semantics. |
 
-## Proposed Closed Logical Inventory
+## Accepted Closed Logical Inventory
 
-This is the narrow contract proposal for review, not JSON and not an implemented
-model:
+This is the accepted synthetic model inventory, not JSON or a wire contract:
 
 - one explicit current KST clinic-day/source/projection/mapping scope;
 - explicit parent encounter identity sufficient to group orders, with the final
@@ -73,10 +78,9 @@ model:
 - failed, partial, timed-out, unavailable, inconsistent or unverified input is not
   a fact and cannot clear prior same-day receiver state.
 
-The detailed 128/256 text bounds and exact Unicode/null policies remain the
-proposal in `docs/kaoseghis-current-day-orders-design.md`. They are not production
-source evidence. Orders must accept or counterpropose them before either repository
-implements the new pure synthetic model.
+The detailed 128/256 text bounds and exact Unicode/null policies remain documented
+in `docs/kaoseghis-current-day-orders-design.md` and are enforced by the synthetic
+model. They are not production source evidence.
 
 ## Fixture Boundary
 
@@ -94,15 +98,11 @@ No existing fixture may be relabeled, edited in place or accepted by the new Ord
 runtime gate. A future fixture needs the new identity and independently invented
 synthetic data after contract acceptance.
 
-## Exact Downstream Decision
+## Exact Downstream Boundary
 
 No new clinical workflow choice is requested: the current-day/non-cancelled/all-
-children/no-history scope is already recorded. The next decision is contractual:
-
-> Orders must accept or counterpropose `kaosorders.current-day-orders` version 1,
-> projection `kaosorders-current-day-orders-v1`, the closed inventory above, and
-> the rule that mapping revision stays unassigned until source evidence closes.
-
-After acceptance, Eghis may implement only a separate pure synthetic fact model and
-collection validator/comparator. Parser, serializer, HTTP/auth/runtime hookup and
-production source acquisition remain later, separately reviewed milestones.
+children/no-history scope is already recorded. Orders/orchestration should now
+review the Eghis synthetic model for parity with acceptance commit `182db514`.
+Mapping revision stays unassigned. Parser, serializer, canonical fixture/hash,
+session/wire, HTTP/auth/runtime hookup and production source acquisition remain
+later, separately reviewed milestones.

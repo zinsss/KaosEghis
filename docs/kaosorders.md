@@ -7,16 +7,18 @@ Last updated: 2026-10-07
 **Current implementation handoff:** the [2026-10-07 complete-order design](kaoseghis-current-day-orders-design.md)
 records receiver `3813b52` acceptance of the four synthetic text facts and the
 sender decision for a separate `kaosorders.current-day-orders` version 1 /
-`kaosorders-current-day-orders-v1` identity. The production mapping revision is
-unassigned. Receiver review must precede a new complete synthetic model; v2 and
-the existing coordinator cannot accept it. This milestone is documentation-only.
+`kaosorders-current-day-orders-v1` identity. Orders acceptance commit
+`182db514b5404b69d4d10c2b30fbc2bb2ce3725d` closes the logical model review.
+Eghis now has a separate pure synthetic immutable model and in-memory collection
+validator/comparator in `core/kaosorders_current_day_orders.py`. The production
+mapping revision remains unassigned; v2 and the existing coordinator cannot accept
+the new model, and no parser, serializer, fixture or runtime hookup exists.
 
 The [source semantics matrix](kaoseghis-orders-source-semantics-matrix.md) pins
-the receiver's disabled memory-only read-gate milestone
-`37713151070abe835fc89a16b0c401bd06794931` and separates repository facts,
-recorded product decisions and unresolved production source meanings. It proposes
-the same new identity for explicit Orders acceptance; it closes no source gate and
-authorizes no parser, serializer, HTTP/auth or runtime integration.
+the receiver's disabled memory-only read-gate and accepted logical-contract
+milestones, and separates repository facts, recorded product decisions and
+unresolved production source meanings. The synthetic implementation closes no
+source gate and authorizes no parser, serializer, HTTP/auth or runtime integration.
 
 **Latest operator decision:** [current-day, memory-only board](#current-day-memory-only-decision-2026-10-06).
 The EMR database is the sole durable source of patient/order truth. KaosOrders
