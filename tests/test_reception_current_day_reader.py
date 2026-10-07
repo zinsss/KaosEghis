@@ -108,6 +108,13 @@ def test_literal_contract_query_and_bounds_are_not_self_derived(database):
     assert reader.STATEMENT_TIMEOUT_SECONDS == 2.0
     assert "WHERE h.clinic_ymd = %(clinic_day)s" in reader.QUERY
     assert "h.proc_gb IN ('30', '40')" in reader.QUERY
+    assert (
+        "SELECT DISTINCT clinic_ymd, selection_id, patient_key, source_status_code"
+        in reader.QUERY
+    )
+    assert reader.QUERY.index("SELECT DISTINCT") < reader.QUERY.index(
+        "LIMIT %(row_sentinel)s"
+    )
     assert "LEFT JOIN public.hz_mst_ptnt" in reader.QUERY
     assert reader.QUERY.count("statement_timestamp()") == 2
     assert reader.QUERY.count(";") == 0
@@ -169,6 +176,29 @@ def test_duplicate_encounter_identity_rejects_whole_day(database):
     database.patient("synthetic-1")
     database.encounter("synthetic-1", code="30")
     database.encounter("synthetic-1", code="40")
+    with pytest.raises(reader.ReceptionDayReadRejected, match="^source_scope_unverified$"):
+        provider(database).read_current_day(NOW)
+
+
+def test_exact_duplicate_fact_collapses_before_logical_row_sentinel(
+    database, monkeypatch
+):
+    monkeypatch.setattr(reader, "MAX_ROWS", 1)
+    monkeypatch.setattr(reader, "ROW_SENTINEL", 2)
+    database.patient("synthetic-1")
+    database.encounter("synthetic-1", code="30")
+    database.encounter("synthetic-1", code="30")
+    result = provider(database).read_current_day(NOW)
+    assert [(item.selection_id, item.state.value) for item in result.patients] == [
+        ("synthetic-1", "CONSULTATION_COMPLETED")
+    ]
+
+
+def test_same_selection_id_with_different_patient_fact_rejects_whole_day(database):
+    database.patient("synthetic-a")
+    database.patient("synthetic-b")
+    database.encounter("synthetic-1", patient_key="synthetic-a", code="30")
+    database.encounter("synthetic-1", patient_key="synthetic-b", code="30")
     with pytest.raises(reader.ReceptionDayReadRejected, match="^source_scope_unverified$"):
         provider(database).read_current_day(NOW)
 
@@ -244,6 +274,28 @@ def test_cleanup_and_time_proof_is_mandatory(database):
 
     with pytest.raises(reader.ReceptionDayReadRejected, match="^cleanup_unverified$"):
         reader.BoundedReceptionDayProvider(slow_cleanup).read_current_day(NOW)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("source_clinic_day", "19990101"),
+        ("selection_id", "synthetic-meta"),
+        ("display_name", "Synthetic Meta"),
+        ("source_status_code", "30"),
+    ],
+)
+def test_meta_row_is_closed_and_bound_to_current_clinic_day(database, field, value):
+    original = database.__call__
+
+    def tampered(*args, **kwargs):
+        columns, rows = original(*args, **kwargs)
+        changed = [list(row) for row in rows]
+        changed[0][columns.index(field)] = value
+        return columns, [tuple(row) for row in changed]
+
+    with pytest.raises(reader.ReceptionDayReadRejected, match="^invalid_result$"):
+        reader.BoundedReceptionDayProvider(tampered).read_current_day(NOW)
 
 
 def test_runner_failure_is_sanitized_without_patient_or_provider_text():

@@ -88,10 +88,13 @@ or opens a connection itself. No runtime module constructs this provider.
 
 The single parameterized CTE SELECT applies a server-side `Asia/Seoul` day guard,
 filters exactly `proc_gb IN ('30', '40')`, joins the patient master internally,
-and emits one META proof plus deterministic DATA rows. The META proof fails closed
-for the 10,001st included encounter, duplicate encounter identity, patient-master
-join cardinality other than one, invalid name/identity, or a 16 MiB result-byte
-sentinel. A complete META row with zero DATA rows is verified-empty authority.
+and emits one META proof plus deterministic DATA rows. Exact identical source facts
+collapse before the 10,001st logical-row sentinel; the same `selection_id` with
+different patient/status facts rejects the whole read. The META proof also fails
+closed for patient-master join cardinality other than one, invalid name/identity,
+or a 16 MiB result-byte sentinel. A complete META row with zero DATA rows is
+verified-empty authority only when its day matches the requested current clinic
+day and all patient-bearing META fields are SQL NULL.
 The adapter independently revalidates the closed columns, row/byte bounds,
 timestamps, freshness, duplicate conflicts, fixed status mapping, and ordered
 cleanup timings. Connection and statement limits are 3 and 2 seconds; completion
@@ -138,3 +141,6 @@ and serialized reader remain unchanged and are not invoked by the tests.
 - **2026-10-07:** Added the unwired bounded parameterized source adapter and
   synthetic SQLite proof. Kept credential access, live reads, transport, runtime,
   persistence, logging, UI, printing, and deployment disabled.
+- **2026-10-07:** Aligned source duplicate semantics with the accepted contract:
+  exact facts collapse before bounds, conflicting facts reject. Closed META
+  validation now requires the current source day and NULL patient payload fields.

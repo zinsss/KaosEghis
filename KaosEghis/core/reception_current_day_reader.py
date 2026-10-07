@@ -51,7 +51,7 @@ WITH day_guard AS (
         THEN 1 ELSE 0 END AS matches,
         statement_timestamp() AS observed_at
 ),
-limited AS (
+source_rows AS (
     SELECT h.clinic_ymd,
            CAST(h.recept_no AS text) AS selection_id,
            CAST(h.ptnt_no AS text) AS patient_key,
@@ -60,7 +60,15 @@ limited AS (
     WHERE h.clinic_ymd = %(clinic_day)s
       AND h.proc_gb IN ('30', '40')
       AND (SELECT matches FROM day_guard) = 1
-    ORDER BY h.recept_no
+),
+distinct_facts AS (
+    SELECT DISTINCT clinic_ymd, selection_id, patient_key, source_status_code
+    FROM source_rows
+),
+limited AS (
+    SELECT clinic_ymd, selection_id, patient_key, source_status_code
+    FROM distinct_facts
+    ORDER BY selection_id, patient_key, source_status_code
     LIMIT %(row_sentinel)s
 ),
 encounters AS (
@@ -282,10 +290,17 @@ class BoundedReceptionDayProvider:
         header = meta[0]
         if header["extraction_status"] != "complete":
             raise ReceptionDayReadRejected("source_scope_unverified")
+        source_day = clinic_day.strftime("%Y%m%d")
+        if (
+            header["source_clinic_day"] != source_day
+            or header["selection_id"] is not None
+            or header["display_name"] is not None
+            or header["source_status_code"] is not None
+        ):
+            raise ReceptionDayReadRejected("invalid_result")
         expected = header["expected_data_rows"]
         if type(expected) is not int or not 0 <= expected <= MAX_ROWS or expected != len(data):
             raise ReceptionDayReadRejected("invalid_result")
-        source_day = clinic_day.strftime("%Y%m%d")
         observed_at = _aware(header["observed_at"])
         age = current_time.astimezone(timezone.utc) - observed_at.astimezone(timezone.utc)
         if age < timedelta(seconds=-30):
