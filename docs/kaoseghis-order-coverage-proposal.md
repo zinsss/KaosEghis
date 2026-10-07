@@ -9,6 +9,10 @@ The production reader stays UNAVAILABLE, and nothing here authorizes publishing
 or patient-data export. Initial preparation was mocked only; the later observation
 is recorded below.
 
+The separate [2026-10-07 performance checkpoint](kaoseghis-order-query-performance.md)
+records a newly approved execution and numeric-only EXPLAIN analysis of this same
+pinned SELECT. It does not change this query, its scope or any source-authority gate.
+
 ## Why This Check
 
 The [previous membership observation](kaoseghis-current-day-counts-proposal.md#observed-checkpoint-2026-10-06)
