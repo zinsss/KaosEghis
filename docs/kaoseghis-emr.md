@@ -9,6 +9,17 @@ version 1 / `kaosorders-current-day-orders-v1`, with mapping revision unassigned
 The existing text component, v1/v2 code, fixtures and runtime remain untouched.
 All source-evidence gates and the production reader block remain in force.
 
+The [2026-10-07 bounded full-field read](kaoseghis-current-day-read-evidence.md)
+observed 269 candidate reception records, 1,025 linked orders and 7 no-order
+receptions, with verified physical closure in 74.467 ms and total probe time
+146.837 ms. The resulting
+[full-snapshot polling recommendation](kaoseghis-current-day-read-evidence.md#full-snapshot-polling-recommendation)
+prefers a fresh whole-current-day read per refresh, serialized and coalesced,
+with validation after close and no deletion on failed/unverified reads. This is
+design guidance, not production enablement or proof of negligible server load.
+Repeated clinical-hours performance and all source-authority gates remain open;
+`EghisSourceDayReader` stays UNAVAILABLE and existing PACS behavior is unchanged.
+
 **Orders target clarified:** the [current-day memory-only decision](kaosorders.md#current-day-memory-only-decision-2026-10-06)
 makes the EMR DB the sole durable patient/order source. KaosOrders keeps only
 today's transient board, clears it at KST midnight and reloads today's source on

@@ -153,6 +153,77 @@ repeated/concurrent clinical activity is made. No buffer/I/O, server CPU, memory
 or transfer-byte measurement was performed. The existing aggregate EXPLAIN result
 must not be presented as an execution plan for this different full-field query.
 
+## Full-Snapshot Polling Recommendation
+
+Documentation-only recommendation recorded on 2026-10-07 from the observation
+above and the operator's question about a fresh full read on every poll. This is
+not approval to enable the diagnostic as a production reader or schedule new reads.
+
+The observed 74.467 ms connection lifecycle and 146.837 ms total probe time make
+a fresh, bounded **whole-current-day read per refresh** a promising design at
+this clinic's observed volume. Prefer this direction over limiting the read to
+the departing chart or relying on unverified edit timestamps. Do not describe
+server load as negligible: server CPU/I/O and repeated clinical-hours impact were
+not measured. One closed-hours result is not a latency or capacity guarantee.
+
+The requested detail fields have separate, limited evidence: the
+[approved one-row grid comparison](kaoseghis-order-grid-numeric-evidence.md)
+matched the screen code/name to `user_cd`/`user_nm`, and the displayed daily-amount,
+frequency and days columns to `qty`/`divide`/`days`. All three numeric columns have
+PostgreSQL `numeric` type. Preserve the independent exact values; do not multiply,
+divide, infer units or generalize this sample to every order category. The full-day
+diagnostic confirms exact-decimal readability in this sample, not universal display
+semantics or approved null/domain/scale policy.
+
+Proposed safeguards for a later, separately reviewed implementation:
+
+- Keep one serialized source connection through the shared FIFO and machine-wide
+  mutex. Close and verify cursor and physical connection before validation,
+  comparison, normalization or any delivery. A queued request must not open a
+  concurrent connection.
+- Debounce chart clear/load/change events by 2 s. Coalesce bursts and redundant
+  pending refresh requests rather than replay every event. Consider one necessary
+  +30 s follow-up for delayed commits; a newer chart transition supersedes the old
+  pending follow-up. Keep a 5-minute successful-read safety check and manual
+  refresh fallback in the proposed policy. This changes no existing timer or PACS
+  trigger, and neither delay proves EMR save completion.
+- Build and validate the complete current-day candidate in memory before replacing
+  accepted state. Failed, partial, timed-out, overflowed, inconsistent or unverified
+  reads retain valid same-day state; zero candidate rows are not a verified empty
+  day. Recheck the KST day before acceptance; midnight clears the prior-day state.
+- Compare complete, validated facts to catch observed additions, same-key edits,
+  disappearance, restoration, key reuse and reception-state changes. Compare all
+  retained facts, not only the row count or chart number. This is state comparison,
+  not an audit trail: transient changes between snapshots can be missed.
+- A fresh full **read** need not cause redundant delivery or rendering when facts
+  are unchanged and the receiver is known to hold matching valid current-day state
+  in the active session/generation. Receiver restart, a changed session/generation,
+  KST rollover or a fresh-snapshot request requires a fresh full snapshot regardless
+  of the sender's previous comparison. Session, wire and acknowledgement decisions
+  remain separate; do not reuse v2 epoch/revision ordering.
+- Retain only current-day patient/order state in memory. Do not introduce a durable
+  patient/order outbox, historical polling or receiver projection storage.
+
+The measured diagnostic includes all candidate reception states, with no
+cancellation filter. The future Orders projection still includes verified
+non-cancelled encounters even without orders, and every scoped child including
+cancelled, fee and unclassified rows. Excluding a verified cancelled encounter is
+a separate scope decision, not evidence that this diagnostic already implements
+the approved projection or that raw state codes are fully mapped.
+
+Next performance evidence should be a separately approved, bounded clinical-hours
+pilot after reviewing the source operation and remaining gates. Observe repeated
+read/close latency, queue delay and EMR responsiveness with a stop condition for
+timeouts or new slowdown. Any claim about server load requires separately reviewed
+server measurements. No such pilot, additional live query, production scheduling,
+serializer or delivery was performed for this documentation update.
+
+Documentation-update verification: **531 focused tests passed in 3.80 s**, covering
+the current-day probe/candidate, grid numeric comparison, shared read queue and
+source-evidence inspection. Databases were mocked, mutexes isolated and external
+network access blocked. `git diff --check` passed. The earlier broader result
+above remains historical; the full suite was not rerun for this docs-only change.
+
 ## Remaining Boundaries
 
 Single-statement consistency is not proof that an EMR save spanning multiple
