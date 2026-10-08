@@ -6,9 +6,12 @@
   protected root through the approved retention boundary, and no retry is approved.
   The corrected offline v3 diagnostic/manifest candidate passed independent review.
   Authoritative logging evidence passed review. The first synthetic Job Object
-  candidate failed review and has one bounded candidate-only remediation prepared
-  for re-review; no v3 executable bundle, manifest identity, ZIP, transfer, Windows
-  probe execution, or installer execution exists.
+  candidate failed review, received one bounded candidate-only remediation, and
+  passed final independent re-review. A user-designated
+  non-clinic target label is not yet a fixed, trusted execution identity, so the
+  approved synthetic probe stopped before host contact. No v3 executable bundle,
+  manifest identity, ZIP, transfer, Windows probe execution, or installer execution
+  exists.
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, orchestration, clinic operations
@@ -448,6 +451,19 @@ live-clinic workstation and was not contacted. Execution approval cannot be
 requested until a distinct non-clinic target and its fixed identity/owner are
 provided and independently reviewed.
 
+Later on 2026-10-08 the user designated non-clinic target label `winbox`, owned by
+`zin`, and authorized only the reviewed synthetic containment transfer/execution
+gate. Read-only validation stopped before any connection because neither the Eghis
+worker context nor the coordinator Gateway context resolved that label to a fixed
+SSH host. Both contexts lacked an explicit dedicated identity with
+`IdentitiesOnly=yes` and lacked a pinned known-host entry for the target; OpenClaw
+presence again returned no connected device. Consequently the exact machine ID,
+SSH target, out-of-band trusted fingerprint, Windows account/admin status, protected
+and staging paths, Sandbox/restart/resource/ACL state, and interactive desktop
+session remain unproven. Per the fail-closed gate, no authentication attempt,
+transfer, staging, Windows command, Sandbox launch, cleanup, or execution occurred.
+The label and owner assertion alone do not authorize inferring any of those values.
+
 The proposed runner delta, intentionally **not wired or packaged yet**, is:
 
 1. keep the 5,400-second monotonic global deadline and do not change any individual
@@ -639,6 +655,12 @@ back to host pytest.
   syntax and explicit-open behavior. Next review must accept that evidence and the
   containment candidate; actual proof remains blocked on a fixed, approved
   non-clinic Windows Sandbox target.
+- The later user-designated `winbox`/`zin` label is approved in intent but remains
+  unusable until the locked coordinator execution context has an explicit host,
+  dedicated identity, `IdentitiesOnly=yes`, and an independently verified pinned
+  host key. Only then may a new read-only host preflight verify account/admin,
+  Sandbox/restart/resources, protected/staging paths and ACLs, and an interactive
+  session before any transfer.
 - Cleanup of the retained exact host paths requires separate approval and must occur
   by the retention deadline; absence of approval is not permission to broaden or
   automate deletion.
@@ -740,3 +762,10 @@ until the applicable next action is separately approved and reviewed.
   Linux-safe tests exercise the wrong-platform failure envelope and structural
   guarantees only. No Windows native execution, manifest/ZIP, transfer, host
   contact/cleanup, push, merge, deployment, or live/clinical access occurred.
+- **2026-10-08:** Recorded final independent PASS of the bounded containment
+  remediation and the user's subsequent candidate-only execution approval for the
+  designated non-clinic `winbox`/`zin` label. Local and Gateway read-only SSH
+  context checks found no fixed alias, dedicated identity, or pinned host key, and
+  presence listed no device. The gate therefore stopped before connection; no host
+  authentication, transfer, staging, Windows/Sandbox execution, cleanup, package,
+  push, merge, deployment, or live/clinical access occurred.
