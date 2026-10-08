@@ -4,6 +4,8 @@
   failed closed during the 480-second Python-install step before product tests.
   Sanitized evidence is archived locally, host artifacts are retained under the
   protected root through the approved retention boundary, and no retry is approved.
+  An offline v3 diagnostic/manifest candidate awaits independent design review;
+  no v3 executable bundle, manifest identity, ZIP, transfer, or execution exists.
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, orchestration, clinic operations
@@ -269,6 +271,86 @@ Host bundle, inbound, results, and return artifacts remain under the approved
 protected staging root. No cleanup is authorized; retention ends no later than
 `2026-10-15T10:28:50Z`, subject to a separately reviewed exact-path cleanup step.
 
+### Offline v3 evidence and bounded design
+
+The pinned installer remains the exact 3.11.9 executable with SHA-256
+`5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde`.
+Offline inspection identifies it as a WiX Burn bootstrapper. Embedded engine text
+contains the `log` command-line token, the fixed error `Must specify a path for
+log`, package-log allocation messages, `burn.clean.room`, active-parent state,
+elevated/unelevated pipe coordination, elevated-child launch, and child-process
+wait messages. This supports a candidate `/log <path>` diagnostic boundary and
+proves the executable has multi-process orchestration. It does **not** prove that a
+child caused the v2 timeout, that a process detached or reparented, or that the
+current `taskkill /T` covered every process.
+
+The current `Invoke-DeadlineProcess` waits only the `Start-Process` bootstrapper
+PID. On Windows timeout it invokes `taskkill /PID <pid> /T /F`, but it neither
+checks the command's exit code nor verifies that the root and descendants exited.
+The existing fake-child test runs on the Linux development host, where .NET
+`Kill(true)` is used, so it is not evidence for Windows `taskkill`, Burn clean-room
+behavior, elevation pipes, detached children, or reparenting. The v2 result shows
+the observed bootstrapper PID remained active through 480 seconds; nothing more
+about its process topology is known.
+
+The reserved next identity is `eghis-d1777c1834e1-win311-v3`, but it is a design
+label only. The repository contains candidate-only modules under
+`tools/windows-sandbox/v3-candidate/`:
+
+- `InstallerDiagnostics.psm1` reads a bounded raw installer log from Sandbox-local
+  storage and emits only a closed JSON summary: presence, byte/line counts, SHA-256,
+  aggregate eight-hex-result-token count, and fixed Detect/Plan/Apply/Cache/Execute
+  marker counts. It never returns a log line, path, username, argument, or token.
+- `New-V3Manifest.ps1` deterministically hashes an exact candidate tree, permits
+  only the `wheelhouse` directory, rejects reparse points and unsafe paths, and
+  writes a fresh manifest. It does not create or compress a ZIP.
+- `test-v3-offline-contract.ps1` proves synthetic raw content is not echoed,
+  enforces the closed schema, no-overwrite and raw-log size bounds, verifies
+  canonical UTF-8/LF output and deterministic manifest paths/order, rejects an
+  unexpected directory or reparse point, and asserts that no ZIP is produced.
+
+The proposed runner delta, intentionally **not wired or packaged yet**, is:
+
+1. keep the 5,400-second monotonic global deadline and do not change any individual
+   budget without new timing evidence;
+2. place the Burn raw log only in an unmapped `C:\KaosTestRun\diagnostics` path,
+   pass the independently confirmed logging syntax to the pinned installer, and
+   delete it with the Sandbox instance;
+3. after installer exit or verified process-tree termination, write only
+   `python-installer-diagnostic.json` to mapped Results using the closed summary;
+4. add only that JSON filename to the reviewed result allowlist, retain the 200-MiB
+   total result cap, and reject malformed/oversized summaries;
+5. replace the race-prone start/kill boundary with a Windows containment mechanism
+   that enrolls the suspended bootstrapper before it may create descendants,
+   prevents unreviewed breakaway, terminates the containment object on timeout,
+   and fails closed unless root/child/grandchild exit is proven; and
+6. retain fixed/redacted status reasons and never export the raw installer log.
+
+A Windows Job Object with kill-on-close is the candidate containment mechanism,
+but it is not accepted merely from design knowledge. Final integration requires an
+independent non-clinic Windows synthetic probe that covers normal exit, timeout,
+child and grandchild processes, attempted detach/reparent/breakaway, PID reuse
+defense, assignment failure, and global-deadline expiry. If the reviewed mechanism
+cannot prove containment, v3 packaging remains blocked. The exact CPython 3.11.9
+and WiX documentation for logging syntax must also be captured and reviewed before
+runner wiring; embedded strings alone are insufficient authority for final bytes.
+
+#### v3 acceptance and sequencing gates
+
+1. Independently review this evidence, candidate modules, closed diagnostic schema,
+   and process-containment design.
+2. Capture an authoritative pinned documentation reference for the exact logging
+   syntax and confirm that it does not enable networking or external collection.
+3. Implement the runner/process helper only after the Windows synthetic containment
+   probe passes; preserve the global cap and fail closed on any unverified cleanup.
+4. Assemble a fresh v3 candidate tree and run `New-V3Manifest.ps1`; record a new
+   entry count and manifest SHA-256. Never reuse or edit the v2 manifest.
+5. Only after code/design review, build one final v3 ZIP, record its new size and
+   SHA-256, and perform a second exact-artifact review. This task does not perform
+   that build.
+6. Transfer, staging, Sandbox execution, or host cleanup each remain separately
+   gated. No execution approval follows from accepting the offline design.
+
 ## Sandbox configuration
 
 The review candidate `tools/windows-sandbox/KaosEghisSynthetic.wsb` enforces:
@@ -411,11 +493,9 @@ back to host pytest.
 
 - Preserve the v2 result as the canonical first-run evidence. Do not reuse its run
   directory or rerun the unchanged v2 bundle.
-- The next bounded technical step is offline analysis of the pinned CPython
-  bootstrapper's documented logging and child-process behavior. Any diagnostic
-  capture, process-wait change, or Python-install budget change must be designed as
-  a new bundle ID with a fresh manifest and hashes, then receive independent review
-  and explicit execution approval while retaining the 5,400-second global bound.
+- The completed offline analysis supports only the closed diagnostic summary and
+  deterministic manifest workflow. Next review must resolve authoritative logging
+  syntax and Windows process-containment proof before runner integration.
 - Cleanup of the retained exact host paths requires separate approval and must occur
   by the retention deadline; absence of approval is not permission to broaden or
   automate deletion.
@@ -481,3 +561,10 @@ until the applicable next action is separately approved and reviewed.
   retention deadline, evidence-limited cause analysis, new-bundle-only diagnostic
   boundary, and deferred OpenClaw-node security gate. This documentation worker did
   not contact YHSHFM, retry Sandbox, mutate host artifacts, or change bundle bytes.
+- **2026-10-08:** Completed offline v3 analysis. Recorded pinned Burn logging and
+  multi-process evidence, the current Windows termination-proof gap, and a bounded
+  Job-Object candidate with explicit Windows synthetic acceptance gates. Added a
+  candidate closed installer-diagnostic summarizer, deterministic manifest-only
+  generator, and synthetic contract test. Reserved the v3 label without generating
+  a manifest identity or executable ZIP. No YHSHFM contact, v2 retry, transfer,
+  host cleanup, deployment, or live-data access occurred.
