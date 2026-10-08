@@ -1,6 +1,7 @@
 # Isolated Windows synthetic test environment
 
-- **Status:** Proposed; no workstation action authorized or performed
+- **Status:** First host-change step approved but not executed by this worker;
+  bundle, runtime, and test execution remain unapproved
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, orchestration, clinic operations
@@ -13,10 +14,32 @@ launcher. The test process must not see or mutate that checkout, EMR processes,
 patient data, credentials, network services, printers, clipboard, or the host
 interactive desktop. Administrator status is not a substitute for isolation.
 
-This plan does not authorize SSH, software installation, optional-feature changes,
-service/firewall changes, test execution, or deployment. It records a proposed
-synthetic-only environment for a later separately approved maintenance window.
-Never run `main.py`, repository tools/probes, or a production reader in this gate.
+Except for the bounded coordinator step below, this plan does not authorize SSH
+use, software installation, optional-feature changes, service/firewall changes,
+test execution, or deployment. Never run `main.py`, repository tools/probes, or a
+production reader in this gate.
+
+### Approved first host-change boundary
+
+The user subsequently authorized a coordinator to perform only these two host
+changes through the already-established administrative channel:
+
+1. enable Windows optional feature `Containers-DisposableClientVM` with dependency
+   enablement and `-NoRestart`; and
+2. create only `C:\KaosClinic-Test\Eghis`, empty, non-reparse, with inheritance
+   disabled and full-control allow entries only for the approving administrator
+   and SYSTEM.
+
+The command must verify expected computer/user/admin context first, accept an
+already-enabled feature, reject an unexpected feature state, and treat any existing
+staging root as acceptable only when it is empty and its protected ACL is already
+exact. Otherwise it stops without repairing or replacing existing content. A newly
+created root whose ACL cannot be secured is removed only if still empty.
+
+This approval does not include a reboot, bundle/source transfer, clone, Python or
+dependency installation, Sandbox launch, test run, firewall/service change, live
+checkout access, or creation of any child under the staging root. This worker did
+not contact or change the workstation.
 
 ## Repository evidence
 
@@ -207,8 +230,10 @@ and report blocked; do not fall back to host pytest.
 
 ## Open decisions and next action
 
-- Approve Windows Sandbox as the isolation boundary, or provide a separate
-  non-production Windows VM/host.
+- Review the coordinator's feature/ACL post-checks; if the feature reports a
+  pending reboot, obtain separate reboot approval and do not proceed meanwhile.
+- Separately approve the exact `.wsb` configuration and a later Sandbox launch,
+  or provide a non-production Windows VM/host.
 - Approve the official CPython 3.11.9 x64 installer, publisher, and SHA-256.
 - Resolve and approve the explicit hash-pinned PyAutoGUI test dependency.
 - Approve the maintenance window, resource budget, host staging/results ACLs,
@@ -226,3 +251,7 @@ launch it.
   supplied read-only workstation inventory and repository dependency/test guards.
   No remote access, installation, host mutation, test execution, or deployment
   occurred.
+- **2026-10-08:** Recorded the user's bounded approval for a coordinator to enable
+  only `Containers-DisposableClientVM` with `-NoRestart` and create the empty,
+  protected staging root. Reboot, staging children, bundles, runtime installation,
+  Sandbox launch, and tests remain unapproved; this worker executed no host action.
