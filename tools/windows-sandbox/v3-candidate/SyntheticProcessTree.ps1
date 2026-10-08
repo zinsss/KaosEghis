@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('normal', 'root', 'child', 'grandchild')]
+    [ValidateSet('normal', 'nonzero-before-marker', 'root', 'child', 'grandchild')]
     [string]$Role,
     [Parameter(Mandatory = $true)][string]$MarkerRoot
 )
@@ -52,6 +52,7 @@ function Start-SyntheticDescendant {
     $process.Dispose()
 }
 
+if ($Role -eq 'nonzero-before-marker') { exit 23 }
 Write-RoleMarker $Role
 switch ($Role) {
     'normal' { exit 0 }

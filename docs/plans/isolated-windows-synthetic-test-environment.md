@@ -5,9 +5,10 @@
   Sanitized evidence is archived locally, host artifacts are retained under the
   protected root through the approved retention boundary, and no retry is approved.
   The corrected offline v3 diagnostic/manifest candidate passed independent review.
-  Authoritative logging evidence and a candidate synthetic Job Object proof are now
-  prepared for review; no v3 executable bundle, manifest identity, ZIP, transfer,
-  Windows probe execution, or installer execution exists.
+  Authoritative logging evidence passed review. The first synthetic Job Object
+  candidate failed review and has one bounded candidate-only remediation prepared
+  for re-review; no v3 executable bundle, manifest identity, ZIP, transfer, Windows
+  probe execution, or installer execution exists.
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, orchestration, clinic operations
@@ -384,14 +385,31 @@ The candidate-only files `Test-JobObjectContainment.ps1` and
 `SyntheticProcessTree.ps1` create no KaosEghis install and reference no clinic path.
 The controller creates PowerShell suspended, applies a Job Object with
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, assigns the process before resuming it, and
-uses monotonic `Stopwatch` budgets. A normal synthetic process must exit cleanly.
-The deadline scenario starts a synthetic root, child, and grandchild, reaches its
-five-second run limit, calls `TerminateJobObject`, waits on the original root handle,
-and requires the Job Object's active-process count to reach zero. Both scenarios
-must complete within a 15-second probe deadline. Output is one closed, nonclinical
-JSON result; temporary role markers contain only fixed synthetic labels and are
-removed with their unique temp root. `test-job-object-containment-contract.ps1`
-provides a Linux-safe static contract check but is not Windows execution evidence.
+uses monotonic `Stopwatch` budgets. A normal synthetic process must exit with code
+zero, produce exactly `normal.ready` with fixed `synthetic-normal` content, and
+leave no other marker. The deadline scenario starts a synthetic root, child, and
+grandchild, reaches its four-second run limit, calls `TerminateJobObject`, waits on
+the original root handle, obtains its exit code, and requires the Job Object's
+active-process count to reach zero. Both scenarios and explicit cleanup must finish
+within the 15-second probe deadline. Success is emitted only after the exact four
+allowlisted marker files and unique temp root are explicitly deleted and absence is
+verified. Success and failure share one closed nonclinical JSON field set; failures
+map to fixed allowlisted reasons and never echo exceptions, paths, PIDs, Win32 text,
+stdout, stderr, or host details. `test-job-object-containment-contract.ps1`
+provides Linux-safe structural checks plus a real wrong-platform failure-envelope
+check, but it is not Windows execution evidence.
+
+Independent review of commit `844647fe817fafaeb61b86eda91de5e36809a7c3`
+accepted the upstream `/log` evidence and suspended-before-assignment ordering but
+rejected four proof gaps: no exit-code or exact normal-marker assertion, success
+before silent cleanup, raw failure propagation, and unchecked cleanup in
+assignment/resume/termination paths. The bounded remediation adds
+`GetExitCodeProcess`, exact marker-set/content checks, explicit deadline-bounded
+cleanup before output, fixed closed envelopes, and checked terminate/wait/job-empty
+postconditions with fallback cleanup that retains native handles until cleanup is
+proven. The worker also has a future `nonzero-before-marker` role that exits with a
+fixed nonzero code before writing anything. Offline tests prove its ordering, but
+this remediation does not execute that Windows case or any native Windows probe.
 
 Execution acceptance requires all of the following on one separately approved,
 non-clinic Windows Sandbox target:
@@ -407,11 +425,13 @@ non-clinic Windows Sandbox target:
    sharing, map probe input read-only, and map only a new empty result directory
    writable;
 3. observe the fixed JSON booleans for create-suspended-before-assignment, normal
-   exit, root/child/grandchild start, timeout, original-root-handle exit, zero active
-   job processes, and the 15-second monotonic bound;
+   zero exit and exact marker, root/child/grandchild start, timeout,
+   original-root-handle exit, zero active job processes, exact cleanup, and the
+   15-second monotonic bound;
 4. additionally review and exercise fail-closed assignment/resume failure and an
-   attempted breakaway/detach case before this helper can replace the runner's
-   current process boundary; do not infer those cases from the current core probe;
+   attempted breakaway/detach case, plus the prepared nonzero-before-marker worker,
+   before this helper can replace the runner's current process boundary; do not
+   infer those Windows results from offline structural checks;
 5. preserve no raw process output, PID list, dump, installer, package, source tree,
    or host path, and destroy the Sandbox after returning only the reviewed JSON; and
 6. before transfer, perform read-only feature/restart/disk/RAM/path/ACL preflight and
@@ -712,3 +732,11 @@ until the applicable next action is separately approved and reviewed.
   discovery found no registered non-clinic Windows target, so no execution approval
   can yet be requested. No v3 manifest/ZIP, transfer, Windows execution, installer
   run, host cleanup, push, deployment, or live/clinical access occurred.
+- **2026-10-08:** Recorded independent FAIL of the first Job Object candidate and
+  completed the single bounded candidate-only remediation. Added original-process
+  exit-code and exact marker proof, a nonzero-before-marker future worker, checked
+  native terminate/wait/job-empty cleanup with handle retention, exact temp-root
+  cleanup before success, and a closed fixed-reason success/failure envelope.
+  Linux-safe tests exercise the wrong-platform failure envelope and structural
+  guarantees only. No Windows native execution, manifest/ZIP, transfer, host
+  contact/cleanup, push, merge, deployment, or live/clinical access occurred.
