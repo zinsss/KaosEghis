@@ -43,7 +43,7 @@ payload or credential content:
   `RestartNeeded=true`, so reboot remains a pending, separately approved gate;
 - `C:\KaosClinic-Test\Eghis` exists, is empty, and is not a reparse point;
 - its DACL has inheritance disabled and exactly two full-control allow principals,
-  `YHSHFM\leejs` and SYSTEM, with the approving administrator as owner; and
+  `YHSHFM\leejs` and SYSTEM; and
 - the protected live checkout remained on `main` at `5fc962e` with tracked and
   staged state clean.
 
