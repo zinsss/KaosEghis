@@ -10,9 +10,10 @@
   passed final independent re-review. The user has now fixed the intended target
   to the centrally registered Windows machine `YHSHFM`, SSH alias `yhshfm`, owner
   `zin`, and Windows account `leejs`. Central inventory still marks its access as
-  unverified and identifies it as the live KaosEghis runtime, so the clarification
-  does not establish the distinct non-clinic target required by this proof plan.
-  The locked local SSH context also does not select the approved account, a
+  unverified and identifies it as the live KaosEghis runtime. Because no distinct
+  Windows host is available, the user explicitly approved YHSHFM only as the host
+  for an isolated Windows Sandbox and only for a no-change read-only preflight at
+  this gate. The locked local SSH context does not select the approved account, a
   dedicated identity, or strict pinned-host-key behavior, so the approved synthetic
   probe remains stopped before host contact. No v3 executable bundle,
   manifest identity, ZIP, transfer, Windows probe execution, or installer execution
@@ -419,10 +420,13 @@ proven. The worker also has a future `nonzero-before-marker` role that exits wit
 fixed nonzero code before writing anything. Offline tests prove its ordering, but
 this remediation does not execute that Windows case or any native Windows probe.
 
-Execution acceptance requires all of the following on one separately approved,
-non-clinic Windows Sandbox target:
+Execution acceptance requires all of the following on one separately approved
+Windows Sandbox host. The current exception is YHSHFM: its live checkout, data,
+services, desktop applications, devices, network, and clinical workflow remain
+prohibited resources, and only synthetic fixtures inside the isolated Sandbox are
+eligible for a later separately approved execution:
 
-1. record the exact non-clinic machine ID, explicit SSH target and trusted host-key
+1. record the exact machine ID, explicit SSH target and trusted host-key
    fingerprint, Windows build, protected/prohibited host paths, separate staging
    root, approved Windows account and key-owning coordinator context, Sandbox
    feature/restart state, approving owner, maintenance window, and sufficient
@@ -450,11 +454,10 @@ non-clinic Windows Sandbox target:
    installer or product-test follow-on and no same-directory rerun.
 
 Read-only OpenClaw presence discovery on 2026-10-08 returned no people or devices.
-No registered non-clinic Windows Sandbox target, stable device identity, or execution
-authorization target can therefore be named. YHSHFM is explicitly excluded as a
-live-clinic workstation and was not contacted. Execution approval cannot be
-requested until a distinct non-clinic target and its fixed identity/owner are
-provided and independently reviewed.
+At that time no registered non-clinic Windows Sandbox target, stable device
+identity, or execution authorization target could be named, and YHSHFM remained
+excluded. This was the original plan; the later explicit YHSHFM Sandbox-host
+exception below supersedes only that target-selection restriction.
 
 Later on 2026-10-08 the user designated non-clinic target label `winbox`, owned by
 `zin`, and authorized only the reviewed synthetic containment transfer/execution
@@ -462,9 +465,11 @@ gate. Validation initially stopped because no fixed SSH host was available. The
 user then clarified that label as central machine `YHSHFM`, registered SSH alias
 `yhshfm`, Windows account `leejs`, and owner `zin`. Central inventory confirms the
 machine, registered hostname, alias, and OS, but also identifies `YHSHFM` as the
-live KaosEghis runtime and retains `unverified-access`. The clarification therefore
-does not prove a distinct non-clinic host or override the plan's protected-live-host
-boundary.
+live KaosEghis runtime and retains `unverified-access`. The user subsequently chose
+YHSHFM because no distinct Windows host is available. This permits only a
+no-change read-only preflight and potential later Sandbox-only synthetic execution;
+it never permits touching the live checkout, data, services, clinical workflow, or
+other host resources.
 
 A locked-context, local-only `ssh -G yhshfm` inspection stopped before connection.
 It resolved a different user, used the default identity search rather than an
@@ -495,7 +500,7 @@ The proposed runner delta, intentionally **not wired or packaged yet**, is:
 
 A Windows Job Object with kill-on-close is the candidate containment mechanism,
 but it is not accepted merely from design knowledge. Final integration requires an
-independent non-clinic Windows synthetic probe that covers normal exit, timeout,
+independent Windows Sandbox synthetic probe that covers normal exit, timeout,
 child and grandchild processes, attempted detach/reparent/breakaway, PID reuse
 defense, assignment failure, and global-deadline expiry. If the reviewed mechanism
 cannot prove containment, v3 packaging remains blocked. The exact CPython 3.11.9
@@ -509,7 +514,7 @@ insufficient authority for final bytes.
    and process-containment design.
 2. Independently review the authoritative logging evidence and the candidate
    synthetic containment scripts; retain the absolute Sandbox-local path rule.
-3. Implement the runner/process helper only after the approved non-clinic Windows
+3. Implement the runner/process helper only after the approved Windows Sandbox
    synthetic containment probe, including failure and breakaway cases, passes;
    preserve the global cap and fail closed on any unverified cleanup.
 4. Assemble a fresh v3 candidate tree and run `New-V3Manifest.ps1`; record a new
@@ -665,15 +670,16 @@ back to host pytest.
 - The completed offline analysis supports only the closed diagnostic summary and
   deterministic manifest workflow. Upstream evidence now establishes the `/log`
   syntax and explicit-open behavior. Next review must accept that evidence and the
-  containment candidate; actual proof remains blocked on a fixed, approved
-  non-clinic Windows Sandbox target.
+  containment candidate; actual proof remains blocked on a fixed, trusted Windows
+  Sandbox execution context.
 - The user clarified the candidate-only target as central machine `YHSHFM`
   (Windows), registered SSH alias `yhshfm`, exact Windows account `leejs`, and
   owner `zin`. The central inventory agrees on the machine, registered hostname,
   alias, and OS but still records `unverified-access` and identifies it as the live
-  KaosEghis runtime. This does not satisfy the existing requirement for a distinct
-  non-clinic target; resolving that classification conflict requires explicit
-  review before any host preflight.
+  KaosEghis runtime. The user explicitly accepted this host only for a no-change
+  read-only preflight and a later separately approved Sandbox-only synthetic run
+  because no distinct Windows host is available. The live checkout, data, services,
+  clinical workflow, and all non-Sandbox execution remain prohibited.
 - A locked-context, local-only `ssh -G yhshfm` inspection did not contact or
   authenticate to the host. It resolved a different user, allowed the default
   identity search instead of a dedicated key (`IdentitiesOnly=no`), was not
@@ -685,6 +691,15 @@ back to host pytest.
   key. Only after that review may a read-only host preflight verify account/admin,
   Sandbox/restart/resources, protected/staging paths and ACLs, and an interactive
   session before any transfer.
+- Minimal user-side trust preparation is: create or select one coordinator-owned
+  dedicated key without sharing its private material; verify the server public
+  host-key fingerprint out of band at the YHSHFM console; pin only that verified
+  key in a dedicated known-hosts file; configure the registered host with exact
+  user `leejs`, one explicit identity, `IdentitiesOnly=yes`, `BatchMode=yes`, and
+  `StrictHostKeyChecking=yes`; then have an independent reviewer compare the local
+  `ssh -G leejs@yhshfm` resolution and pinned fingerprint before authorizing any
+  connection. Existing unverified known-host entries and SSH-agent/default-key
+  discovery are not acceptable substitutes.
 - Cleanup of the retained exact host paths requires separate approval and must occur
   by the retention deadline; absence of approval is not permission to broaden or
   automate deletion.
@@ -799,4 +814,12 @@ until the applicable next action is separately approved and reviewed.
   identity, non-interactive settings, and independently verified pinned host key.
   The gate remains blocked before connection; no authentication, host command,
   transfer, Windows/Sandbox execution, packaging, cleanup, push, deployment, or
+  clinical-data access occurred.
+- **2026-10-08:** Recorded the user's explicit plan change selecting YHSHFM as the
+  Sandbox host because no distinct Windows host is available. The exception allows
+  only a no-change read-only preflight at this gate and never authorizes contact
+  with the live checkout, data, services, or clinical workflow. Local-only SSH
+  resolution still lacked the dedicated identity, non-interactive options, and
+  independently pinned host key, so no authentication, host command, transfer,
+  staging, Windows/Sandbox execution, packaging, cleanup, push, deployment, or
   clinical-data access occurred.
