@@ -1,6 +1,7 @@
 # Current-day volatile provider remaining gates
 
-- **Status:** Contract inputs and evidence plan; no runtime activation authorized
+- **Status:** Phase 3A pure lifecycle model implemented; disabled runtime and all
+  production gates remain pending
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, KaosReception, orchestration,
@@ -10,7 +11,8 @@
 
 The selected architecture is one Eghis-owned, SQLite-free, volatile current-day
 provider. Orchestration commit
-`bd3c66a0e954ad65dde81b8a2b7b24b87d24bdc7` is the baseline for this plan:
+`527776400d774abf40f0cf248e5bab60c0c77602` is the normative baseline for this
+plan and supersedes the earlier `bd3c66a` planning baseline:
 
 - `architecture/current-day-volatile-provider-v1.md` selects one authoritative
   owner and destination-minimal Orders and Reception projections;
@@ -305,11 +307,72 @@ consumers to their accepted unavailable/manual-safe behavior. There is no patien
 database, replay, schema migration, or cache to restore. Rollback must not reactivate
 the legacy Orders snapshot route for these projections.
 
+## Phase 3A pure lifecycle implementation
+
+`KaosEghis/core/current_day_provider_lifecycle.py` implements the first code slice
+authorized by orchestration `5277764`. It is deliberately I/O-free and has no
+source reader, SQL, transaction, serializer/parser, HTTP/auth, socket, OS mutex,
+thread/timer, settings, persistence, UI, runtime mount, or deployment import.
+
+The settled implementation decisions are:
+
+- all provider, cursor, ticket, destination, observation, lease-claim, and snapshot
+  records are frozen/redacted values;
+- `OpaqueIdentity` supports equality/hash only and defines no magnitude or order;
+- every transition returns a new `ProviderState`; publishing creates one complete
+  `ProviderSnapshot` and changes the caller's state reference once, so existing
+  readers retain the complete old immutable reference while later readers receive
+  the complete new one;
+- startup is empty/`STARTING`; KST rollover clears first and retires the old pair;
+  lease loss and shutdown clear serving and in-flight references fail closed;
+- one injected refresh ticket captures session, generation, day, lease token, and
+  exact 10-second deadline; one active cycle admits only one coalesced successor;
+- ordinary completion schedules 60 seconds plus the injected stable 0–5-second
+  jitter; failures use 60/120/300 seconds plus jitter, cap at 300, never retry
+  inside the cycle, and success resets the failure count;
+- final publication checks lease, session, generation, clinic day, active ticket,
+  and deadline; late/restart/rollover/lease-loss results cannot publish;
+- each accepted observation advances one common sequence while Orders and Reception
+  may independently be available, verified empty, or unavailable; a failed source
+  cycle retains the prior internal immutable reference but has no replacement
+  authority; and
+- health/reason values are a closed nonclinical vocabulary with fixed exceptions
+  and redacted representations.
+
+The lease is only an injected immutable claim. This slice does not acquire a named
+mutex, elect a process, schedule work, or provide a runtime singleton. Destination
+states contain only synthetic item counts and integer content markers; no patient-
+or order-shaped fixture is required.
+
+### Phase 3A validation evidence
+
+- The normal focused pytest command reached repository `tests/conftest.py` but all
+  21 then-defined cases failed in setup because the unrelated PySide6 PACS fixture
+  could not load host `libxkbcommon.so.0`; no lifecycle assertion ran in that pass.
+- Following the approved pure-model verification procedure, the final focused
+  suite passed **23 tests** with `--noconftest`, plugin autoload disabled, and
+  bytecode disabled.
+- Adjacent pure Orders facts, Reception projection, and bounded Reception reader
+  regressions passed **293 tests** under the same isolated mode.
+- The documented full baseline collected 4,615 tests but stopped with 12 GUI-module
+  collection errors for the same missing host `libxkbcommon.so.0`; this is an
+  environment blocker, not a lifecycle assertion failure.
+- Tests cover literal constants, equality-only IDs, startup, deadline, stable
+  jitter, single-flight/coalescing, success and failure schedules, backoff cap/reset,
+  KST rollover, restart/day/ticket/lease fences, A-B-A rejection, verified empty,
+  destination failure isolation, sequence retry/conflict/regression, immutable
+  old-or-new replacement, shutdown, fixed errors, redacted representations, and a
+  standard-library-only AST boundary.
+
+The isolated results are focused verification, not a complete repository baseline.
+The full baseline remains blocked by the existing host GUI-library dependency.
+
 ## Safe implementation sequence
 
-1. Independent review of this Eghis input/evidence plan.
-2. Implement only the already authorized pure, I/O-free lifecycle state model and
-   synthetic matrix; obtain independent review.
+1. Independent review of the provider contract inputs: completed through central
+   baseline `5277764`.
+2. Implement the pure, I/O-free lifecycle state model and synthetic matrix:
+   completed in Phase 3A; independent code review pending.
 3. Consumers and orchestration settle the unresolved decisions listed below and
    accept separate destination wire/auth contracts.
 4. Freeze and synthetically verify the common source-observation contract; obtain
@@ -353,10 +416,12 @@ route or deployment.
 
 ## Next action
 
-Independent integration review should compare this plan with orchestration
-`bd3c66a`, the accepted Orders/Reception logical contracts, and the actual unwired
-Eghis boundaries. After review, the next Eghis code slice remains only the pure,
-I/O-free lifecycle state model and synthetic tests already authorized centrally.
+Independent integration review should compare the Phase 3A model/tests with
+orchestration `5277764` and verify the pure boundary, transition invariants, and
+isolated test evidence. Only after that review may Eghis begin the separately
+sequenced disabled coordinator/source-boundary slice using injected synthetic
+observations. SQL/source access, HTTP serialization/handlers/auth, sockets, runtime
+mounting, persistence, activation, and deployment remain outside this slice.
 
 ## Revision history
 
@@ -364,3 +429,7 @@ I/O-free lifecycle state model and synthetic tests already authorized centrally.
   with orchestration `bd3c66a`, recorded topology/transport/auth/refresh inputs,
   separated Orders and Reception source-evidence ledgers, and preserved all
   runtime, live-source, credential, push, and deployment gates.
+- **2026-10-08:** Implemented the Phase 3A pure immutable lifecycle/scheduling/
+  atomic-publication model and synthetic test matrix; recorded the normal pytest
+  GUI-library setup blocker and isolated focused/adjacent verification. Retained all
+  source, transport, credential, socket, runtime, persistence, and deployment gates.
