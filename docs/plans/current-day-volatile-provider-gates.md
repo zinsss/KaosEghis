@@ -1,7 +1,7 @@
 # Current-day volatile provider remaining gates
 
-- **Status:** Phase 3A pure lifecycle model implemented; disabled runtime and all
-  production gates remain pending
+- **Status:** Phase 3A pure lifecycle model review remediation completed; disabled
+  runtime and all production gates remain pending
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, KaosReception, orchestration,
@@ -19,9 +19,13 @@ plan and supersedes the earlier `bd3c66a` planning baseline:
 - `contracts/eghis-current-day-provider-session-v1.md` accepts the common
   lifecycle/session rules and authorizes only a later pure, I/O-free lifecycle
   model plus synthetic tests;
-- `contracts/kaosorders-current-day-orders-v1.md` retains every Orders
-  fact-shape, source-evidence, wire/auth, runtime, scheduler, persistence, and
-  deployment prohibition; and
+- `contracts/eghis-current-day-provider-runtime-v1.md`,
+  `contracts/kaosorders-current-day-orders-wire-v1.md`, and
+  `contracts/reception-current-day-patients-wire-v1.md` accept the Option A H4
+  owner/runtime baseline and separate destination wire/auth boundaries;
+- `contracts/kaosorders-current-day-orders-v1.md` keeps the logical fact shape
+  and production source-evidence gates separate while authorizing only disabled,
+  injected synthetic wire components under the later accepted contracts; and
 - `contracts/reception-current-day-patients-v1.md` retains Reception's exact
   mapping, fail-closed behavior, and 300-second maximum age.
 
@@ -49,17 +53,17 @@ is the common runtime provider:
 The original project plans treated Orders and Reception as independent source
 paths. The plan delta is to establish one owner lifecycle and one accepted source
 observation per scheduled cycle, then derive two independently validated
-projections. Existing readers remain unwired until the common source-observation
-shape, topology, cadence, and destination contracts are separately accepted.
+projections. Existing readers remain unwired until production source mapping,
+capacity/cleanup evidence, and concrete deployment inputs are separately accepted.
 
-## Singleton owner and process topology inputs
+## Accepted singleton owner and process topology
 
 The invariant is exact: one clinic/source scope has one active owner process,
 one active generation, at most one in-flight source observation, and at most one
 coalesced successor. A Python module global in multiple workers is forbidden.
 Consumer requests never elect an owner and never start a source read.
 
-### Option A — one in-process owner and serving process (preferred input)
+### Option A — one in-process owner and serving process (accepted H4 baseline)
 
 - One supervised Eghis process owns the lifecycle, refresh coordinator,
   immutable snapshot reference, and destination handlers.
@@ -74,59 +78,43 @@ Consumer requests never elect an owner and never start a source read.
   must be suitable for supervision and must not be multiplied by an HTTP worker
   count, UI restart pattern, or auto-reloader.
 
-### Option B — one dedicated owner plus bounded authenticated local IPC
+### Later topology changes
 
-- One dedicated owner process alone holds the singleton lease, source boundary,
-  and active snapshot. A separate serving process may read only destination-
-  specific projections through an accepted local IPC contract.
-- IPC must have bounded request/response sizes, deadlines, destination audience
-  separation, OS ACLs, application authentication, no caching, and generation/
-  sequence fencing. The serving process may not copy the internal superset or
-  initiate source refreshes.
-- Owner or IPC failure makes serving unavailable; no file, shared SQLite, replay,
-  or stale recovery path is allowed.
+Orchestration `5277764` accepts Option A for the H4 implementation baseline. A
+dedicated owner plus local IPC, multiple workers, or any other topology is not an
+implementation alternative in this phase and would require a new reviewed central
+contract. Multi-owner active/active, shared mutable memory across workers,
+consumer-owned polling, and a shared database/file cache remain rejected.
 
-Option B adds failure and credential surfaces and should be selected only if the
-approved host/service topology cannot safely run Option A. Multi-owner active/
-active, shared mutable memory across workers, consumer-owned polling, and a
-shared database/file cache are rejected.
+**Deployment inputs still required:** operations must identify the approved
+non-production and eventual production host/service manager, the exact singleton
+lease implementation and supervision settings, and whether each consumer crosses
+a host boundary. These concrete values do not reopen the accepted Option A design.
 
-**Inputs still required:** operations must identify the approved non-production
-and eventual production host/service manager; Orders and Reception must identify
-whether they are same-host or cross-host consumers; orchestration must then accept
-Option A or B and the exact singleton lease/supervision contract.
+## Accepted destination transport and authentication boundary
 
-## Destination transport, authentication, and network inputs
+Orchestration `5277764` accepts separate Orders and Reception wire contracts and
+a bounded HTTPS-style HTTP destination boundary. It also accepts distinct
+destination bearer identities/audiences, fail-closed authentication, TLS server
+verification, no plaintext fallback, no TLS 1.3 early data, and the rule that
+loopback is not authentication. Synthetic in-process handler tests may avoid a
+socket and real credential, but that does not weaken the production boundary.
 
-No route or credential format is accepted here. The following alternatives are
-inputs to separate destination contracts.
-
-### Transport option 1 — bounded authenticated HTTP
+### Bounded authenticated HTTP
 
 - Separate versioned Orders and Reception routes, handlers, schemas, payload
   bounds, rate limits, and audience checks. The existing
   `/api/v1/order-snapshots` route is never reused.
 - Loopback is not authentication. Same-host HTTP still requires destination-
   specific credentials and fail-closed audience validation.
-- Cross-host HTTP requires TLS with server identity validation and, preferably,
-  mutual TLS or a short-lived audience-bound token over TLS. Plain HTTP and
-  bearer credentials over an unencrypted network are forbidden.
+- Cross-host HTTP requires TLS with server identity validation and the accepted
+  destination-specific bearer identity. Plain HTTP and bearer credentials over
+  an unencrypted network are forbidden.
 - Bind only to the accepted interface. Host firewall rules allow only the exact
   consumer hosts and destination port. No public wildcard exposure, discovery,
   proxy caching, or browser-facing access is allowed.
 
-### Transport option 2 — bounded authenticated local IPC
-
-- Available only when owner and consumer are on the same approved host.
-- A Windows named pipe is the leading candidate; use a restrictive service ACL
-  and separate logical or physical audience boundaries for Orders and Reception.
-- OS identity/ACL checks are necessary but do not replace application-level
-  destination authorization, version validation, size/deadline bounds, and
-  fixed non-echoing errors.
-- Remote pipe access, anonymous access, shared temp files, memory-mapped patient
-  payloads, and durable queues are forbidden.
-
-### Credential lifecycle inputs
+### Credential lifecycle
 
 - Orders and Reception receive distinct identities and audiences; no credential
   grants both projections by default.
@@ -142,41 +130,43 @@ inputs to separate destination contracts.
 - Missing, expired, revoked, wrong-audience, ambiguous, or unreadable credentials
   fail closed with no clinical response fields and no source read.
 
-**Consumer decisions required:** Orders and Reception must each accept its route
-or IPC name, request/response wire contract, media type, maximum bytes/rows,
-polling behavior, credential type, audience, rollover behavior, fixed errors,
-and cache controls. Operations must approve the bind/interface, service account,
-secret store, certificate authority if applicable, firewall allowlist, and
-rotation/revocation runbook.
+The destination routes, media types, closed envelopes, lifecycle cursors, bounds,
+headers, freshness/readiness, polling, audiences, and auth-failure semantics are
+settled by the separate accepted central wire contracts. Concrete production
+bearer provisioning/store references, certificate authority and server identity,
+bind/interface/port, service accounts, firewall allowlist, and rotation/revocation
+runbook remain deployment inputs and must not be guessed in code or documentation.
 
-## Refresh coordinator contract inputs
+## Accepted refresh coordinator contract
 
 The central lifecycle invariants are already fixed: scheduled owner refresh,
 single-flight execution, at most one coalesced successor, a monotonic local
 ticket, close-before-normalize, final lifecycle fence, and atomic full
-replacement. The proposed initial operating values below are **contract inputs,
-not accepted runtime defaults**:
+replacement. Orchestration `5277764` accepts these H4 values:
 
-| Item | Proposed input | Required acceptance/evidence |
+| Item | Accepted H4 value | Remaining implementation/evidence |
 | --- | --- | --- |
 | startup | One immediate cycle after singleton and source prerequisites are valid | Synthetic restart tests; no serving before success. |
-| base cadence | 60 seconds from completion of the prior cycle | Orders accepts freshness; Reception confirms this stays within its 300-second ceiling; clinical-hours capacity evidence passes. |
-| jitter | Stable process-local 0–5 seconds, never persisted | Operations confirms it cannot violate freshness; deterministic synthetic clock tests. |
+| base cadence | 60 seconds from completion of the prior cycle | Clinical-hours capacity evidence passes. |
+| jitter | Stable process-local 0–5 seconds, never persisted | Deterministic synthetic clock tests. |
 | source deadline | 10 seconds for the whole queued observation, with stricter connection/statement bounds defined by the approved source reader | Orders source evidence and serialized-queue contention evidence must show the limit is safe. |
 | retry | No retry inside a cycle; a failed cycle publishes nothing | Avoids hidden duplicate source load and keeps one observation per cycle. |
-| failure backoff | Proposed next-cycle delays 60, 120, then at most 300 seconds while unavailable | Reception must confirm immediate fail-closed clearing; Orders must accept its stale policy; operations must accept recovery delay. |
+| failure backoff | Next-cycle delays 60, 120, then at most 300 seconds while unavailable | Synthetic cap/reset tests; destination freshness still independently gates serving. |
 | coalescing | While active, retain only one successor requirement | Synthetic concurrency tests prove no parallel connection or lost current-day rollover. |
 | rollover | KST day change invalidates before read, rotates generation, and requests one immediate cycle | Injected-clock midnight/late-result tests. |
 | shutdown | Stop admission/serving, cancel or bound the in-flight operation, prove cursor/connection closure, then drop references and lease | Source-runner cancellation/cleanup proof and supervised stop deadline. |
 
-Consumer polling must not affect this cadence. A consumer may poll more frequently
-only if its accepted rate limit permits; every poll remains a side-effect-free read
-of the current immutable projection.
+Consumer polling must not affect this cadence. Accepted success polling is 10
+seconds for Orders and 60 seconds for Reception; every poll remains a side-effect-
+free read of the current immutable projection and destination freshness still
+governs whether a retained internal observation can be served.
 
-Provider health is a bounded non-clinical state, not a patient payload. Proposed
-states are `STARTING`, `READY`, `DEGRADED`, `UNAVAILABLE`, `STOPPING`; exact wire
-encoding is deferred. `READY` requires a current-day accepted observation and an
-independently servable destination projection. Any wrong day, failed lifecycle
+Provider health is a bounded non-clinical state, not a patient payload. The closed
+states are `STARTING`, `READY`, `DEGRADED`, `UNAVAILABLE`, `STOPPING`; destination
+wire encoding is settled in its accepted contract. `READY` requires a current-day
+accepted observation with both destination projections independently servable;
+one unavailable projection is `DEGRADED` and both unavailable is `UNAVAILABLE`.
+Any wrong day, failed lifecycle
 fence, stale-by-destination result, auth/configuration failure, or uncertain source
 cleanup is not ready. Health must not expose raw source errors, SQL, identifiers,
 names, facts, credentials, or content digests.
@@ -185,19 +175,12 @@ names, facts, credentials, or content digests.
 
 The owner needs one bounded source observation capable of independently producing
 the two accepted logical projections. The current Reception query and the Orders
-diagnostic/model are not yet that common observation. Before implementation,
-orchestration must accept one of these source shapes:
-
-1. **Preferred input:** one parameterized read-only statement/snapshot returning
-   a bounded internal superset of current-day encounter, permitted patient-name,
-   and order facts, plus closed metadata/count proofs. It is detached, closed,
-   validated, and discarded after projection construction.
-2. **Alternative needing an explicit central clarification:** multiple bounded
-   statements within one read-only transaction/snapshot treated as one observation.
-   This is acceptable only if snapshot consistency, cleanup, total deadlines,
-   counts, and all-or-nothing failure are proven and the central contract defines
-   it as one observation. Independent queries at different snapshots are not one
-   common observation.
+diagnostic/model are not yet that common observation. Orchestration `5277764`
+accepts either one bounded read-only statement or multiple bounded statements in
+one read-only transaction/snapshot as one common observation. The latter must
+prove snapshot consistency, all-or-nothing validation, total deadline/count
+bounds, and cleanup; independent queries at different snapshots are forbidden.
+Production SQL, mapping, privileges, and capacity evidence remain unaccepted.
 
 The common reader must use the existing serialized-read/physical-close boundary.
 It must never share its internal superset, connection, cursor, SQL error, or raw
@@ -324,7 +307,9 @@ The settled implementation decisions are:
   readers retain the complete old immutable reference while later readers receive
   the complete new one;
 - startup is empty/`STARTING`; KST rollover clears first and retires the old pair;
-  lease loss and shutdown clear serving and in-flight references fail closed;
+  lease loss clears references fail closed, while shutdown first stops admission
+  and serving but retains the lease and in-flight cleanup responsibility, then
+  releases references and lease only after explicit cleanup confirmation;
 - one injected refresh ticket captures session, generation, day, lease token, and
   exact 10-second deadline; one active cycle admits only one coalesced successor;
 - ordinary completion schedules 60 seconds plus the injected stable 0–5-second
@@ -332,6 +317,9 @@ The settled implementation decisions are:
   inside the cycle, and success resets the failure count;
 - final publication checks lease, session, generation, clinic day, active ticket,
   and deadline; late/restart/rollover/lease-loss results cannot publish;
+- ticket or sequence exhaustion never wraps: an explicit same-day transition
+  retires the old pair, accepts one injected fresh generation identity, clears the
+  snapshot and counters, and requires a complete fresh observation;
 - each accepted observation advances one common sequence while Orders and Reception
   may independently be available, verified empty, or unavailable; a failed source
   cycle retains the prior internal immutable reference but has no replacement
@@ -357,12 +345,19 @@ or order-shaped fixture is required.
 - The documented full baseline collected 4,615 tests but stopped with 12 GUI-module
   collection errors for the same missing host `libxkbcommon.so.0`; this is an
   environment blocker, not a lifecycle assertion failure.
+- During the single review remediation, the normal focused command again reached
+  the autouse PySide6 fixture and produced **26 setup errors** for the same missing
+  host library. The isolated lifecycle suite then passed **26 tests**, and the
+  combined lifecycle plus adjacent pure Orders/Reception suites passed **319
+  tests** (26 lifecycle and 293 adjacent).
 - Tests cover literal constants, equality-only IDs, startup, deadline, stable
   jitter, single-flight/coalescing, success and failure schedules, backoff cap/reset,
   KST rollover, restart/day/ticket/lease fences, A-B-A rejection, verified empty,
-  destination failure isolation, sequence retry/conflict/regression, immutable
-  old-or-new replacement, shutdown, fixed errors, redacted representations, and a
-  standard-library-only AST boundary.
+  destination failure isolation, sequence retry/conflict/regression, validated
+  day/pair disposition scope, immutable old-or-new replacement, two-stage
+  shutdown, ticket/sequence exhaustion rotation at the exact counter boundaries,
+  closed phase/reason/destination/lease invariants, fixed errors, redacted
+  representations, and a standard-library-only AST boundary.
 
 The isolated results are focused verification, not a complete repository baseline.
 The full baseline remains blocked by the existing host GUI-library dependency.
@@ -373,8 +368,8 @@ The full baseline remains blocked by the existing host GUI-library dependency.
    baseline `5277764`.
 2. Implement the pure, I/O-free lifecycle state model and synthetic matrix:
    completed in Phase 3A; independent code review pending.
-3. Consumers and orchestration settle the unresolved decisions listed below and
-   accept separate destination wire/auth contracts.
+3. Accept Option A, the common runtime/transport rules, and separate destination
+   wire/auth contracts: completed through central baseline `5277764`.
 4. Freeze and synthetically verify the common source-observation contract; obtain
    approved non-PHI source evidence and central mapping revisions.
 5. Implement a disabled coordinator and source adapter behind injected boundaries;
@@ -393,14 +388,9 @@ route or deployment.
 
 | Decision | Required owner/input |
 | --- | --- |
-| Option A in-process owner or Option B dedicated owner/local IPC | Eghis + operations + orchestration, after exact host/process inventory |
-| same-host IPC versus HTTP and any cross-host boundary | Orders, Reception, operations, orchestration |
-| exact routes/IPC names, media types, schemas, byte/row bounds, status/errors | Separate Orders and Reception contracts |
-| credential type, audiences, provisioning store, rotation overlap, revocation | Security/operations plus each consumer |
+| approved host/process/service-manager inventory for accepted Option A | Operations + orchestration |
+| concrete bearer provisioning store, rotation overlap, and revocation runbook | Security/operations plus each consumer |
 | TLS CA/server identity, bind address, port, firewall allowlist | Security/operations; mandatory before cross-host activation |
-| 60-second cadence, 10-second total deadline, proposed backoff, rate limits | Eghis, Orders, Reception, operations after capacity evidence |
-| Orders freshness/stale policy and verified-empty authority | Orders + orchestration |
-| common one-statement versus one-transaction observation | Eghis + orchestration after synthetic/source evidence |
 | Orders source mapping and revision | Eghis evidence + Orders acceptance + orchestration |
 | Reception production evidence and common-reader privacy proof | Eghis evidence + Reception acceptance + orchestration |
 | service supervision, health wiring, memory ceiling, dump/swap/hibernation controls, rollback | Operations + security + orchestration |
@@ -408,7 +398,7 @@ route or deployment.
 
 ## Evidence completed in this phase
 
-- Read-only repository and central-contract inspection only.
+- Synthetic-only pure-model implementation, tests, and contract inspection only.
 - No source/service/network connection, credential discovery, runtime import,
   route binding, scheduler activation, patient/order fixture, or deployment.
 - The plan preserves all accepted lifecycle/session and destination logical
@@ -418,7 +408,7 @@ route or deployment.
 
 Independent integration review should compare the Phase 3A model/tests with
 orchestration `5277764` and verify the pure boundary, transition invariants, and
-isolated test evidence. Only after that review may Eghis begin the separately
+isolated remediation evidence. Only after that review may Eghis begin the separately
 sequenced disabled coordinator/source-boundary slice using injected synthetic
 observations. SQL/source access, HTTP serialization/handlers/auth, sockets, runtime
 mounting, persistence, activation, and deployment remain outside this slice.
@@ -433,3 +423,8 @@ mounting, persistence, activation, and deployment remain outside this slice.
   atomic-publication model and synthetic test matrix; recorded the normal pytest
   GUI-library setup blocker and isolated focused/adjacent verification. Retained all
   source, transport, credential, socket, runtime, persistence, and deployment gates.
+- **2026-10-08:** Remediated the independent review blockers with two-stage
+  cleanup-confirmed shutdown, explicit non-wrapping same-day generation rotation,
+  closed state invariants, and day/pair-scoped snapshot disposition. Reclassified
+  Option A, separate destination wire/auth, HTTPS bearer/TLS rules, and the accepted
+  cadence/deadline/backoff as settled H4 decisions under orchestration `5277764`.

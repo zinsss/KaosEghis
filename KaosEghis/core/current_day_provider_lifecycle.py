@@ -43,6 +43,7 @@ class ProviderReason(StrEnum):
     CLEANUP_UNCERTAIN = "CLEANUP_UNCERTAIN"
     OBSERVATION_INVALID = "OBSERVATION_INVALID"
     PROJECTION_INVALID = "PROJECTION_INVALID"
+    COUNTER_EXHAUSTED = "COUNTER_EXHAUSTED"
     LEASE_UNAVAILABLE = "LEASE_UNAVAILABLE"
     SHUTDOWN = "SHUTDOWN"
 
@@ -278,6 +279,7 @@ class ProviderState(_Redacted):
             self.snapshot.cursor.provider_session_id != self.provider_session_id
             or self.snapshot.cursor.provider_generation != self.provider_generation
             or self.snapshot.cursor.clinic_day != self.clinic_day
+            or clinic_day_at(self.snapshot.observed_at) != self.clinic_day
         ):
             raise ProviderLifecycleRejected("invalid_state")
         if self.in_flight is not None and (
@@ -291,12 +293,25 @@ class ProviderState(_Redacted):
         if self.successor_pending and self.in_flight is None:
             raise ProviderLifecycleRejected("invalid_state")
         if self.phase is ProviderPhase.STOPPING and (
-            self.lease.held
-            or self.snapshot is not None
-            or self.in_flight is not None
+            self.reason is not ProviderReason.SHUTDOWN
             or self.next_refresh_at is not None
+            or self.successor_pending
         ):
             raise ProviderLifecycleRejected("invalid_state")
+        if self.phase is ProviderPhase.STOPPING and not self.lease.held and (
+            self.snapshot is not None or self.in_flight is not None
+        ):
+            raise ProviderLifecycleRejected("invalid_state")
+        if self.phase is not ProviderPhase.STOPPING and not self.lease.held:
+            if (
+                self.phase is not ProviderPhase.UNAVAILABLE
+                or self.reason is not ProviderReason.LEASE_UNAVAILABLE
+                or self.snapshot is not None
+                or self.in_flight is not None
+                or self.next_refresh_at is not None
+            ):
+                raise ProviderLifecycleRejected("invalid_state")
+        _validate_phase_invariants(self)
 
     @property
     def pair(self) -> tuple[OpaqueIdentity, OpaqueIdentity]:
@@ -355,8 +370,14 @@ def request_refresh(
         return replace(state, successor_pending=True), None
     if state.next_refresh_at is None or current < state.next_refresh_at:
         raise ProviderLifecycleRejected("refresh_not_due")
-    if state.next_ticket >= MAX_COUNTER:
-        raise ProviderLifecycleRejected("ticket_exhausted")
+    if (
+        state.next_ticket >= MAX_COUNTER
+        or (
+            state.snapshot is not None
+            and state.snapshot.cursor.snapshot_sequence >= MAX_COUNTER
+        )
+    ):
+        raise ProviderLifecycleRejected("generation_rotation_required")
     ticket = RefreshTicket(
         state.provider_session_id,
         state.provider_generation,
@@ -399,6 +420,50 @@ def rollover(
         clinic_day=new_day,
         phase=ProviderPhase.UNAVAILABLE,
         reason=ProviderReason.DAY_ROLLOVER,
+        snapshot=None,
+        in_flight=None,
+        successor_pending=False,
+        next_ticket=1,
+        consecutive_failures=0,
+        next_refresh_at=current,
+        retired_pairs=frozenset(retired),
+    )
+
+
+def rotate_exhausted_generation(
+    state: ProviderState,
+    *,
+    now: datetime,
+    provider_generation: OpaqueIdentity,
+    lease: SingletonLeaseClaim,
+) -> ProviderState:
+    """Rotate a same-day generation after ticket or sequence exhaustion."""
+
+    current = _aware(now)
+    _require_lease(state, lease)
+    if state.phase is ProviderPhase.STOPPING:
+        raise ProviderLifecycleRejected("stopping")
+    if clinic_day_at(current) != state.clinic_day:
+        raise ProviderLifecycleRejected("day_rollover_required")
+    if state.in_flight is not None:
+        raise ProviderLifecycleRejected("refresh_in_flight")
+    exhausted = state.next_ticket >= MAX_COUNTER or (
+        state.snapshot is not None
+        and state.snapshot.cursor.snapshot_sequence >= MAX_COUNTER
+    )
+    if not exhausted:
+        raise ProviderLifecycleRejected("counter_not_exhausted")
+    if type(provider_generation) is not OpaqueIdentity:
+        raise ProviderLifecycleRejected("invalid_identity")
+    new_pair = (state.provider_session_id, provider_generation)
+    retired = state.retired_pairs | {state.pair}
+    if new_pair == state.pair or new_pair in retired:
+        raise ProviderLifecycleRejected("retired_pair")
+    return replace(
+        state,
+        provider_generation=provider_generation,
+        phase=ProviderPhase.UNAVAILABLE,
+        reason=ProviderReason.COUNTER_EXHAUSTED,
         snapshot=None,
         in_flight=None,
         successor_pending=False,
@@ -507,14 +572,38 @@ def lose_lease(state: ProviderState, *, lease: SingletonLeaseClaim) -> ProviderS
     )
 
 
-def shutdown(state: ProviderState) -> ProviderState:
-    """Stop admission/serving and drop all volatile references."""
+def begin_shutdown(state: ProviderState) -> ProviderState:
+    """Stop admission/serving while retaining lease and cleanup responsibility."""
 
+    if state.phase is ProviderPhase.STOPPING:
+        raise ProviderLifecycleRejected("stopping")
+    if not state.lease.held:
+        raise ProviderLifecycleRejected("lease_unavailable")
+    return replace(
+        state,
+        phase=ProviderPhase.STOPPING,
+        reason=ProviderReason.SHUTDOWN,
+        successor_pending=False,
+        next_refresh_at=None,
+    )
+
+
+def finalize_shutdown(
+    state: ProviderState,
+    *,
+    lease: SingletonLeaseClaim,
+    cleanup_confirmed: bool,
+) -> ProviderState:
+    """Release the lease and references only after explicit cleanup proof."""
+
+    if state.phase is not ProviderPhase.STOPPING:
+        raise ProviderLifecycleRejected("not_stopping")
+    _require_lease(state, lease)
+    if cleanup_confirmed is not True:
+        raise ProviderLifecycleRejected("cleanup_unconfirmed")
     return replace(
         state,
         lease=replace(state.lease, held=False),
-        phase=ProviderPhase.STOPPING,
-        reason=ProviderReason.SHUTDOWN,
         snapshot=None,
         in_flight=None,
         successor_pending=False,
@@ -525,28 +614,45 @@ def shutdown(state: ProviderState) -> ProviderState:
 def read_snapshot(state: ProviderState) -> ProviderSnapshot | None:
     """Return the current immutable reference; callers observe old or new, never mixed."""
 
-    return state.snapshot
+    return None if state.phase is ProviderPhase.STOPPING else state.snapshot
 
 
 def snapshot_disposition(
     current: ProviderSnapshot | None,
     incoming: ProviderSnapshot,
     *,
+    expected_clinic_day: date,
+    current_pair: tuple[OpaqueIdentity, OpaqueIdentity],
     retired_pairs: frozenset[tuple[OpaqueIdentity, OpaqueIdentity]],
 ) -> SnapshotDisposition:
-    """Classify a complete snapshot without ordering opaque identities."""
+    """Classify a snapshot only inside a caller-validated current day/pair scope."""
 
-    if type(incoming) is not ProviderSnapshot or type(retired_pairs) is not frozenset:
+    if (
+        type(incoming) is not ProviderSnapshot
+        or type(expected_clinic_day) is not date
+        or type(current_pair) is not tuple
+        or len(current_pair) != 2
+        or any(type(item) is not OpaqueIdentity for item in current_pair)
+        or type(retired_pairs) is not frozenset
+    ):
         raise ProviderLifecycleRejected("invalid_snapshot")
+    if current_pair in retired_pairs:
+        raise ProviderLifecycleRejected("retired_pair")
+    if incoming.cursor.clinic_day != expected_clinic_day:
+        raise ProviderLifecycleRejected("scope_mismatch")
     if incoming.cursor.pair in retired_pairs:
         raise ProviderLifecycleRejected("retired_pair")
+    if incoming.cursor.pair != current_pair:
+        raise ProviderLifecycleRejected("unexpected_pair")
     if current is None:
         return SnapshotDisposition.NEWER
     if type(current) is not ProviderSnapshot:
         raise ProviderLifecycleRejected("invalid_snapshot")
-    if incoming.cursor.clinic_day != current.cursor.clinic_day:
-        raise ProviderLifecycleRejected("scope_mismatch")
-    if incoming.cursor.pair != current.cursor.pair:
+    if current.cursor.clinic_day != expected_clinic_day:
+        raise ProviderLifecycleRejected("invalid_scope")
+    if current.cursor.pair != current_pair:
+        if current.cursor.pair not in retired_pairs:
+            raise ProviderLifecycleRejected("unexpected_pair")
         return SnapshotDisposition.NEW_GENERATION
     if incoming.cursor.snapshot_sequence < current.cursor.snapshot_sequence:
         raise ProviderLifecycleRejected("sequence_regression")
@@ -593,7 +699,11 @@ def _finish_failure(state: ProviderState, now: datetime, reason: ProviderReason)
     failures = state.consecutive_failures + 1
     delay = FAILURE_DELAYS_SECONDS[min(failures - 1, len(FAILURE_DELAYS_SECONDS) - 1)]
     next_refresh = now + timedelta(seconds=delay + state.stable_jitter_seconds)
-    phase = ProviderPhase.DEGRADED if state.snapshot is not None else ProviderPhase.UNAVAILABLE
+    phase = (
+        ProviderPhase.DEGRADED
+        if state.snapshot is not None and _available_destinations(state.snapshot) > 0
+        else ProviderPhase.UNAVAILABLE
+    )
     return replace(
         state,
         phase=phase,
@@ -603,3 +713,75 @@ def _finish_failure(state: ProviderState, now: datetime, reason: ProviderReason)
         consecutive_failures=failures,
         next_refresh_at=next_refresh,
     )
+
+
+def _available_destinations(snapshot: ProviderSnapshot) -> int:
+    return sum(
+        item.availability is not ProjectionAvailability.UNAVAILABLE
+        for item in (snapshot.orders, snapshot.reception)
+    )
+
+
+def _validate_phase_invariants(state: ProviderState) -> None:
+    available = 0 if state.snapshot is None else _available_destinations(state.snapshot)
+    if state.phase is ProviderPhase.STARTING:
+        if state.reason is not ProviderReason.STARTUP or state.snapshot is not None:
+            raise ProviderLifecycleRejected("invalid_state")
+    elif state.phase is ProviderPhase.READY:
+        if (
+            state.reason is not ProviderReason.NONE
+            or state.snapshot is None
+            or available != 2
+            or not state.lease.held
+        ):
+            raise ProviderLifecycleRejected("invalid_state")
+    elif state.phase is ProviderPhase.DEGRADED:
+        if (
+            state.snapshot is None
+            or available == 0
+            or state.reason not in {
+                ProviderReason.SOURCE_FAILURE,
+                ProviderReason.DEADLINE_EXCEEDED,
+                ProviderReason.CLEANUP_UNCERTAIN,
+                ProviderReason.OBSERVATION_INVALID,
+                ProviderReason.PROJECTION_INVALID,
+            }
+            or (
+                state.reason is ProviderReason.PROJECTION_INVALID
+                and available != 1
+            )
+        ):
+            raise ProviderLifecycleRejected("invalid_state")
+    elif state.phase is ProviderPhase.UNAVAILABLE:
+        if state.reason not in {
+            ProviderReason.DAY_ROLLOVER,
+            ProviderReason.SOURCE_FAILURE,
+            ProviderReason.DEADLINE_EXCEEDED,
+            ProviderReason.CLEANUP_UNCERTAIN,
+            ProviderReason.OBSERVATION_INVALID,
+            ProviderReason.PROJECTION_INVALID,
+            ProviderReason.COUNTER_EXHAUSTED,
+            ProviderReason.LEASE_UNAVAILABLE,
+        }:
+            raise ProviderLifecycleRejected("invalid_state")
+        if state.snapshot is not None and available != 0:
+            raise ProviderLifecycleRejected("invalid_state")
+        if (
+            state.reason is ProviderReason.PROJECTION_INVALID
+            and state.snapshot is None
+        ):
+            raise ProviderLifecycleRejected("invalid_state")
+        if state.reason in {
+            ProviderReason.DAY_ROLLOVER,
+            ProviderReason.COUNTER_EXHAUSTED,
+            ProviderReason.LEASE_UNAVAILABLE,
+        } and state.snapshot is not None:
+            raise ProviderLifecycleRejected("invalid_state")
+        if (
+            state.reason is ProviderReason.LEASE_UNAVAILABLE
+            and state.lease.held
+        ):
+            raise ProviderLifecycleRejected("invalid_state")
+    elif state.phase is ProviderPhase.STOPPING:
+        if state.reason is not ProviderReason.SHUTDOWN:
+            raise ProviderLifecycleRejected("invalid_state")

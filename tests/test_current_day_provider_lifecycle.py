@@ -74,6 +74,12 @@ def test_contract_values_are_literal_and_ids_are_equality_only():
     assert {item.value for item in lifecycle.ProviderPhase} == {
         "STARTING", "READY", "DEGRADED", "UNAVAILABLE", "STOPPING"
     }
+    assert {item.value for item in lifecycle.ProviderReason} == {
+        "NONE", "STARTUP", "DAY_ROLLOVER", "SOURCE_FAILURE",
+        "DEADLINE_EXCEEDED", "CLEANUP_UNCERTAIN", "OBSERVATION_INVALID",
+        "PROJECTION_INVALID", "COUNTER_EXHAUSTED", "LEASE_UNAVAILABLE",
+        "SHUTDOWN",
+    }
     assert identity("same") == identity("same")
     assert identity("same") != identity("other")
     with pytest.raises(TypeError):
@@ -332,7 +338,7 @@ def test_atomic_replacement_leaves_old_state_and_snapshot_unchanged():
         second.snapshot.orders.item_count = 99
 
 
-def test_state_rejects_mixed_cursor_ticket_and_successor_invariants():
+def test_state_rejects_mixed_cursor_ticket_and_phase_invariants():
     ready = publish(owner())
     wrong_cursor = replace(
         ready.snapshot.cursor, provider_generation=identity("generation-other")
@@ -341,46 +347,285 @@ def test_state_rejects_mixed_cursor_ticket_and_successor_invariants():
         replace(ready, snapshot=replace(ready.snapshot, cursor=wrong_cursor))
     with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
         replace(ready, successor_pending=True)
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
+        replace(ready, snapshot=None)
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
+        replace(ready, reason=lifecycle.ProviderReason.SOURCE_FAILURE)
+    one_unavailable = replace(
+        ready.snapshot,
+        orders=destination(lifecycle.ProjectionAvailability.UNAVAILABLE),
+    )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
+        replace(ready, snapshot=one_unavailable)
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
+        replace(
+            ready,
+            phase=lifecycle.ProviderPhase.DEGRADED,
+            reason=lifecycle.ProviderReason.PROJECTION_INVALID,
+        )
+    both_unavailable = replace(
+        one_unavailable,
+        reception=destination(lifecycle.ProjectionAvailability.UNAVAILABLE),
+    )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
+        replace(
+            ready,
+            phase=lifecycle.ProviderPhase.DEGRADED,
+            reason=lifecycle.ProviderReason.PROJECTION_INVALID,
+            snapshot=both_unavailable,
+        )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
+        replace(
+            ready,
+            phase=lifecycle.ProviderPhase.UNAVAILABLE,
+            reason=lifecycle.ProviderReason.SOURCE_FAILURE,
+        )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
+        replace(
+            ready,
+            phase=lifecycle.ProviderPhase.STARTING,
+            reason=lifecycle.ProviderReason.STARTUP,
+        )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
+        replace(ready, lease=replace(ready.lease, held=False))
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
+        replace(
+            ready,
+            phase=lifecycle.ProviderPhase.STOPPING,
+            reason=lifecycle.ProviderReason.SHUTDOWN,
+            next_refresh_at=NOW,
+        )
 
 
 def test_sequence_retry_conflict_regression_and_new_generation_are_explicit():
     current = publish(owner()).snapshot
+    current_pair = current.cursor.pair
     assert lifecycle.snapshot_disposition(
-        current, current, retired_pairs=frozenset()
+        current,
+        current,
+        expected_clinic_day=date(2026, 10, 8),
+        current_pair=current_pair,
+        retired_pairs=frozenset(),
     ) is lifecycle.SnapshotDisposition.IDEMPOTENT_RETRY
     conflict = replace(
         current,
         orders=destination(lifecycle.ProjectionAvailability.AVAILABLE, count=9, marker=99),
     )
     with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^sequence_conflict$"):
-        lifecycle.snapshot_disposition(current, conflict, retired_pairs=frozenset())
+        lifecycle.snapshot_disposition(
+            current,
+            conflict,
+            expected_clinic_day=date(2026, 10, 8),
+            current_pair=current_pair,
+            retired_pairs=frozenset(),
+        )
     regression = replace(current, cursor=replace(current.cursor, snapshot_sequence=1))
     newer_current = replace(current, cursor=replace(current.cursor, snapshot_sequence=2))
     with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^sequence_regression$"):
-        lifecycle.snapshot_disposition(newer_current, regression, retired_pairs=frozenset())
+        lifecycle.snapshot_disposition(
+            newer_current,
+            regression,
+            expected_clinic_day=date(2026, 10, 8),
+            current_pair=current_pair,
+            retired_pairs=frozenset(),
+        )
     new_generation = replace(
         current,
         cursor=replace(current.cursor, provider_generation=identity("generation-b")),
     )
     assert lifecycle.snapshot_disposition(
-        current, new_generation, retired_pairs=frozenset()
+        current,
+        new_generation,
+        expected_clinic_day=date(2026, 10, 8),
+        current_pair=new_generation.cursor.pair,
+        retired_pairs=frozenset({current_pair}),
     ) is lifecycle.SnapshotDisposition.NEW_GENERATION
     with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^retired_pair$"):
         lifecycle.snapshot_disposition(
-            current, new_generation, retired_pairs=frozenset({new_generation.cursor.pair})
+            current,
+            new_generation,
+            expected_clinic_day=date(2026, 10, 8),
+            current_pair=new_generation.cursor.pair,
+            retired_pairs=frozenset({new_generation.cursor.pair}),
         )
 
 
-def test_shutdown_stops_admission_and_drops_all_references():
+def test_snapshot_disposition_fails_closed_without_validated_day_and_pair_scope():
+    current = publish(owner()).snapshot
+    other_pair = (current.cursor.provider_session_id, identity("generation-b"))
+    incoming_other = replace(
+        current,
+        cursor=replace(current.cursor, provider_generation=other_pair[1]),
+    )
+    old_day = date(2026, 10, 7)
+    old_snapshot = replace(
+        current,
+        cursor=replace(current.cursor, clinic_day=old_day),
+        observed_at=NOW - timedelta(days=1),
+    )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^scope_mismatch$"):
+        lifecycle.snapshot_disposition(
+            None,
+            old_snapshot,
+            expected_clinic_day=date(2026, 10, 8),
+            current_pair=old_snapshot.cursor.pair,
+            retired_pairs=frozenset(),
+        )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^unexpected_pair$"):
+        lifecycle.snapshot_disposition(
+            None,
+            current,
+            expected_clinic_day=date(2026, 10, 8),
+            current_pair=other_pair,
+            retired_pairs=frozenset(),
+        )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^unexpected_pair$"):
+        lifecycle.snapshot_disposition(
+            current,
+            incoming_other,
+            expected_clinic_day=date(2026, 10, 8),
+            current_pair=(current.cursor.provider_session_id, identity("generation-c")),
+            retired_pairs=frozenset(),
+        )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_scope$"):
+        lifecycle.snapshot_disposition(
+            old_snapshot,
+            current,
+            expected_clinic_day=date(2026, 10, 8),
+            current_pair=current.cursor.pair,
+            retired_pairs=frozenset(),
+        )
+
+
+def test_ticket_exhaustion_rotates_same_day_without_wrap_or_snapshot_reuse():
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
+        replace(owner(), next_ticket=lifecycle.MAX_COUNTER + 1)
+    state = replace(owner(), next_ticket=lifecycle.MAX_COUNTER - 1)
+    active, before_last = begin(state)
+    assert before_last.ticket == lifecycle.MAX_COUNTER - 1
+    state = lifecycle.complete_failure(
+        active,
+        before_last,
+        now=NOW,
+        lease=active.lease,
+        reason=lifecycle.ProviderReason.SOURCE_FAILURE,
+    )
+    assert state.next_ticket == lifecycle.MAX_COUNTER
+    with pytest.raises(
+        lifecycle.ProviderLifecycleRejected, match="^generation_rotation_required$"
+    ):
+        begin(state, now=state.next_refresh_at)
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^retired_pair$"):
+        lifecycle.rotate_exhausted_generation(
+            state,
+            now=state.next_refresh_at,
+            provider_generation=identity("generation-a"),
+            lease=state.lease,
+        )
+    rotated = lifecycle.rotate_exhausted_generation(
+        state,
+        now=state.next_refresh_at,
+        provider_generation=identity("generation-b"),
+        lease=state.lease,
+    )
+    assert rotated.snapshot is None
+    assert rotated.next_ticket == 1
+    assert rotated.phase is lifecycle.ProviderPhase.UNAVAILABLE
+    assert rotated.reason is lifecycle.ProviderReason.COUNTER_EXHAUSTED
+    assert state.pair in rotated.retired_pairs
+    exhausted_again = replace(rotated, next_ticket=lifecycle.MAX_COUNTER)
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^retired_pair$"):
+        lifecycle.rotate_exhausted_generation(
+            exhausted_again,
+            now=rotated.next_refresh_at,
+            provider_generation=identity("generation-a"),
+            lease=rotated.lease,
+        )
+
+
+def test_sequence_exhaustion_rotates_and_requires_fresh_sequence_one():
     ready = publish(owner())
-    active, _ticket = begin(ready, now=ready.next_refresh_at)
-    stopped = lifecycle.shutdown(active)
-    assert stopped.phase is lifecycle.ProviderPhase.STOPPING
-    assert stopped.reason is lifecycle.ProviderReason.SHUTDOWN
-    assert stopped.snapshot is None and stopped.in_flight is None
-    assert stopped.next_refresh_at is None and stopped.lease.held is False
+    near_limit = replace(
+        ready,
+        snapshot=replace(
+            ready.snapshot,
+            cursor=replace(
+                ready.snapshot.cursor,
+                snapshot_sequence=lifecycle.MAX_COUNTER - 1,
+            ),
+        ),
+    )
+    active, last = begin(near_limit, now=near_limit.next_refresh_at)
+    at_limit = lifecycle.complete_success(
+        active,
+        last,
+        candidate(observed_at=near_limit.next_refresh_at),
+        now=near_limit.next_refresh_at,
+        lease=active.lease,
+    )
+    assert at_limit.snapshot.cursor.snapshot_sequence == lifecycle.MAX_COUNTER
+    with pytest.raises(
+        lifecycle.ProviderLifecycleRejected, match="^generation_rotation_required$"
+    ):
+        begin(at_limit, now=at_limit.next_refresh_at)
+    rotated = lifecycle.rotate_exhausted_generation(
+        at_limit,
+        now=at_limit.next_refresh_at,
+        provider_generation=identity("generation-b"),
+        lease=at_limit.lease,
+    )
+    assert lifecycle.read_snapshot(rotated) is None
+    fresh = publish(
+        rotated,
+        now=rotated.next_refresh_at,
+        observation=candidate(observed_at=rotated.next_refresh_at),
+    )
+    assert fresh.snapshot.cursor.snapshot_sequence == 1
+    assert fresh.snapshot.cursor.provider_generation == identity("generation-b")
+
+
+def test_shutdown_is_two_stage_and_late_completion_is_fenced():
+    ready = publish(owner())
+    active, ticket = begin(ready, now=ready.next_refresh_at)
+    stopping = lifecycle.begin_shutdown(active)
+    assert stopping.phase is lifecycle.ProviderPhase.STOPPING
+    assert stopping.reason is lifecycle.ProviderReason.SHUTDOWN
+    assert stopping.snapshot is ready.snapshot
+    assert stopping.in_flight is ticket
+    assert stopping.lease.held is True
+    assert stopping.next_refresh_at is None
+    assert lifecycle.read_snapshot(stopping) is None
     with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^stopping$"):
-        lifecycle.request_refresh(stopped, now=NOW)
+        lifecycle.request_refresh(stopping, now=ready.next_refresh_at)
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^stopping$"):
+        lifecycle.complete_success(
+            stopping,
+            ticket,
+            candidate(observed_at=ready.next_refresh_at),
+            now=ready.next_refresh_at,
+            lease=stopping.lease,
+        )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^cleanup_unconfirmed$"):
+        lifecycle.finalize_shutdown(
+            stopping, lease=stopping.lease, cleanup_confirmed=False
+        )
+    stopped = lifecycle.finalize_shutdown(
+        stopping, lease=stopping.lease, cleanup_confirmed=True
+    )
+    assert stopped.snapshot is None and stopped.in_flight is None
+    assert stopped.lease.held is False
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^lease_fence$"):
+        lifecycle.complete_success(
+            stopped,
+            ticket,
+            candidate(observed_at=ready.next_refresh_at),
+            now=ready.next_refresh_at,
+            lease=stopped.lease,
+        )
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^lease_unavailable$"):
+        lifecycle.begin_shutdown(
+            lifecycle.lose_lease(ready, lease=replace(ready.lease, held=False))
+        )
 
 
 def test_models_errors_and_module_boundary_are_redacted_and_io_free():
