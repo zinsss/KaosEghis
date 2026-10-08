@@ -7,9 +7,14 @@
   The corrected offline v3 diagnostic/manifest candidate passed independent review.
   Authoritative logging evidence passed review. The first synthetic Job Object
   candidate failed review, received one bounded candidate-only remediation, and
-  passed final independent re-review. A user-designated
-  non-clinic target label is not yet a fixed, trusted execution identity, so the
-  approved synthetic probe stopped before host contact. No v3 executable bundle,
+  passed final independent re-review. The user has now fixed the intended target
+  to the centrally registered Windows machine `YHSHFM`, SSH alias `yhshfm`, owner
+  `zin`, and Windows account `leejs`. Central inventory still marks its access as
+  unverified and identifies it as the live KaosEghis runtime, so the clarification
+  does not establish the distinct non-clinic target required by this proof plan.
+  The locked local SSH context also does not select the approved account, a
+  dedicated identity, or strict pinned-host-key behavior, so the approved synthetic
+  probe remains stopped before host contact. No v3 executable bundle,
   manifest identity, ZIP, transfer, Windows probe execution, or installer execution
   exists.
 - **Last updated:** 2026-10-08
@@ -453,16 +458,23 @@ provided and independently reviewed.
 
 Later on 2026-10-08 the user designated non-clinic target label `winbox`, owned by
 `zin`, and authorized only the reviewed synthetic containment transfer/execution
-gate. Read-only validation stopped before any connection because neither the Eghis
-worker context nor the coordinator Gateway context resolved that label to a fixed
-SSH host. Both contexts lacked an explicit dedicated identity with
-`IdentitiesOnly=yes` and lacked a pinned known-host entry for the target; OpenClaw
-presence again returned no connected device. Consequently the exact machine ID,
-SSH target, out-of-band trusted fingerprint, Windows account/admin status, protected
-and staging paths, Sandbox/restart/resource/ACL state, and interactive desktop
-session remain unproven. Per the fail-closed gate, no authentication attempt,
-transfer, staging, Windows command, Sandbox launch, cleanup, or execution occurred.
-The label and owner assertion alone do not authorize inferring any of those values.
+gate. Validation initially stopped because no fixed SSH host was available. The
+user then clarified that label as central machine `YHSHFM`, registered SSH alias
+`yhshfm`, Windows account `leejs`, and owner `zin`. Central inventory confirms the
+machine, registered hostname, alias, and OS, but also identifies `YHSHFM` as the
+live KaosEghis runtime and retains `unverified-access`. The clarification therefore
+does not prove a distinct non-clinic host or override the plan's protected-live-host
+boundary.
+
+A locked-context, local-only `ssh -G yhshfm` inspection stopped before connection.
+It resolved a different user, used the default identity search rather than an
+explicit dedicated key, left `IdentitiesOnly` and `BatchMode` disabled, and used
+ask-on-first-use host-key behavior instead of an independently verified pinned key.
+Consequently the approved SSH execution identity and trust chain are not present,
+and account/admin, Sandbox/restart/resource/ACL state, protected and staging paths,
+and the interactive desktop session remain unproven. Per the fail-closed gate, no
+authentication attempt, transfer, staging, Windows command, Sandbox launch,
+cleanup, or execution occurred.
 
 The proposed runner delta, intentionally **not wired or packaged yet**, is:
 
@@ -655,10 +667,22 @@ back to host pytest.
   syntax and explicit-open behavior. Next review must accept that evidence and the
   containment candidate; actual proof remains blocked on a fixed, approved
   non-clinic Windows Sandbox target.
-- The later user-designated `winbox`/`zin` label is approved in intent but remains
-  unusable until the locked coordinator execution context has an explicit host,
-  dedicated identity, `IdentitiesOnly=yes`, and an independently verified pinned
-  host key. Only then may a new read-only host preflight verify account/admin,
+- The user clarified the candidate-only target as central machine `YHSHFM`
+  (Windows), registered SSH alias `yhshfm`, exact Windows account `leejs`, and
+  owner `zin`. The central inventory agrees on the machine, registered hostname,
+  alias, and OS but still records `unverified-access` and identifies it as the live
+  KaosEghis runtime. This does not satisfy the existing requirement for a distinct
+  non-clinic target; resolving that classification conflict requires explicit
+  review before any host preflight.
+- A locked-context, local-only `ssh -G yhshfm` inspection did not contact or
+  authenticate to the host. It resolved a different user, allowed the default
+  identity search instead of a dedicated key (`IdentitiesOnly=no`), was not
+  non-interactive (`BatchMode=no`), and used ask-on-first-use host-key behavior
+  rather than an independently verified pinned key. Therefore the target remains
+  unusable. The next permissible action is a separate review of an explicit
+  `leejs@<registered-host>` configuration with a dedicated identity,
+  `IdentitiesOnly=yes`, `BatchMode=yes`, and an independently verified pinned host
+  key. Only after that review may a read-only host preflight verify account/admin,
   Sandbox/restart/resources, protected/staging paths and ACLs, and an interactive
   session before any transfer.
 - Cleanup of the retained exact host paths requires separate approval and must occur
@@ -769,3 +793,10 @@ until the applicable next action is separately approved and reviewed.
   presence listed no device. The gate therefore stopped before connection; no host
   authentication, transfer, staging, Windows/Sandbox execution, cleanup, package,
   push, merge, deployment, or live/clinical access occurred.
+- **2026-10-08:** Reconciled the user's clarified `YHSHFM`/`yhshfm`/Windows/
+  `leejs`/owner-`zin` tuple with central inventory. A local-only `ssh -G` check
+  proved that the locked context still lacks the required exact account, dedicated
+  identity, non-interactive settings, and independently verified pinned host key.
+  The gate remains blocked before connection; no authentication, host command,
+  transfer, Windows/Sandbox execution, packaging, cleanup, push, deployment, or
+  clinical-data access occurred.
