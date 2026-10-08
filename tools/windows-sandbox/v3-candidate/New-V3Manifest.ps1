@@ -34,32 +34,64 @@ $files = @($descendants | Where-Object {
         $manifestFullPath,
         [System.StringComparison]::OrdinalIgnoreCase
     )
-} | Sort-Object FullName)
+})
 if ($files.Count -eq 0) { throw 'empty_artifact_set' }
+if (Test-Path -LiteralPath $manifestPath) { throw 'manifest_already_exists' }
 
-$lines = foreach ($file in $files) {
+$filesByRelativePath = [System.Collections.Generic.Dictionary[string, System.IO.FileInfo]]::new(
+    [System.StringComparer]::Ordinal
+)
+foreach ($file in $files) {
     $relative = $file.FullName.Substring($rootItem.FullName.Length + 1).Replace('\', '/')
     if ($relative -notmatch '^[A-Za-z0-9][A-Za-z0-9._/\-]*$' -or
         [System.IO.Path]::IsPathRooted($relative) -or
         $relative.Split('/') -contains '..') {
         throw 'unsafe_artifact_path'
     }
+    if ($filesByRelativePath.ContainsKey($relative)) { throw 'duplicate_artifact_path' }
+    $filesByRelativePath.Add($relative, $file)
+}
+$relativePaths = [string[]]@($filesByRelativePath.Keys)
+[System.Array]::Sort($relativePaths, [System.StringComparer]::Ordinal)
+
+$lines = foreach ($relative in $relativePaths) {
+    $file = $filesByRelativePath[$relative]
     $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $relative"
 }
 
 $temporaryPath = "$manifestPath.pending"
 if (Test-Path -LiteralPath $temporaryPath) { throw 'manifest_pending_path_exists' }
+$pendingCreated = $false
 try {
     $manifestText = ($lines -join "`n") + "`n"
-    [System.IO.File]::WriteAllText(
-        $temporaryPath,
-        $manifestText,
-        [System.Text.UTF8Encoding]::new($false)
-    )
-    Move-Item -LiteralPath $temporaryPath -Destination $manifestPath -Force
+    $manifestBytes = [System.Text.UTF8Encoding]::new($false).GetBytes($manifestText)
+    try {
+        $pending = [System.IO.FileStream]::new(
+            $temporaryPath,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None
+        )
+        $pendingCreated = $true
+    } catch [System.IO.IOException] {
+        if (Test-Path -LiteralPath $temporaryPath) { throw 'manifest_pending_path_exists' }
+        throw 'manifest_pending_create_failed'
+    }
+    try {
+        $pending.Write($manifestBytes, 0, $manifestBytes.Length)
+        $pending.Flush($true)
+    } finally {
+        $pending.Dispose()
+    }
+    try {
+        [System.IO.File]::Move($temporaryPath, $manifestPath)
+    } catch [System.IO.IOException] {
+        if (Test-Path -LiteralPath $manifestPath) { throw 'manifest_already_exists' }
+        throw 'manifest_publish_failed'
+    }
 } finally {
-    if (Test-Path -LiteralPath $temporaryPath) {
+    if ($pendingCreated -and (Test-Path -LiteralPath $temporaryPath)) {
         Remove-Item -LiteralPath $temporaryPath -Force
     }
 }

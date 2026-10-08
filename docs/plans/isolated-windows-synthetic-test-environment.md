@@ -297,17 +297,31 @@ The reserved next identity is `eghis-d1777c1834e1-win311-v3`, but it is a design
 label only. The repository contains candidate-only modules under
 `tools/windows-sandbox/v3-candidate/`:
 
-- `InstallerDiagnostics.psm1` reads a bounded raw installer log from Sandbox-local
-  storage and emits only a closed JSON summary: presence, byte/line counts, SHA-256,
-  aggregate eight-hex-result-token count, and fixed Detect/Plan/Apply/Cache/Execute
-  marker counts. It never returns a log line, path, username, argument, or token.
+- `InstallerDiagnostics.psm1` opens the Sandbox-local raw log once with read-only
+  sharing, reads one in-memory snapshot while enforcing the byte cap on every read,
+  and derives byte count, SHA-256, lines, and markers only from those same bytes. It
+  emits only a closed JSON summary and publishes it through atomic create-new with
+  no overwrite. It never returns a log line, path, username, argument, or token.
 - `New-V3Manifest.ps1` deterministically hashes an exact candidate tree, permits
-  only the `wheelhouse` directory, rejects reparse points and unsafe paths, and
-  writes a fresh manifest. It does not create or compress a ZIP.
+  only the `wheelhouse` directory, rejects reparse points and unsafe paths, sorts
+  canonical relative paths with ordinal comparison, and publishes a fresh manifest
+  without overwriting an existing final path. It does not create or compress a ZIP.
 - `test-v3-offline-contract.ps1` proves synthetic raw content is not echoed,
-  enforces the closed schema, no-overwrite and raw-log size bounds, verifies
-  canonical UTF-8/LF output and deterministic manifest paths/order, rejects an
-  unexpected directory or reparse point, and asserts that no ZIP is produced.
+  races two distinct create-new diagnostic writers, simulates growth beyond the
+  byte cap, replaces the source path after snapshot capture, and verifies the
+  published summary still matches the one snapshot. It also proves closed schema,
+  canonical UTF-8/LF output, culture-independent ordinal manifest order, immutable
+  pre-existing manifest, unexpected-directory/reparse rejection, and no ZIP.
+
+Independent review of the first candidate commit `55994fad5407751e284c74d5c635c41b0541ac2c`
+failed because its diagnostic output used a check-then-write overwrite race, its
+log size/hash/counts did not come from one enforced bounded snapshot, and its
+manifest publication overwrote existing output and used culture-sensitive sorting.
+This sole remediation corrects only those three gaps. The diagnostic output now
+uses `FileMode.CreateNew`; the log is read once from one handle into a per-read
+bounded snapshot and never reopened for hashing; and manifest publication refuses
+an existing final path, uses no-overwrite `File.Move`, and orders relative paths
+with `StringComparer.Ordinal`.
 
 The proposed runner delta, intentionally **not wired or packaged yet**, is:
 
@@ -568,3 +582,9 @@ until the applicable next action is separately approved and reviewed.
   generator, and synthetic contract test. Reserved the v3 label without generating
   a manifest identity or executable ZIP. No YHSHFM contact, v2 retry, transfer,
   host cleanup, deployment, or live-data access occurred.
+- **2026-10-08:** Recorded the first v3 candidate review FAIL and completed the one
+  bounded remediation: atomic create-new diagnostic output, one-handle/per-read-
+  bounded snapshot derivation, and ordinal/no-overwrite manifest publication.
+  Added concurrent-writer, synthetic growth, post-snapshot replacement, existing-
+  manifest immutability, and cross-culture ordering assertions. No v3 artifact,
+  host contact, v2 retry, cleanup, deployment, or live-data access occurred.
