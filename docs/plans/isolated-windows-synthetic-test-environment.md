@@ -4,8 +4,10 @@
   failed closed during the 480-second Python-install step before product tests.
   Sanitized evidence is archived locally, host artifacts are retained under the
   protected root through the approved retention boundary, and no retry is approved.
-  An offline v3 diagnostic/manifest candidate awaits independent design review;
-  no v3 executable bundle, manifest identity, ZIP, transfer, or execution exists.
+  The corrected offline v3 diagnostic/manifest candidate passed independent review.
+  Authoritative logging evidence and a candidate synthetic Job Object proof are now
+  prepared for review; no v3 executable bundle, manifest identity, ZIP, transfer,
+  Windows probe execution, or installer execution exists.
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, orchestration, clinic operations
@@ -340,6 +342,92 @@ separate `StringComparer.OrdinalIgnoreCase` collision set while retaining
 authorize runner wiring, artifact or ZIP generation, transfer, execution, host
 cleanup, deployment, or access to YHSHFM or clinical data.
 
+#### Authoritative `/log` evidence
+
+The accepted syntax for the pinned full installer is the minimal pair
+`/log <absolute-log-path>`. The path must be an absolute path beneath the
+unmapped Sandbox-local diagnostic directory; it is never a URL and does not enable
+network collection. This conclusion is grounded in the following upstream evidence:
+
+- Python Software Foundation, **CPython `v3.11.9` —
+  `Tools/msi/get_externals.bat`**, lines 48-60,
+  <https://github.com/python/cpython/blob/v3.11.9/Tools/msi/get_externals.bat#L48-L60>:
+  the exact release source selects the `wix-314` binary dependency for Windows
+  installer builds. The same tag's **`Tools/msi/README.txt`**,
+  <https://github.com/python/cpython/blob/v3.11.9/Tools/msi/README.txt>, identifies
+  WiX as the installer toolset and the bundle EXE as the command-line entry point.
+- WiX Toolset upstream, **WiX 3.14 RTM Burn `core.cpp`**, lines 1081-1096,
+  <https://github.com/wixtoolset/wix3/blob/wix314rtm/src/burn/engine/core.cpp#L1081-L1096>:
+  the parser accepts either `l` or `log`, case-insensitively, after `-` or `/`,
+  requires one following argument, and copies that argument as the log-file path.
+  WiX 3.14.1 contains the same parser at the corresponding lines:
+  <https://github.com/wixtoolset/wix3/blob/wix3141rtm/src/burn/engine/core.cpp#L1081-L1096>.
+- WiX Toolset upstream, **WiX 3.14 RTM Burn `logging.cpp`**, lines 51-104,
+  <https://github.com/wixtoolset/wix3/blob/wix314rtm/src/burn/engine/logging.cpp#L51-L104>:
+  a supplied path is opened as the requested log; explicit open failure is fatal,
+  unlike best-effort default logging. The resulting log can contain installer paths
+  and package details, so the raw file remains Sandbox-local and only the closed,
+  bounded summary may enter mapped Results.
+
+The Python 3.11 user guide's **Installing Without UI** section,
+<https://docs.python.org/3.11/using/windows.html#installing-without-ui>, documents
+`/quiet`, `/passive`, `/uninstall`, and feature `name=value` options but does not
+document `/log`; it is supporting context, not the authority for the logging switch.
+Static inspection of the already pinned 3.11.9 installer (SHA-256 above) confirms
+the matching fixed Burn messages `Must specify a path for log.` and
+`Failed to copy log file path.` without executing it. The source evidence settles
+the syntax and open behavior, but it does not authorize running the installer.
+
+#### Synthetic process-containment proof candidate
+
+The candidate-only files `Test-JobObjectContainment.ps1` and
+`SyntheticProcessTree.ps1` create no KaosEghis install and reference no clinic path.
+The controller creates PowerShell suspended, applies a Job Object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, assigns the process before resuming it, and
+uses monotonic `Stopwatch` budgets. A normal synthetic process must exit cleanly.
+The deadline scenario starts a synthetic root, child, and grandchild, reaches its
+five-second run limit, calls `TerminateJobObject`, waits on the original root handle,
+and requires the Job Object's active-process count to reach zero. Both scenarios
+must complete within a 15-second probe deadline. Output is one closed, nonclinical
+JSON result; temporary role markers contain only fixed synthetic labels and are
+removed with their unique temp root. `test-job-object-containment-contract.ps1`
+provides a Linux-safe static contract check but is not Windows execution evidence.
+
+Execution acceptance requires all of the following on one separately approved,
+non-clinic Windows Sandbox target:
+
+1. record the exact non-clinic machine ID, explicit SSH target and trusted host-key
+   fingerprint, Windows build, protected/prohibited host paths, separate staging
+   root, approved Windows account and key-owning coordinator context, Sandbox
+   feature/restart state, approving owner, maintenance window, and sufficient
+   CPU/RAM/disk before transfer;
+2. independently review the exact candidate commit and hashes, then transfer only
+   the probe scripts into a fixed-memory Sandbox with exact case-sensitive `vGPU`
+   disablement; disable networking, clipboard, printer, audio, video, and device
+   sharing, map probe input read-only, and map only a new empty result directory
+   writable;
+3. observe the fixed JSON booleans for create-suspended-before-assignment, normal
+   exit, root/child/grandchild start, timeout, original-root-handle exit, zero active
+   job processes, and the 15-second monotonic bound;
+4. additionally review and exercise fail-closed assignment/resume failure and an
+   attempted breakaway/detach case before this helper can replace the runner's
+   current process boundary; do not infer those cases from the current core probe;
+5. preserve no raw process output, PID list, dump, installer, package, source tree,
+   or host path, and destroy the Sandbox after returning only the reviewed JSON; and
+6. before transfer, perform read-only feature/restart/disk/RAM/path/ACL preflight and
+   prove the approved account has an active interactive desktop with `quser` or an
+   equivalent session API; SSH-side process enumeration is insufficient; and
+7. treat any missing marker, nonzero active count, exceeded deadline, absent
+   interactive session, host ambiguity, or containment error as a blocker with no
+   installer or product-test follow-on and no same-directory rerun.
+
+Read-only OpenClaw presence discovery on 2026-10-08 returned no people or devices.
+No registered non-clinic Windows Sandbox target, stable device identity, or execution
+authorization target can therefore be named. YHSHFM is explicitly excluded as a
+live-clinic workstation and was not contacted. Execution approval cannot be
+requested until a distinct non-clinic target and its fixed identity/owner are
+provided and independently reviewed.
+
 The proposed runner delta, intentionally **not wired or packaged yet**, is:
 
 1. keep the 5,400-second monotonic global deadline and do not change any individual
@@ -363,17 +451,19 @@ independent non-clinic Windows synthetic probe that covers normal exit, timeout,
 child and grandchild processes, attempted detach/reparent/breakaway, PID reuse
 defense, assignment failure, and global-deadline expiry. If the reviewed mechanism
 cannot prove containment, v3 packaging remains blocked. The exact CPython 3.11.9
-and WiX documentation for logging syntax must also be captured and reviewed before
-runner wiring; embedded strings alone are insufficient authority for final bytes.
+and WiX source evidence for logging syntax is now captured above but still requires
+independent acceptance before runner wiring; embedded strings alone remain
+insufficient authority for final bytes.
 
 #### v3 acceptance and sequencing gates
 
 1. Independently review this evidence, candidate modules, closed diagnostic schema,
    and process-containment design.
-2. Capture an authoritative pinned documentation reference for the exact logging
-   syntax and confirm that it does not enable networking or external collection.
-3. Implement the runner/process helper only after the Windows synthetic containment
-   probe passes; preserve the global cap and fail closed on any unverified cleanup.
+2. Independently review the authoritative logging evidence and the candidate
+   synthetic containment scripts; retain the absolute Sandbox-local path rule.
+3. Implement the runner/process helper only after the approved non-clinic Windows
+   synthetic containment probe, including failure and breakaway cases, passes;
+   preserve the global cap and fail closed on any unverified cleanup.
 4. Assemble a fresh v3 candidate tree and run `New-V3Manifest.ps1`; record a new
    entry count and manifest SHA-256. Never reuse or edit the v2 manifest.
 5. Only after code/design review, build one final v3 ZIP, record its new size and
@@ -525,8 +615,10 @@ back to host pytest.
 - Preserve the v2 result as the canonical first-run evidence. Do not reuse its run
   directory or rerun the unchanged v2 bundle.
 - The completed offline analysis supports only the closed diagnostic summary and
-  deterministic manifest workflow. Next review must resolve authoritative logging
-  syntax and Windows process-containment proof before runner integration.
+  deterministic manifest workflow. Upstream evidence now establishes the `/log`
+  syntax and explicit-open behavior. Next review must accept that evidence and the
+  containment candidate; actual proof remains blocked on a fixed, approved
+  non-clinic Windows Sandbox target.
 - Cleanup of the retained exact host paths requires separate approval and must occur
   by the retention deadline; absence of approval is not permission to broaden or
   automate deletion.
@@ -613,3 +705,10 @@ until the applicable next action is separately approved and reviewed.
   canonical sorting. The candidate-only boundary is unchanged; no package/ZIP,
   workstation contact, execution, cleanup, push, deployment, or clinical-data
   access occurred.
+- **2026-10-08:** After independent PASS and user `go`, recorded authoritative
+  CPython 3.11.9/WiX 3.14 `/log <path>` source evidence and explicit-log behavior.
+  Added a candidate-only create-suspended/Job-Object synthetic containment probe
+  plus an offline contract check and fixed acceptance matrix. Read-only presence
+  discovery found no registered non-clinic Windows target, so no execution approval
+  can yet be requested. No v3 manifest/ZIP, transfer, Windows execution, installer
+  run, host cleanup, push, deployment, or live/clinical access occurred.
