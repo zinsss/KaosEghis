@@ -1,7 +1,7 @@
 # Isolated Windows synthetic test environment
 
-- **Status:** First host-change step approved but not executed by this worker;
-  bundle, runtime, and test execution remain unapproved
+- **Status:** First host-change step completed by the coordinator and independently
+  post-checked; reboot, bundle, runtime, and test execution remain unapproved
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, orchestration, clinic operations
@@ -19,10 +19,10 @@ use, software installation, optional-feature changes, service/firewall changes,
 test execution, or deployment. Never run `main.py`, repository tools/probes, or a
 production reader in this gate.
 
-### Approved first host-change boundary
+### Completed first host-change boundary
 
-The user subsequently authorized a coordinator to perform only these two host
-changes through the already-established administrative channel:
+The user authorized and the coordinator completed only these two host changes
+through the already-established administrative channel:
 
 1. enable Windows optional feature `Containers-DisposableClientVM` with dependency
    enablement and `-NoRestart`; and
@@ -36,10 +36,22 @@ staging root as acceptable only when it is empty and its protected ACL is alread
 exact. Otherwise it stops without repairing or replacing existing content. A newly
 created root whose ACL cannot be secured is removed only if still empty.
 
-This approval does not include a reboot, bundle/source transfer, clone, Python or
-dependency installation, Sandbox launch, test run, firewall/service change, live
-checkout access, or creation of any child under the staging root. This worker did
-not contact or change the workstation.
+Independent post-check/review recorded all of the following without clinical
+payload or credential content:
+
+- `Containers-DisposableClientVM` is `Enabled`; the coordinator result reported
+  `RestartNeeded=true`, so reboot remains a pending, separately approved gate;
+- `C:\KaosClinic-Test\Eghis` exists, is empty, and is not a reparse point;
+- its DACL has inheritance disabled and exactly two full-control allow principals,
+  `YHSHFM\leejs` and SYSTEM, with the approving administrator as owner; and
+- the protected live checkout remained on `main` at `5fc962e` with tracked and
+  staged state clean.
+
+This completed step does not include a reboot, bundle/source transfer, clone,
+Python or dependency installation, Sandbox launch, test run, firewall/service
+change, live checkout change, or creation of any child under the staging root. The
+Eghis worker did not contact or mutate the workstation; it records coordinator and
+independent review evidence only.
 
 ## Repository evidence
 
@@ -201,8 +213,8 @@ Execution therefore requires all of the following:
 
 1. user approval for the exact source commit, Python installer, hash lock,
    PyAutoGUI test-only decision, `.wsb`, runner, mapped paths, and result retention;
-2. confirmation that Windows Sandbox is already enabled, or separate approval for
-   enabling the optional feature and any required reboot;
+2. separate approval and completion of the pending reboot, followed by read-only
+   confirmation that the Sandbox feature remains `Enabled`;
 3. an operator-approved maintenance window with the live app left untouched and
    no clinical workflow depending on workstation resources;
 4. an interactive operator launch of the reviewed `.wsb`; do not attempt to drive
@@ -230,14 +242,14 @@ and report blocked; do not fall back to host pytest.
 
 ## Open decisions and next action
 
-- Review the coordinator's feature/ACL post-checks; if the feature reports a
-  pending reboot, obtain separate reboot approval and do not proceed meanwhile.
+- Obtain separate approval for the reported pending reboot; do not proceed until
+  reboot completion and post-reboot feature state are separately verified.
 - Separately approve the exact `.wsb` configuration and a later Sandbox launch,
   or provide a non-production Windows VM/host.
 - Approve the official CPython 3.11.9 x64 installer, publisher, and SHA-256.
 - Resolve and approve the explicit hash-pinned PyAutoGUI test dependency.
 - Approve the maintenance window, resource budget, host staging/results ACLs,
-  result retention, and whether enabling Sandbox/reboot is acceptable.
+  result retention, and post-reboot validation procedure.
 - Approve a later transfer/staging action; established SSH access alone does not
   authorize transfer, launch, installation, or execution.
 
@@ -255,3 +267,9 @@ launch it.
   only `Containers-DisposableClientVM` with `-NoRestart` and create the empty,
   protected staging root. Reboot, staging children, bundles, runtime installation,
   Sandbox launch, and tests remain unapproved; this worker executed no host action.
+- **2026-10-08:** Recorded coordinator execution and independent review: the
+  Sandbox feature is enabled with restart still needed; the staging root is empty,
+  non-reparse, and protected by the exact administrator/SYSTEM full-control DACL;
+  the live checkout remained tracked/staged clean on `main@5fc962e`. The Eghis
+  worker did not contact or mutate the workstation. Reboot and every later artifact,
+  launch, and test step remain separately gated.
