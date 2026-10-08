@@ -300,18 +300,23 @@ label only. The repository contains candidate-only modules under
 - `InstallerDiagnostics.psm1` opens the Sandbox-local raw log once with read-only
   sharing, reads one in-memory snapshot while enforcing the byte cap on every read,
   and derives byte count, SHA-256, lines, and markers only from those same bytes. It
-  emits only a closed JSON summary and publishes it through atomic create-new with
+  preserves an existing zero-byte log as present (distinct from a missing path),
+  emits only a closed JSON summary, and publishes it through atomic create-new with
   no overwrite. It never returns a log line, path, username, argument, or token.
 - `New-V3Manifest.ps1` deterministically hashes an exact candidate tree, permits
   only the `wheelhouse` directory, rejects reparse points and unsafe paths, sorts
-  canonical relative paths with ordinal comparison, and publishes a fresh manifest
-  without overwriting an existing final path. It does not create or compress a ZIP.
+  canonical relative paths with ordinal comparison, rejects distinct source paths
+  that collide under Windows ordinal-ignore-case comparison, and publishes a fresh
+  manifest without overwriting an existing final path. It does not create or
+  compress a ZIP.
 - `test-v3-offline-contract.ps1` proves synthetic raw content is not echoed,
   races two distinct create-new diagnostic writers, simulates growth beyond the
   byte cap, replaces the source path after snapshot capture, and verifies the
-  published summary still matches the one snapshot. It also proves closed schema,
-  canonical UTF-8/LF output, culture-independent ordinal manifest order, immutable
-  pre-existing manifest, unexpected-directory/reparse rejection, and no ZIP.
+  published summary still matches the one snapshot. It also proves missing versus
+  existing-empty log semantics, closed schema, canonical UTF-8/LF output,
+  culture-independent ordinal manifest order, Linux-host rejection of a Windows
+  case-insensitive path collision, immutable pre-existing manifest,
+  unexpected-directory/reparse rejection, and no ZIP.
 
 Independent review of the first candidate commit `55994fad5407751e284c74d5c635c41b0541ac2c`
 failed because its diagnostic output used a check-then-write overwrite race, its
@@ -322,6 +327,18 @@ uses `FileMode.CreateNew`; the log is read once from one handle into a per-read
 bounded snapshot and never reopened for hashing; and manifest publication refuses
 an existing final path, uses no-overwrite `File.Move`, and orders relative paths
 with `StringComparer.Ordinal`.
+
+A second independent review then found two remaining fail-closed gaps: PowerShell
+pipeline enumeration collapsed an existing empty byte array into the same state as
+a missing file, and a case-sensitive development filesystem could admit paths that
+collide on Windows. The user explicitly approved one additional bounded remediation
+on 2026-10-08. The file reader now returns an explicit snapshot wrapper, including
+an empty byte array, while a missing path still returns no wrapper; all diagnostic
+fields remain derived from that same bounded snapshot. Manifest input now uses a
+separate `StringComparer.OrdinalIgnoreCase` collision set while retaining
+`StringComparer.Ordinal` for canonical output ordering. This exception does not
+authorize runner wiring, artifact or ZIP generation, transfer, execution, host
+cleanup, deployment, or access to YHSHFM or clinical data.
 
 The proposed runner delta, intentionally **not wired or packaged yet**, is:
 
@@ -588,3 +605,11 @@ until the applicable next action is separately approved and reviewed.
   Added concurrent-writer, synthetic growth, post-snapshot replacement, existing-
   manifest immutability, and cross-culture ordering assertions. No v3 artifact,
   host contact, v2 retry, cleanup, deployment, or live-data access occurred.
+- **2026-10-08:** Recorded the second v3 candidate review FAIL and the user's
+  explicit one-more-remediation exception. Preserved an existing zero-byte log as
+  present through an explicit snapshot wrapper, rejected Windows
+  case-insensitive relative-path collisions before manifest publication, and added
+  synthetic empty/missing and Linux collision assertions while retaining ordinal
+  canonical sorting. The candidate-only boundary is unchanged; no package/ZIP,
+  workstation contact, execution, cleanup, push, deployment, or clinical-data
+  access occurred.

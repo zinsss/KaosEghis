@@ -181,7 +181,7 @@ try {
     $capturedSummary = & $diagnosticModule {
         param([byte[]]$Snapshot)
         ConvertTo-SafeInstallerDiagnostic $Snapshot
-    } $captured
+    } $captured.Bytes
     if ($capturedSummary.RawLogBytes -ne $oldBytes.Length -or
         $capturedSummary.RawLogSha256 -ne (Get-BytesSha256 $oldBytes) -or
         $capturedSummary.DetectMarkerCount -ne 1 -or
@@ -199,6 +199,18 @@ try {
     if ($missingSummary.RawLogPresent -or $missingSummary.RawLogBytes -ne 0 -or
         $null -ne $missingSummary.RawLogSha256) {
         throw 'missing_installer_log_summary_invalid'
+    }
+    $emptyLog = Join-Path $root 'empty.log'
+    [System.IO.File]::WriteAllBytes($emptyLog, [byte[]]::new(0))
+    $emptySummary = Get-SafeInstallerDiagnostic $emptyLog 1MB
+    if (-not $emptySummary.RawLogPresent -or $emptySummary.RawLogBytes -ne 0 -or
+        $emptySummary.RawLogSha256 -ne ('e3b0c44298fc1c149afbf4c8996fb924' +
+            '27ae41e4649b934ca495991b7852b855') -or
+        $emptySummary.LineCount -ne 0 -or $emptySummary.HexResultTokenCount -ne 0 -or
+        $emptySummary.DetectMarkerCount -ne 0 -or $emptySummary.PlanMarkerCount -ne 0 -or
+        $emptySummary.ApplyMarkerCount -ne 0 -or $emptySummary.CacheMarkerCount -ne 0 -or
+        $emptySummary.ExecuteMarkerCount -ne 0) {
+        throw 'existing_empty_installer_log_summary_invalid'
     }
 
     $savedCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
@@ -235,6 +247,17 @@ try {
     }
     if ((Get-ChildItem -LiteralPath $treeTr -Filter '*.zip' -File | Measure-Object).Count -ne 0) {
         throw 'manifest_workflow_generated_zip'
+    }
+
+    if (-not $IsLinux) { throw 'case_collision_test_requires_linux_host' }
+    $caseCollisionTree = New-SyntheticManifestTree $root 'tree-case-collision'
+    [System.IO.File]::WriteAllText((Join-Path $caseCollisionTree 'Alpha.txt'), 'upper')
+    [System.IO.File]::WriteAllText((Join-Path $caseCollisionTree 'alpha.txt'), 'lower')
+    try {
+        & $manifestScript -Root $caseCollisionTree | Out-Null
+        throw 'windows_case_insensitive_collision_was_accepted'
+    } catch {
+        if ($_.Exception.Message -ne 'artifact_path_case_collision') { throw }
     }
 
     $existingManifestHash = (Get-FileHash -LiteralPath $manifestTr.ManifestPath -Algorithm SHA256).Hash
@@ -276,7 +299,9 @@ try {
         DiagnosticCanonicalUtf8Lf = $true
         DiagnosticSchemaClosed = $true
         MissingDiagnosticHandled = $true
+        ExistingEmptyDiagnosticPresent = $true
         ManifestOrdinalCultureIndependent = $true
+        WindowsCaseCollisionRejected = $true
         ManifestExistingFilePreserved = $true
         ManifestCanonicalUtf8Lf = $true
         UnexpectedDirectoryRejected = $true

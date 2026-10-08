@@ -15,7 +15,7 @@ function Read-BoundedStreamSnapshot {
             }
             $snapshot.Write($buffer, 0, $read)
         }
-        return $snapshot.ToArray()
+        return ,$snapshot.ToArray()
     } finally {
         $snapshot.Dispose()
     }
@@ -50,7 +50,8 @@ function Read-BoundedFileSnapshot {
         return $null
     }
     try {
-        return Read-BoundedStreamSnapshot $stream $MaximumBytes
+        $bytes = [byte[]](Read-BoundedStreamSnapshot $stream $MaximumBytes)
+        return [PSCustomObject]@{ Bytes = $bytes }
     } finally {
         $stream.Dispose()
     }
@@ -73,7 +74,11 @@ function New-MissingInstallerDiagnostic {
 }
 
 function ConvertTo-SafeInstallerDiagnostic {
-    param([Parameter(Mandatory = $true)][byte[]]$Snapshot)
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [byte[]]$Snapshot
+    )
     $counts = [ordered]@{
         LineCount = 0
         HexResultTokenCount = 0
@@ -138,7 +143,7 @@ function Get-SafeInstallerDiagnostic {
     )
     $snapshot = Read-BoundedFileSnapshot $LogPath $MaximumBytes
     if ($null -eq $snapshot) { return New-MissingInstallerDiagnostic }
-    return ConvertTo-SafeInstallerDiagnostic $snapshot
+    return ConvertTo-SafeInstallerDiagnostic $snapshot.Bytes
 }
 
 function Write-SafeInstallerDiagnostic {

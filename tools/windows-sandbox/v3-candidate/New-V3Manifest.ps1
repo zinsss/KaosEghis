@@ -41,12 +41,18 @@ if (Test-Path -LiteralPath $manifestPath) { throw 'manifest_already_exists' }
 $filesByRelativePath = [System.Collections.Generic.Dictionary[string, System.IO.FileInfo]]::new(
     [System.StringComparer]::Ordinal
 )
+$caseInsensitiveRelativePaths = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase
+)
 foreach ($file in $files) {
     $relative = $file.FullName.Substring($rootItem.FullName.Length + 1).Replace('\', '/')
     if ($relative -notmatch '^[A-Za-z0-9][A-Za-z0-9._/\-]*$' -or
         [System.IO.Path]::IsPathRooted($relative) -or
         $relative.Split('/') -contains '..') {
         throw 'unsafe_artifact_path'
+    }
+    if (-not $caseInsensitiveRelativePaths.Add($relative)) {
+        throw 'artifact_path_case_collision'
     }
     if ($filesByRelativePath.ContainsKey($relative)) { throw 'duplicate_artifact_path' }
     $filesByRelativePath.Add($relative, $file)
