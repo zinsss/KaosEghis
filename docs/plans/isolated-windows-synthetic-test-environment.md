@@ -1,7 +1,8 @@
 # Isolated Windows synthetic test environment
 
-- **Status:** First host-change step completed by the coordinator and independently
-  post-checked; reboot, bundle, runtime, and test execution remain unapproved
+- **Status:** First host-change step completed and post-checked; one bounded reboot
+  is approved for the current closed-time window but not executed by this worker;
+  bundle, runtime, and test execution remain unapproved
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, orchestration, clinic operations
@@ -40,7 +41,7 @@ Independent post-check/review recorded all of the following without clinical
 payload or credential content:
 
 - `Containers-DisposableClientVM` is `Enabled`; the coordinator result reported
-  `RestartNeeded=true`, so reboot remains a pending, separately approved gate;
+  `RestartNeeded=true`, establishing the bounded reboot gate now approved below;
 - `C:\KaosClinic-Test\Eghis` exists, is empty, and is not a reparse point;
 - its DACL has inheritance disabled and exactly two full-control allow principals,
   `YHSHFM\leejs` and SYSTEM; and
@@ -52,6 +53,33 @@ Python or dependency installation, Sandbox launch, test run, firewall/service
 change, live checkout change, or creation of any child under the staging root. The
 Eghis worker did not contact or mutate the workstation; it records coordinator and
 independent review evidence only.
+
+### Approved reboot and post-reboot gate
+
+The user approved one coordinator-driven reboot of the expected workstation during
+the current closed-time window. Before reboot, the coordinator must fail closed
+unless computer name, signed-in account, administrator role, and Sandbox feature
+state are exactly the reviewed values. It records the pre-reboot boot timestamp in
+coordinator memory, invokes only a local ordinary `Restart-Computer`, and performs
+no force, remote target, staging, install, launch, test, service, firewall, or live
+checkout command.
+
+The coordinator waits for the existing SSH endpoint to disconnect and return within
+a bounded 15-minute window. On return, a read-only PowerShell post-check must:
+
+1. revalidate expected computer, account, and administrator role;
+2. prove `LastBootUpTime` is later than the recorded pre-reboot value;
+3. require `Containers-DisposableClientVM` state exactly `Enabled`, not
+   `EnablePending`; and
+4. report only fixed booleans for Component Based Servicing reboot pending, Windows
+   Update reboot required, and pending file-rename operations, plus their composite
+   pending-restart result. It must not output registry values.
+
+Any context mismatch, missing disconnect, SSH timeout, unchanged boot timestamp,
+non-`Enabled` feature state, or remaining pending-restart indicator stops the
+workflow. No artifact, child directory, Sandbox launch, runtime, or test step is
+authorized by successful reboot verification. This Eghis worker supplies the
+procedure only and does not contact or reboot the workstation.
 
 ## Repository evidence
 
@@ -213,8 +241,8 @@ Execution therefore requires all of the following:
 
 1. user approval for the exact source commit, Python installer, hash lock,
    PyAutoGUI test-only decision, `.wsb`, runner, mapped paths, and result retention;
-2. separate approval and completion of the pending reboot, followed by read-only
-   confirmation that the Sandbox feature remains `Enabled`;
+2. coordinator completion of the now-approved bounded reboot and the exact
+   read-only post-reboot gate above;
 3. an operator-approved maintenance window with the live app left untouched and
    no clinical workflow depending on workstation resources;
 4. an interactive operator launch of the reviewed `.wsb`; do not attempt to drive
@@ -236,14 +264,15 @@ junction-following deletion, or the live path. Record the exact deleted paths an
 whether the retained JUnit/inventory artifacts were archived or removed.
 
 Do not disable Windows Sandbox automatically after the run. Optional-feature
-rollback and any reboot require a separate operator decision because they are host
-changes. If setup fails before isolation is proven, remove the new staging run only
-and report blocked; do not fall back to host pytest.
+rollback and any reboot beyond the single currently approved reboot require a
+separate operator decision because they are host changes. If setup fails before
+isolation is proven, remove the new staging run only and report blocked; do not fall
+back to host pytest.
 
 ## Open decisions and next action
 
-- Obtain separate approval for the reported pending reboot; do not proceed until
-  reboot completion and post-reboot feature state are separately verified.
+- Execute only the approved bounded reboot procedure, then stop unless the exact
+  read-only post-reboot gate succeeds and reports no remaining pending restart.
 - Separately approve the exact `.wsb` configuration and a later Sandbox launch,
   or provide a non-production Windows VM/host.
 - Approve the official CPython 3.11.9 x64 installer, publisher, and SHA-256.
@@ -273,3 +302,8 @@ launch it.
   the live checkout remained tracked/staged clean on `main@5fc962e`. The Eghis
   worker did not contact or mutate the workstation. Reboot and every later artifact,
   launch, and test step remain separately gated.
+- **2026-10-08:** Recorded user approval for one coordinator-driven reboot in the
+  current closed-time window and fixed the post-reboot gate: exact context, advanced
+  boot timestamp, feature exactly `Enabled`, and fixed pending-restart booleans.
+  Artifacts, installation, Sandbox launch, runtime, and tests remain unapproved;
+  this Eghis worker did not contact or mutate the workstation.
