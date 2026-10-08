@@ -3,7 +3,7 @@ Set-StrictMode -Version Latest
 
 $ExpectedComputer = 'YHSHFM'
 $ExpectedAccount = 'YHSHFM\leejs'
-$RunId = 'eghis-d1777c1834e1-win311-v1-run-01'
+$RunId = 'eghis-d1777c1834e1-win311-v2-run-01'
 $Root = 'C:\KaosClinic-Test\Eghis'
 $Results = Join-Path (Join-Path $Root 'Results') $RunId
 $ReturnArchive = Join-Path $Root "$RunId-results.zip"

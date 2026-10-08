@@ -1,16 +1,16 @@
-Bundle ID: eghis-d1777c1834e1-win311-v1
+Bundle ID: eghis-d1777c1834e1-win311-v2
 Source commit under test: d1777c1834e129e93441bdb208c780e322401a48
-Archive filename: eghis-d1777c1834e1-win311-v1.zip
-Archive size bytes: 310595043
-Archive SHA-256: 9b4576c4e2ba50f0f54c62d89ee629dfddca44ce9538f8a5c4042bdb62123967
-Internal manifest entries: 50
-Internal manifest SHA-256: dbe026726e936256e29a9531f19fa1ff4cd6af5efebb452ef77560a85fed43ce
+Archive filename: eghis-d1777c1834e1-win311-v2.zip
+Archive size bytes: 310597385
+Archive SHA-256: f7e3ca423d5252fa2d261831592d9df57992b0f5cb3fc6d24d0ec912710c9fd7
+Internal manifest entries: 51
+Internal manifest SHA-256: 14ac22894d0b53338109d893926203391551f879b1c285cd4c6660440f131381
 Wheel count: 41
 Wheelhouse resolution target: CPython 3.11 x64 Windows (win_amd64)
 Source archive SHA-256: 3b946718deef6e6235f5ce992587d79975121d05fe22a8571699207e1feea823
 Complete-history Git bundle SHA-256: e4847bdc029f8b009b88e36ee044c9777d214e90816177b3f284decbe7f04509
 Dependency lock SHA-256: 2031389cd549154316a0d8109d0b5ceccb51d4a6c65cfc4f2161f06569f80c72
 CPython installer SHA-256: 5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde
-Build-host artifact path: build/windows-sandbox-prep/eghis-d1777c1834e1-win311-v1.zip
-Host inbound path after separately reviewed staging: C:\KaosClinic-Test\Eghis\Inbound\eghis-d1777c1834e1-win311-v1
-Host results path after separately reviewed staging: C:\KaosClinic-Test\Eghis\Results\eghis-d1777c1834e1-win311-v1-run-01
+Build-host artifact path: build/windows-sandbox-prep/eghis-d1777c1834e1-win311-v2.zip
+Host inbound path after separately reviewed staging: C:\KaosClinic-Test\Eghis\Inbound\eghis-d1777c1834e1-win311-v2
+Host results path after separately reviewed staging: C:\KaosClinic-Test\Eghis\Results\eghis-d1777c1834e1-win311-v2-run-01

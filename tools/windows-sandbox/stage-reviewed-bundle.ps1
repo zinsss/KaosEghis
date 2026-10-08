@@ -3,11 +3,11 @@ Set-StrictMode -Version Latest
 
 $ExpectedComputer = 'YHSHFM'
 $ExpectedAccount = 'YHSHFM\leejs'
-$BundleId = 'eghis-d1777c1834e1-win311-v1'
-$RunId = 'eghis-d1777c1834e1-win311-v1-run-01'
+$BundleId = 'eghis-d1777c1834e1-win311-v2'
+$RunId = 'eghis-d1777c1834e1-win311-v2-run-01'
 $Root = 'C:\KaosClinic-Test\Eghis'
 $Package = Join-Path $Root "$BundleId.zip"
-$ExpectedPackageHash = '9b4576c4e2ba50f0f54c62d89ee629dfddca44ce9538f8a5c4042bdb62123967'
+$ExpectedPackageHash = 'f7e3ca423d5252fa2d261831592d9df57992b0f5cb3fc6d24d0ec912710c9fd7'
 $InboundParent = Join-Path $Root 'Inbound'
 $ResultsParent = Join-Path $Root 'Results'
 $Inbound = Join-Path $InboundParent $BundleId
@@ -20,6 +20,12 @@ function Assert-ExpectedContext {
     $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
     if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'administrator_required' }
     return $identity
+}
+
+function Assert-PathSetAbsent([string[]]$Paths) {
+    foreach ($path in $Paths) {
+        if (Test-Path -LiteralPath $path) { throw 'staging_path_already_exists' }
+    }
 }
 
 function Assert-SafeDirectory([string]$Path, [string[]]$ExpectedSids) {
@@ -72,31 +78,47 @@ if (-not (Test-Path -LiteralPath $Package -PathType Leaf)) { throw 'package_miss
 $packageItem = Get-Item -LiteralPath $Package -Force
 if (($packageItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'package_reparse_point' }
 if ((Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedPackageHash) { throw 'package_hash_mismatch' }
-if ((Test-Path -LiteralPath $Inbound) -or (Test-Path -LiteralPath $Results)) { throw 'run_path_already_exists' }
+$newPaths = @($InboundParent, $ResultsParent, $Inbound, $Results)
+Assert-PathSetAbsent $newPaths
 
-foreach ($path in @($InboundParent, $ResultsParent, $Inbound, $Results)) {
-    if (-not (Test-Path -LiteralPath $path)) {
-        New-Item -ItemType Directory -Path $path -ErrorAction Stop | Out-Null
-    }
+foreach ($path in $newPaths) {
+    New-Item -ItemType Directory -Path $path -ErrorAction Stop | Out-Null
     Set-ExactDirectoryAcl $path $userSid
     Assert-SafeDirectory $path $expectedSids
 }
 
 Expand-Archive -LiteralPath $Package -DestinationPath $Inbound -ErrorAction Stop
 $manifest = Join-Path $Inbound 'artifact-manifest.sha256'
+$inboundItem = Get-Item -LiteralPath $Inbound -Force
+if (($inboundItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'artifact_root_unsafe' }
+$descendants = @(Get-ChildItem -LiteralPath $Inbound -Force -Recurse)
+foreach ($item in $descendants) {
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'artifact_reparse_point' }
+}
+$directories = @($descendants | Where-Object { $_.PSIsContainer } | ForEach-Object {
+    $_.FullName.Substring($Inbound.Length + 1).Replace('\', '/')
+} | Sort-Object)
+if ($directories.Count -ne 1 -or $directories[0] -ne 'wheelhouse') { throw 'unexpected_artifact_directory' }
 $entries = @{}
 foreach ($line in Get-Content -LiteralPath $manifest -Encoding UTF8) {
     if ($line -notmatch '^([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9._/\-]*)$') { throw 'malformed_artifact_manifest' }
-    $relative = $Matches[2].Replace('/', '\')
-    if ([System.IO.Path]::IsPathRooted($relative) -or $relative.Split('\') -contains '..' -or $entries.ContainsKey($relative)) { throw 'unsafe_manifest_path' }
+    $relative = $Matches[2].Replace('\', '/')
+    if ([System.IO.Path]::IsPathRooted($relative) -or $relative.Split('/') -contains '..' -or $entries.ContainsKey($relative)) { throw 'unsafe_manifest_path' }
     $entries[$relative] = $Matches[1]
 }
-$files = @(Get-ChildItem -LiteralPath $Inbound -File -Recurse | Where-Object { $_.FullName -ne $manifest })
-if ($files.Count -ne $entries.Count) { throw 'artifact_set_mismatch' }
+$manifestFullPath = [System.IO.Path]::GetFullPath($manifest)
+$files = @($descendants | Where-Object {
+    -not $_.PSIsContainer -and
+    -not [string]::Equals(
+        [System.IO.Path]::GetFullPath($_.FullName),
+        $manifestFullPath,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )
+})
+if ($files.Count -ne $entries.Count) { throw 'artifact_file_set_mismatch' }
 foreach ($file in $files) {
-    if (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'artifact_reparse_point' }
-    $relative = $file.FullName.Substring($Inbound.Length + 1)
-    if (-not $entries.ContainsKey($relative)) { throw 'unexpected_artifact' }
+    $relative = $file.FullName.Substring($Inbound.Length + 1).Replace('\', '/')
+    if (-not $entries.ContainsKey($relative)) { throw 'unexpected_artifact_file' }
     if ((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $entries[$relative]) { throw 'artifact_hash_mismatch' }
 }
 

@@ -4,17 +4,17 @@
   <ClipboardRedirection>Disable</ClipboardRedirection>
   <AudioInput>Disable</AudioInput>
   <VideoInput>Disable</VideoInput>
-  <VGpu>Disable</VGpu>
+  <vGPU>Disable</vGPU>
   <ProtectedClient>Enable</ProtectedClient>
   <MemoryInMB>8192</MemoryInMB>
   <MappedFolders>
     <MappedFolder>
-      <HostFolder>C:\KaosClinic-Test\Eghis\Inbound\eghis-d1777c1834e1-win311-v1</HostFolder>
+      <HostFolder>C:\KaosClinic-Test\Eghis\Inbound\eghis-d1777c1834e1-win311-v2</HostFolder>
       <SandboxFolder>C:\MappedInbound</SandboxFolder>
       <ReadOnly>true</ReadOnly>
     </MappedFolder>
     <MappedFolder>
-      <HostFolder>C:\KaosClinic-Test\Eghis\Results\eghis-d1777c1834e1-win311-v1-run-01</HostFolder>
+      <HostFolder>C:\KaosClinic-Test\Eghis\Results\eghis-d1777c1834e1-win311-v2-run-01</HostFolder>
       <SandboxFolder>C:\MappedResults</SandboxFolder>
       <ReadOnly>false</ReadOnly>
     </MappedFolder>

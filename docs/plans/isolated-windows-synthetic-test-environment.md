@@ -119,14 +119,14 @@ direct execution on the clinic desktop and not enabling Hyper-V implicitly.
 
 ## Host staging layout and source provenance
 
-Exact non-live staging layout for bundle `eghis-d1777c1834e1-win311-v1` and run
-`eghis-d1777c1834e1-win311-v1-run-01`:
+Exact non-live staging layout for bundle `eghis-d1777c1834e1-win311-v2` and run
+`eghis-d1777c1834e1-win311-v2-run-01`:
 
 ```text
 C:\KaosClinic-Test\Eghis\
-  eghis-d1777c1834e1-win311-v1.zip
-  Inbound\eghis-d1777c1834e1-win311-v1\
-  Results\eghis-d1777c1834e1-win311-v1-run-01\
+  eghis-d1777c1834e1-win311-v2.zip
+  Inbound\eghis-d1777c1834e1-win311-v2\
+  Results\eghis-d1777c1834e1-win311-v2-run-01\
 ```
 
 The completed staging root retains its protected two-principal ACL. Each inbound
@@ -176,11 +176,11 @@ acceptable only with user approval. It must not alter production requirements.
 
 The exact source under test is
 `d1777c1834e129e93441bdb208c780e322401a48`. The build-host artifact is ignored by
-Git at `build/windows-sandbox-prep/eghis-d1777c1834e1-win311-v1.zip`; it is
-310,595,043 bytes with SHA-256
-`9b4576c4e2ba50f0f54c62d89ee629dfddca44ce9538f8a5c4042bdb62123967`.
-Its 50-entry internal manifest has SHA-256
-`dbe026726e936256e29a9531f19fa1ff4cd6af5efebb452ef77560a85fed43ce`.
+Git at `build/windows-sandbox-prep/eghis-d1777c1834e1-win311-v2.zip`; it is
+310,597,385 bytes with SHA-256
+`f7e3ca423d5252fa2d261831592d9df57992b0f5cb3fc6d24d0ec912710c9fd7`.
+Its 51-entry internal manifest has SHA-256
+`14ac22894d0b53338109d893926203391551f879b1c285cd4c6660440f131381`.
 The package includes:
 
 - source archive SHA-256
@@ -207,6 +207,30 @@ PyTweening were built on the trusted development host as pure `py3-none-any`
 wheels with setuptools 84.0.0; their exact hashes are in the lock and manifest.
 No production dependency file changed.
 
+### Independent review failure and bounded remediation
+
+Independent review rejected commit `9e684aa9a8d1c7d2a2eb761a40b0011494ea2931`
+and ZIP SHA-256
+`9b4576c4e2ba50f0f54c62d89ee629dfddca44ce9538f8a5c4042bdb62123967`.
+That `v1` ZIP is superseded and must never be transferred, staged, or launched; its
+bytes were not modified in place. This sole retry creates `v2` because review found:
+
+1. the case-sensitive WSB element was incorrectly spelled `VGpu` instead of `vGPU`;
+2. staging could change an existing parent ACL before proving all four parent/run
+   paths absent, while both staging and the Sandbox runner did not close the full
+   directory/reparse-point set; and
+3. independent child budgets could exceed the stated 90-minute window before
+   accounting for setup and validation overhead.
+
+The remediation uses the exact `vGPU` element; requires all four staging paths
+absent before the first creation or ACL mutation; accepts only one inbound directory
+named `wheelhouse`; rejects all descendant reparse points and any extra file or
+directory after extraction, immediately before launch, and again inside Sandbox;
+and applies the monotonic global deadline described below. Automated guard checks
+exercise unchanged rejection of a nonempty parent and parent symlink, rejection of
+an unexpected empty directory and nested symlink, exact XML element case, mutation
+ordering, and termination of a fake long-running child at the global deadline.
+
 ## Sandbox configuration
 
 The review candidate `tools/windows-sandbox/KaosEghisSynthetic.wsb` enforces:
@@ -218,7 +242,7 @@ The review candidate `tools/windows-sandbox/KaosEghisSynthetic.wsb` enforces:
   <ClipboardRedirection>Disable</ClipboardRedirection>
   <AudioInput>Disable</AudioInput>
   <VideoInput>Disable</VideoInput>
-  <VGpu>Disable</VGpu>
+  <vGPU>Disable</vGPU>
   <ProtectedClient>Enable</ProtectedClient>
   <MemoryInMB>8192</MemoryInMB>
   <!-- Map only Inbound read-only and the new Results\run-id writable. -->
@@ -261,14 +285,20 @@ $pytestExit = $LASTEXITCODE
 exit $pytestExit
 ```
 
-The prepared runner verifies the exact artifact set/hashes, source identity,
-installer hash/signature, Sandbox account, absence of default routes and non-loopback
-addresses, empty result directory, Python 3.11.9, hash-only offline installation,
-`pip check`, and frozen inventory before pytest. It has 10-minute installer,
-15-minute dependency-install, and 60-minute pytest bounds and rejects result output
-over 200 MiB. The final report contains only fixed status fields and synthetic test
-artifacts; network isolation is a boolean, never raw addresses/routes. It keeps
-`tests/conftest.py`; tests must not use `--noconftest` or run from a host SSH shell.
+The prepared runner verifies the exact artifact files **and** sole allowed
+`wheelhouse` directory, rejects every descendant reparse point, and then verifies
+source identity, installer hash/signature, Sandbox account, absence of default
+routes and non-loopback addresses, empty results, Python 3.11.9, hash-only offline
+installation, `pip check`, and frozen inventory before pytest. A monotonic 5,400-
+second global deadline bounds all work. Child budgets are 480 seconds for install,
+120 for venv creation, 720 for dependencies, 60 each for `pip check` and inventory,
+and 3,300 for pytest: 4,740 seconds total with 660 seconds reserved for validation
+and other overhead. Every child timeout is capped by remaining global time; expiry
+kills the process tree, writes fixed `global_deadline_exceeded`, and prevents later
+steps. Results over 200 MiB are rejected. The final report contains only fixed
+status fields and synthetic test artifacts; network isolation is a boolean, never
+raw addresses/routes. The runner keeps `tests/conftest.py`; tests must not use
+`--noconftest` or run from a host SSH shell.
 
 ## Execution gates and operations
 
@@ -276,7 +306,8 @@ Even with isolation, the run can consume CPU, memory, and disk on a clinic machi
 Execution therefore requires all of the following:
 
 1. independent review acceptance of the exact source commit, package/manifest
-   hashes, CPython evidence, lock and PyAutoGUI decision, `.wsb`, three scripts,
+   hashes, CPython evidence, lock and PyAutoGUI decision, `.wsb`, guard module,
+   four operational scripts and two guard-test scripts,
    mapped paths, resource bounds, ACL, retention, and return process;
 2. the completed coordinator reboot and successful read-only post-reboot gate
    recorded above;
@@ -297,25 +328,28 @@ checkout.
 After independent review passes, the coordinator may perform only this sequence:
 
 1. transfer the one reviewed ZIP to
-   `C:\KaosClinic-Test\Eghis\eghis-d1777c1834e1-win311-v1.zip`, then verify its
+   `C:\KaosClinic-Test\Eghis\eghis-d1777c1834e1-win311-v2.zip`, then verify its
    exact size/hash before extraction;
 2. run reviewed `tools/windows-sandbox/stage-reviewed-bundle.ps1` via the established
    administrative channel. It fails closed on host/account/admin/feature/resource,
    root safety, ACL, path reuse, package/manifest/hash, or Authenticode mismatch;
-3. independently inspect the staging JSON, confirm the two new run directories have
-   protected ACLs with exactly `YHSHFM\leejs` and SYSTEM full control, and confirm
-   Results is empty;
-4. during the bounded window, have the operator interactively open only the emitted
+3. independently inspect the staging JSON, confirm all four parent/run paths were
+   absent before creation, the new directories have protected ACLs with exactly
+   `YHSHFM\leejs` and SYSTEM full control, and Results is empty;
+4. immediately before launch run reviewed
+   `tools/windows-sandbox/verify-before-sandbox-launch.ps1`; require an exact
+   file/directory manifest match, no descendant reparse points, and empty Results;
+5. during the bounded window, have the operator interactively open only the emitted
    `KaosEghisSynthetic.wsb` path. Do not launch it invisibly through SSH;
-5. allow the mapped runner to finish, then close Sandbox. Never rerun into the same
+6. allow the mapped runner to finish, then close Sandbox. Never rerun into the same
    result directory;
-6. review the allowlisted result files locally for synthetic-only, non-sensitive
+7. review the allowlisted result files locally for synthetic-only, non-sensitive
    content. Only after that review run
    `tools/windows-sandbox/package-reviewed-results.ps1` via the established channel;
-7. record the returned ZIP hash, transfer only that reviewed result ZIP, and retain
+8. record the returned ZIP hash, transfer only that reviewed result ZIP, and retain
    protected inbound/results/return artifacts for at most seven days or until the
    accepted report is archived, whichever is earlier; and
-8. remove only the explicit bundle/run paths in a separately reviewed cleanup step.
+9. remove only the explicit bundle/run paths in a separately reviewed cleanup step.
    Do not use wildcards, follow reparse points, or touch the live checkout.
 
 ## Rollback and removal
@@ -343,6 +377,8 @@ back to host pytest.
   and recheck the 20-GiB/12-GiB resource thresholds immediately before staging.
 - Any artifact or procedure change invalidates the recorded hashes and requires a
   new bundle ID and review; never patch the staged package in place.
+- The rejected `v1` identity and SHA-256 remain permanently prohibited; only the
+  reviewed `v2` identity may advance.
 
 After review passes, execute only the exact downstream sequence above. If review or
 any host precondition fails, stop without transfer, extraction, Sandbox launch, or
@@ -381,3 +417,11 @@ test execution.
   network `.wsb`, fail-closed runner, staging/return scripts, fixed paths/resource
   bounds/ACL/retention, and downstream sequence. Independent review is still
   required before staging or launch; this worker did not contact the workstation.
+- **2026-10-08:** Recorded independent review FAIL for `v1` and completed the sole
+  bounded remediation as new `v2`: corrected the case-sensitive `vGPU` element,
+  moved the all-path absence gate before mutation, closed exact directory and
+  descendant reparse semantics across staging/prelaunch/Sandbox, and replaced the
+  additive child limits with a 5,400-second monotonic global deadline and 660-second
+  overhead reserve. Added automated unchanged-parent, junction, unexpected-directory,
+  nested-junction, exact-tag, ordering, and fake-long-child checks. No workstation
+  contact, transfer, staging, launch, test, or deployment occurred.
