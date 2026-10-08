@@ -12,10 +12,11 @@
   `zin`, and Windows account `leejs`. Central inventory still marks its access as
   unverified and identifies it as the live KaosEghis runtime. Because no distinct
   Windows host is available, the user explicitly approved YHSHFM only as the host
-  for an isolated Windows Sandbox and only for a no-change read-only preflight at
-  this gate. The locked local SSH context does not select the approved account, a
-  dedicated identity, or strict pinned-host-key behavior, so the approved synthetic
-  probe remains stopped before host contact. No v3 executable bundle,
+  for an isolated Windows Sandbox. The later approved plan replaces the SSH-first
+  observation path with a future Windows Hub/OpenClaw node enrollment. Initial node
+  authority is observation-only and pairing is not authorized by this documentation
+  change. Synthetic execution remains separately gated by Windows Sandbox. No v3
+  executable bundle,
   manifest identity, ZIP, transfer, Windows probe execution, or installer execution
   exists.
 - **Last updated:** 2026-10-08
@@ -111,6 +112,35 @@ the workstation; it records only the coordinator's sanitized completion evidence
   boundary for every UIA, native printer, subprocess, or extension call.
 
 ## Selected topology
+
+### Observation-only OpenClaw node
+
+The user approved replacing the SSH-first/YHSHFM Windows Sandbox-first environment
+observation path with future enrollment of YHSHFM as a Windows Hub/OpenClaw node.
+Enrollment itself still requires a separately controlled installation and pairing
+step; this documentation task does not contact the host, install software, generate
+or relay a setup code, or approve a pairing request.
+
+The initial node permission set is closed and observation-only:
+
+- allow only `device.info`, `device.status`, and `system.which`;
+- deny `system.run`, every file read/write/mutation or transfer surface, application
+  or service control, camera, microphone/talk, notifications, location, screen
+  snapshot or recording, and any access to the live Eghis checkout, data, services,
+  credentials, processes, logs, or clinical workflow; and
+- treat node pairing/admission as transport identity only. Pairing never authorizes
+  a command-surface or permission expansion; any expansion requires a new explicit
+  user decision, reviewed capability policy, and updated durable plan.
+
+Windows Sandbox is not required merely to obtain those three non-clinical,
+read-only observations. The node is not a containment boundary and must never run
+synthetic tests on the host. Any Windows-native synthetic execution still requires
+the separately approved, independently reviewed Windows Sandbox gate below with
+synthetic fixtures only and no live-resource mapping. The SSH configuration and
+key-registration work previously proposed for this observation path is stopped and
+superseded; its historical evidence remains below for auditability.
+
+### Synthetic execution containment
 
 Use **Windows Sandbox with host networking, printer redirection, clipboard,
 audio/video input, and vGPU disabled**. Map only an immutable inbound bundle and a
@@ -426,11 +456,11 @@ services, desktop applications, devices, network, and clinical workflow remain
 prohibited resources, and only synthetic fixtures inside the isolated Sandbox are
 eligible for a later separately approved execution:
 
-1. record the exact machine ID, explicit SSH target and trusted host-key
-   fingerprint, Windows build, protected/prohibited host paths, separate staging
-   root, approved Windows account and key-owning coordinator context, Sandbox
-   feature/restart state, approving owner, maintenance window, and sufficient
-   CPU/RAM/disk before transfer;
+1. record the exact machine ID, separately approved control-channel identity and
+   authentication boundary, Windows build, protected/prohibited host paths,
+   separate staging root, approved Windows account and coordinator context,
+   Sandbox feature/restart state, approving owner, maintenance window, and
+   sufficient CPU/RAM/disk before transfer;
 2. independently review the exact candidate commit and hashes, then transfer only
    the probe scripts into a fixed-memory Sandbox with exact case-sensitive `vGPU`
    disablement; disable networking, clipboard, printer, audio, video, and device
@@ -448,7 +478,7 @@ eligible for a later separately approved execution:
    or host path, and destroy the Sandbox after returning only the reviewed JSON; and
 6. before transfer, perform read-only feature/restart/disk/RAM/path/ACL preflight and
    prove the approved account has an active interactive desktop with `quser` or an
-   equivalent session API; SSH-side process enumeration is insufficient; and
+   equivalent session API; remote process enumeration alone is insufficient; and
 7. treat any missing marker, nonzero active count, exceeded deadline, absent
    interactive session, host ambiguity, or containment error as a blocker with no
    installer or product-test follow-on and no same-directory rerun.
@@ -680,26 +710,24 @@ back to host pytest.
   read-only preflight and a later separately approved Sandbox-only synthetic run
   because no distinct Windows host is available. The live checkout, data, services,
   clinical workflow, and all non-Sandbox execution remain prohibited.
-- A locked-context, local-only `ssh -G yhshfm` inspection did not contact or
-  authenticate to the host. It resolved a different user, allowed the default
-  identity search instead of a dedicated key (`IdentitiesOnly=no`), was not
-  non-interactive (`BatchMode=no`), and used ask-on-first-use host-key behavior
-  rather than an independently verified pinned key. Therefore the target remains
-  unusable. The next permissible action is a separate review of an explicit
-  `leejs@<registered-host>` configuration with a dedicated identity,
-  `IdentitiesOnly=yes`, `BatchMode=yes`, and an independently verified pinned host
-  key. Only after that review may a read-only host preflight verify account/admin,
-  Sandbox/restart/resources, protected/staging paths and ACLs, and an interactive
-  session before any transfer.
-- Minimal user-side trust preparation is: create or select one coordinator-owned
-  dedicated key without sharing its private material; verify the server public
-  host-key fingerprint out of band at the YHSHFM console; pin only that verified
-  key in a dedicated known-hosts file; configure the registered host with exact
-  user `leejs`, one explicit identity, `IdentitiesOnly=yes`, `BatchMode=yes`, and
-  `StrictHostKeyChecking=yes`; then have an independent reviewer compare the local
-  `ssh -G leejs@yhshfm` resolution and pinned fingerprint before authorizing any
-  connection. Existing unverified known-host entries and SSH-agent/default-key
-  discovery are not acceptable substitutes.
+- The user superseded the SSH-first observation/preflight route with a future
+  Windows Hub/OpenClaw node route. Do not continue SSH key registration or use SSH
+  as a fallback for this path. The earlier local-only `ssh -G` failure remains
+  historical evidence, not an active prerequisite list.
+- Before any node enrollment, separately fix and review the Gateway/Hub identity,
+  Windows node package/source, owner, state/config root, route and authentication
+  boundary, exact observation-only capability policy, installation/rollback, and
+  pairing request identity. Never generate or relay a setup code through worker
+  output, and never approve by recency or position.
+- Initial admission must expose only `device.info`, `device.status`, and
+  `system.which`. Deny `system.run`, file access/mutation/transfer, app/service
+  control, camera, microphone/talk, notifications, location, screen capture/record,
+  and all live Eghis checkout/data/service/clinical access. Pairing does not expand
+  this boundary.
+- The node may support read-only environment observation without Sandbox, but it is
+  not containment. Synthetic test execution still requires separate approval and
+  the independently reviewed isolated Windows Sandbox gate; it must not run through
+  the observation node on the host.
 - Cleanup of the retained exact host paths requires separate approval and must occur
   by the retention deadline; absence of approval is not permission to broaden or
   automate deletion.
@@ -707,11 +735,10 @@ back to host pytest.
   new bundle ID and review; never patch the staged package in place.
 - The rejected `v1` identity and SHA-256 remain permanently prohibited; only the
   reviewed `v2` identity was used for this completed attempt.
-- Installing an independent OpenClaw node on YHSHFM was considered and deferred.
-  It requires separate security and installation approval, user-scoped dedicated
-  state/configuration, a tailnet Gateway, no initial autostart, minimum execution
-  permissions, and an enforced boundary excluding the live checkout and clinical
-  data. It is not a workaround for the failed run or permission to retry it.
+- The Windows node path is approved as the replacement design but is not installed,
+  paired, admitted, or activated. Its observation-only permissions and separate
+  installation/pairing review remain mandatory. It is not a workaround for the
+  failed run or permission to retry v2.
 
 Do not contact YHSHFM, retry Sandbox, alter v2 bytes, or clean up host artifacts
 until the applicable next action is separately approved and reviewed.
@@ -823,3 +850,9 @@ until the applicable next action is separately approved and reviewed.
   independently pinned host key, so no authentication, host command, transfer,
   staging, Windows/Sandbox execution, packaging, cleanup, push, deployment, or
   clinical-data access occurred.
+- **2026-10-08:** Recorded the user's replacement of the SSH-first observation path
+  with a future YHSHFM Windows Hub/OpenClaw node. Fixed the initial allowlist to
+  `device.info`, `device.status`, and `system.which`; explicitly denied command,
+  file, control, sensor, screen, and live-clinic surfaces; and separated node
+  observation from Sandbox containment. Pairing, installation, setup-code handling,
+  host contact, file transfer, testing, cleanup, and deployment did not occur.
