@@ -1,0 +1,17 @@
+# Windows Sandbox-only test environment for CPython 3.11 x64.
+# Keep production dependency bounds aligned with requirements.txt.
+PySide6>=6.7
+cryptography>=43
+keyring>=25
+psutil>=5.9
+pygetwindow>=0.0.9
+psycopg2-binary>=2.9
+pywinauto>=0.6.8
+pyvda>=0.6,<0.7
+pynput>=1.7
+pytest>=8
+
+# Explicit test-only decision: product and tests import PyAutoGUI, but the
+# production requirements file does not declare it. Pin it only in this
+# disposable, offline, synthetic Windows test environment.
+PyAutoGUI==0.9.54

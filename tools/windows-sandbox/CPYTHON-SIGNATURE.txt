@@ -1,0 +1,14 @@
+Artifact: python-3.11.9-amd64.exe
+Source URL: https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
+SHA-256: 5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde
+Verification tool: osslsigncode 2.9 (Debian package 2.9-2)
+Verification result: Succeeded; one signature verified
+Signer subject: C=US, ST=Oregon, L=Beaverton, O=Python Software Foundation, CN=Python Software Foundation
+Signer issuer: C=US, O=DigiCert, Inc., CN=DigiCert Trusted G4 Code Signing RSA4096 SHA384 2021 CA1
+Signature digest: SHA-256
+RFC3161 timestamp: 2024-04-02T12:54:37Z
+Timestamp authority: DigiCert Timestamp 2023
+File digest match: yes
+Signing chain verification: ok at the trusted build-host verification time
+Signature CRL verification: ok at the trusted build-host verification time
+Timestamp chain and CRL verification: ok at the trusted build-host verification time

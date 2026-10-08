@@ -1,8 +1,8 @@
 # Isolated Windows synthetic test environment
 
-- **Status:** First host-change step and the approved bounded reboot completed and
-  post-checked; bundle, runtime, Sandbox launch, and test execution remain
-  unapproved
+- **Status:** Host feature/reboot gates completed; exact offline synthetic-test
+  bundle prepared in H4 and awaiting independent artifact review before the
+  conditionally approved staging and interactive Sandbox run
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, orchestration, clinic operations
@@ -15,10 +15,12 @@ launcher. The test process must not see or mutate that checkout, EMR processes,
 patient data, credentials, network services, printers, clipboard, or the host
 interactive desktop. Administrator status is not a substitute for isolation.
 
-Except for the bounded coordinator step below, this plan does not authorize SSH
-use, software installation, optional-feature changes, service/firewall changes,
-test execution, or deployment. Never run `main.py`, repository tools/probes, or a
-production reader in this gate.
+Artifact preparation does not authorize workstation contact. The user's next-phase
+approval permits staging and interactive Sandbox execution only after independent
+review of the exact hashes, signature evidence, lock, configuration, runner, paths,
+resource bounds, ACLs, retention, and return procedure recorded below. It never
+permits host Python installation, another reboot, service/firewall changes,
+deployment, `main.py`, repository probes, or a production reader.
 
 ### Completed first host-change boundary
 
@@ -117,27 +119,30 @@ direct execution on the clinic desktop and not enabling Hyper-V implicitly.
 
 ## Host staging layout and source provenance
 
-Proposed non-live staging root:
+Exact non-live staging layout for bundle `eghis-d1777c1834e1-win311-v1` and run
+`eghis-d1777c1834e1-win311-v1-run-01`:
 
 ```text
 C:\KaosClinic-Test\Eghis\
-  Inbound\<bundle-id>\
-  Results\<run-id>\
+  eghis-d1777c1834e1-win311-v1.zip
+  Inbound\eghis-d1777c1834e1-win311-v1\
+  Results\eghis-d1777c1834e1-win311-v1-run-01\
 ```
 
-The staging root must be newly created with an ACL limited to the approving
-administrator and SYSTEM. It must not be under, linked to, or populated from the
-live checkout.
+The completed staging root retains its protected two-principal ACL. Each inbound
+and results run directory must be newly created with the same exact principals and
+must not be under, linked to, or populated from the live checkout.
 
-Prepare the following on a trusted development/build host, then transfer them only
-after separate approval:
+The trusted development host prepared the following for independent review; none
+has been transferred to the workstation:
 
 1. an independent Git bundle containing the exact reviewed commit and its history;
 2. a source archive produced from that commit, plus `SOURCE_COMMIT.txt` and a
    SHA-256 manifest for every archive file;
 3. an official offline CPython 3.11 installer and recorded publisher/hash;
 4. a Windows CPython-3.11 wheelhouse and hash-locked requirements file; and
-5. a reviewed Sandbox `.wsb` file and runner script.
+5. a Sandbox `.wsb`, fail-closed runner, staging procedure, and result-packaging
+   procedure.
 
 On the workstation, provenance verification may create an **independent clone**
 from the offline Git bundle under the staging root and detach it at the reviewed
@@ -167,9 +172,44 @@ decision. Preferred resolution is a reviewed repository test dependency declarat
 for the first isolated gate, a separately listed and hash-pinned test-only wheel is
 acceptable only with user approval. It must not alter production requirements.
 
+### Prepared artifact evidence
+
+The exact source under test is
+`d1777c1834e129e93441bdb208c780e322401a48`. The build-host artifact is ignored by
+Git at `build/windows-sandbox-prep/eghis-d1777c1834e1-win311-v1.zip`; it is
+310,595,043 bytes with SHA-256
+`9b4576c4e2ba50f0f54c62d89ee629dfddca44ce9538f8a5c4042bdb62123967`.
+Its 50-entry internal manifest has SHA-256
+`dbe026726e936256e29a9531f19fa1ff4cd6af5efebb452ef77560a85fed43ce`.
+The package includes:
+
+- source archive SHA-256
+  `3b946718deef6e6235f5ce992587d79975121d05fe22a8571699207e1feea823`;
+- complete-history Git bundle SHA-256
+  `e4847bdc029f8b009b88e36ee044c9777d214e90816177b3f284decbe7f04509`;
+- the 41-wheel Windows CPython 3.11 x64 wheelhouse and lock SHA-256
+  `2031389cd549154316a0d8109d0b5ceccb51d4a6c65cfc4f2161f06569f80c72`;
+- official `python-3.11.9-amd64.exe`, SHA-256
+  `5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde`;
+  and
+- the exact `.wsb`, runner, source identity, and redacted signature evidence.
+
+The installer came from the HTTPS Python.org 3.11.9 release path. Build-host
+`osslsigncode 2.9` verified one SHA-256 signature, matching file digest, RFC3161
+timestamp `2024-04-02T12:54:37Z`, Python Software Foundation signer, DigiCert code
+signing/timestamp chains, and CRLs. Windows staging and the Sandbox runner repeat
+hash and Authenticode signer/status checks before use.
+
+The lock deliberately adds **PyAutoGUI 0.9.54 only to this disposable test
+environment** because repository code/tests import it while production
+`requirements.txt` does not declare it. PyAutoGUI, MouseInfo, PyScreeze, and
+PyTweening were built on the trusted development host as pure `py3-none-any`
+wheels with setuptools 84.0.0; their exact hashes are in the lock and manifest.
+No production dependency file changed.
+
 ## Sandbox configuration
 
-The reviewed `.wsb` configuration should enforce the equivalent of:
+The review candidate `tools/windows-sandbox/KaosEghisSynthetic.wsb` enforces:
 
 ```xml
 <Configuration>
@@ -185,10 +225,11 @@ The reviewed `.wsb` configuration should enforce the equivalent of:
 </Configuration>
 ```
 
-The exact mapped-folder XML and runner path must be generated for the approved
-run ID and reviewed before launch. The writable results folder must be empty at
-start. No parent test directory, user profile, drive root, live checkout, `%APPDATA%`,
-`%LOCALAPPDATA%`, SSH material, or credential store is mapped.
+The exact mapped paths are the inbound and results run directories above. Only
+inbound is read-only and only the new results directory is writable. The runner is
+`C:\MappedInbound\run-synthetic-tests.ps1`. The writable results folder must be
+empty at start. No parent test directory, user profile, drive root, live checkout,
+`%APPDATA%`, `%LOCALAPPDATA%`, SSH material, or credential store is mapped.
 
 ## Guarded test command
 
@@ -220,27 +261,28 @@ $pytestExit = $LASTEXITCODE
 exit $pytestExit
 ```
 
-Before this block, the runner must verify the source and dependency manifests,
-create every redirected directory, confirm the results directory is empty, record
-`python --version`, `pip check`, and the frozen package inventory, and inspect the
-Sandbox adapter/route state without making an external connectivity probe. The
-final report must record pass/fail/skip counts and fixed failure summaries without
-clinical or credential content; network isolation is recorded only as a fixed
-boolean, not raw addresses or routes. Do not add `--noconftest`; the repository
-safety fixtures are required. Do not run tests directly from an SSH shell on the
-host.
+The prepared runner verifies the exact artifact set/hashes, source identity,
+installer hash/signature, Sandbox account, absence of default routes and non-loopback
+addresses, empty result directory, Python 3.11.9, hash-only offline installation,
+`pip check`, and frozen inventory before pytest. It has 10-minute installer,
+15-minute dependency-install, and 60-minute pytest bounds and rejects result output
+over 200 MiB. The final report contains only fixed status fields and synthetic test
+artifacts; network isolation is a boolean, never raw addresses/routes. It keeps
+`tests/conftest.py`; tests must not use `--noconftest` or run from a host SSH shell.
 
 ## Execution gates and operations
 
 Even with isolation, the run can consume CPU, memory, and disk on a clinic machine.
 Execution therefore requires all of the following:
 
-1. user approval for the exact source commit, Python installer, hash lock,
-   PyAutoGUI test-only decision, `.wsb`, runner, mapped paths, and result retention;
+1. independent review acceptance of the exact source commit, package/manifest
+   hashes, CPython evidence, lock and PyAutoGUI decision, `.wsb`, three scripts,
+   mapped paths, resource bounds, ACL, retention, and return process;
 2. the completed coordinator reboot and successful read-only post-reboot gate
    recorded above;
-3. an operator-approved maintenance window with the live app left untouched and
-   no clinical workflow depending on workstation resources;
+3. a closed-time maintenance window capped at 90 minutes, with no clinical workflow
+   depending on workstation resources, at least 20 GiB free on C:, at least 12 GiB
+   available RAM, and the live app/checkout left untouched;
 4. an interactive operator launch of the reviewed `.wsb`; do not attempt to drive
    Windows Sandbox invisibly from the SSH session; and
 5. post-run review that results contain only synthetic test names/counts and fixed
@@ -250,14 +292,41 @@ No test result authorizes runtime activation, source access, printing, endpoint
 binding, firewall change, credential provisioning, deployment, or use of the live
 checkout.
 
+### Exact downstream staging, launch, and return sequence
+
+After independent review passes, the coordinator may perform only this sequence:
+
+1. transfer the one reviewed ZIP to
+   `C:\KaosClinic-Test\Eghis\eghis-d1777c1834e1-win311-v1.zip`, then verify its
+   exact size/hash before extraction;
+2. run reviewed `tools/windows-sandbox/stage-reviewed-bundle.ps1` via the established
+   administrative channel. It fails closed on host/account/admin/feature/resource,
+   root safety, ACL, path reuse, package/manifest/hash, or Authenticode mismatch;
+3. independently inspect the staging JSON, confirm the two new run directories have
+   protected ACLs with exactly `YHSHFM\leejs` and SYSTEM full control, and confirm
+   Results is empty;
+4. during the bounded window, have the operator interactively open only the emitted
+   `KaosEghisSynthetic.wsb` path. Do not launch it invisibly through SSH;
+5. allow the mapped runner to finish, then close Sandbox. Never rerun into the same
+   result directory;
+6. review the allowlisted result files locally for synthetic-only, non-sensitive
+   content. Only after that review run
+   `tools/windows-sandbox/package-reviewed-results.ps1` via the established channel;
+7. record the returned ZIP hash, transfer only that reviewed result ZIP, and retain
+   protected inbound/results/return artifacts for at most seven days or until the
+   accepted report is archived, whichever is earlier; and
+8. remove only the explicit bundle/run paths in a separately reviewed cleanup step.
+   Do not use wildcards, follow reparse points, or touch the live checkout.
+
 ## Rollback and removal
 
 Closing Windows Sandbox destroys its Python install, venv, copied source, temp
-files, synthetic databases, process state, and test-local credentials. After result
-review and retention approval, remove only the explicit run directory and inbound
-bundle beneath `C:\KaosClinic-Test\Eghis`; never use a drive-root target, wildcard,
-junction-following deletion, or the live path. Record the exact deleted paths and
-whether the retained JUnit/inventory artifacts were archived or removed.
+files, synthetic databases, process state, and test-local credentials. After the
+reviewed result ZIP is safely archived, retain host artifacts no longer than seven
+days. Remove only the explicit run directory, inbound bundle directory, source ZIP,
+and result ZIP beneath `C:\KaosClinic-Test\Eghis`; never use a drive-root target,
+wildcard, junction-following deletion, or the live path. Record the exact deleted
+paths and whether JUnit/inventory artifacts were archived.
 
 Do not disable Windows Sandbox automatically after the run. Optional-feature
 rollback and any reboot beyond the single completed reboot require a separate
@@ -267,18 +336,17 @@ back to host pytest.
 
 ## Open decisions and next action
 
-- Separately approve the exact `.wsb` configuration and a later Sandbox launch,
-  or provide a non-production Windows VM/host.
-- Approve the official CPython 3.11.9 x64 installer, publisher, and SHA-256.
-- Resolve and approve the explicit hash-pinned PyAutoGUI test dependency.
-- Approve the maintenance window, resource budget, per-run staging/results ACLs,
-  and result retention.
-- Approve a later transfer/staging action; established SSH access alone does not
-  authorize transfer, launch, installation, or execution.
+- Independent review must accept this exact commit plus the external ZIP hash,
+  internal manifest, CPython evidence, dependency lock/custom pure wheels, `.wsb`,
+  runner, staging/return scripts, paths, bounds, ACL, retention, and return process.
+- The coordinator must select and record the actual closed-time 90-minute window
+  and recheck the 20-GiB/12-GiB resource thresholds immediately before staging.
+- Any artifact or procedure change invalidates the recorded hashes and requires a
+  new bundle ID and review; never patch the staged package in place.
 
-After those decisions, prepare the offline bundle and submit its manifests, `.wsb`,
-and runner for review. Only a subsequent explicit execution approval may stage or
-launch it.
+After review passes, execute only the exact downstream sequence above. If review or
+any host precondition fails, stop without transfer, extraction, Sandbox launch, or
+test execution.
 
 ## Revision history
 
@@ -307,3 +375,9 @@ launch it.
   indicators, and the protected staging root remained empty with the exact two
   principals. No artifact, installation, Sandbox launch, test, or deployment
   occurred; this Eghis worker did not contact or mutate the workstation.
+- **2026-10-08:** Recorded the user's conditional approval for the next bounded
+  phase and prepared the exact H4 offline artifact set, CPython signature evidence,
+  Windows 3.11 lock/wheelhouse with the test-only PyAutoGUI decision, disabled-
+  network `.wsb`, fail-closed runner, staging/return scripts, fixed paths/resource
+  bounds/ACL/retention, and downstream sequence. Independent review is still
+  required before staging or launch; this worker did not contact the workstation.

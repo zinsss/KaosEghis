@@ -1,0 +1,25 @@
+<Configuration>
+  <Networking>Disable</Networking>
+  <PrinterRedirection>Disable</PrinterRedirection>
+  <ClipboardRedirection>Disable</ClipboardRedirection>
+  <AudioInput>Disable</AudioInput>
+  <VideoInput>Disable</VideoInput>
+  <VGpu>Disable</VGpu>
+  <ProtectedClient>Enable</ProtectedClient>
+  <MemoryInMB>8192</MemoryInMB>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\KaosClinic-Test\Eghis\Inbound\eghis-d1777c1834e1-win311-v1</HostFolder>
+      <SandboxFolder>C:\MappedInbound</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\KaosClinic-Test\Eghis\Results\eghis-d1777c1834e1-win311-v1-run-01</HostFolder>
+      <SandboxFolder>C:\MappedResults</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\MappedInbound\run-synthetic-tests.ps1</Command>
+  </LogonCommand>
+</Configuration>
