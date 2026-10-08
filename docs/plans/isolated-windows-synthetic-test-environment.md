@@ -15,7 +15,11 @@
   for an isolated Windows Sandbox. The later approved plan replaces the SSH-first
   observation path with a future Windows Hub/OpenClaw node enrollment. Initial node
   authority is observation-only and pairing is not authorized by this documentation
-  change. Synthetic execution remains separately gated by Windows Sandbox. No v3
+  change. Orchestration contract
+  `openclaw-yhshfm-observation-route-v1.md` is now active at reviewed commit
+  `e3126870afe8c5455057a2a31b109e78af77ee76`; H4 is ready, but YHSHFM still has no
+  installed, paired, or admitted node. Synthetic execution remains separately gated
+  by Windows Sandbox. No v3
   executable bundle,
   manifest identity, ZIP, transfer, Windows probe execution, or installer execution
   exists.
@@ -131,6 +135,29 @@ The initial node permission set is closed and observation-only:
 - treat node pairing/admission as transport identity only. Pairing never authorizes
   a command-surface or permission expansion; any expansion requires a new explicit
   user decision, reviewed capability policy, and updated durable plan.
+
+The accepted central route contract is
+`/srv/projects/KaosClinic/orchestration/contracts/openclaw-yhshfm-observation-route-v1.md`
+at orchestration commit `e3126870afe8c5455057a2a31b109e78af77ee76`:
+
+- the H4 Gateway remains loopback-only and OpenClaw supervises tailnet-only
+  HTTPS/WSS Serve exposure;
+- Gateway authentication remains token-based,
+  `gateway.auth.allowTailscale=false`, and Tailscale identity never bypasses the
+  Gateway token;
+- Funnel and LAN/public binds are absent/prohibited; and
+- SSH auto-approval and node plugin tools are disabled, while non-observation
+  command families are denied by policy.
+
+Independent review passed that contract and reported zero devices, nodes, or
+pending requests. No YHSHFM installation, contact, pairing, or command occurred.
+The remaining installation must begin locally at the YHSHFM interactive desktop.
+Credentials and setup codes stay outside chat, logs, repositories, and worker
+output. After a fresh attempt, re-list requests and approve only the exact matching
+device and node request IDs. Before approving the node command surface,
+`openclaw nodes describe` must prove the effective command set is exactly
+`device.info`, `device.status`, and `system.which`; any additional effective command
+is a fail-closed rejection.
 
 Windows Sandbox is not required merely to obtain those three non-clinical,
 read-only observations. The node is not a containment boundary and must never run
@@ -714,11 +741,11 @@ back to host pytest.
   Windows Hub/OpenClaw node route. Do not continue SSH key registration or use SSH
   as a fallback for this path. The earlier local-only `ssh -G` failure remains
   historical evidence, not an active prerequisite list.
-- Before any node enrollment, separately fix and review the Gateway/Hub identity,
-  Windows node package/source, owner, state/config root, route and authentication
-  boundary, exact observation-only capability policy, installation/rollback, and
-  pairing request identity. Never generate or relay a setup code through worker
-  output, and never approve by recency or position.
+- The H4 Gateway route, token authentication boundary, tailnet-only Serve topology,
+  and deny policy are accepted through orchestration commit `e3126870`. Remaining
+  work is the separately controlled YHSHFM-local node installation and exact-ID
+  admission. Never generate or relay a setup code through worker output, and never
+  approve by recency or position.
 - Initial admission must expose only `device.info`, `device.status`, and
   `system.which`. Deny `system.run`, file access/mutation/transfer, app/service
   control, camera, microphone/talk, notifications, location, screen capture/record,
@@ -739,6 +766,10 @@ back to host pytest.
   paired, admitted, or activated. Its observation-only permissions and separate
   installation/pairing review remain mandatory. It is not a workaround for the
   failed run or permission to retry v2.
+- H4 currently reports zero devices, zero nodes, and zero pending requests. Local
+  YHSHFM installation must keep the setup credential off chat and handoffs. Approve
+  only freshly re-listed exact request IDs, then require `nodes describe` to show
+  exactly the three observation commands before admitting the node surface.
 
 Do not contact YHSHFM, retry Sandbox, alter v2 bytes, or clean up host artifacts
 until the applicable next action is separately approved and reviewed.
@@ -856,3 +887,11 @@ until the applicable next action is separately approved and reviewed.
   file, control, sensor, screen, and live-clinic surfaces; and separated node
   observation from Sandbox containment. Pairing, installation, setup-code handling,
   host contact, file transfer, testing, cleanup, and deployment did not occur.
+- **2026-10-08:** Recorded independent PASS for orchestration commit `e3126870`,
+  which activates the H4 loopback-only Gateway through supervised tailnet-only
+  HTTPS/WSS Serve with token authentication, `allowTailscale=false`, no Funnel, and
+  observation-only node deny policy. H4 had zero devices, nodes, and pending
+  requests. Fixed the remaining local-install/exact-ID admission gate and the
+  requirement that `nodes describe` expose exactly the three approved observation
+  commands. No YHSHFM contact, installation, pairing, command, transfer, test,
+  cleanup, or deployment occurred.
