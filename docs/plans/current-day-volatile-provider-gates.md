@@ -151,7 +151,7 @@ replacement. Orchestration `5277764` accepts these H4 values:
 | jitter | Stable process-local 0–5 seconds, never persisted | Deterministic synthetic clock tests. |
 | source deadline | 10 seconds for the whole queued observation, with stricter connection/statement bounds defined by the approved source reader | Orders source evidence and serialized-queue contention evidence must show the limit is safe. |
 | retry | No retry inside a cycle; a failed cycle publishes nothing | Avoids hidden duplicate source load and keeps one observation per cycle. |
-| failure backoff | Next-cycle delays 60, 120, then at most 300 seconds while unavailable | Synthetic cap/reset tests; destination freshness still independently gates serving. |
+| failure backoff | Base next-cycle delays are 60, 120, and 300 seconds, plus stable process-local jitter of 0–5 seconds; the third and every later failure therefore schedules 300–305 seconds after completion | Synthetic base-delay cap/reset and jittered-total tests; destination freshness still independently gates serving. |
 | coalescing | While active, retain only one successor requirement | Synthetic concurrency tests prove no parallel connection or lost current-day rollover. |
 | rollover | KST day change invalidates before read, rotates generation, and requests one immediate cycle | Injected-clock midnight/late-result tests. |
 | shutdown | Stop admission/serving, cancel or bound the in-flight operation, prove cursor/connection closure, then drop references and lease | Source-runner cancellation/cleanup proof and supervised stop deadline. |
@@ -313,8 +313,9 @@ The settled implementation decisions are:
 - one injected refresh ticket captures session, generation, day, lease token, and
   exact 10-second deadline; one active cycle admits only one coalesced successor;
 - ordinary completion schedules 60 seconds plus the injected stable 0–5-second
-  jitter; failures use 60/120/300 seconds plus jitter, cap at 300, never retry
-  inside the cycle, and success resets the failure count;
+  jitter; failures use base delays of 60/120/300 seconds plus that jitter, so the
+  third and every later total is 300–305 seconds, never retry inside the cycle,
+  and success resets the failure count;
 - final publication checks lease, session, generation, clinic day, active ticket,
   and deadline; late/restart/rollover/lease-loss results cannot publish;
 - ticket or sequence exhaustion never wraps: an explicit same-day transition
@@ -351,7 +352,8 @@ or order-shaped fixture is required.
   combined lifecycle plus adjacent pure Orders/Reception suites passed **319
   tests** (26 lifecycle and 293 adjacent).
 - Tests cover literal constants, equality-only IDs, startup, deadline, stable
-  jitter, single-flight/coalescing, success and failure schedules, backoff cap/reset,
+  jitter, single-flight/coalescing, success and failure schedules, base-delay
+  cap/reset and jittered totals,
   KST rollover, restart/day/ticket/lease fences, A-B-A rejection, verified empty,
   destination failure isolation, sequence retry/conflict/regression, validated
   day/pair disposition scope, immutable old-or-new replacement, two-stage
@@ -428,3 +430,6 @@ mounting, persistence, activation, and deployment remain outside this slice.
   closed state invariants, and day/pair-scoped snapshot disposition. Reclassified
   Option A, separate destination wire/auth, HTTPS bearer/TLS rules, and the accepted
   cadence/deadline/backoff as settled H4 decisions under orchestration `5277764`.
+- **2026-10-08:** Corrected both failure-backoff descriptions to distinguish the
+  accepted 60/120/300-second base delays from the added stable 0–5-second jitter;
+  the third and later completion-to-next-cycle totals are 300–305 seconds.
