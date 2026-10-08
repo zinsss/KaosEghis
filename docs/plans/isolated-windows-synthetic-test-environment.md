@@ -1,8 +1,8 @@
 # Isolated Windows synthetic test environment
 
-- **Status:** First host-change step completed and post-checked; one bounded reboot
-  is approved for the current closed-time window but not executed by this worker;
-  bundle, runtime, and test execution remain unapproved
+- **Status:** First host-change step and the approved bounded reboot completed and
+  post-checked; bundle, runtime, Sandbox launch, and test execution remain
+  unapproved
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, orchestration, clinic operations
@@ -41,7 +41,7 @@ Independent post-check/review recorded all of the following without clinical
 payload or credential content:
 
 - `Containers-DisposableClientVM` is `Enabled`; the coordinator result reported
-  `RestartNeeded=true`, establishing the bounded reboot gate now approved below;
+  `RestartNeeded=true` before the subsequently completed bounded reboot below;
 - `C:\KaosClinic-Test\Eghis` exists, is empty, and is not a reparse point;
 - its DACL has inheritance disabled and exactly two full-control allow principals,
   `YHSHFM\leejs` and SYSTEM; and
@@ -54,32 +54,28 @@ change, live checkout change, or creation of any child under the staging root. T
 Eghis worker did not contact or mutate the workstation; it records coordinator and
 independent review evidence only.
 
-### Approved reboot and post-reboot gate
+### Completed reboot and post-reboot gate
 
-The user approved one coordinator-driven reboot of the expected workstation during
-the current closed-time window. Before reboot, the coordinator must fail closed
-unless computer name, signed-in account, administrator role, and Sandbox feature
-state are exactly the reviewed values. It records the pre-reboot boot timestamp in
-coordinator memory, invokes only a local ordinary `Restart-Computer`, and performs
-no force, remote target, staging, install, launch, test, service, firewall, or live
-checkout command.
+The user approved and the coordinator completed one reboot of the expected
+workstation during the closed-time window. The preflight confirmed computer
+`YHSHFM`, account `YHSHFM\leejs`, administrator role, and
+`Containers-DisposableClientVM` state `Enabled`. The reboot was scheduled once,
+and the coordinator observed the SSH endpoint disconnect and return.
 
-The coordinator waits for the existing SSH endpoint to disconnect and return within
-a bounded 15-minute window. On return, a read-only PowerShell post-check must:
+The read-only post-check recorded a new boot time of
+`2026-10-08T17:47:44.5000000+09:00` and confirmed:
 
-1. revalidate expected computer, account, and administrator role;
-2. prove `LastBootUpTime` is later than the recorded pre-reboot value;
-3. require `Containers-DisposableClientVM` state exactly `Enabled`, not
-   `EnablePending`; and
-4. report only fixed booleans for Component Based Servicing reboot pending, Windows
-   Update reboot required, and pending file-rename operations, plus their composite
-   pending-restart result. It must not output registry values.
+1. `Containers-DisposableClientVM` state is `Enabled` and
+   `EnablePending=false`;
+2. Component Based Servicing `RebootPending=false`;
+3. Windows Update `RebootRequired=false`; and
+4. `PendingFileRenameOperations=false`.
 
-Any context mismatch, missing disconnect, SSH timeout, unchanged boot timestamp,
-non-`Enabled` feature state, or remaining pending-restart indicator stops the
-workflow. No artifact, child directory, Sandbox launch, runtime, or test step is
-authorized by successful reboot verification. This Eghis worker supplies the
-procedure only and does not contact or reboot the workstation.
+The staging root also remains empty with ACL inheritance protected and exactly
+SYSTEM and `YHSHFM\leejs` as principals. No artifact transfer, installation,
+Sandbox launch, test, or deployment occurred. Successful reboot verification does
+not authorize any of those later steps. This Eghis worker did not contact or mutate
+the workstation; it records only the coordinator's sanitized completion evidence.
 
 ## Repository evidence
 
@@ -241,8 +237,8 @@ Execution therefore requires all of the following:
 
 1. user approval for the exact source commit, Python installer, hash lock,
    PyAutoGUI test-only decision, `.wsb`, runner, mapped paths, and result retention;
-2. coordinator completion of the now-approved bounded reboot and the exact
-   read-only post-reboot gate above;
+2. the completed coordinator reboot and successful read-only post-reboot gate
+   recorded above;
 3. an operator-approved maintenance window with the live app left untouched and
    no clinical workflow depending on workstation resources;
 4. an interactive operator launch of the reviewed `.wsb`; do not attempt to drive
@@ -264,21 +260,19 @@ junction-following deletion, or the live path. Record the exact deleted paths an
 whether the retained JUnit/inventory artifacts were archived or removed.
 
 Do not disable Windows Sandbox automatically after the run. Optional-feature
-rollback and any reboot beyond the single currently approved reboot require a
-separate operator decision because they are host changes. If setup fails before
+rollback and any reboot beyond the single completed reboot require a separate
+operator decision because they are host changes. If setup fails before
 isolation is proven, remove the new staging run only and report blocked; do not fall
 back to host pytest.
 
 ## Open decisions and next action
 
-- Execute only the approved bounded reboot procedure, then stop unless the exact
-  read-only post-reboot gate succeeds and reports no remaining pending restart.
 - Separately approve the exact `.wsb` configuration and a later Sandbox launch,
   or provide a non-production Windows VM/host.
 - Approve the official CPython 3.11.9 x64 installer, publisher, and SHA-256.
 - Resolve and approve the explicit hash-pinned PyAutoGUI test dependency.
-- Approve the maintenance window, resource budget, host staging/results ACLs,
-  result retention, and post-reboot validation procedure.
+- Approve the maintenance window, resource budget, per-run staging/results ACLs,
+  and result retention.
 - Approve a later transfer/staging action; established SSH access alone does not
   authorize transfer, launch, installation, or execution.
 
@@ -307,3 +301,9 @@ launch it.
   boot timestamp, feature exactly `Enabled`, and fixed pending-restart booleans.
   Artifacts, installation, Sandbox launch, runtime, and tests remain unapproved;
   this Eghis worker did not contact or mutate the workstation.
+- **2026-10-08:** Recorded coordinator completion of the single approved reboot and
+  its sanitized post-check evidence: SSH went down and returned, the boot timestamp
+  advanced, Sandbox remained `Enabled` with no enable-pending or reported restart
+  indicators, and the protected staging root remained empty with the exact two
+  principals. No artifact, installation, Sandbox launch, test, or deployment
+  occurred; this Eghis worker did not contact or mutate the workstation.
