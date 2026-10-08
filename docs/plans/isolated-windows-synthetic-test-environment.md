@@ -1,8 +1,9 @@
 # Isolated Windows synthetic test environment
 
-- **Status:** Host feature/reboot gates completed; exact offline synthetic-test
-  bundle prepared in H4 and awaiting independent artifact review before the
-  conditionally approved staging and interactive Sandbox run
+- **Status:** Reviewed v2 bundle was staged and launched once; the Sandbox run
+  failed closed during the 480-second Python-install step before product tests.
+  Sanitized evidence is archived locally, host artifacts are retained under the
+  protected root through the approved retention boundary, and no retry is approved.
 - **Last updated:** 2026-10-08
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, orchestration, clinic operations
@@ -15,11 +16,11 @@ launcher. The test process must not see or mutate that checkout, EMR processes,
 patient data, credentials, network services, printers, clipboard, or the host
 interactive desktop. Administrator status is not a substitute for isolation.
 
-Artifact preparation does not authorize workstation contact. The user's next-phase
-approval permits staging and interactive Sandbox execution only after independent
-review of the exact hashes, signature evidence, lock, configuration, runner, paths,
-resource bounds, ACLs, retention, and return procedure recorded below. It never
-permits host Python installation, another reboot, service/firewall changes,
+Artifact preparation did not authorize workstation contact. The user later approved
+one staging and interactive Sandbox execution only after independent review of the
+exact hashes, signature evidence, lock, configuration, runner, paths, resource
+bounds, ACLs, retention, and return procedure recorded below. That completed run
+never permitted host Python installation, another reboot, service/firewall changes,
 deployment, `main.py`, repository probes, or a production reader.
 
 ### Completed first host-change boundary
@@ -133,8 +134,9 @@ The completed staging root retains its protected two-principal ACL. Each inbound
 and results run directory must be newly created with the same exact principals and
 must not be under, linked to, or populated from the live checkout.
 
-The trusted development host prepared the following for independent review; none
-has been transferred to the workstation:
+The trusted development host prepared the following for independent review. After
+review passed, the coordinator transferred only the exact v2 ZIP and used it for
+the single bounded run recorded below:
 
 1. an independent Git bundle containing the exact reviewed commit and its history;
 2. a source archive produced from that commit, plus `SOURCE_COMMIT.txt` and a
@@ -231,6 +233,42 @@ exercise unchanged rejection of a nonempty parent and parent symlink, rejection 
 an unexpected empty directory and nested symlink, exact XML element case, mutation
 ordering, and termination of a fake long-running child at the global deadline.
 
+### Completed v2 execution and sanitized evidence
+
+Independent final review passed commit
+`4c5f9293d8bd142426a8d1b4ec5926e8989e005c` and the exact v2 identities above.
+During the approved closed-time window, the coordinator reported that all host,
+account, administrator, Sandbox-feature, pending-restart, resource, path, staging,
+ACL, and pre-launch gates passed. The exact v2 ZIP was staged, and interactive run
+`eghis-d1777c1834e1-win311-v2-run-01` was launched once. The Sandbox was closed
+after the runner failed closed; it was not retried.
+
+The runner returned `Status=blocked` with fixed reason
+`bounded_process_timeout` at the Python-install step's 480-second budget. Both
+installer output files are empty. Product test collection never began, JUnit is
+absent, and there are therefore no pass/fail/skip counts. This is a step timeout,
+not evidence that the 5,400-second global deadline expired.
+
+The sanitized result archive is retained on the H4 development host at
+`build/windows-sandbox-results/eghis-d1777c1834e1-win311-v2-run-01-results.zip`:
+
+- size: 541 bytes;
+- SHA-256:
+  `1eb1720f6812f1e31b6849b2026c1f0d63440183f701d600995414f46b4ce29b`;
+- exact contents: `failure.txt` (25 bytes), `status.json` (60 bytes),
+  `python-install.txt` (0 bytes), and `python-install-error.txt` (0 bytes).
+
+The fixed status and empty streams prove only that the quiet installer process did
+not finish within its reviewed budget. They do not distinguish a slow installer,
+blocked child/bootstrapper activity, host resource contention, or another Windows
+installer condition, so none of those possibilities is accepted as the cause.
+There is no evidence of a Python exit code, installer diagnostic, dependency step,
+source extraction, or product-test behavior.
+
+Host bundle, inbound, results, and return artifacts remain under the approved
+protected staging root. No cleanup is authorized; retention ends no later than
+`2026-10-15T10:28:50Z`, subject to a separately reviewed exact-path cleanup step.
+
 ## Sandbox configuration
 
 The review candidate `tools/windows-sandbox/KaosEghisSynthetic.wsb` enforces:
@@ -323,9 +361,10 @@ No test result authorizes runtime activation, source access, printing, endpoint
 binding, firewall change, credential provisioning, deployment, or use of the live
 checkout.
 
-### Exact downstream staging, launch, and return sequence
+### Exact reviewed staging, launch, and return sequence
 
-After independent review passes, the coordinator may perform only this sequence:
+The coordinator performed this sequence through sanitized result return. Step 9
+remains pending and is not authorized by the execution approval:
 
 1. transfer the one reviewed ZIP to
    `C:\KaosClinic-Test\Eghis\eghis-d1777c1834e1-win311-v2.zip`, then verify its
@@ -370,19 +409,28 @@ back to host pytest.
 
 ## Open decisions and next action
 
-- Independent review must accept this exact commit plus the external ZIP hash,
-  internal manifest, CPython evidence, dependency lock/custom pure wheels, `.wsb`,
-  runner, staging/return scripts, paths, bounds, ACL, retention, and return process.
-- The coordinator must select and record the actual closed-time 90-minute window
-  and recheck the 20-GiB/12-GiB resource thresholds immediately before staging.
+- Preserve the v2 result as the canonical first-run evidence. Do not reuse its run
+  directory or rerun the unchanged v2 bundle.
+- The next bounded technical step is offline analysis of the pinned CPython
+  bootstrapper's documented logging and child-process behavior. Any diagnostic
+  capture, process-wait change, or Python-install budget change must be designed as
+  a new bundle ID with a fresh manifest and hashes, then receive independent review
+  and explicit execution approval while retaining the 5,400-second global bound.
+- Cleanup of the retained exact host paths requires separate approval and must occur
+  by the retention deadline; absence of approval is not permission to broaden or
+  automate deletion.
 - Any artifact or procedure change invalidates the recorded hashes and requires a
   new bundle ID and review; never patch the staged package in place.
 - The rejected `v1` identity and SHA-256 remain permanently prohibited; only the
-  reviewed `v2` identity may advance.
+  reviewed `v2` identity was used for this completed attempt.
+- Installing an independent OpenClaw node on YHSHFM was considered and deferred.
+  It requires separate security and installation approval, user-scoped dedicated
+  state/configuration, a tailnet Gateway, no initial autostart, minimum execution
+  permissions, and an enforced boundary excluding the live checkout and clinical
+  data. It is not a workaround for the failed run or permission to retry it.
 
-After review passes, execute only the exact downstream sequence above. If review or
-any host precondition fails, stop without transfer, extraction, Sandbox launch, or
-test execution.
+Do not contact YHSHFM, retry Sandbox, alter v2 bytes, or clean up host artifacts
+until the applicable next action is separately approved and reviewed.
 
 ## Revision history
 
@@ -425,3 +473,11 @@ test execution.
   overhead reserve. Added automated unchanged-parent, junction, unexpected-directory,
   nested-junction, exact-tag, ordering, and fake-long-child checks. No workstation
   contact, transfer, staging, launch, test, or deployment occurred.
+- **2026-10-08:** Recorded the independently reviewed v2 execution handoff. All
+  preflight and staging gates passed, but the one interactive Sandbox run failed
+  closed at the 480-second Python-install budget with fixed
+  `bounded_process_timeout`, empty installer streams, no JUnit, and no product test
+  counts. Recorded the 541-byte sanitized result ZIP identity, protected-host
+  retention deadline, evidence-limited cause analysis, new-bundle-only diagnostic
+  boundary, and deferred OpenClaw-node security gate. This documentation worker did
+  not contact YHSHFM, retry Sandbox, mutate host artifacts, or change bundle bytes.
