@@ -203,8 +203,14 @@ The exact Eghis-owned input for that later gate is recorded in
 [Controlled Source Evidence Gate Review](../kaoseghis-source-evidence-gates.md#current-day-orders-production-source-acceptance-input-2026-10-09).
 It closes the candidate field/statement inventory, same-snapshot and verified-empty
 acceptance requirements, join/cardinality and plan/type/domain/privilege evidence,
-capacity/latency/cleanup package, and the six clinical/product questions that
-cannot be inferred from technical observations. It also records why the current
+capacity/latency/cleanup package, and the owner decisions that cannot be inferred
+from technical observations. The 2026-10-09 owner clarification keeps Orders v1
+unchanged, includes every no-order parent, rejects cross-day children, and fixes a
+stricter fail-closed eventual demographic policy without assigning any source
+field or mapping revision. The remaining blockers are the complete raw parent and
+child truth tables, authoritative relations/fields/exact-one joins, the leap-day
+convention, the save-completion fence, and exhaustive category/relation coverage.
+The evidence input also records why the current
 offline candidate SQL is not a production-v1 mapping statement. No evidence was
 acquired and no mapping revision was assigned in this documentation phase.
 
@@ -299,6 +305,9 @@ low-cardinality.
   restart begins unavailable and requires a new session/generation and fresh read.
 - Garbage collection/object release is not secure erasure and must not be described
   as such.
+- KST midnight invalidation drops prior-day references from the volatile lifecycle;
+  it is not a claim of secure physical erasure from RAM, swap, dumps, or allocator
+  copies.
 
 ### Dumps, swap, hibernation, and caches
 
@@ -508,8 +517,12 @@ route or deployment.
 
 ## Next action
 
-The next central step is review and acceptance of a non-PHI production-source
-evidence/mapping gate using the detailed owner input above. Orders receiver
+The non-PHI production-source evidence/mapping procedure is accepted centrally at
+orchestration `34073204ea8b4deda636b4ab09f7ba2aebab34fa`, with the 2026-10-09
+owner decisions recorded at `f699b755b8643c42a3a2eff99d9ca393ba0d8f0b`.
+The next step is independent review of this
+Eghis documentation alignment; any evidence acquisition still needs its own
+explicitly authorized, reviewed non-PHI protocol. Orders receiver
 implementation is already limited to its accepted injected, disabled parser/client
 and volatile lifecycle/freshness tests; that acceptance does not authorize a source
 mapping, FastAPI/runtime wiring, real credentials, network access, board cutover,
@@ -565,3 +578,10 @@ slice.
   cardinality rule, plan/type/domain/privilege and capacity/latency/cleanup artifact,
   and six unresolved human decisions. No source operation, mapping revision, code,
   test, credential, runtime, transport, push, or deployment change occurred.
+- **2026-10-09:** Recorded the authorized Orders owner clarification: retained the
+  accepted v1 five-state parent and explicit child-state contract, included all
+  no-order parents, rejected cross-day children, and fixed the eventual stricter
+  fail-closed demographics policy. No source field, mapping revision, evidence
+  acquisition, runtime, activation, push, or deployment was authorized; the raw
+  truth tables, authoritative joins, leap-day rule, save fence, and exhaustive
+  category coverage remain blocked.

@@ -27,16 +27,19 @@ operation was approved, requested or performed. No new query or probe was added.
 
 ## Current-day Orders production-source acceptance input (2026-10-09)
 
-This section is the Eghis-owned input to a later central **non-PHI evidence and
-mapping gate**. It follows the reviewed synthetic provider at Eghis
+This section is the Eghis-owned input to the accepted central **non-PHI evidence
+and mapping gate** at orchestration `34073204ea8b4deda636b4ab09f7ba2aebab34fa`
+and its owner-decision record at
+`f699b755b8643c42a3a2eff99d9ca393ba0d8f0b`. It follows the reviewed synthetic
+provider at Eghis
 `0896f2b500a942cf10bd1ee71c8db94698bbc174`, the disabled Orders receiver at
 `dd94ee726224b038fb468a3f4bc8ada5b61fae9d`, and orchestration
 `565e9ddfdcfa0684dc1a29c8bcef8534e9b0d728`. It assigns no production
 `mapping_revision`, approves no source statement, and does not make existing
 observations authoritative. `EghisSourceDayReader` remains `UNAVAILABLE`.
 
-The future central contract should accept an exact mapping only when every row in
-the following ledger is either proven or explicitly rejected. A candidate column
+That central procedure may accept an exact mapping only when every row in the
+following ledger is either proven or explicitly rejected. A candidate column
 name is evidence to investigate, not permission to query, normalize, publish, or
 assign clinical meaning.
 
@@ -48,14 +51,14 @@ assign clinical meaning.
 | clinic day | Candidate statements bind `public.h1opdin.clinic_ymd` to a `YYYYMMDD` parameter and compare it with PostgreSQL `statement_timestamp()` converted to `Asia/Seoul`. | Exact source type/domain, index/plan, server time-zone behavior, pre-enqueue and post-cleanup KST-day fences, and proof that this predicate covers the complete current-day encounter scope. |
 | `observed_at` | Candidate statements use aware PostgreSQL `statement_timestamp()` as observation metadata. | Exact timestamp type/offset conversion and one common value for every statement/result in the transaction; it is never an order edit, save, cancellation, administration, or payment time. |
 | `encounter_id` | Candidate `public.h1opdin.recept_no`; sample uniqueness and parent/child linkage were observed. | Exact source type, lossless text conversion, null/blank/length domain, complete-day uniqueness, and whether exact duplicate source facts are possible. Orders v1 rejects duplicate logical parents rather than silently selecting one. |
-| `chart_number` | No Orders-v1 source column is accepted. Reception uses `h1opdin.ptnt_no` only as a join key; that does not establish chart-number meaning. | Human-approved source field and meaning, exact type/text conversion, join path, cardinality, length/content domain, and confirmation that it is not a sensitive identifier outside the accepted chart-number boundary. |
-| `patient_name` | Reception's separate mapping reads `hz_mst_ptnt.ptnt_nm` as display-only name after an exact-one join. That destination-specific evidence is not automatically an Orders mapping. | Orders-specific approval of provenance and use, exact-one join, nonblank/unpadded/128-code-point domain, and proof that no fallback or alternate name is required. |
-| `sex` | Prior aggregate evidence observed `M`/`F`; the accepted logical range is `M`, `F`, or null. No current Orders statement selects a field. | Approved source field, exact domain including true SQL null, rejection of blank/other values, join cardinality, and privacy review. No coercion or `O` value is allowed by Orders v1. |
-| `age` | Product policy says completed years on the encounter clinic date; no safe source or derivation is accepted. | One privacy-reviewed source or derivation, required inputs, date boundary/leap-day rule, null/invalid policy, integer 0..130 proof, and confirmation that source DOB/resident identifiers are not retained, emitted, or logged. |
+| `chart_number` | The eventual Eghis mapping requires one nonblank chart number, but no Orders-v1 source column is accepted. Reception uses `h1opdin.ptnt_no` only as a join key; that does not establish chart-number meaning. | Approved source field and meaning, exact type/text conversion, authoritative exact-one join path, length/content domain, conflict rejection, and confirmation that it stays inside the accepted chart-number boundary. Missing, blank, malformed, or conflicting values reject the whole observation. |
+| `patient_name` | The eventual Eghis mapping requires one nonblank patient name. Reception's separate mapping reads `hz_mst_ptnt.ptnt_nm` as display-only name after an exact-one join, but that destination-specific evidence is not automatically an Orders mapping. | Orders-specific approval of provenance and use, authoritative exact-one join, nonblank/unpadded/128-code-point domain, conflict rejection, and proof that no fallback or alternate name is required. |
+| `sex` | The accepted logical schema permits `M`, `F`, or null, but the authorized eventual Eghis mapping is stricter: it may publish only exact `M` or `F`. No current Orders statement selects a field. | Approved source field, exact domain and exact-one join/cardinality evidence. True SQL null, blank, unknown, other, malformed, or conflicting source values reject the whole observation; they are not coerced to logical null or another code. |
+| `age` | The eventual Eghis mapping requires an exact integer age in completed years on the `Asia/Seoul` clinic day, in 0..130. No safe source or derivation is accepted. | One explicitly privacy-reviewed source or derivation, required inputs, exact birthday/leap-day convention, exact-one join/cardinality, and range proof. Missing, invalid, conflicting, or uncomputable age rejects the whole observation. DOB or resident identifiers require separate explicit privacy approval as transient source inputs and may never be retained, emitted, or logged. |
 | parent `state` | `h1opdin.proc_gb` is the candidate code. Sampled UI associations exist for 10/20/25/30/40/50, but they are not a complete truth table. | A versioned human clinical decision mapping every allowed code plus `hold_yn` combination to `WAITING`, `IN_PROGRESS`, `ON_HOLD`, `CONSULTATION_COMPLETED`, `PAYMENT_COMPLETED`, or excluded cancelled; unknown/null/blank/conflicting values must reject the whole observation. |
 | `qualifiers.hold_yn` | Candidate `h1opdin.hold_yn`; strict `Y`/`N` shape is tested. | Full production domain and the clinical interaction with `proc_gb`. `hold_opd` remains prohibited and cannot be reacquired to resolve ambiguity. |
 | child-parent relation | Candidate `h2opd_doct_ord.recept_no = h1opdin.recept_no`; current draft uses `EXISTS` to avoid multiplying child candidates. | Proof that this is the complete child relation for every included parent/category, that no alternate readable source is required, and that every returned child links to exactly one included parent. |
-| four-part child key | Candidate `recept_no`, `ord_ymd`, `ord_no`, `ord_seq_no`; sample uniqueness was observed. | Source types, lossless text/date conversions, all-category uniqueness/reuse, cross-day-child policy, null/blank/length domains, and complete-snapshot duplicate/orphan rejection. |
+| four-part child key | Candidate `recept_no`, `ord_ymd`, `ord_no`, `ord_seq_no`; sample uniqueness was observed. Owner policy rejects the whole observation when a child key is off the current clinic day. | Source types, lossless text/date conversions, all-category uniqueness/reuse, proof of the cross-day rejection condition, null/blank/length domains, and complete-snapshot duplicate/orphan rejection. |
 | `catalog_code` / `catalog_name` | Candidate `ord_cd` / `medfee_nm`. | All-category provenance, nullable/empty/whitespace/padding domains, 128/256-code-point bounds, safe-content review, and proof that neither is substituted for the user field. |
 | `user_code` / `user_name` | Candidate `user_cd` / `user_nm`; one approved display comparison matched. | All-category provenance, nullable/empty/whitespace/padding domains, 128/256-code-point bounds, and proof that retained names are not arbitrary patient-entered clinical text. |
 | `order_type` / `department_code` | Candidate `ord_type` / `proc_dept_cd`; bounded aggregate buckets exist. | Complete nullable text domains and lengths across fee, cancelled, non-billing, and unclassified rows. These remain exact facts, not filtering/category rules. |
@@ -165,25 +168,49 @@ after validation. No SQL, provider exception, identifier, name, demographics,
 clinical text, source row, payload, content digest, credential, connection string,
 or raw log may be printed, persisted, or placed in the handoff.
 
-### Human decisions that evidence cannot silently make
+### Authorized owner clarifications and remaining decisions
 
-The central gate must remain blocked until an authorized clinical/product owner
-answers these questions or explicitly selects a different, non-authoritative
-contract:
+The authorized owner clarified on 2026-10-09 that the accepted
+`kaosorders-current-day-orders` v1 logical contract remains unchanged. All five
+parent states remain in scope; only verified cancelled parents are excluded;
+explicit `CANCELLED` child facts and the child state field remain; and no alternate
+projection is introduced. Every otherwise-in-scope parent is included even with
+zero children, explicitly including consultation-completed and payment-completed
+encounters with no orders. A child whose key is not on the current clinic day makes
+the observation invalid rather than becoming a historical fact.
 
-1. the exhaustive `proc_gb` + `hold_yn` truth table for the five included parent
-   states and cancelled-parent exclusion, including unknown/conflicting cases;
-2. the exhaustive child `ACTIVE`/`CANCELLED` rule, independent of raw qualifier
-   retention, across every included order category;
-3. whether a cross-day child linked to a current-day parent is part of the complete
-   current-day projection or makes the observation invalid;
-4. the authoritative clinical save/completion boundary that prevents a FULL
-   snapshot between related EMR commits;
-5. the Orders-specific chart-number/name/sex/age provenance and the privacy-safe
-   completed-years derivation/null policy; and
-6. whether the proposed parent and child relations are authoritative for every
-   clinic workflow, including legitimate no-order encounters and cancellation/
-   restoration.
+The owner terminology treats consultation-completed and payment-completed as
+clinically final saved orders that may still be edited later, while an on-hold
+parent is not clinically final but remains in scope. These labels do not prove an
+atomic source commit or safe read point; the source-level save/completion fence
+remains evidence required for both initial and later saves.
+
+The owner also settled the eventual Eghis demographic acceptance policy described
+in the ledger above: chart number, patient name, exact `M`/`F` sex, and exact
+completed-years age 0..130 are all required. This is a policy decision, not source
+evidence and not a mapping assignment. It does not authorize use of DOB or resident
+identifiers; either would need a separate explicit privacy approval as a transient
+derivation input and could never be retained or transmitted.
+
+The accepted volatile lifecycle invalidates and drops prior-day references at the
+KST day boundary. That lifecycle behavior is not secure physical erasure and makes
+no claim about allocator copies, swap, hibernation, or crash dumps.
+
+The central gate therefore remains blocked on the following evidence and precise
+decisions, which observations must not silently invent:
+
+1. the exhaustive raw `proc_gb` x `hold_yn` truth table for the five included
+   parent states and verified cancelled-parent exclusion, including every unknown,
+   null, blank, malformed, and conflicting combination;
+2. the exhaustive child `ACTIVE`/`CANCELLED` truth table, independent of retained
+   `dc_yn`/`act_yn`, across every included order category;
+3. authoritative parent and child relations, exact fields and exact-one joins,
+   including no-order parents, cancellation/restoration, and conflict handling;
+4. the exact completed-years leap-day convention, with fictional boundary tests;
+5. the authoritative clinical save/completion fence that prevents a `FULL`
+   snapshot between related EMR commits; and
+6. exhaustive category/relation coverage, including disappearance, restoration,
+   key reuse, and proof that no accepted child source is omitted.
 
 No mapping revision may be named until these decisions and the non-PHI technical
 evidence are jointly reviewed. Acceptance of the mapping gate would authorize only
@@ -332,9 +359,11 @@ Detailed provenance and limitations remain in
   reuse on re-add, and cancellation of a parent with active children retained.
   They did not cover every order category or every cancellation/restoration path.
 - The populated sample observed M/F sex values; it did not observe every possible
-  null/blank/other value. Operator policy approved exact M/F and SQL NULL, with
-  unknown/blank values rejected, and completed-years age at the encounter date.
-  That policy does not prove a safe age source/calculation.
+  null/blank/other value. The 2026-10-09 owner clarification requires exact M/F
+  for the eventual mapping and rejects SQL null, blank, unknown, other, malformed,
+  or conflicting values for the whole observation. It also requires a completed-
+  years age at the KST clinic day in 0..130. That policy does not prove a safe age
+  source/calculation or settle the leap-day convention.
 - Catalog checks showed SELECT access to candidate base tables. They did not prove
   least privilege. A dictionary permission denial was not bypassed.
 
@@ -355,7 +384,7 @@ evidence, and no gate is closed merely because a fixture can represent the resul
 | 4. States/retained qualifiers | Supervised codes 10/20/25/30/40/50 and some exact flag combinations. | Versioned state truth table including hold_yn Y/N, transient states, unknown/null/blank combinations and consultation versus payment completion. No default mapping from a column name or sample. |
 | 5. State without excluded field | v2 excludes hold_opd; receiver has no raw-field business requirement. | Compare operator-confirmed states with only approved retained facts; seek ambiguous combinations rather than assume independence. If state remains ambiguous, keep it blocked; a privacy-safe semantic would need separate review. Never retrieve the excluded raw value to guess. |
 | 6. All-category lifecycle | Sampled edits, deletion, restoration, parent cancellation and key reuse. | Definitions and a separately approved category/path matrix for dc_yn/act_yn, physical disappearance, restorations and identity reuse. Neither act_yn nor disappearance proves clinical completion/cancellation. |
-| 7. Sex/age | Exact M/F/null and completed-years-at-clinic-date policy approved; sampled M/F only. | Controlled source-domain evidence, unknown/null/blank rejection and a reviewed privacy-safe derived-age source/function with synthetic birthday/leap-day tests. Vendor definitions are optional, not expected. No DOB or resident-number retrieval is authorized. |
+| 7. Sex/age | Eventual mapping policy requires exact M/F and completed-years age 0..130 on the KST clinic day; sampled evidence observed M/F only. The broader logical schema remains unchanged. | Controlled source-domain and exact-one-join evidence, whole-observation rejection for SQL null/blank/unknown/other/malformed/conflicting sex and missing/invalid/conflicting/uncomputable age, plus a separately privacy-reviewed age source/function and explicit synthetic birthday/leap-day convention tests. No DOB or resident-identifier retrieval is authorized by this decision. |
 | 8. Least privilege | Verified read-only sessions; selected table/column non-SELECT capabilities absent on the two sources; no observed superuser/admin/owner-role capabilities. | Effective CREATE capability in public was observed and remains a blocker. Admin review of a restricted reader identity/grants is needed; other schemas/functions and effective paths are not fully audited. Never test with a production write or change shared grants automatically. |
 
 ## Vendor/Admin Definition Request
@@ -588,6 +617,14 @@ validators, fixtures/hashes, source block and transport restrictions stay intact
 
 ## Revision history
 
+- **2026-10-09:** Recorded the authorized owner clarification without changing the
+  accepted Orders v1 logical contract: retained all five parent states, verified
+  cancelled-parent exclusion, explicit child cancellation/state, and all no-order
+  parents. Fixed the eventual Eghis demographic fail-closed policy and cross-day
+  rejection, while leaving mapping unassigned and preserving the raw state and
+  child truth tables, authoritative relations/joins, leap-day convention,
+  save-completion fence, and exhaustive category coverage as blockers. Clarified
+  that midnight reference release is not secure physical erasure.
 - **2026-10-09:** Added the Eghis-owned current-day Orders production-source
   evidence/mapping-gate input after accepted synthetic provider and receiver work.
   Closed the required evidence inventory without assigning source authority or a

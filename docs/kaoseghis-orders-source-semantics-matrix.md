@@ -1,6 +1,6 @@
 # KaosOrders Current-Day Source Semantics Matrix
 
-Date: 2026-10-07. Status: **logical boundary accepted and synthetic model
+Date: 2026-10-09. Status: **logical boundary accepted and synthetic model
 implemented; production source authority remains blocked.**
 
 This began as the Eghis-owned response to the KaosOrders disabled
@@ -45,14 +45,15 @@ semantics. The new fact is not an optional text companion attached to a v2 order
 | Current-day scope | The recorded decision is the current KST clinic day, with no historical replay. The synthetic collection carries an exact source ID and clinic day under the fixed projection identity; every valid comparison describes a FULL same-scope replacement. | Authoritative source objects, clinic-day predicate, save boundary, mapping scope and final day recheck are not proven. | No production FULL read; source/day mismatch rejects comparison. |
 | Encounter membership | The recorded Orders decision includes every verified non-cancelled encounter, including waiting, in-progress, hold, consultation-completed, payment-completed and no-order encounters. | Complete production mapping of every reception code and retained qualifier combination is absent. `hold_opd` is excluded and must not be reacquired or inferred. | Unknown or ambiguous state fails the candidate set; it is never skipped or defaulted. |
 | Cancelled parents | The recorded decision excludes a verified cancelled encounter and its children; a later verified restoration may re-add it. | Code/qualifier evidence is not a complete cancellation truth table. | No production filtering until mapping evidence exists. |
-| Child coverage | The recorded decision keeps every child of each included encounter, including cancelled, fee, non-billing and unclassified rows. No-order encounters remain with an empty list. | Complete child relation, cross-date child handling, save consistency and absence of alternate storage are not proven. | No category/fee pruning and no authoritative omission/removal yet. |
+| Clinical finality | Owner terminology treats consultation-completed and payment-completed as clinically final saved orders that may later be edited; on-hold is not clinically final but remains in scope. | The exact source-level save/completion fence for initial and later saves is not proven. | Labels and repeated equal reads cannot authorize a `FULL` observation between related source commits. |
+| Child coverage | The recorded decision keeps every child of each included encounter, including explicit cancelled, fee, non-billing and unclassified rows. No-order parents remain with an empty list, explicitly including consultation-completed and payment-completed encounters. A cross-day child makes the observation invalid. | Complete child relation, cancellation truth table, save consistency and absence of alternate storage are not proven. | No category/fee pruning and no authoritative omission/removal yet. |
 | Order identity | Existing synthetic models/tests preserve encounter, order date, order number and sequence. Repository evidence observed a matching candidate unique key. | Lossless production numeric-to-text conversion, all-category reuse and cross-date membership remain unresolved. | Keep the four-part logical key proposal; do not claim a lifetime ID. |
 | Four source text facts | Synthetic work distinguishes catalog code/name from user code/name. A bounded observation located one expected display code/name in `user_cd`/`user_nm`. | All-category null/blank/length/content provenance and safe-display coverage are not proven. | Preserve four accepted nullable exact facts; no fallback or production mapping. |
 | Type and department | Existing source models preserve order type and department without category decisions; bounded aggregate evidence observed candidate fields. | Complete source domains and universal meaning are not proven. | Preserve accepted nullable exact facts; source mapping remains blocked. |
 | Order state | Synthetic tests distinguish `ACTIVE` and `CANCELLED` and keep state separate from strict qualifier objects. | No approved direct source state column or all-category rule exists; `dc_yn` and `act_yn` meanings are incomplete. | Retain the accepted two-value logical vocabulary; never infer it from a qualifier. |
 | Retained flags | Existing validators accept only exact `Y`/`N` for `dc_yn` and `act_yn`; tests cover synthetic combinations without deriving state. | Production domains and meanings across all order categories are not proven. | Invalid or contradictory facts fail the whole candidate set. |
 | Numeric facts | Normalized-source v2 has synthetic exact-decimal quantity/days/frequency coverage. | The new fact has no approved columns, meanings, units, null policy or bounds for them. | Omit them entirely from current-day-orders v1; do not add null placeholders. |
-| Demographics | The accepted parent boundary requires chart number and a patient name of at most 128 code points, M/F/null sex and age 0..130/null. | Safe production provenance, age derivation and unseen source domains remain unresolved. | Enforce the accepted synthetic shape; do not infer production mappings. |
+| Demographics | The accepted logical parent boundary still permits M/F/null sex and age 0..130/null. For the eventual Eghis production mapping, the owner requires nonblank chart number/name, exact M/F sex, and exact completed-years age 0..130 on the KST clinic day; any missing, SQL-null, blank, unknown, malformed, conflicting, or uncomputable required fact rejects the whole observation. | Authoritative exact-one provenance, source domains, privacy-reviewed age input/derivation, and the leap-day convention remain unresolved. DOB/resident identifiers are not approved source inputs and, if separately approved later, may never be retained or transmitted. | Keep the v1 schema unchanged and enforce its synthetic shape; the stricter eventual source policy assigns no mapping and authorizes no source read. |
 | Complete empty | Tests prove failed/partial/unavailable inputs cannot normalize as complete; diagnostic aggregates are always non-authoritative. | A zero-row production result is not a verified empty current day. | Startup/rollover is unavailable/empty UI state, not `FULL` source truth. |
 | Comparison | The synthetic comparator requires the same source ID, fixed projection and clinic day. Initial, changed and unchanged comparisons all return `full_replacement=true`; upsert/missing tuples are derived summaries, not deltas with independent authority. | Comparison becomes production-authoritative only after a complete same-scope read and mapping evidence exist. | Absence may remove only as part of a future valid FULL replacement; it is not cancellation proof. |
 | Read boundary | Shared FIFO/mutex, finite timeout, read-only checks and close-before-interpretation are implemented/tested for existing readers and probes. | A reviewed complete-current-day operation and least-privilege identity are absent; effective schema `CREATE` remains a blocker. | Production reader stays disabled. |
@@ -103,9 +104,18 @@ synthetic data after contract acceptance.
 
 ## Exact Downstream Boundary
 
-No new clinical workflow choice is requested: the current-day/non-cancelled/all-
-children/no-history scope is already recorded. Orders/orchestration should now
+The 2026-10-09 owner clarification retains the existing current-day/non-cancelled/
+all-five-parent-state/all-child-state/no-history v1 scope; it does not create a
+new projection. Orders/orchestration should now
 review the Eghis synthetic model for parity with acceptance commit `182db514`.
 Mapping revision stays unassigned. Parser, serializer, canonical fixture/hash,
 session/wire, HTTP/auth/runtime hookup and production source acquisition remain
 later, separately reviewed milestones.
+
+## Revision history
+
+- **2026-10-09:** Recorded the authorized owner clarification that v1 remains
+  unchanged, no-order completed/payment-completed parents remain included,
+  explicit cancelled children remain represented, cross-day children reject the
+  observation, and the eventual Eghis demographic mapping is stricter and
+  fail-closed without assigning source fields or a mapping revision.
