@@ -1,5 +1,5 @@
 import ast
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, fields, replace
 from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 import json
@@ -158,6 +158,29 @@ def decoded(response):
     return json.loads(response.body.decode("utf-8"))
 
 
+def unsafe_replace(instance, **changes):
+    """Build malformed synthetic inputs that exercise downstream fail-closed guards."""
+
+    clone = object.__new__(type(instance))
+    for field in fields(instance):
+        object.__setattr__(
+            clone,
+            field.name,
+            changes.get(field.name, getattr(instance, field.name)),
+        )
+    return clone
+
+
+def forged_sequence(sequence):
+    state, projection = published()
+    cursor = unsafe_replace(state.snapshot.cursor, snapshot_sequence=sequence)
+    snapshot = unsafe_replace(state.snapshot, cursor=cursor)
+    return (
+        unsafe_replace(state, snapshot=snapshot),
+        unsafe_replace(projection, snapshot=snapshot),
+    )
+
+
 def test_literal_contract_values_are_not_derived_from_implementation():
     assert wire.METHOD == "GET"
     assert wire.PATH == "/api/v1/current-day/orders"
@@ -171,6 +194,45 @@ def test_literal_contract_values_are_not_derived_from_implementation():
     assert wire.MAX_BODY_BYTES == 16_777_216
     assert wire.MAX_FRESHNESS_SECONDS == 300
     assert wire.MAX_FUTURE_SECONDS == 30
+    assert wire.MAX_SNAPSHOT_SEQUENCE == 9_007_199_254_740_991
+    assert lifecycle.MAX_SNAPSHOT_SEQUENCE == 9_007_199_254_740_991
+
+
+def test_literal_maximum_snapshot_sequence_has_exact_canonical_json_parity():
+    state, projection = published()
+    cursor = replace(
+        state.snapshot.cursor, snapshot_sequence=9_007_199_254_740_991
+    )
+    snapshot = replace(state.snapshot, cursor=cursor)
+    bounded_state = replace(state, snapshot=snapshot)
+    bounded_projection = wire.SyntheticOrdersProjection(
+        projection.scope, snapshot, projection.facts, synthetic_fixture=True
+    )
+
+    serialized = wire.serialize_orders_success(bounded_projection, bearer())
+    assert b'"snapshot_sequence":9007199254740991' in serialized.canonical_content
+    assert json.loads(serialized.body)["snapshot_sequence"] == 9_007_199_254_740_991
+    assert handle(state=bounded_state, projection=bounded_projection).status == 200
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        9_007_199_254_740_992,
+        9_007_199_254_740_993,
+        9_223_372_036_854_775_807,
+        True,
+        "9007199254740991",
+    ],
+)
+def test_serializer_and_handler_reject_sequence_overflow_and_coercion(invalid):
+    state, projection = forged_sequence(invalid)
+    with pytest.raises(wire.OrdersWireRejected, match="^projection_invalid$"):
+        wire.serialize_orders_success(projection, bearer())
+
+    response = handle(state=state, projection=projection)
+    assert response.status == 503
+    assert decoded(response)["code"] == "projection_invalid"
 
 
 def test_populated_canonical_fixture_bytes_and_digest_are_exact():

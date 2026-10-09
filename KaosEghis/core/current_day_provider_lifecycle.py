@@ -15,7 +15,8 @@ from zoneinfo import ZoneInfo
 CLINIC_TIME_ZONE_NAME = "Asia/Seoul"
 CLINIC_TIME_ZONE = ZoneInfo(CLINIC_TIME_ZONE_NAME)
 IDENTITY_LIMIT = 128
-MAX_COUNTER = (1 << 63) - 1
+MAX_REFRESH_TICKET = (1 << 63) - 1
+MAX_SNAPSHOT_SEQUENCE = (1 << 53) - 1
 REFRESH_INTERVAL_SECONDS = 60
 OBSERVATION_DEADLINE_SECONDS = 10
 MAX_STABLE_JITTER_SECONDS = 5
@@ -84,8 +85,8 @@ def _aware(value: object) -> datetime:
     return value
 
 
-def _positive_counter(value: object, reason: str) -> int:
-    if type(value) is not int or not 1 <= value <= MAX_COUNTER:
+def _positive_counter(value: object, reason: str, maximum: int) -> int:
+    if type(value) is not int or not 1 <= value <= maximum:
         raise ProviderLifecycleRejected(reason)
     return value
 
@@ -175,7 +176,9 @@ class ProviderCursor(_Redacted):
             or type(self.clinic_day) is not date
         ):
             raise ProviderLifecycleRejected("invalid_cursor")
-        _positive_counter(self.snapshot_sequence, "invalid_sequence")
+        _positive_counter(
+            self.snapshot_sequence, "invalid_sequence", MAX_SNAPSHOT_SEQUENCE
+        )
 
     @property
     def pair(self) -> tuple[OpaqueIdentity, OpaqueIdentity]:
@@ -218,7 +221,7 @@ class RefreshTicket(_Redacted):
             or type(self.lease_token) is not OpaqueIdentity
         ):
             raise ProviderLifecycleRejected("invalid_ticket")
-        _positive_counter(self.ticket, "invalid_ticket")
+        _positive_counter(self.ticket, "invalid_ticket", MAX_REFRESH_TICKET)
         start = _aware(self.started_at)
         deadline = _aware(self.deadline_at)
         if deadline - start != timedelta(seconds=OBSERVATION_DEADLINE_SECONDS):
@@ -261,7 +264,7 @@ class ProviderState(_Redacted):
             or self.consecutive_failures < 0
         ):
             raise ProviderLifecycleRejected("invalid_state")
-        _positive_counter(self.next_ticket, "invalid_state")
+        _positive_counter(self.next_ticket, "invalid_state", MAX_REFRESH_TICKET)
         if self.snapshot is not None and type(self.snapshot) is not ProviderSnapshot:
             raise ProviderLifecycleRejected("invalid_state")
         if self.in_flight is not None and type(self.in_flight) is not RefreshTicket:
@@ -371,10 +374,10 @@ def request_refresh(
     if state.next_refresh_at is None or current < state.next_refresh_at:
         raise ProviderLifecycleRejected("refresh_not_due")
     if (
-        state.next_ticket >= MAX_COUNTER
+        state.next_ticket >= MAX_REFRESH_TICKET
         or (
             state.snapshot is not None
-            and state.snapshot.cursor.snapshot_sequence >= MAX_COUNTER
+            and state.snapshot.cursor.snapshot_sequence >= MAX_SNAPSHOT_SEQUENCE
         )
     ):
         raise ProviderLifecycleRejected("generation_rotation_required")
@@ -447,9 +450,9 @@ def rotate_exhausted_generation(
         raise ProviderLifecycleRejected("day_rollover_required")
     if state.in_flight is not None:
         raise ProviderLifecycleRejected("refresh_in_flight")
-    exhausted = state.next_ticket >= MAX_COUNTER or (
+    exhausted = state.next_ticket >= MAX_REFRESH_TICKET or (
         state.snapshot is not None
-        and state.snapshot.cursor.snapshot_sequence >= MAX_COUNTER
+        and state.snapshot.cursor.snapshot_sequence >= MAX_SNAPSHOT_SEQUENCE
     )
     if not exhausted:
         raise ProviderLifecycleRejected("counter_not_exhausted")
@@ -497,7 +500,7 @@ def complete_success(
     ):
         raise ProviderLifecycleRejected("candidate_scope_mismatch")
     previous_sequence = 0 if state.snapshot is None else state.snapshot.cursor.snapshot_sequence
-    if previous_sequence >= MAX_COUNTER:
+    if previous_sequence >= MAX_SNAPSHOT_SEQUENCE:
         raise ProviderLifecycleRejected("sequence_exhausted")
     cursor = ProviderCursor(
         state.provider_session_id,

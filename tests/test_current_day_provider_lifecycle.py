@@ -498,11 +498,12 @@ def test_snapshot_disposition_fails_closed_without_validated_day_and_pair_scope(
 
 
 def test_ticket_exhaustion_rotates_same_day_without_wrap_or_snapshot_reuse():
+    assert lifecycle.MAX_REFRESH_TICKET == 9_223_372_036_854_775_807
     with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_state$"):
-        replace(owner(), next_ticket=lifecycle.MAX_COUNTER + 1)
-    state = replace(owner(), next_ticket=lifecycle.MAX_COUNTER - 1)
+        replace(owner(), next_ticket=9_223_372_036_854_775_808)
+    state = replace(owner(), next_ticket=9_223_372_036_854_775_806)
     active, before_last = begin(state)
-    assert before_last.ticket == lifecycle.MAX_COUNTER - 1
+    assert before_last.ticket == 9_223_372_036_854_775_806
     state = lifecycle.complete_failure(
         active,
         before_last,
@@ -510,7 +511,7 @@ def test_ticket_exhaustion_rotates_same_day_without_wrap_or_snapshot_reuse():
         lease=active.lease,
         reason=lifecycle.ProviderReason.SOURCE_FAILURE,
     )
-    assert state.next_ticket == lifecycle.MAX_COUNTER
+    assert state.next_ticket == 9_223_372_036_854_775_807
     with pytest.raises(
         lifecycle.ProviderLifecycleRejected, match="^generation_rotation_required$"
     ):
@@ -533,7 +534,7 @@ def test_ticket_exhaustion_rotates_same_day_without_wrap_or_snapshot_reuse():
     assert rotated.phase is lifecycle.ProviderPhase.UNAVAILABLE
     assert rotated.reason is lifecycle.ProviderReason.COUNTER_EXHAUSTED
     assert state.pair in rotated.retired_pairs
-    exhausted_again = replace(rotated, next_ticket=lifecycle.MAX_COUNTER)
+    exhausted_again = replace(rotated, next_ticket=9_223_372_036_854_775_807)
     with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^retired_pair$"):
         lifecycle.rotate_exhausted_generation(
             exhausted_again,
@@ -544,6 +545,7 @@ def test_ticket_exhaustion_rotates_same_day_without_wrap_or_snapshot_reuse():
 
 
 def test_sequence_exhaustion_rotates_and_requires_fresh_sequence_one():
+    assert lifecycle.MAX_SNAPSHOT_SEQUENCE == 9_007_199_254_740_991
     ready = publish(owner())
     near_limit = replace(
         ready,
@@ -551,7 +553,7 @@ def test_sequence_exhaustion_rotates_and_requires_fresh_sequence_one():
             ready.snapshot,
             cursor=replace(
                 ready.snapshot.cursor,
-                snapshot_sequence=lifecycle.MAX_COUNTER - 1,
+                snapshot_sequence=9_007_199_254_740_990,
             ),
         ),
     )
@@ -563,7 +565,7 @@ def test_sequence_exhaustion_rotates_and_requires_fresh_sequence_one():
         now=near_limit.next_refresh_at,
         lease=active.lease,
     )
-    assert at_limit.snapshot.cursor.snapshot_sequence == lifecycle.MAX_COUNTER
+    assert at_limit.snapshot.cursor.snapshot_sequence == 9_007_199_254_740_991
     with pytest.raises(
         lifecycle.ProviderLifecycleRejected, match="^generation_rotation_required$"
     ):
@@ -582,6 +584,36 @@ def test_sequence_exhaustion_rotates_and_requires_fresh_sequence_one():
     )
     assert fresh.snapshot.cursor.snapshot_sequence == 1
     assert fresh.snapshot.cursor.provider_generation == identity("generation-b")
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        9_007_199_254_740_992,
+        9_007_199_254_740_993,
+        9_223_372_036_854_775_807,
+        True,
+        "9007199254740991",
+    ],
+)
+def test_snapshot_sequence_literal_wire_bound_rejects_overflow_and_coercion(invalid):
+    with pytest.raises(lifecycle.ProviderLifecycleRejected, match="^invalid_sequence$"):
+        lifecycle.ProviderCursor(
+            identity("session-boundary"),
+            identity("generation-boundary"),
+            date(2026, 10, 8),
+            invalid,
+        )
+
+
+def test_snapshot_sequence_literal_wire_maximum_is_accepted():
+    cursor = lifecycle.ProviderCursor(
+        identity("session-boundary"),
+        identity("generation-boundary"),
+        date(2026, 10, 8),
+        9_007_199_254_740_991,
+    )
+    assert cursor.snapshot_sequence == 9_007_199_254_740_991
 
 
 def test_shutdown_is_two_stage_and_late_completion_is_fenced():

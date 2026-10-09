@@ -1,8 +1,9 @@
 # Current-day volatile provider remaining gates
 
 - **Status:** Phase 3A pure lifecycle reviewed; Phase 3B synthetic Orders serializer
-  and disabled in-process handler implemented; independent handoff review pending;
-  source, runtime activation, and all production gates remain pending
+  and disabled in-process handler remediated after the first independent review;
+  independent re-review pending; source, runtime activation, and all production
+  gates remain pending
 - **Last updated:** 2026-10-09
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, KaosReception, orchestration,
@@ -12,9 +13,13 @@
 
 The selected architecture is one Eghis-owned, SQLite-free, volatile current-day
 provider. Orchestration commit
-`5dd9e23` is the normative baseline for this plan. It retains the lifecycle/runtime
-decisions accepted at `5277764`, the destination-token hardening accepted at
-`9288070`, and supersedes the earlier `bd3c66a` planning baseline:
+`565e9ddfdcfa0684dc1a29c8bcef8534e9b0d728` is the normative baseline for this
+plan. It corrects `5dd9e23` by capping every wire-visible `snapshot_sequence` at
+`1..9,007,199,254,740,991` (`2^53-1`) while retaining the local, non-wire refresh
+ticket bound of `1..9,223,372,036,854,775,807` (`2^63-1`). It otherwise retains
+the lifecycle/runtime decisions accepted at `5277764`, the destination-token
+hardening accepted at `9288070`, and supersedes the earlier `bd3c66a` planning
+baseline:
 
 - `architecture/current-day-volatile-provider-v1.md` selects one authoritative
   owner and destination-minimal Orders and Reception projections;
@@ -388,7 +393,9 @@ The implementation fixes these contract artifacts:
   table;
 - deterministic RFC 8785-compatible JSON for the contract's closed ASCII-key,
   integer/boolean/null/string-only schema, with literal populated and verified-empty
-  canonical fixture bytes and SHA-256 digests;
+  canonical fixture bytes and SHA-256 digests. Wire-visible `snapshot_sequence` is
+  validated before canonicalization at the ECMAScript exact-integer ceiling of
+  `2^53-1`; overflow, booleans, and string coercion fail closed;
 - exact parent/child/qualifier/key projection from the reviewed immutable fact
   model, preserving nullable/blank child text and deterministic collection order;
 - an invented synthetic Orders-only bearer identity and injected identity set with
@@ -407,21 +414,31 @@ production mapping revision or credential and cannot be promoted. The production
 mapping remains unassigned, `EghisSourceDayReader` remains unavailable, and the
 existing `/api/v1/order-snapshots` path is explicitly rejected rather than reused.
 
-### Phase 3B validation evidence
+### Phase 3B review correction and validation evidence
 
-- The normal focused command collected the 23 then-defined wire tests, but all 23
+- Independent review of `55b1143366865c73ee1b3af4ed4758b644bfe69b`
+  found that lifecycle sequences still admitted `2^63-1`, allowing Python integer
+  rendering outside ECMAScript's exact-integer range. Orchestration correction
+  `565e9ddfdcfa0684dc1a29c8bcef8534e9b0d728` makes `2^53-1` the common and
+  destination wire ceiling. The lifecycle now rotates the generation instead of
+  publishing past that ceiling; refresh tickets retain their separate `2^63-1`
+  local bound. The serializer independently validates the sequence before building
+  canonical content or its digest, so a malformed injected object also fails closed.
+- The normal focused lifecycle plus wire command collected **62 tests**, but all 62
   stopped in autouse setup because importing the unrelated PySide6 PACS fixture
-  failed on missing host `libxkbcommon.so.0`; no wire assertion ran in that pass.
-- The final wire suite contains **24 tests** and passes with `--noconftest`, plugin
-  autoload disabled, and bytecode disabled.
+  failed on missing host `libxkbcommon.so.0`; no focused assertion ran in that pass.
+- The focused lifecycle plus wire suites pass **62 tests** with `--noconftest`,
+  plugin autoload disabled, and bytecode disabled.
 - The combined Phase 3B wire suite plus pure Orders facts, lifecycle, Reception
-  projection, and bounded Reception reader regressions passes **343 tests** under
+  projection, and bounded Reception reader regressions passes **355 tests** under
   the same isolated mode.
 - Tests include literal contract assertions independent of implementation enums,
   literal fixture bytes/digests, independent SHA-256 checks, all closed error codes,
   request negotiation, auth/audience/revocation, exact headers, bounds, freshness,
-  rollover, immutable snapshot identity, verified empty, redaction, and an AST
-  boundary proving the module remains free of I/O/runtime imports and calls.
+  rollover, immutable snapshot identity, verified empty, redaction, exact acceptance
+  of `2^53-1`, lifecycle/serializer/handler rejection of `2^53`, `2^53+1`, the
+  former `2^63-1` ceiling, booleans, and string coercion, and an AST boundary proving
+  the module remains free of I/O/runtime imports and calls.
 
 These isolated results are focused pure verification, not a full baseline. The
 existing host GUI-library blocker remains unresolved and no system package was
@@ -480,7 +497,8 @@ route or deployment.
 
 Independent integration review should compare the Phase 3B serializer/handler,
 literal fixture bytes/digests, request/error/auth matrices, and isolated test
-evidence with orchestration `5dd9e23`. Until that review passes, Orders receiver
+evidence with orchestration `565e9ddfdcfa0684dc1a29c8bcef8534e9b0d728`.
+Until that re-review passes, Orders receiver
 implementation is **not yet authorized**. A PASS authorizes Orders only for its
 accepted injected, disabled parser/client and volatile lifecycle/freshness tests;
 it does not authorize FastAPI/runtime wiring, real credentials, network access,
@@ -521,3 +539,11 @@ slice.
   PySide6/`libxkbcommon.so.0` normal-test blocker. No source, socket, route mount,
   real credential, runtime activation, persistence, push, or deployment occurred;
   Orders receiver work remains gated on independent PASS of this handoff.
+- **2026-10-09:** Remediated the first Phase 3B review finding against orchestration
+  correction `565e9ddfdcfa0684dc1a29c8bcef8534e9b0d728`: split the local refresh-ticket
+  (`2^63-1`) and wire snapshot-sequence (`2^53-1`) bounds, added a pre-canonical
+  serializer guard, and fixed literal maximum/overflow/coercion tests across the
+  lifecycle, serializer, and handler. Recorded 62 focused and 355 adjacent isolated
+  passes plus the unchanged 62-case PySide6/`libxkbcommon.so.0` setup blocker. No
+  route, runtime, network, credential, source, persistence, push, or deployment
+  action occurred; Orders receiver work remains gated on independent re-review.

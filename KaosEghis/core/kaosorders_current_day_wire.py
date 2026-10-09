@@ -30,6 +30,7 @@ SNAPSHOT_KIND = "FULL"
 MAX_BODY_BYTES = 16_777_216
 MAX_FRESHNESS_SECONDS = 300
 MAX_FUTURE_SECONDS = 30
+MAX_SNAPSHOT_SEQUENCE = 9_007_199_254_740_991
 MAX_IDENTITY_LENGTH = 128
 MAX_TOKEN_LENGTH = 512
 MIN_SYNTHETIC_TOKEN_LENGTH = 43
@@ -95,6 +96,12 @@ def _token(value: object) -> str:
         or _TOKEN.fullmatch(value) is None
     ):
         raise OrdersWireRejected("invalid_synthetic_identity")
+    return value
+
+
+def _snapshot_sequence(value: object) -> int:
+    if type(value) is not int or not 1 <= value <= MAX_SNAPSHOT_SEQUENCE:
+        raise OrdersWireRejected("projection_invalid")
     return value
 
 
@@ -178,6 +185,7 @@ class SyntheticOrdersProjection(_Redacted):
         self.snapshot.__post_init__()
         self.snapshot.orders.__post_init__()
         self.facts.__post_init__(True)
+        _snapshot_sequence(self.snapshot.cursor.snapshot_sequence)
         if (
             self.snapshot.cursor.clinic_day != self.facts.clinic_day
             or lifecycle.clinic_day_at(self.snapshot.observed_at) != self.facts.clinic_day
@@ -373,6 +381,7 @@ def serialize_orders_success(
     ):
         raise OrdersWireRejected("scope_forbidden")
     cursor = projection.snapshot.cursor
+    snapshot_sequence = _snapshot_sequence(cursor.snapshot_sequence)
     verified_empty = (
         projection.snapshot.orders.availability
         is lifecycle.ProjectionAvailability.VERIFIED_EMPTY
@@ -387,7 +396,7 @@ def serialize_orders_success(
         "mapping_revision": projection.scope.mapping_revision,
         "provider_session_id": cursor.provider_session_id.value,
         "provider_generation": cursor.provider_generation.value,
-        "snapshot_sequence": cursor.snapshot_sequence,
+        "snapshot_sequence": snapshot_sequence,
         "clinic_day": cursor.clinic_day.isoformat(),
         "observed_at": _utc_timestamp(projection.snapshot.observed_at),
         "snapshot_kind": SNAPSHOT_KIND,
