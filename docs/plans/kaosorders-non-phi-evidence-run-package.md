@@ -712,7 +712,8 @@ decision, approval SHA-256, KST start/end no longer than 30 minutes and containi
 the attempt time, plus non-sensitive stable references naming the operator and
 cancellation owner. The references supplied at 07:30 KST remain syntactically
 valid, and the owner's 07:48:51 KST exact statement now supplies a complete
-08:00:00–08:30:00 KST window record below. It remains review-pending.
+08:00:00–08:30:00 KST window record below. Independent review accepted it at
+commit `7b9baca`.
 
 ### Bounded KST execution-window template
 
@@ -742,15 +743,16 @@ Current human-only window readiness is closed as follows:
 
 | Required value | Current state | Acceptance rule |
 | --- | --- | --- |
-| `approval_sha256` | `c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d` (**REVIEW PENDING**) | Exact lowercase 64-hex digest of the JCS artifact below. |
+| `approval_sha256` | `c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d` (**INDEPENDENT PASS**) | Exact lowercase 64-hex digest of the accepted JCS artifact below. |
 | `starts_at` | `2026-10-10T08:00:00+09:00` | Exact owner-approved future KST timestamp. |
 | `ends_at` | `2026-10-10T08:30:00+09:00` | Same KST date, strictly after start, duration exactly 30 minutes. |
 | `operator_reference` | `kaosclinic-eghis` | Explicitly bound; passes `[A-Za-z0-9][A-Za-z0-9._-]*` and is 1..64 characters. |
 | `cancellation_owner_reference` | `kaosclinic-owner` | Explicitly bound, distinct, and passes the same closed syntax. |
 | attempt time and evidence date | **BLOCKED** | Inside the approved interval and identical KST calendar date. |
 
-The completed record must receive independent review before manifest population.
-Missing, stale, expired, mismatched, or unreviewed values stop before credential
+Independent review accepted exact commit
+`7b9baca642b6d3d77ec9e182c0892202136a64ba` and the digest above. Missing,
+stale, expired, mismatched, or unreviewed values still stop before credential
 lookup or connection.
 
 #### Completed owner-approved 08:00:00–08:30:00 KST window
@@ -782,8 +784,10 @@ The closed envelope therefore has these exact values:
 
 The references satisfy the closed literal syntax, both endpoints share the same
 KST date, and the duration is positive and exactly 30 minutes. Independent
-review must reproduce the digest and accept the record before
-`window_approval_sha256` can replace `BLOCKED` in the canonical manifest. The
+review accepted the record at exact commit
+`7b9baca642b6d3d77ec9e182c0892202136a64ba`. The accepted digest is eligible
+for later manifest population, but `window_approval_sha256` remains `BLOCKED`
+until all remaining fields are ready and the final manifest is reviewed. The
 window record is not a fresh single-attempt authorization and does not activate
 authentication or execution. If all remaining gates and final manifest review
 do not complete before 08:30:00 KST, this record expires and cannot be reused.
@@ -881,11 +885,11 @@ account-purpose statement alone did not create the closed attestation. The later
 07:05 KST authority statement now supplies the exact substantive path,
 authority, P00, and validity fields in the completed artifact above.
 
-The identity/path record is therefore **INDEPENDENT PASS**, while the canonical
-manifest below remains unchanged and `BLOCKED`. No username, host, database,
-role dump, connection property, credential, or secret-store locator is needed or
-permitted. This PASS cannot revive an expired or rejected window; a new compliant
-bounded window and later fresh single-attempt authorization remain required.
+The identity/path record is **INDEPENDENT PASS**, and the exact 08:00:00–08:30:00
+window above is also **INDEPENDENT PASS**. The canonical manifest below remains
+unchanged and `BLOCKED`. No username, host, database, role dump, connection
+property, credential, or secret-store locator is needed or permitted. A fresh
+single-attempt authorization and final populated-manifest review remain required.
 
 At the 2026-10-10 06:57 KST assessment, that endpoint had passed without the
 required prerequisite PASS. The candidate window is therefore **EXPIRED** and
@@ -894,9 +898,36 @@ historical evidence only; a new same-day bounded window, closed canonical role
 references, immutable window approval digest, and later fresh single-attempt
 authorization are required.
 
-Neither the earlier 07:00–12:00 request nor any later shorthand revives the
-expired scheduling candidate, satisfies independent review, or authorizes
-credential lookup, authentication, connection, or query.
+None of the historical rejected or incomplete requests authorizes access. Only
+the exact seconds-bearing 08:00:00–08:30:00 record above received independent
+PASS, and that PASS alone still does not authorize credential lookup,
+authentication, connection, or query.
+
+### Exact remaining package/review state
+
+Accepted inputs are: the disabled composition at
+`e9e65e8dd8452e07a20908c63aa3703c767e9c3f`; the deterministic closed
+run-package procedure at `b57d2ea298e0bd5a5e30e047c3aa74c625cd666f`;
+identity/path attestation commit `722bef966f5496c4b21df8db35053705a4fdc861`
+and digest
+`4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401`;
+and window commit `7b9baca642b6d3d77ec9e182c0892202136a64ba` and digest
+`c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d`.
+
+Still absent are the exact immutable `independent_review_sha256` artifact for
+manifest binding, a fresh owner `fresh_single_attempt_authorization_sha256`, a
+populated manifest and its non-self-referential digest, and final independent
+manifest PASS. No missing digest may be inferred from a commit ID or chat result.
+The attempt timestamp/evidence date also remains unset until a fully approved
+attempt actually starts inside the window.
+
+The shortest exact owner statement that supplies only the next fresh
+authorization is:
+
+> `KaosEghis non-PHI evidence package eghis-kaosorders-non-phi-evidence-run-v1 / review-candidate-3, run-package commit b57d2ea298e0bd5a5e30e047c3aa74c625cd666f, composition commit e9e65e8dd8452e07a20908c63aa3703c767e9c3f, identity/path digest 4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401, window commit 7b9baca642b6d3d77ec9e182c0892202136a64ba 및 window digest c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d (2026-10-10T08:00:00+09:00–2026-10-10T08:30:00+09:00)에 바인딩하여, 그 window 안에서 정확히 1회의 bounded non-PHI evidence attempt를 승인한다. retry, scope expansion, runtime activation, push, deploy는 승인하지 않는다.`
+
+This text is a request template only. It has not been stated by the owner,
+hashed, inserted into the manifest, or consumed as execution authority.
 
 ### Immutable approval-manifest candidate
 
@@ -1254,3 +1285,8 @@ verification is not reported as a full baseline.
   SHA-256 is `c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d`.
   The record remains review-pending and does not populate the still-blocked
   manifest or authorize authentication/execution.
+- **2026-10-10:** Recorded independent PASS for window commit `7b9baca` and
+  digest `c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d`.
+  Added the exact remaining manifest/review state and the minimal owner statement
+  required for a fresh one-attempt authorization. The statement is a template
+  only; it was not inferred, hashed, consumed, or treated as execution authority.
