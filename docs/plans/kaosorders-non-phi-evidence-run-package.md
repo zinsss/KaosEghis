@@ -1,9 +1,9 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
 - **Status:** the consumed attempt remains blocked with no evidence artifact;
-  a new resolver-bound approval-manifest candidate is prepared for independent
-  review, but its package-review, window, authorization, and final manifest
-  fields remain `BLOCKED`; no execution authority exists
+  the resolver-bound package and 09:00–09:30 KST window have independent PASS,
+  but fresh authorization and the populated final manifest remain `BLOCKED`;
+  no execution authority exists
 - **Last updated:** 2026-10-10
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -804,19 +804,21 @@ Current human-only window readiness is closed as follows:
 
 | Required value | Current state | Acceptance rule |
 | --- | --- | --- |
-| `approval_sha256` | `fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c` (**REVIEW PENDING**) | Exact lowercase 64-hex digest of the new JCS artifact below. |
+| `approval_sha256` | `fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c` (**INDEPENDENT PASS**) | Exact lowercase 64-hex digest of the accepted JCS artifact below. |
 | `starts_at` | `2026-10-10T09:00:00+09:00` | Exact owner-approved future KST timestamp at statement receipt. |
 | `ends_at` | `2026-10-10T09:30:00+09:00` | Same KST date, strictly after start, duration exactly 30 minutes. |
 | `operator_reference` | `kaosclinic-eghis` | Explicitly bound; passes `[A-Za-z0-9][A-Za-z0-9._-]*` and is 1..64 characters. |
 | `cancellation_owner_reference` | `kaosclinic-owner` | Explicitly bound, distinct, and passes the same closed syntax. |
 | attempt time and evidence date | **BLOCKED** | Inside the approved interval and identical KST calendar date. |
 
-Independent review of the new exact record and its commit is pending. Missing,
-stale, expired, mismatched, or unreviewed values still stop before credential
-lookup or connection. The prior accepted commit `7b9baca642b6d3d77ec9e182c0892202136a64ba`
-and its digest remain historical and non-reusable.
+Independent review accepted exact commit
+`ecc59a4bfc45e0269d9dcdd4f967da7fa09add0d` and the digest above at
+2026-10-10T08:49:49+09:00. Missing, stale, expired, mismatched, or unreviewed
+values still stop before credential lookup or connection. The prior accepted
+commit `7b9baca642b6d3d77ec9e182c0892202136a64ba` and its digest remain historical
+and non-reusable.
 
-#### Owner-approved 09:00:00–09:30:00 KST window — review pending
+#### Owner-approved 09:00:00–09:30:00 KST window — independent PASS
 
 At 2026-10-10 08:47:38 KST, the owner explicitly approved both seconds-bearing
 endpoints and both privacy-safe stable role references. The start was future at
@@ -850,6 +852,9 @@ manifest, and does not authorize setting read, authentication, connection, or
 execution. It expires fail-closed at 09:30:00 KST and cannot be reused. A fresh
 single-attempt authorization may be requested only after this exact artifact and
 commit receive independent PASS and while a viable reviewed window remains.
+Independent review supplied that PASS for exact commit `ecc59a4` and digest
+`fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c`;
+it did not supply or consume fresh owner authorization.
 
 #### Completed owner-approved 08:00:00–08:30:00 KST window
 
@@ -980,11 +985,11 @@ account-purpose statement alone did not create the closed attestation. The later
 07:05 KST authority statement now supplies the exact substantive path,
 authority, P00, and validity fields in the completed artifact above.
 
-The identity/path record is **INDEPENDENT PASS**, and the exact 08:00:00–08:30:00
-window above is also **INDEPENDENT PASS**. The canonical manifest below remains
-unchanged and `BLOCKED`. No username, host, database, role dump, connection
-property, credential, or secret-store locator is needed or permitted. A fresh
-single-attempt authorization and final populated-manifest review remain required.
+The identity/path record is **INDEPENDENT PASS**. The exact 08:00:00–08:30:00
+window also received independent PASS but is now historical, expired, and
+non-reusable. The historical canonical manifest below is consumed and cannot be
+reactivated. No username, host, database, role dump, connection property,
+credential, or secret-store locator is needed or permitted.
 
 At the 2026-10-10 06:57 KST assessment, that endpoint had passed without the
 required prerequisite PASS. The candidate window is therefore **EXPIRED** and
@@ -993,12 +998,12 @@ historical evidence only; a new same-day bounded window, closed canonical role
 references, immutable window approval digest, and later fresh single-attempt
 authorization are required.
 
-None of the historical rejected or incomplete requests authorizes access. Only
-the exact seconds-bearing 08:00:00–08:30:00 record above received independent
-PASS, and that PASS alone still does not authorize credential lookup,
-authentication, connection, or query.
+None of the historical rejected or incomplete requests authorizes access. The
+new exact seconds-bearing 09:00:00–09:30:00 record above is the only current
+reviewed window candidate, and its PASS alone still does not authorize setting
+read, credential lookup, authentication, connection, or query.
 
-### Exact remaining package/review state
+### Historical consumed package/review state
 
 Accepted inputs are: the disabled composition at
 `e9e65e8dd8452e07a20908c63aa3703c767e9c3f`; the deterministic closed
@@ -1008,11 +1013,9 @@ and digest
 `4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401`;
 and window commit `7b9baca642b6d3d77ec9e182c0892202136a64ba` and digest
 `c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d`.
-The independently accepted executor/package review record and the fresh owner
-authorization are now frozen below. The populated manifest remains
-**REVIEW PENDING** and cannot be consumed before its own independent final PASS.
-The attempt timestamp/evidence date remains unset until a fully approved attempt
-actually starts inside the window.
+The independently accepted executor/package review record, authorization, and
+manifest frozen below belong only to the consumed prior attempt. They are
+retained as historical evidence and are not inputs to the resolver-bound gate.
 
 ### Immutable fresh single-attempt authorization
 
@@ -1045,6 +1048,23 @@ accepted executor/package binding:
 
 The SHA-256 of those exact UTF-8 bytes, without a trailing line feed, is
 `3ec16a2a63c380238aed884ff5d4a2b16129d0aabf9c6eab00fd888940068136`.
+
+#### Resolver-bound immutable package-review record — independent PASS
+
+The prior package-review record above belongs only to the consumed composition
+and is non-reusable. Independent integration review issued and reconfirmed this
+exact digest-free RFC 8785 JCS record for the resolver-bound candidate at
+`d9288d4b113a8d74c812beaded4ba7f901d4a85d`:
+
+```json
+{"contract_id":"kaoseghis.orders-evidence-executor-approval.v1","decision":"approved","executor_commit":"4565605845617de1ed3099c7abb887fbc45daabe","package_revision":"review-candidate-3","reviewer_role":"independent-integration-review"}
+```
+
+The SHA-256 of those exact UTF-8 bytes, without a trailing line feed, is
+`72e0c74e3c6f9232029f9c7ca370f90496c6fdc33cabc9174c39043f7a7c0c52`.
+This digest is the only eligible `independent_review_sha256` for a future
+resolver-bound populated manifest. It does not authorize setting resolution,
+authentication, connection, statements, publication, or execution.
 
 ### Populated immutable approval manifest — final review pending
 
@@ -1186,38 +1206,49 @@ For review reproducibility only, removing the root
 preimage yields
 `1cdff065ee2ec33993a8f5563423a3d5b8da86c9a59e186f4656f8ef0a8938a6`.
 This fingerprint is not inserted into the candidate and must not be mistaken
-for a final approval-manifest digest. Independent review must reproduce every
-component and statement digest, confirm the fifth component is disabled and
-unwired, and issue a separate immutable package-review record before that
-candidate field can be populated.
+for a final approval-manifest digest. Independent review reproduced every
+component and statement digest, confirmed the fifth component is disabled and
+unwired, and issued the immutable package-review record and digest
+`72e0c74e3c6f9232029f9c7ca370f90496c6fdc33cabc9174c39043f7a7c0c52`
+recorded above. It also accepted window commit `ecc59a4` and digest
+`fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c`.
 
-After that review, the minimum non-secret owner inputs are, in order:
+### Exact fresh single-attempt authorization text — not yet supplied
 
-1. A new future same-`Asia/Seoul`-day window no longer than 30 minutes, with
-   explicit seconds and exact non-personal role references. Copyable form:
-   `YYYY-MM-DD KST 실행 창을 HH:MM:SS부터 HH:MM:SS까지 승인한다. operator_reference는 <reference>, cancellation_owner_reference는 <reference>로 승인한다.`
-2. Only after the window record independently passes, one fresh single-attempt
-   authorization bound to this resolver implementation, the independently
-   reviewed candidate-package commit/digest, the accepted identity/path digest,
-   and the new window commit/digest. Copyable form:
-   `KaosEghis non-PHI evidence package eghis-kaosorders-non-phi-evidence-run-v1 / review-candidate-3, implementation commit 4565605845617de1ed3099c7abb887fbc45daabe, resolver digest 71977c3cb3fc475b679a3fa35152322f066fc7af6ef0ea393493d40202cd986d, package-review digest <reviewed digest>, identity/path digest 4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401, window commit <reviewed commit> 및 window digest <reviewed digest> (<start ISO 8601>–<end ISO 8601>)에 바인딩하여, 그 window 안에서 정확히 1회의 bounded non-PHI evidence attempt를 승인한다. retry, scope expansion, runtime activation, push, deploy는 승인하지 않는다.`
+The remaining owner input is the following exact statement. It is copyable as
+one message; the text below is a request template only and has not been stated,
+hashed, inserted into a manifest, or consumed:
 
-Placeholders are instructions, not values or approval. After those records pass,
-Eghis must regenerate a fully populated canonical manifest with no `BLOCKED`
-field and obtain a separate final independent manifest PASS. Until then, setting
-read, authentication, connection, statements, publication, and all runtime or
+> `KaosEghis non-PHI evidence package eghis-kaosorders-non-phi-evidence-run-v1 / review-candidate-3, resolver-bound candidate commit d9288d4b113a8d74c812beaded4ba7f901d4a85d, implementation commit 4565605845617de1ed3099c7abb887fbc45daabe, resolver SHA-256 71977c3cb3fc475b679a3fa35152322f066fc7af6ef0ea393493d40202cd986d, package-review SHA-256 72e0c74e3c6f9232029f9c7ca370f90496c6fdc33cabc9174c39043f7a7c0c52, identity/path SHA-256 4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401, window commit ecc59a4bfc45e0269d9dcdd4f967da7fa09add0d 및 window SHA-256 fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c (2026-10-10T09:00:00+09:00–2026-10-10T09:30:00+09:00, operator_reference=kaosclinic-eghis, cancellation_owner_reference=kaosclinic-owner)에 바인딩하여, 그 window 안에서 정확히 1회의 bounded non-PHI evidence attempt를 승인한다. retry, scope expansion, runtime activation, push, merge, deploy는 승인하지 않는다.`
+
+Only after the owner sends that exact text during a viable window may Eghis
+construct the closed authorization record. Its preimage has exactly four string
+fields and this shape; `authorized_at` is the exact source-message receipt time
+to whole seconds in `Asia/Seoul`, which is intentionally not guessed now:
+
+```json
+{"authorization_text":"<the exact statement above, byte-for-byte>","authorized_at":"<owner-message receipt YYYY-MM-DDTHH:MM:SS+09:00>","contract_id":"kaoseghis.orders-evidence-single-attempt-authorization.v1","decision":"approved"}
+```
+
+Generation must substitute only those two bracketed values, reject any text
+difference or non-KST/missing/subsecond timestamp, serialize the resulting
+four-string object with RFC 8785 JCS as exact UTF-8 without BOM or trailing line
+feed, and SHA-256 those bytes to lowercase hexadecimal. The digest cannot exist
+before the exact owner message and receipt timestamp exist. Afterward Eghis must
+regenerate a fully populated canonical manifest with no `BLOCKED` field and
+obtain a separate final independent manifest PASS. Until then, setting read,
+authentication, connection, statements, publication, and all runtime or
 deployment actions remain stopped.
 
 ## Next action
 
-1. Independently review the exact resolver-bound candidate above and the new
-   09:00:00–09:30:00 window artifact, including their immutable bindings and
-   reproduced digests.
+1. Ask the owner to send the exact fresh single-attempt statement above while
+   the independently accepted 09:00:00–09:30:00 KST window remains viable.
 2. Keep setting read, authentication, connection, P00, later statements, and
    publication stopped. Every prior window/authorization/manifest is non-reusable.
-3. Only after both prerequisite reviews PASS, obtain a fresh single-attempt
-   authorization bound to their exact commits/digests, then regenerate the
-   populated manifest and obtain its separate final independent review.
+3. After the exact owner message, freeze its four-field JCS record/digest,
+   regenerate the populated manifest, and obtain its separate final independent
+   review before any attempt.
 
 ## Revision history
 
@@ -1459,3 +1490,12 @@ deployment actions remain stopped.
   authorization, and manifest remain non-reusable; no fresh authorization was
   created or consumed and no setting, credential, source, runtime, push, merge,
   or deployment action occurred.
+- **2026-10-10:** Recorded independent PASS of window commit `ecc59a4` and
+  digest `fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c`
+  at 08:49:49 KST. Durably recorded the independently issued resolver-bound
+  package-review JCS artifact and digest
+  `72e0c74e3c6f9232029f9c7ca370f90496c6fdc33cabc9174c39043f7a7c0c52`.
+  Added the exact copyable fresh one-attempt owner statement and closed
+  four-field canonicalization rule without inventing its future receipt time or
+  digest. No authorization was claimed, populated, hashed, or consumed; all
+  setting/source/runtime/deployment gates remain stopped.
