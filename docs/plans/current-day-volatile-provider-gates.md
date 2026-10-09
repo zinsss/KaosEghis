@@ -1,9 +1,8 @@
 # Current-day volatile provider remaining gates
 
-- **Status:** Phase 3A pure lifecycle reviewed; Phase 3B synthetic Orders serializer
-  and disabled in-process handler remediated after the first independent review;
-  independent re-review pending; source, runtime activation, and all production
-  gates remain pending
+- **Status:** Phase 3A lifecycle and Phase 3B synthetic Orders provider accepted;
+  owner-side non-PHI production-source evidence input prepared; central mapping,
+  source authority, runtime activation, and all production gates remain pending
 - **Last updated:** 2026-10-09
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, KaosReception, orchestration,
@@ -20,6 +19,11 @@ ticket bound of `1..9,223,372,036,854,775,807` (`2^63-1`). It otherwise retains
 the lifecycle/runtime decisions accepted at `5277764`, the destination-token
 hardening accepted at `9288070`, and supersedes the earlier `bd3c66a` planning
 baseline:
+
+The reviewed synthetic implementation references are Eghis
+`0896f2b500a942cf10bd1ee71c8db94698bbc174` and the disabled Orders receiver
+`dd94ee726224b038fb468a3f4bc8ada5b61fae9d`. Neither reference supplies source
+authority or a production mapping revision.
 
 - `architecture/current-day-volatile-provider-v1.md` selects one authoritative
   owner and destination-minimal Orders and Reception projections;
@@ -194,6 +198,15 @@ one read-only transaction/snapshot as one common observation. The latter must
 prove snapshot consistency, all-or-nothing validation, total deadline/count
 bounds, and cleanup; independent queries at different snapshots are forbidden.
 Production SQL, mapping, privileges, and capacity evidence remain unaccepted.
+
+The exact Eghis-owned input for that later gate is recorded in
+[Controlled Source Evidence Gate Review](../kaoseghis-source-evidence-gates.md#current-day-orders-production-source-acceptance-input-2026-10-09).
+It closes the candidate field/statement inventory, same-snapshot and verified-empty
+acceptance requirements, join/cardinality and plan/type/domain/privilege evidence,
+capacity/latency/cleanup package, and the six clinical/product questions that
+cannot be inferred from technical observations. It also records why the current
+offline candidate SQL is not a production-v1 mapping statement. No evidence was
+acquired and no mapping revision was assigned in this documentation phase.
 
 The common reader must use the existing serialized-read/physical-close boundary.
 It must never share its internal superset, connection, cursor, SQL error, or raw
@@ -495,14 +508,12 @@ route or deployment.
 
 ## Next action
 
-Independent integration review should compare the Phase 3B serializer/handler,
-literal fixture bytes/digests, request/error/auth matrices, and isolated test
-evidence with orchestration `565e9ddfdcfa0684dc1a29c8bcef8534e9b0d728`.
-Until that re-review passes, Orders receiver
-implementation is **not yet authorized**. A PASS authorizes Orders only for its
-accepted injected, disabled parser/client and volatile lifecycle/freshness tests;
-it does not authorize FastAPI/runtime wiring, real credentials, network access,
-board cutover, persistence, activation, or deployment.
+The next central step is review and acceptance of a non-PHI production-source
+evidence/mapping gate using the detailed owner input above. Orders receiver
+implementation is already limited to its accepted injected, disabled parser/client
+and volatile lifecycle/freshness tests; that acceptance does not authorize a source
+mapping, FastAPI/runtime wiring, real credentials, network access, board cutover,
+persistence, activation, or deployment.
 
 The next Eghis runtime/source work remains separately sequenced. Production SQL,
 source access, mapping assignment, socket/route mounting, credential lookup,
@@ -547,3 +558,10 @@ slice.
   passes plus the unchanged 62-case PySide6/`libxkbcommon.so.0` setup blocker. No
   route, runtime, network, credential, source, persistence, push, or deployment
   action occurred; Orders receiver work remains gated on independent re-review.
+- **2026-10-09:** Recorded the owner-side non-PHI production-source evidence and
+  Orders mapping-gate input following accepted Eghis `0896f2b` and Orders
+  `dd94ee7`. The detailed ledger names every logical field and current candidate
+  source, statement/transaction and complete-day/verified-empty proof, join and
+  cardinality rule, plan/type/domain/privilege and capacity/latency/cleanup artifact,
+  and six unresolved human decisions. No source operation, mapping revision, code,
+  test, credential, runtime, transport, push, or deployment change occurred.
