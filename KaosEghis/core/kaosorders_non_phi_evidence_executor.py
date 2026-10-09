@@ -87,12 +87,78 @@ class _Observation(_Redacted):
     k20: list[dict[str, object]]
 
 
-@dataclass(frozen=True, slots=True, repr=False)
-class SerializedReadResult(_Redacted):
-    callback_count: int
-    lease_released: bool
-    deadline_bound: bool
-    value: object
+class _SerializedLeaseGuard(_Redacted):
+    __slots__ = (
+        "_deadline", "_monotonic", "_operation", "_value",
+        "callback_count", "released", "released_within_deadline",
+    )
+
+    def __init__(self, *, operation: object, deadline: float, monotonic: object):
+        self._operation = operation
+        self._deadline = deadline
+        self._monotonic = monotonic
+        self._value = None
+        self.callback_count = 0
+        self.released = False
+        self.released_within_deadline = False
+
+    def invoke(self):
+        self.callback_count += 1
+        if self.callback_count != 1:
+            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        if self._monotonic() > self._deadline:
+            raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+        try:
+            self._value = self._operation()
+            return self._value
+        finally:
+            self.released = True
+            self.released_within_deadline = self._monotonic() <= self._deadline
+
+    def verified_value(self, returned: object) -> object:
+        if self.callback_count != 1 or self.released is not True:
+            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        if self.released_within_deadline is not True:
+            raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+        if returned is not self._value:
+            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        return self._value
+
+
+def _raise_if_late(*, monotonic: object, deadline: float) -> None:
+    if monotonic() > deadline:
+        raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+
+
+def _fixed_reason(error: Exception) -> capture.FixedReason:
+    allowed = {
+        item.value: item for item in capture.FixedReason
+        if item is not capture.FixedReason.NONE
+    }
+    return allowed.get(str(error), capture.FixedReason.PREFLIGHT_FAILED)
+
+
+def _discard_and_classify(
+    *, sink: object, sink_clean: bool, error: Exception,
+    monotonic: object, deadline: float,
+    default_reason: capture.FixedReason = capture.FixedReason.PREFLIGHT_FAILED,
+) -> capture.FixedReason:
+    try:
+        if sink_clean:
+            sink.discard_all()
+        absent = sink.final_exists() is False
+    except Exception:
+        absent = False
+    if not absent:
+        return capture.FixedReason.CLEANUP_UNCERTAIN
+    fixed = _fixed_reason(error)
+    if fixed is capture.FixedReason.PREFLIGHT_FAILED:
+        fixed = default_reason
+    if fixed is capture.FixedReason.CLEANUP_UNCERTAIN:
+        return fixed
+    if monotonic() > deadline:
+        return capture.FixedReason.TIMEOUT
+    return fixed
 
 
 def _approved_prerequisites(
@@ -162,11 +228,15 @@ def _verified_statements(statement_bytes: object) -> dict[str, bytes]:
     return statement_bytes
 
 
-def _rows(cursor: object, spec: capture.StatementSpec) -> capture.InjectedResult:
+def _rows(
+    cursor: object, spec: capture.StatementSpec, *,
+    monotonic: object, deadline: float,
+) -> capture.InjectedResult:
     columns = tuple(item[0] for item in (cursor.description or ()))
     if columns != spec.columns:
         raise ExecutorRejected(capture.FixedReason.UNEXPECTED_SHAPE.value)
     fetched = cursor.fetchmany(spec.maximum_rows + 1)
+    _raise_if_late(monotonic=monotonic, deadline=deadline)
     if type(fetched) not in (list, tuple):
         raise ExecutorRejected(capture.FixedReason.UNEXPECTED_SHAPE.value)
     if len(fetched) > spec.maximum_rows:
@@ -186,21 +256,22 @@ def _observe_and_close(*, connection_owner: object, statement_bytes: dict[str, b
     p00 = version = m10 = k20 = None
     failure: Exception | None = None
     try:
-        if monotonic() > deadline:
-            raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
         connection_owner.acquire(deadline)
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
         if (connection_owner.acquisition_count != 1
                 or connection_owner.acquisition_complete is not True
                 or connection_owner.connection is None):
             raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
         connection = connection_owner.connection
         cursor = connection.cursor()
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
         for spec in capture.STATEMENT_SPECS:
-            if monotonic() > deadline:
-                raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+            _raise_if_late(monotonic=monotonic, deadline=deadline)
             if spec.statement_id == "EKO-C99":
                 c99_done = True
             cursor.execute(statement_bytes[spec.statement_id].decode("ascii"))
+            _raise_if_late(monotonic=monotonic, deadline=deadline)
             if getattr(connection, "notices", ()):
                 raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
             if spec.maximum_rows == 0:
@@ -209,7 +280,9 @@ def _observe_and_close(*, connection_owner: object, statement_bytes: dict[str, b
                 result = capture.InjectedResult(())
                 capture._validate_control(result)
             else:
-                result = _rows(cursor, spec)
+                result = _rows(
+                    cursor, spec, monotonic=monotonic, deadline=deadline,
+                )
                 if spec.statement_id == "EKO-P00":
                     p00 = capture._validate_p00(result)
                 elif spec.statement_id == "EKO-V01":
@@ -218,8 +291,7 @@ def _observe_and_close(*, connection_owner: object, statement_bytes: dict[str, b
                     m10 = capture._validate_m10(result)
                 elif spec.statement_id == "EKO-K20":
                     k20 = capture._validate_k20(result)
-            if monotonic() > deadline:
-                raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+            _raise_if_late(monotonic=monotonic, deadline=deadline)
     except Exception as error:
         failure = (
             ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
@@ -254,7 +326,7 @@ def _observe_and_close(*, connection_owner: object, statement_bytes: dict[str, b
             cleanup_ok = False
         if not cleanup_ok:
             failure = ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
-        elif monotonic() > deadline and failure is None:
+        elif monotonic() > deadline:
             failure = ExecutorRejected(ExecutorReason.TIMEOUT.value)
     if failure is not None:
         if isinstance(failure, ExecutorRejected):
@@ -275,8 +347,11 @@ def execute_reviewed_package_once(
 ) -> capture.CaptureOutcome:
     """Execute only after all injected prerequisites are independently approved."""
 
+    started = monotonic()
+    deadline = started + capture.GLOBAL_DEADLINE_SECONDS
     sink_clean = False
     try:
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
         _approved_prerequisites(
             identity=identity, approval=approval, window=window,
             runtime_commit=runtime_commit, evidence_date=evidence_date, now=now,
@@ -285,49 +360,30 @@ def execute_reviewed_package_once(
         if sink.final_exists() is not False:
             raise ExecutorRejected(ExecutorReason.PUBLICATION_FAILED.value)
         sink_clean = True
-        started = monotonic()
-        deadline = started + capture.GLOBAL_DEADLINE_SECONDS
-        callback_count = 0
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
 
         def observe_once():
-            nonlocal callback_count
-            callback_count += 1
-            if callback_count != 1:
-                raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
             return _observe_and_close(
                 connection_owner=connection_owner, statement_bytes=statements,
                 deadline=deadline, monotonic=monotonic,
             )
 
-        serialized = serialized_read_until(
-            observe_once,
-            deadline,
+        lease_guard = _SerializedLeaseGuard(
+            operation=observe_once, deadline=deadline, monotonic=monotonic,
         )
-        if (type(serialized) is not SerializedReadResult or callback_count != 1
-                or serialized.callback_count != 1
-                or serialized.lease_released is not True or serialized.deadline_bound is not True):
+        serialized = serialized_read_until(lease_guard.invoke, deadline)
+        observation = lease_guard.verified_value(serialized)
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
+        if type(observation) is not _Observation:
             raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
-        observation = serialized.value
-        if monotonic() > deadline or type(observation) is not _Observation:
-            raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
     except Exception as error:
-        cleanup_uncertain = False
-        try:
-            if sink_clean:
-                sink.discard_all()
-            cleanup_uncertain = sink.final_exists() is not False
-        except Exception:
-            cleanup_uncertain = True
-        reason = str(error)
-        allowed = {
-            item.value: item for item in capture.FixedReason
-            if item is not capture.FixedReason.NONE
-        }
-        fixed = allowed.get(reason, capture.FixedReason.PREFLIGHT_FAILED)
-        if cleanup_uncertain:
-            fixed = capture.FixedReason.CLEANUP_UNCERTAIN
+        fixed = _discard_and_classify(
+            sink=sink, sink_clean=sink_clean, error=error,
+            monotonic=monotonic, deadline=deadline,
+        )
         return capture.CaptureOutcome(capture.RunStatus.BLOCKED, fixed, None)
     try:
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
         if sink.final_exists() is not False:
             raise ExecutorRejected(ExecutorReason.PUBLICATION_FAILED.value)
         artifact = capture._build_artifact(
@@ -335,26 +391,22 @@ def execute_reviewed_package_once(
             fixed_reason=capture.FixedReason.NONE, version=observation.version,
             p00=observation.p00, m10=observation.m10, k20=observation.k20,
         )
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
         sink.create_new_no_overwrite()
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
         sink.write(artifact)
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
         sink.publish_no_overwrite()
         if sink.final_exists() is not True:
             raise ExecutorRejected(ExecutorReason.PUBLICATION_FAILED.value)
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
         return capture.CaptureOutcome(capture.RunStatus.COMPLETE, capture.FixedReason.NONE, artifact)
     except Exception as error:
-        try:
-            sink.discard_all()
-            absent = sink.final_exists() is False
-        except Exception:
-            absent = False
-        reason = str(error)
-        allowed = {
-            item.value: item for item in capture.FixedReason
-            if item is not capture.FixedReason.NONE
-        }
+        fixed = _discard_and_classify(
+            sink=sink, sink_clean=True, error=error,
+            monotonic=monotonic, deadline=deadline,
+            default_reason=capture.FixedReason.CAPTURE_FAILED,
+        )
         return capture.CaptureOutcome(
-            capture.RunStatus.BLOCKED,
-            allowed.get(reason, capture.FixedReason.CAPTURE_FAILED)
-            if absent else capture.FixedReason.CLEANUP_UNCERTAIN,
-            None,
+            capture.RunStatus.BLOCKED, fixed, None,
         )

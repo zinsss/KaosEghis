@@ -424,6 +424,12 @@ runtime import, or route. It accepts a resource-owning connection context, a
 deadline-aware serialized-read function, and an atomic no-overwrite sink only
 after three closed prerequisite objects validate.
 
+The owner-authorized exception after the second integration-review failure is
+limited to two executor defects: remove caller self-attestation of serialized
+lease state, and make the one 10-second fence govern validation through all
+cleanup and publication paths. It does not reopen the statement inventory,
+evidence schema, source-access, runtime, or deployment scope.
+
 The non-secret identity/path attestation must provide exactly: contract/version
 ID, `approved` decision, privacy-safe attestation SHA-256, identity class
 `dedicated-least-privilege-read-only`, path class
@@ -444,28 +450,39 @@ the attempt time, plus non-sensitive stable references naming the operator and
 cancellation owner. Those values are **not available** and cannot be inferred from
 the owner's general approval.
 
-After validation, the candidate requires `evidence_date`, KST `now`, and both
-approved-window endpoints to share one exact KST date before connection, starts
-the 10-second monotonic fence before serialized admission, validates all nine
-statement bytes/digests, opens at
-most one injected connection, validates P00/V01/M10/K20 while connected, and marks
-C99 attempted before its sole execution. A resource-owning acquisition context
-must prove either no connection was allocated or its owned connection was closed,
-including allocate-then-raise. The serialized result must prove exactly one local
-callback, deadline binding, and FIFO/mutex lease release. Only then may canonical
-artifact construction and atomic no-overwrite publication occur. The sink must
-remove and verify absence of any run-created visible final after failure; a
-pre-existing final is never overwritten or deleted. Allowed fixed validation
-reasons are preserved without raw error text. Any uncertainty returns blocked
-with no artifact. No production binding is included.
+The candidate starts one monotonic 10-second fence before prerequisite and
+statement validation. It requires `evidence_date`, KST `now`, and both
+approved-window endpoints to share one exact KST date before connection,
+validates all nine statement bytes/digests, opens at most one injected connection,
+validates P00/V01/M10/K20 while connected, and marks C99 attempted before its sole
+execution. A resource-owning acquisition context must prove either no connection
+was allocated or its owned connection was closed, including allocate-then-raise.
 
-Local verification after the first integration-review remediation: 36 executor
+The reviewed executor creates and owns the serialized lease guard. Only its
+callback can record entry; it enforces exactly one callback, releases in reviewed
+`finally` code, records whether release occurred within the deadline, and requires
+the serializer's returned object to be the exact callback value. A caller-created
+object claiming callback count, deadline binding, or release cannot authorize
+publication. Validation, connection acquisition, every statement, cancellation,
+C99 rollback, cursor close, physical-connection close, guard release, canonical
+artifact construction, atomic sink operations, and failure cleanup all share the
+same fence. Confirmed late cleanup returns `timeout`; uncertain cleanup returns
+`cleanup_uncertain`; either overrides an earlier ordinary rejection and prevents
+publication.
+
+Only after all guards pass may canonical artifact construction and atomic
+no-overwrite publication occur. The sink must remove and verify absence of any
+run-created visible final after failure; a pre-existing final is never overwritten
+or deleted. Allowed fixed validation reasons are preserved without raw error text.
+No production binding is included.
+
+Local verification after the owner-authorized second remediation: 45 executor
 cases and 37 existing capture tests passed together under the approved isolated
-pure-model path (73 passed); 355 adjacent lifecycle,
-Orders wire/fact, and Reception pure regressions also passed. The normal executor
-test invocation reached 36 setup errors before test execution solely because this
-host cannot load PySide6 without `libxkbcommon.so.0`. No host package was installed,
-and isolated verification is not reported as a full baseline.
+pure-model path (82 passed); 355 adjacent lifecycle, Orders wire/fact, and
+Reception pure regressions also passed. The normal executor test invocation
+reached 45 setup errors before test execution solely because this host cannot load
+PySide6 without `libxkbcommon.so.0`. No host package was installed, and isolated
+verification is not reported as a full baseline.
 
 ## Next action
 
@@ -521,3 +538,10 @@ and isolated verification is not reported as a full baseline.
   evidence-date binding, and fixed reason preservation. Added synthetic probes for
   every failure path. Identity/path and window records and independent re-review
   remain pending; no source access or runtime activation occurred.
+- **2026-10-09:** Applied the owner-authorized exception after the second/final
+  executor review failure. Replaced caller-asserted lease booleans with an
+  executor-owned single-entry/finally-release guard and extended one monotonic
+  10-second fence from validation through cancellation, rollback, all closes,
+  lease release, publication, and failure cleanup. Added forged-positive and late
+  cleanup adversarial probes. Statements, evidence schemas, runtime boundaries,
+  and all source/credential/deployment gates remain unchanged.

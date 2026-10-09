@@ -69,26 +69,39 @@ class Clock:
     def __call__(self):
         return self.value
 
+    def expire(self):
+        self.value = capture.GLOBAL_DEADLINE_SECONDS + 0.001
+
 
 class Sink:
-    def __init__(self, events, *, publish_visible_raise=False, initial_final=None):
+    def __init__(self, events, *, clock=None, publish_visible_raise=False,
+                 initial_final=None, late_first_check=False, late_event=None):
         self.events = events
+        self.clock = clock
         self.temp = None
         self.final = initial_final
         self.publish_visible_raise = publish_visible_raise
+        self.late_first_check = late_first_check
+        self.late_event = late_event
+        self.check_count = 0
+
+    def _record(self, event):
+        self.events.append(event)
+        if event == self.late_event:
+            self.clock.expire()
 
     def create_new_no_overwrite(self):
-        self.events.append("publish:create")
+        self._record("publish:create")
         if self.temp is not None or self.final is not None:
             raise RuntimeError("exists")
         self.temp = b""
 
     def write(self, value):
-        self.events.append("publish:write")
+        self._record("publish:write")
         self.temp = value
 
     def publish_no_overwrite(self):
-        self.events.append("publish:commit")
+        self._record("publish:commit")
         if self.final is not None:
             raise RuntimeError("exists")
         self.final, self.temp = self.temp, None
@@ -96,17 +109,23 @@ class Sink:
             raise RuntimeError("synthetic")
 
     def discard_all(self):
-        self.events.append("publish:discard")
+        self._record("publish:discard")
         self.temp = self.final = None
 
     def final_exists(self):
+        self.check_count += 1
+        if self.late_first_check and self.check_count == 1:
+            self.clock.expire()
         return self.final is not None
 
 
 class Cursor:
-    def __init__(self, events, *, missing_m10=False, close_ok=True, fail_c99=False,
-                 version="150000", p00_value=True, extra_m10=False):
+    def __init__(self, events, *, clock=None, late_event=None, missing_m10=False,
+                 close_ok=True, fail_c99=False, version="150000", p00_value=True,
+                 extra_m10=False):
         self.events = events
+        self.clock = clock
+        self.late_event = late_event
         self.missing_m10 = missing_m10
         self.close_ok = close_ok
         self.fail_c99 = fail_c99
@@ -117,10 +136,15 @@ class Cursor:
         self.closed = False
         self.description = None
 
+    def _record(self, event):
+        self.events.append(event)
+        if event == self.late_event:
+            self.clock.expire()
+
     def execute(self, sql):
         statement_id = sql.splitlines()[0].split()[-1]
         self.current = statement_id
-        self.events.append(f"execute:{statement_id}")
+        self._record(f"execute:{statement_id}")
         if statement_id == "EKO-C99" and self.fail_c99:
             raise RuntimeError("synthetic")
         spec = next(item for item in capture.STATEMENT_SPECS if item.statement_id == statement_id)
@@ -141,7 +165,7 @@ class Cursor:
         raise AssertionError("unexpected fetch")
 
     def close(self):
-        self.events.append("cursor:close")
+        self._record("cursor:close")
         self.closed = self.close_ok
 
 
@@ -150,6 +174,8 @@ class Connection:
 
     def __init__(self, events, **cursor_options):
         self.events = events
+        self.clock = cursor_options.get("clock")
+        self.late_event = cursor_options.get("late_event")
         self.cursor_value = Cursor(events, **cursor_options)
         self.closed = 0
 
@@ -159,9 +185,13 @@ class Connection:
 
     def cancel(self):
         self.events.append("connection:cancel")
+        if self.late_event == "connection:cancel":
+            self.clock.expire()
 
     def close(self):
         self.events.append("connection:close")
+        if self.late_event == "connection:close":
+            self.clock.expire()
         self.closed = 1
 
 
@@ -203,16 +233,17 @@ def run(*, identity=None, approval=None, window=None, connection_options=None,
     events = []
     identity0, approval0, window0 = prerequisites()
     clock = clock or Clock()
-    sink = Sink(events, **(sink_options or {}))
-    owner = ConnectionOwner(events, **(owner_options or {}), **(connection_options or {}))
+    sink = Sink(events, clock=clock, **(sink_options or {}))
+    owner = ConnectionOwner(
+        events, **(owner_options or {}), clock=clock, **(connection_options or {}),
+    )
 
     def serialized_default(operation, _deadline):
         events.append("lease:acquired")
         try:
-            value = operation()
+            return operation()
         finally:
             events.append("lease:released")
-        return executor.SerializedReadResult(1, True, True, value)
 
     outcome = executor.execute_reviewed_package_once(
         identity=identity if identity is not None else identity0,
@@ -297,15 +328,100 @@ def test_queue_time_is_inside_global_deadline_and_prevents_connection():
     assert "connection:create" not in events
 
 
-@pytest.mark.parametrize("count,released,bound", [(0, True, True), (2, True, True), (1, False, True), (1, True, False)])
-def test_serialized_result_must_prove_one_callback_and_released_deadline_bound_lease(count, released, bound):
-    def serialized(operation, _deadline):
-        value = None
-        for _ in range(count):
-            value = operation()
-        return executor.SerializedReadResult(count, released, bound, value)
+def test_forged_positive_serialized_result_without_guard_entry_fails_closed():
+    class ForgedPositive:
+        callback_count = 1
+        lease_released = True
+        deadline_bound = True
+        value = object()
+
+    def serialized(_operation, _deadline):
+        return ForgedPositive()
+
     outcome, events, sink = run(serialized=serialized)
     assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
+    assert outcome.artifact is None and sink.final is None
+    assert "connection:create" not in events and "publish:commit" not in events
+
+
+def test_second_guard_callback_is_rejected_and_never_publishes():
+    def serialized(operation, _deadline):
+        operation()
+        return operation()
+
+    outcome, _events, sink = run(serialized=serialized)
+    assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
+    assert outcome.artifact is None and sink.final is None
+
+
+def test_serialized_return_must_be_guard_recorded_callback_value():
+    def serialized(operation, _deadline):
+        operation()
+        return object()
+
+    outcome, _events, sink = run(serialized=serialized)
+    assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
+    assert outcome.artifact is None and sink.final is None
+
+
+def test_validation_time_is_inside_global_deadline():
+    clock = Clock()
+    outcome, events, sink = run(
+        clock=clock, sink_options={"late_first_check": True},
+    )
+    assert outcome.fixed_reason is capture.FixedReason.TIMEOUT
+    assert outcome.artifact is None and sink.final is None
+    assert "connection:create" not in events
+
+
+@pytest.mark.parametrize(
+    "late_event",
+    ["connection:cancel", "execute:EKO-C99", "cursor:close", "connection:close"],
+)
+def test_late_cleanup_overrides_ordinary_failure_with_timeout(late_event):
+    clock = Clock()
+    outcome, _events, sink = run(
+        clock=clock,
+        connection_options={"missing_m10": True, "late_event": late_event},
+    )
+    assert outcome.fixed_reason is capture.FixedReason.TIMEOUT
+    assert outcome.artifact is None and sink.final is None
+
+
+def test_late_serialized_release_boundary_blocks_publication():
+    clock = Clock()
+
+    def serialized(operation, _deadline):
+        value = operation()
+        clock.expire()
+        return value
+
+    outcome, events, sink = run(serialized=serialized, clock=clock)
+    assert outcome.fixed_reason is capture.FixedReason.TIMEOUT
+    assert outcome.artifact is None and sink.final is None
+    assert "publish:commit" not in events
+
+
+@pytest.mark.parametrize(
+    "late_event", ["publish:create", "publish:write", "publish:commit"],
+)
+def test_late_publication_stage_is_removed_and_returns_timeout(late_event):
+    clock = Clock()
+    outcome, _events, sink = run(
+        clock=clock, sink_options={"late_event": late_event},
+    )
+    assert outcome.fixed_reason is capture.FixedReason.TIMEOUT
+    assert outcome.artifact is None and sink.final is None
+
+
+def test_late_failure_artifact_cleanup_overrides_ordinary_rejection():
+    clock = Clock()
+    outcome, _events, sink = run(
+        clock=clock,
+        connection_options={"missing_m10": True},
+        sink_options={"late_event": "publish:discard"},
+    )
+    assert outcome.fixed_reason is capture.FixedReason.TIMEOUT
     assert outcome.artifact is None and sink.final is None
 
 
