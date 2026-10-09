@@ -7,6 +7,71 @@ import pytest
 from KaosEghis.core import kaosorders_non_phi_evidence_settings as settings
 
 
+class FailingCursor:
+    def __init__(self, *, stage, value):
+        self.stage = stage
+        self.value = value
+        self.execute_count = 0
+        self.close_attempts = 0
+        self.closed = False
+
+    def execute(self, _statement, _parameters=None):
+        if self.closed:
+            if self.stage == "cursor_post_close_verification":
+                return None
+            raise sqlite3.ProgrammingError("SYNTHETIC_PRIVATE_CANARY")
+        self.execute_count += 1
+        stages = {
+            1: "pragma_set",
+            2: "pragma_query",
+            3: "value_query",
+        }
+        if self.stage == stages.get(self.execute_count):
+            raise RuntimeError("SYNTHETIC_PRIVATE_CANARY")
+
+    def fetchone(self):
+        if self.stage == "pragma_fetch":
+            raise RuntimeError("SYNTHETIC_PRIVATE_CANARY")
+        return (1,)
+
+    def fetchmany(self, _maximum):
+        if self.stage == "value_fetch":
+            raise RuntimeError("SYNTHETIC_PRIVATE_CANARY")
+        return [(self.value,)]
+
+    def close(self):
+        self.close_attempts += 1
+        if self.stage == "cursor_close":
+            raise RuntimeError("SYNTHETIC_PRIVATE_CANARY")
+        self.closed = True
+
+
+class FailingConnection:
+    def __init__(self, *, stage, value):
+        self.stage = stage
+        self.cursor_value = FailingCursor(stage=stage, value=value)
+        self.cursor_attempts = 0
+        self.close_attempts = 0
+        self.closed = False
+
+    def cursor(self):
+        self.cursor_attempts += 1
+        if self.stage == "cursor_create":
+            raise RuntimeError("SYNTHETIC_PRIVATE_CANARY")
+        return self.cursor_value
+
+    def close(self):
+        self.close_attempts += 1
+        if self.stage == "connection_close":
+            raise RuntimeError("SYNTHETIC_PRIVATE_CANARY")
+        self.closed = True
+
+    def execute(self, _statement):
+        if self.closed and self.stage != "connection_post_close_verification":
+            raise sqlite3.ProgrammingError("SYNTHETIC_PRIVATE_CANARY")
+        return None
+
+
 def _store(tmp_path: Path, rows: list[tuple[str, object]]) -> Path:
     path = (tmp_path / "synthetic-settings.sqlite").resolve()
     connection = sqlite3.connect(path)
@@ -42,6 +107,40 @@ def test_exact_synthetic_setting_builds_disabled_composition_and_closes_store(
     assert len(composition.statement_digests) == 9
     store.unlink()
     assert not store.exists()
+
+
+def test_opaque_value_reaches_connection_path_byte_for_byte_without_echo(
+    tmp_path, monkeypatch, capsys, caplog,
+):
+    value = "  postgresql://synthetic.invalid/경계?token=Ω  "
+    store = _store(tmp_path, [("synthetic.connection", value)])
+    observed = []
+
+    class SyntheticPath:
+        def __init__(self, opaque_value):
+            observed.append(opaque_value)
+
+    sentinel = object()
+    monkeypatch.setattr(settings, "Psycopg2SingleConnectionPath", SyntheticPath)
+    monkeypatch.setattr(
+        settings,
+        "build_disabled_orders_evidence_composition",
+        lambda *, path, monotonic: sentinel,
+    )
+    resolver = settings.ApplicationSettingsOpaqueResolver(
+        store_path=store,
+        locator="synthetic.connection",
+    )
+
+    result = settings.build_disabled_orders_evidence_composition_from_settings(
+        resolver=resolver,
+    )
+
+    assert result is sentinel
+    assert observed == [value]
+    assert observed[0].encode("utf-8") == value.encode("utf-8")
+    assert capsys.readouterr() == ("", "")
+    assert not caplog.records
 
 
 @pytest.mark.parametrize(
@@ -130,6 +229,82 @@ def test_resolver_is_single_use_and_never_echoes_locator_or_value(tmp_path):
         )
     assert str(error.value) == "settings_resolution_failed"
     assert locator not in repr(error.value) and value not in repr(error.value)
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "connect",
+        "cursor_create",
+        "pragma_set",
+        "pragma_query",
+        "pragma_fetch",
+        "value_query",
+        "value_fetch",
+        "cursor_close",
+        "cursor_post_close_verification",
+        "connection_close",
+        "connection_post_close_verification",
+    ],
+)
+def test_every_settings_failure_cleans_up_fails_fixed_and_consumes_once(
+    tmp_path, monkeypatch, capsys, caplog, stage,
+):
+    locator = "synthetic.private.locator"
+    value = "  SYNTHETIC_PRIVATE_VALUE_한글  "
+    store = _store(tmp_path, [(locator, value)])
+    connection = FailingConnection(stage=stage, value=value)
+    connect_calls = []
+    composition_calls = []
+
+    def connect(*_args, **_kwargs):
+        connect_calls.append(True)
+        if stage == "connect":
+            raise RuntimeError("SYNTHETIC_PRIVATE_CANARY")
+        return connection
+
+    monkeypatch.setattr(settings.sqlite3, "connect", connect)
+    monkeypatch.setattr(
+        settings,
+        "Psycopg2SingleConnectionPath",
+        lambda _value: composition_calls.append(True),
+    )
+    resolver = settings.ApplicationSettingsOpaqueResolver(
+        store_path=store,
+        locator=locator,
+    )
+
+    with pytest.raises(settings.SettingsResolutionRejected) as error:
+        settings.build_disabled_orders_evidence_composition_from_settings(
+            resolver=resolver,
+        )
+
+    assert str(error.value) == "settings_resolution_failed"
+    assert connect_calls == [True]
+    assert connection.cursor_attempts == (0 if stage == "connect" else 1)
+    if stage == "connect":
+        assert connection.close_attempts == 0
+        assert connection.cursor_value.close_attempts == 0
+    else:
+        assert connection.close_attempts == 1
+        if stage == "cursor_create":
+            assert connection.cursor_value.close_attempts == 0
+        else:
+            assert connection.cursor_value.close_attempts == 1
+    assert composition_calls == []
+    assert locator not in repr(error.value) and value not in repr(error.value)
+    assert capsys.readouterr() == ("", "")
+    assert not caplog.records
+
+    with pytest.raises(
+        settings.SettingsResolutionRejected,
+        match=r"^settings_resolution_failed$",
+    ):
+        settings.build_disabled_orders_evidence_composition_from_settings(
+            resolver=resolver,
+        )
+    assert connect_calls == [True]
+    assert connection.close_attempts == (0 if stage == "connect" else 1)
 
 
 def test_locator_is_parameterized_and_runtime_remains_unwired():

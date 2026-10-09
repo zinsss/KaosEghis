@@ -484,6 +484,9 @@ absolute settings-store path and one opaque locator. The resolver:
 - requires exactly one non-blank string row, rejects missing, duplicate,
   malformed, relative-path, symlink, reused, or cleanup-uncertain cases with the
   fixed `settings_resolution_failed` reason;
+- uses whitespace trimming only to decide whether the string is non-blank and
+  passes the original opaque string unchanged, including leading/trailing
+  whitespace and Unicode code points, into the reviewed connection path;
 - closes and verifies the cursor and settings connection before passing the
   opaque value directly into the already reviewed
   `Psycopg2SingleConnectionPath`; and
@@ -1341,3 +1344,10 @@ verification is not reported as a full baseline.
   setting value, credential, authentication, source connection, SQL, patient
   data, runtime activation, retry, push, or deployment occurred. A new window,
   fresh authorization, regenerated manifest, and final review remain required.
+- **2026-10-10:** Applied the single integration-review return: preserved the
+  original opaque string unchanged while retaining whitespace-only rejection,
+  and added synthetic probes for connect, cursor creation, both PRAGMA steps,
+  value query/fetch, cursor close, connection close, and both post-close
+  verification failures. Every failure consumes the resolver once, attempts all
+  available cleanup, returns only `settings_resolution_failed`, constructs no
+  composition, and emits no locator/value. All execution gates remain stopped.

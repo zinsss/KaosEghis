@@ -85,7 +85,7 @@ class ApplicationSettingsOpaqueResolver(_Redacted):
                 or not rows[0][0].strip()
             ):
                 raise SettingsResolutionRejected("settings_resolution_failed")
-            resolved_value = rows[0][0].strip()
+            resolved_value = rows[0][0]
         except SettingsResolutionRejected:
             failed = True
         except Exception:
