@@ -451,6 +451,7 @@ def test_no_io_runtime_wire_reader_or_mapping_surface():
     ):
         assert not hasattr(model, forbidden)
     root = path.parents[1]
+    allowed_consumer = path.with_name("kaosorders_current_day_wire.py")
     for other in root.rglob("*.py"):
-        if other != path:
+        if other not in {path, allowed_consumer}:
             assert "kaosorders_current_day_orders" not in other.read_text(encoding="utf-8-sig")

@@ -1,8 +1,9 @@
 # Current-day volatile provider remaining gates
 
-- **Status:** Phase 3A pure lifecycle model review remediation completed; disabled
-  runtime and all production gates remain pending
-- **Last updated:** 2026-10-08
+- **Status:** Phase 3A pure lifecycle reviewed; Phase 3B synthetic Orders serializer
+  and disabled in-process handler implemented; independent handoff review pending;
+  source, runtime activation, and all production gates remain pending
+- **Last updated:** 2026-10-09
 - **Owning project:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, KaosReception, orchestration,
   clinic operations
@@ -11,10 +12,9 @@
 
 The selected architecture is one Eghis-owned, SQLite-free, volatile current-day
 provider. Orchestration commit
-`92880706c58ace9debaf985343857f6a4ec62635` is the normative baseline for this
-plan. It retains the lifecycle/runtime decisions accepted at `5277764`, adds the
-destination-token hardening below, and supersedes the earlier `bd3c66a` planning
-baseline:
+`5dd9e23` is the normative baseline for this plan. It retains the lifecycle/runtime
+decisions accepted at `5277764`, the destination-token hardening accepted at
+`9288070`, and supersedes the earlier `bd3c66a` planning baseline:
 
 - `architecture/current-day-volatile-provider-v1.md` selects one authoritative
   owner and destination-minimal Orders and Reception projections;
@@ -39,8 +39,8 @@ fixtures, or handoff evidence; tests use synthetic values only.
 
 ## Current repository evidence and plan delta
 
-The repository already contains three separate building blocks, none of which
-is the common runtime provider:
+The repository contains four separate building blocks, none of which is a mounted
+or active common runtime provider:
 
 1. `KaosEghis/core/kaosorders_current_day_orders.py` is a pure immutable Orders
    fact model/validator/comparator using synthetic data only.
@@ -51,6 +51,10 @@ is the common runtime provider:
    the existing serialized-read and close-before-return boundary. The current
    macro scheduler is a persistent SQLite job system and is not suitable for
    this provider's no-persistence lifecycle.
+4. `KaosEghis/core/kaosorders_current_day_wire.py` is the Phase 3B pure,
+   synthetic-only Orders serializer and exact in-process handler. It imports only
+   the reviewed pure lifecycle/fact boundaries and standard-library helpers; no
+   runtime module imports it.
 
 The original project plans treated Orders and Reception as independent source
 paths. The plan delta is to establish one owner lifecycle and one accepted source
@@ -226,8 +230,9 @@ unassigned. Required evidence includes:
   no partial/truncated replacement;
 - approved mapping revision, source/projection identity, maximum source/result
   rows and bytes, latency, query plan, privileges, and clinical-hours load;
-- an Orders-owned decision for freshness/stale serving and destination payload
-  bounds before a provider serializer or handler exists.
+- the already accepted Orders wire limits and freshness behavior remain synthetic
+  implementation inputs only until the source mapping and production evidence are
+  accepted.
 
 No numeric display-field proposal, legacy normalized source, diagnostic outbox,
 or current `/api/v1/order-snapshots` behavior becomes part of this provider unless
@@ -282,8 +287,8 @@ low-cardinality.
 Deployment review must disable or tightly govern user/system crash dumps for the
 provider, restrict debugger rights, decide whether encrypted swap/pagefile and
 hibernation satisfy clinic policy, and prohibit response/proxy/browser/service-worker
-caches. Every future HTTP response is `Cache-Control: no-store`; exact wire headers
-remain destination-contract work.
+caches. The synthetic Orders handler implements the accepted exact no-store headers;
+deployment must still prove that HTTP/proxy layers preserve them and add no cache.
 
 ### Rollback
 
@@ -368,12 +373,66 @@ or order-shaped fixture is required.
 The isolated results are focused verification, not a complete repository baseline.
 The full baseline remains blocked by the existing host GUI-library dependency.
 
+## Phase 3B synthetic Orders wire implementation
+
+`KaosEghis/core/kaosorders_current_day_wire.py` implements only the synthetic,
+injected, disabled Orders boundary authorized by orchestration `5dd9e23`. It is not
+mounted or imported by application runtime code and contains no socket, HTTP server,
+source reader, SQL, credential lookup, settings, scheduler, persistence, UI, or
+deployment integration.
+
+The implementation fixes these contract artifacts:
+
+- exact `GET /api/v1/current-day/orders`, media types, closed success/error bodies,
+  application-controlled no-store headers, 16 MiB body bound, and fixed status/code
+  table;
+- deterministic RFC 8785-compatible JSON for the contract's closed ASCII-key,
+  integer/boolean/null/string-only schema, with literal populated and verified-empty
+  canonical fixture bytes and SHA-256 digests;
+- exact parent/child/qualifier/key projection from the reviewed immutable fact
+  model, preserving nullable/blank child text and deterministic collection order;
+- an invented synthetic Orders-only bearer identity and injected identity set with
+  fixed/redacted failures for missing, malformed, expired, revoked, wrong-audience,
+  wrong-projection, and wrong-source credentials;
+- one immutable `SyntheticOrdersProjection` that binds the exact lifecycle snapshot
+  reference and injected synthetic clinic/source/mapping scope to one complete fact
+  set, clinic day, destination availability, and synthetic projected item count;
+- startup, rollover, projection-reference, future-time, 300-second freshness,
+  rate-limit, response-bound, verified-empty, and failure-envelope behavior; and
+- an in-process request/response handoff only. Request handling does not schedule or
+  trigger source work, bind a route, open a network connection, or read a secret.
+
+The synthetic mapping label and bearer bytes are test artifacts. They are never a
+production mapping revision or credential and cannot be promoted. The production
+mapping remains unassigned, `EghisSourceDayReader` remains unavailable, and the
+existing `/api/v1/order-snapshots` path is explicitly rejected rather than reused.
+
+### Phase 3B validation evidence
+
+- The normal focused command collected the 23 then-defined wire tests, but all 23
+  stopped in autouse setup because importing the unrelated PySide6 PACS fixture
+  failed on missing host `libxkbcommon.so.0`; no wire assertion ran in that pass.
+- The final wire suite contains **24 tests** and passes with `--noconftest`, plugin
+  autoload disabled, and bytecode disabled.
+- The combined Phase 3B wire suite plus pure Orders facts, lifecycle, Reception
+  projection, and bounded Reception reader regressions passes **343 tests** under
+  the same isolated mode.
+- Tests include literal contract assertions independent of implementation enums,
+  literal fixture bytes/digests, independent SHA-256 checks, all closed error codes,
+  request negotiation, auth/audience/revocation, exact headers, bounds, freshness,
+  rollover, immutable snapshot identity, verified empty, redaction, and an AST
+  boundary proving the module remains free of I/O/runtime imports and calls.
+
+These isolated results are focused pure verification, not a full baseline. The
+existing host GUI-library blocker remains unresolved and no system package was
+installed or changed.
+
 ## Safe implementation sequence
 
 1. Independent review of the provider contract inputs: completed through central
    baseline `9288070`.
 2. Implement the pure, I/O-free lifecycle state model and synthetic matrix:
-   completed in Phase 3A; independent code review pending.
+   completed and reviewed in Phase 3A.
 3. Accept Option A, the common runtime/transport rules, and separate destination
    wire/auth contracts: completed through central baseline `9288070`.
 4. Freeze and synthetically verify the common source-observation contract; obtain
@@ -381,7 +440,9 @@ The full baseline remains blocked by the existing host GUI-library dependency.
 5. Implement a disabled coordinator and source adapter behind injected boundaries;
    test single-flight, deadlines, cleanup, rollover, atomicity, and memory bounds.
 6. Implement disabled destination projections/handlers and consumer parsers with
-   synthetic contract/integration tests and auth-denial/cache tests.
+   synthetic contract/integration tests and auth-denial/cache tests. The Eghis
+   Orders serializer/handler candidate is complete in Phase 3B; Orders parser/client
+   work remains unauthorized until independent review accepts this handoff.
 7. Prepare a deployment proposal covering service topology, singleton enforcement,
    secret/certificate operations, firewall, monitoring, dumps/swap, rollback, and
    Reception spool. Deployment still requires separate explicit approval.
@@ -404,24 +465,31 @@ route or deployment.
 
 ## Evidence completed in this phase
 
-- Synthetic-only pure-model implementation, tests, and contract inspection only.
-- The current-day lifecycle, Orders model, Reception model/reader, and their
-  synthetic tests contain no destination bearer generator, validator, handler,
-  or disabled auth contract artifact. The lifecycle `lease_token` is an unrelated
-  injected singleton-fence identity and is not a destination credential.
+- Synthetic-only pure serializer/handler implementation, tests, and contract
+  inspection only.
+- The new Orders bearer is an explicitly synthetic injected test identity with a
+  redacted representation. It is not generated, loaded, stored, logged, mounted,
+  or accepted by runtime configuration. The lifecycle `lease_token` remains an
+  unrelated injected singleton-fence identity.
 - No source/service/network connection, credential discovery, runtime import,
-  route binding, scheduler activation, patient/order fixture, or deployment.
+  route binding, scheduler activation, real patient/order fixture, or deployment.
 - The plan preserves all accepted lifecycle/session and destination logical
   contracts and names every remaining contract/evidence owner.
 
 ## Next action
 
-Independent integration review should compare the Phase 3A model/tests with
-orchestration `9288070` and verify the pure boundary, transition invariants, and
-isolated remediation evidence. Only after that review may Eghis begin the separately
-sequenced disabled coordinator/source-boundary slice using injected synthetic
-observations. SQL/source access, HTTP serialization/handlers/auth, sockets, runtime
-mounting, persistence, activation, and deployment remain outside this slice.
+Independent integration review should compare the Phase 3B serializer/handler,
+literal fixture bytes/digests, request/error/auth matrices, and isolated test
+evidence with orchestration `5dd9e23`. Until that review passes, Orders receiver
+implementation is **not yet authorized**. A PASS authorizes Orders only for its
+accepted injected, disabled parser/client and volatile lifecycle/freshness tests;
+it does not authorize FastAPI/runtime wiring, real credentials, network access,
+board cutover, persistence, activation, or deployment.
+
+The next Eghis runtime/source work remains separately sequenced. Production SQL,
+source access, mapping assignment, socket/route mounting, credential lookup,
+settings integration, persistence, activation, and deployment remain outside this
+slice.
 
 ## Revision history
 
@@ -446,3 +514,10 @@ mounting, persistence, activation, and deployment remain outside this slice.
   bits of CSPRNG entropy. Token sharing or cross-destination derivation is
   forbidden. No credential, secret-store, handler, socket, or runtime artifact was
   created because destination authentication remains unimplemented in this repo.
+- **2026-10-09:** Aligned the plan with orchestration `5dd9e23` and implemented the
+  synthetic-only Orders serializer, canonical populated/empty fixture bytes and
+  digests, invented Orders bearer boundary, and exact disabled in-process handler.
+  Recorded the 24 focused and 343 combined isolated passes and the unchanged
+  PySide6/`libxkbcommon.so.0` normal-test blocker. No source, socket, route mount,
+  real credential, runtime activation, persistence, push, or deployment occurred;
+  Orders receiver work remains gated on independent PASS of this handoff.
