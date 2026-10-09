@@ -670,7 +670,7 @@ proposed inputs only; they do not change the closed template or make its
 | `starts_at` | `2026-10-10T00:30:00+09:00` | Supplied; not activated pending the prerequisite PASS and immutable approval digest. |
 | `ends_at` | `2026-10-10T01:00:00+09:00` | Supplied; same KST day and exactly 30 minutes, but not reusable after expiry. |
 | `operator_reference` | `agent:kaosclinic-eghis:main` | Supplied, but the colon characters do not match the closed `[A-Za-z0-9][A-Za-z0-9._-]*` syntax; a compliant canonical reference requires owner confirmation and cannot be normalized implicitly. |
-| `cancellation_owner_reference` | `LeeJS_Gdd` | Supplied compliant stable reference; Telegram sender reference `8406158172` is provenance only and is not copied into the canonical field. Independent review remains pending. |
+| `cancellation_owner_reference` | `LeeJS_Gdd` | Supplied compliant stable reference; out-of-band provenance is excluded from the canonical field. Independent review remains pending. |
 | `approval_sha256` | **BLOCKED** | No immutable privacy-safe approval artifact and digest has been reviewed. |
 | attempt time/evidence date | **BLOCKED** | No attempt occurred; a future attempt must begin inside the approved interval on 2026-10-10 KST. |
 
@@ -991,3 +991,8 @@ verification is not reported as a full baseline.
   attestation, window approval digest, immutable manifest, and attempt remain
   blocked; the candidate window expires rather than being reused if prerequisite
   review does not complete in time.
+- **2026-10-09:** Removed a raw messaging-account identifier from the readiness
+  record after independent review. Only the approved non-sensitive canonical
+  reference may enter the closed field; out-of-band provenance is excluded.
+  Manifest bytes, `BLOCKED` values, window semantics, and the pre-authentication
+  stop are unchanged.
