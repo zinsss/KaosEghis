@@ -2,8 +2,10 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+import math
 import sys
 import threading
+import time
 
 
 _worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="KaosEghis-emr")
@@ -31,7 +33,7 @@ def _check_health():
 
 
 @contextmanager
-def _exclusive_reader():
+def _exclusive_reader(*, deadline=None, monotonic=time.monotonic):
     # The service/API and tools can run in separate processes. Keep their
     # physical connections exclusive too, including elevated instances.
     if sys.platform != "win32":
@@ -44,7 +46,19 @@ def _exclusive_reader():
     acquired = False
     retained = False
     try:
-        result = win32event.WaitForSingleObject(handle, 60000)
+        wait_milliseconds = 60000
+        if deadline is not None:
+            if (
+                type(deadline) not in (int, float)
+                or not math.isfinite(deadline)
+                or not callable(monotonic)
+            ):
+                raise RuntimeError("EMR read deadline is invalid; no connection opened.")
+            wait_milliseconds = min(
+                60000,
+                max(0, math.ceil((deadline - monotonic()) * 1000)),
+            )
+        result = win32event.WaitForSingleObject(handle, wait_milliseconds)
         acquired = result in (win32event.WAIT_OBJECT_0, win32event.WAIT_ABANDONED)
         if not acquired:
             raise RuntimeError("EMR read queue busy; no connection opened.")

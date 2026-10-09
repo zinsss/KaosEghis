@@ -8,6 +8,7 @@
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
 - **Central baseline:** orchestration `e341737`
+- **Stopped execution protocol:** orchestration `74a5cda8fde27990fa538fdb7fb44b10f023eca5`
 - **Package ID:** `eghis-kaosorders-non-phi-evidence-run-v1`
 - **Package revision:** `review-candidate-3`
 
@@ -16,6 +17,12 @@
 Orchestration authorized the bounded non-PHI evidence protocol at immutable commit
 `e341737`. This package is the Eghis-owned, documentation-only first run package
 required before any source operation. It does not authorize or perform execution.
+
+Canonical protocol `74a5cda8fde27990fa538fdb7fb44b10f023eca5`
+records independent acceptance of executor commit `81e57dc7` but stops the
+execution gate. The owner's stated intent for a future attempt does not activate
+that gate. The exact backend, non-secret attestation, and bounded window must each
+pass review first; only then may the owner reconfirm one single bounded attempt.
 
 The original evidence plan contemplated one broad evidence package. Exact
 demographic fields, authoritative joins, production types, and index identities
@@ -421,9 +428,22 @@ The disabled candidate is
 `KaosEghis/core/kaosorders_non_phi_evidence_executor.py`; its synthetic contract
 tests are `tests/test_kaosorders_non_phi_evidence_executor.py`. It has no driver,
 settings, credential lookup, connection string, source discovery, CLI, scheduler,
-runtime import, or route. It accepts a resource-owning connection context, a
-deadline-aware serialized-read function, and an atomic no-overwrite sink only
+runtime import, or route. It accepts a resource-owning connection context, the
+reviewed concrete serialized-read lease, and an atomic no-overwrite sink only
 after three closed prerequisite objects validate.
+
+The concrete disabled lease backend is
+`KaosEghis/core/kaosorders_non_phi_evidence_lease.py`. Its factory is not imported
+or called by application runtime code. Construction alone does not submit work,
+acquire a mutex, connect, or read a source. On an explicitly approved future
+attempt, it reuses the same bounded-capacity single-worker FIFO and
+`_exclusive_reader` named mutex as `run_serialized_read`. The backend exposes
+ownership only after the worker enters the exclusive scope, and reports release
+only after that worker exits the scope. Queue admission, named-mutex wait, held
+time, and release confirmation all consume the executor's one absolute deadline.
+An unconfirmed queued worker, deadline-expired held lease, worker failure, or
+release uncertainty marks the shared EMR reader unhealthy and blocks later reads.
+No connection or credential behavior is included.
 
 The owner-authorized exception after the second integration-review failure is
 limited to two executor defects: remove caller self-attestation of serialized
@@ -439,6 +459,31 @@ authority role `database-security-authority`, and validity dates covering the
 evidence date. No username, role dump, host, credential, or connection property is
 permitted. This attestation is **not available** and cannot be invented here.
 
+### Non-secret identity/path attestation template
+
+The database security authority must complete and privacy-review this exact
+shape outside chat. Angle-bracket values are required non-secret references, not
+values supplied by this plan:
+
+```json
+{
+  "contract_id": "kaoseghis.orders-evidence-read-path-attestation.v1",
+  "decision": "approved",
+  "attestation_sha256": "<64 lowercase hex privacy-safe attestation digest>",
+  "identity_class": "dedicated-least-privilege-read-only",
+  "path_class": "existing-serialized-read-single-connection",
+  "p00_statement_sha256": "6b32e06db86fd62b7df3c6edb860b6f0e1482ec2f3e98b3304811688d0dcd3d6",
+  "authority_role": "database-security-authority",
+  "valid_from": "<YYYY-MM-DD>",
+  "expires_on": "<YYYY-MM-DD>"
+}
+```
+
+The attestation must not contain a username, host, port, database name,
+connection string, role dump, credential, secret-store locator, token, or live
+payload. Approval is invalid unless its date range covers the evidence date and
+its digest resolves to a separately reviewed non-secret attestation.
+
 The executor approval must provide exactly: approval contract/version ID,
 `approved` decision, review SHA-256, exact 40-hex executor commit matching the
 running build, reviewer role `independent-integration-review`, and package revision
@@ -450,6 +495,30 @@ decision, approval SHA-256, KST start/end no longer than 30 minutes and containi
 the attempt time, plus non-sensitive stable references naming the operator and
 cancellation owner. Those values are **not available** and cannot be inferred from
 the owner's general approval.
+
+### Bounded KST execution-window template
+
+The future operator and cancellation owner must be named only by stable,
+non-sensitive references. This template records no approval by itself:
+
+```json
+{
+  "contract_id": "kaoseghis.orders-evidence-window.v1",
+  "decision": "approved",
+  "approval_sha256": "<64 lowercase hex privacy-safe approval digest>",
+  "starts_at": "<YYYY-MM-DDTHH:MM:SS+09:00>",
+  "ends_at": "<YYYY-MM-DDTHH:MM:SS+09:00>",
+  "operator_reference": "<approved non-sensitive operator reference>",
+  "cancellation_owner_reference": "<approved non-sensitive cancellation-owner reference>"
+}
+```
+
+Both endpoints and the evidence date must be the same `Asia/Seoul` date, the
+window must be positive and no longer than 30 minutes, and the actual attempt
+time must fall inside it. No person name, contact detail, credential, host, or
+patient information is permitted. Owner intent does not populate or activate
+this record; it must be completed, independently reviewed, and reconfirmed before
+one attempt can be authorized.
 
 The candidate starts one monotonic 10-second fence before prerequisite and
 statement validation. It requires `evidence_date`, KST `now`, and both
@@ -466,9 +535,9 @@ one backend `acquire_until(deadline)`, independently queries
 `release_owned(deadline)` in reviewed `finally` code. It queries ownership again
 after release. A positive acquire without observed ownership, no acquisition,
 an externally unreleased lease, a forged state object, multiple use, or uncertain
-release all block with no publication. The exact future FIFO/mutex backend must
-itself receive independent review and be bound by a later executor approval;
-there is no production backend or runtime binding in this candidate.
+release all block with no publication. The concrete FIFO/mutex backend prepared
+above must receive independent review and be bound by a later executor approval;
+there is no runtime binding or activation in this candidate.
 
 Validation, lease acquisition, connection acquisition, every statement,
 cancellation, C99 rollback, cursor close, physical-connection close, lease
@@ -481,14 +550,16 @@ Only after all guards pass may canonical artifact construction and atomic
 no-overwrite publication occur. The sink must remove and verify absence of any
 run-created visible final after failure; a pre-existing final is never overwritten
 or deleted. Allowed fixed validation reasons are preserved without raw error text.
-No production binding is included.
+No runtime binding or activation is included.
 
-Local verification after the owner-authorized final lease remediation: 47 executor
-cases and 37 existing capture tests passed together under the approved isolated
-pure-model path (84 passed); 355 adjacent lifecycle, Orders wire/fact, and
-Reception pure regressions also passed. The normal executor test invocation
-reached 47 setup errors before test execution solely because this host cannot load
-PySide6 without `libxkbcommon.so.0`. No host package was installed, and isolated
+Local verification after concrete-backend preparation: 47 executor cases, 37
+existing capture cases, and 9 backend cases passed together under the approved
+isolated pure-model path (93 passed). The non-GUI existing EMR read-queue
+regression subset passed 45 with 3 platform skips; its four GUI consumer cases
+remain unexecutable because this host cannot load PySide6 without
+`libxkbcommon.so.0`. A further 355 lifecycle, Orders wire/fact, and Reception pure
+regressions passed. The normal focused invocation reached 93 setup errors for the
+same host-library blocker. No host package was installed, and isolated
 verification is not reported as a full baseline.
 
 ## Next action
@@ -558,5 +629,13 @@ verification is not reported as a full baseline.
   `SerializedReadLease` wrapper: executor code now calls acquire/release and
   independently queries backend ownership before connection and after release.
   Added no-lease, false-positive acquire, forged-object, acquire-then-raise, and
-  externally unreleased-backend probes. The production FIFO/mutex backend remains
-  absent and must be separately reviewed before any execution approval.
+  externally unreleased-backend probes. At that revision the production
+  FIFO/mutex backend remained absent and required separate review before any
+  execution approval.
+- **2026-10-09:** Prepared the disabled concrete production-shaped FIFO/mutex
+  backend using the existing EMR read worker and named-mutex scope, with one
+  deadline, single-attempt admission, independent held/released observations,
+  unhealthy fail-closed behavior, and no runtime import or activation. Added
+  closed non-secret identity/path and KST window templates. No values were
+  invented and the evidence attempt remains stopped pending independent PASS and
+  later authorization reconfirmation.
