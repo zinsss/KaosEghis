@@ -593,3 +593,12 @@ slice.
   a synthetic verification plan. Execution remains blocked on Orders and
   independent review; no source, credential, patient value, runtime, push, or
   deployment was accessed.
+- **2026-10-09:** Remediated the single Orders review return for the closed
+  non-PHI package: aligned K20 to its exact eight-column statement, closed the
+  envelope/results/provenance/91-criterion schema, bounded V01 to
+  `120000..179999`, made the 10-second fence admission-through-release, and added
+  a pure injected capture/atomic-publication/cleanup/deadline/leap-day harness.
+  The normal focused pytest remains blocked before collection by the host's
+  missing PySide6 `libxkbcommon.so.0`; isolated pure verification is recorded in
+  the handoff. No source SQL was executed and no runtime, credential, patient
+  data, push, or deployment boundary changed.

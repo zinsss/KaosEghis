@@ -6,7 +6,7 @@
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
 - **Central baseline:** orchestration `e341737`
 - **Package ID:** `eghis-kaosorders-non-phi-evidence-run-v1`
-- **Package revision:** `review-candidate-1`
+- **Package revision:** `review-candidate-2`
 
 ## Context and plan delta
 
@@ -17,10 +17,11 @@ required before any source operation. It does not authorize or perform execution
 The original evidence plan contemplated one broad evidence package. Exact
 demographic fields, authoritative joins, production types, and index identities
 are still unproven, so this revision deliberately closes only a metadata-first
-run. It may establish least-privilege and allowlisted catalog facts. It cannot
-ratify a mapping, and it cannot dynamically expand into row, domain, aggregate,
-plan, or demographic queries. A later inventory requires a new immutable digest,
-documentation revision, Orders review, and independent PASS.
+run. It may establish only the 15 scoped privilege booleans and allowlisted
+catalog facts. It cannot establish full least privilege, ratify a mapping, or
+dynamically expand into row, domain, aggregate, plan, or demographic queries. A
+later inventory requires a new immutable digest, documentation revision, Orders
+review, and independent PASS.
 
 ## Settled leap-day rule
 
@@ -44,7 +45,7 @@ These invented dates are contract vectors, not patient examples.
 ## Closed statement inventory
 
 The exact statement bytes are frozen in
-[Eghis → KaosOrders Non-PHI Evidence Statements v1](evidence/eghis-kaosorders-non-phi-evidence-statements-v1.md).
+[Eghis → KaosOrders Non-PHI Evidence Statements v1](evidence/eghis-kaosorders-non-phi-statements-v1.md).
 No implicit driver probe, session discovery, retry, count, `EXPLAIN`, wildcard,
 row sample, or follow-up statement is allowed.
 
@@ -54,8 +55,8 @@ row sample, or follow-up statement is allowed.
 | `EKO-C01` | Set the local statement timeout to 1.5 seconds. | 0 | Exact control must succeed before evidence. |
 | `EKO-C02` | Set the local lock timeout to 100 milliseconds. | 0 | Exact control must succeed before evidence. |
 | `EKO-C03` | Set the local idle-in-transaction timeout to 5 seconds. | 0 | Exact control must succeed before evidence. |
-| `EKO-P00` | Prove transaction read-only mode, SELECT on exactly three allowlisted relations, and absence of specified write/DDL/temp/non-system-function capabilities across non-system objects. | 1 | `proven` only if one row has every closed boolean true; otherwise stop and mark least privilege `unproven`. |
-| `EKO-V01` | Record only PostgreSQL `server_version_num` as the source database version class. | 1 | Version provenance is `proven` only for one ASCII-digit string of at most 16 bytes; mismatch against the reviewed execution target stops the run. |
+| `EKO-P00` | Prove transaction read-only mode and exactly the 14 additional allowlisted privilege facts named by the statement. | 1 | The 15 scoped facts are `proven` only if one row has every closed boolean true. This does not establish full least privilege; any false, null, missing, extra, or non-boolean value stops before `EKO-V01`. |
+| `EKO-V01` | Record only PostgreSQL `server_version_num` as the source database version class. | 1 | Exactly one six-ASCII-digit string in the frozen inclusive range `120000..179999` is accepted. Any other type, width, alphabet, or value stops before `EKO-M10` with `version_mismatch`. |
 | `EKO-M10` | Return type/nullability/generated/identity metadata for exactly 19 named candidate columns. | 19 | Each named field is `proven` only for its observed metadata fact; absence or any schema mismatch is `unproven` and stops the run. No clinical meaning is inferred. |
 | `EKO-K20` | Return matching-index metadata for exactly three predefined candidate key shapes, excluding partial and expression indexes. | 3 | Observed match facts may be `proven`; authoritative key choice and expected runtime plan remain `unproven` until a later reviewed inventory. |
 | `EKO-C99` | Roll back the read-only transaction on every success, failure, timeout, or cancellation path. | 0 | Cleanup cannot be `closed` until rollback, cursor closure, physical connection closure, and lease release are all confirmed. |
@@ -78,32 +79,78 @@ before execution can be considered:
 
 ## Closed output envelope and schemas
 
-The capture produces one UTF-8 canonical JSON object with exactly these top-level
-fields: `contract_id`, `package_id`, `package_revision`, `central_commit`,
-`evidence_date`, `environment_class`, `source_version_class`, `statements`,
-`criteria`, and `run_status`. Unexpected or missing fields reject the whole file.
-The envelope contains no source ID, mapping revision, host, database, role, user,
-credential, connection string, SQL, raw exception, raw timestamp, path, PID, or
-patient-derived value.
+The pure candidate emits at most one canonical ASCII JSON object. The root is a
+closed object with exactly these fields and values/types (canonical key ordering
+is lexical):
 
-Each `statements` item has exactly `statement_id`, `statement_sha256`, `status`,
-`row_count`, `elapsed_bucket`, and `cleanup_status`. `status` is one of
-`proven`, `unproven`, `not_applicable`; `row_count` is allowed only because the
-closed metadata cardinalities are public package facts (five control rows of 0,
-plus 1, 1, 19, and 3), not a
-clinical count. `elapsed_bucket` is one of `lt_100ms`, `100_to_499ms`,
-`500_to_1499ms`, `timeout`, and `cleanup_status` is `closed` or `uncertain`.
+| Field | Exact value or type |
+| --- | --- |
+| `contract_id` | literal `kaoseghis.non-phi-source-evidence` |
+| `contract_version` | integer `1`; booleans rejected |
+| `package_id` | literal `eghis-kaosorders-non-phi-evidence-run-v1` |
+| `package_revision` | literal `review-candidate-2` |
+| `central_commit` | full literal `e3417375984acc2a58392315e26035e14c253219` |
+| `run_status` | exactly `complete` or `blocked` |
+| `fixed_reason` | exactly `none`, `preflight_failed`, `inventory_mismatch`, `unexpected_shape`, `privacy_boundary`, `row_limit`, `byte_limit`, `timeout`, `cancel_failed`, `cleanup_uncertain`, `version_mismatch`, or `capture_failed`; `none` is valid only with `complete` |
+| `evidence_date` | ISO `YYYY-MM-DD` date supplied by the reviewed run boundary |
+| `environment_class` | literal `production-read-only` |
+| `provenance` | closed object defined below |
+| `results` | closed object defined below |
+| `criteria` | exactly 91 closed criterion objects in the inventory order below |
 
-`EKO-P00` output is exactly the 15 booleans named in its SELECT. `EKO-V01`
-outputs only `source_version_class`, which must be an ASCII-digit string of 1..16
-bytes. `EKO-M10` output
-is exactly `relation_id`, `column_id`, `column_present`, `data_type`, `nullable`,
-`generated`, `identity`; the first two values must match the 19-entry allowlist,
-and `data_type` is capped at 128 ASCII characters. `EKO-K20` output is exactly
-`relation_id`, `index_method`, `is_unique`, `is_primary`, `is_valid`, `is_ready`,
-`key_id`, `matching_index_count`, `any_unique`, `any_primary`, `all_valid`,
-`all_ready`, `single_index_method`; relation/key IDs must match the three-entry
-allowlist and `matching_index_count` is capped at 64.
+Unexpected/missing fields, coercion, NaN/infinity, non-ASCII metadata, or an
+artifact over 65,536 bytes reject the artifact. It contains no source ID,
+mapping revision, host/database/user identity, credential, connection string,
+SQL, exception text, timestamp, PID, patient-derived value, or driver echo.
+
+`results` has exactly `p00`, `v01`, `m10`, and `k20`:
+
+- `p00` is either null or one object with exactly the 15 statement booleans. It
+  is non-null only for `complete` and every value is literal JSON true.
+- `v01` is always an object with exactly `source_version_class`. Its value is a
+  six-ASCII-digit string in `120000..179999`, or null when no accepted version
+  was observed. A clean blocked envelope may retain an already validated version.
+- `m10` is null or exactly 19 objects in the frozen `(relation_id,column_id)`
+  order. Each has exactly `relation_id`, `column_id`, `column_present`,
+  `data_type`, `nullable`, `generated`, `identity`. If `column_present` is false,
+  the last four fields are all null. If true, `data_type` is 1..128 printable
+  ASCII bytes and the other three fields are booleans.
+- `k20` is null or exactly three objects in the frozen `(relation_id,key_id)`
+  order. Each has **exactly eight fields**: `relation_id`, `key_id`,
+  `matching_index_count`, `any_unique`, `any_primary`, `all_valid`, `all_ready`,
+  `single_index_method`. The count is a non-boolean integer `0..64`; zero requires
+  all four flags false and the method null. A positive count permits a null method
+  or 1..128 printable ASCII bytes. This exactly matches the eight-column SELECT.
+
+For `complete`, all four results are populated. For `blocked`, `p00`, `m10`, and
+`k20` are null; `v01.source_version_class` follows the rule above. Timeout,
+cancellation failure, cleanup uncertainty, or publication failure creates no
+artifact at all. Clean fixed validation failures may atomically publish only the
+closed blocked envelope.
+
+Each `criteria` item is a closed object with exactly `criterion_id`, `status`,
+`source_statement_id`, and `fixed_reason`. `status` is exactly `proven`,
+`unproven`, or `not_applicable`. `source_statement_id` is null or one of
+`EKO-P00`, `EKO-V01`, `EKO-M10`, `EKO-K20`; metadata-only logical limits never
+receive a source statement. `fixed_reason` is null only for a proven complete-run
+fact; otherwise it is a fixed reason, `metadata_only`,
+`owner_decision_not_source_evidence`, or `synthetic_harness_only`.
+
+The closed `provenance` object contains exactly:
+
+- repository-relative `artifact_path` literal
+  `evidence/eghis-kaosorders-non-phi-evidence-v1.json`;
+- lowercase 64-hex `safe_content_sha256`, computed over canonical
+  `{"criteria":<criteria>,"results":<results>}` from the same in-memory objects;
+- `reviewer_role=independent-integration-review` and
+  `authority_role=clinical-product-owner` (roles, never personal identities);
+- `applicable_source_database_version`, equal to the accepted V01 value or null;
+- `accepted_version_range=120000-179999`;
+- `expires_on`, exactly 30 calendar days after `evidence_date`; and
+- ordered `revalidation_triggers`: source/database version change; schema,
+  relation, column, key, or index change; privilege or identity change; statement
+  or digest change; package or protocol change; environment-class change;
+  contradictory or unverifiable evidence; review expiry.
 
 ## Aggregation and suppression policy
 
@@ -125,30 +172,94 @@ a later statement.
 
 - one physical connection, one read-only `REPEATABLE READ` transaction, and no
   connection pool;
-- transaction admission only after an external serialized-read lease is obtained;
-- 10-second total admission-to-physical-close deadline;
+- one monotonic 10-second fence starts immediately before FIFO/serialized-lease
+  admission and includes queue wait, lease acquisition, connection, every control
+  and metadata read, cancellation, rollback, cursor closure, physical connection
+  closure, and lease release;
 - 1.5-second statement timeout and 100-millisecond lock timeout per statement;
 - no retry, no savepoint retry, no second connection, and no coalesced follow-up;
 - maximum 24 result rows and 64 KiB canonical output for the full run;
 - maximum 128 bytes for any scalar text and maximum matching-index count 64;
 - cursor closure immediately after each fetch, transaction rollback after the last
-  read, physical connection closure before validation/persistence, and detached
-  row clearing after canonical output; and
-- source version/environment mismatch, queue delay leaving less than 5 seconds,
-  or inability to guarantee cleanup before the global deadline stops before the
-  first statement.
+  read, physical connection closure and lease release before artifact construction
+  or publication, and detached row clearing after canonical output; and
+- package/environment mismatch, queue delay leaving less than 5 seconds, or
+  inability to guarantee cleanup before the global deadline stops before the
+  first statement; V01 version mismatch stops before M10.
 
-## Criteria mapping
+## Fixed criterion inventory and crosswalk
 
-| Mapping criterion | This run can establish | This run cannot establish |
-| --- | --- | --- |
-| least privilege | Closed booleans for the exact relations and prohibited capabilities in `EKO-P00`. | Broader deployment identity, network, TLS, secret-store, or unlisted callable paths. Any false/unknown result blocks all later statements. |
-| candidate fields/types | Presence, PostgreSQL type, nullability, generated and identity flags for 19 already named candidates. | Authoritative meaning, content domain, privacy approval, demographic source, or mapping assignment. |
-| keys/indexes | Simple key/index shapes for three relations. | Expected production plan, capacity, complete relation coverage, save fence, or authoritative key selection. |
-| parent/child semantics | Nothing; status remains `unproven`. | Raw state × hold truth table, child cancellation truth table, cancellation/restoration, no-order and category coverage. |
-| completeness | Nothing; status remains `unproven`. | Complete-day, verified-empty, duplicate/orphan/off-day, exact-one join, alternate relation, and save consistency. |
-| demographics | Leap-day product rule only, from owner decision rather than source evidence. | Chart/name/sex/age source fields, exact-one join, privacy-approved birth input/expression, and production domain proof. |
-| performance | Bounded metadata statement duration buckets only. | Clinical-hours query plan, queue impact, row/byte capacity, aggregate query latency, or common-observation deadline proof. |
+The envelope contains these exact 91 IDs, once each and in the order shown. Only
+the first 20 can become `proven` in a complete metadata run. The 56 logical and
+capacity IDs remain `unproven/metadata_only`; the owner policy is
+`not_applicable/owner_decision_not_source_evidence`; failure-rule IDs are
+`not_applicable/synthetic_harness_only` unless the corresponding clean fixed
+failure produced the blocked envelope.
+
+**P00 scoped booleans (15, `EKO-P00`):**
+`preflight.transaction_read_only`, `preflight.all_relations_present`,
+`preflight.all_select`, `preflight.no_insert`, `preflight.no_update`,
+`preflight.no_delete`, `preflight.no_truncate`, `preflight.no_references`,
+`preflight.no_trigger`, `preflight.no_database_create`,
+`preflight.no_database_temp`, `preflight.no_public_schema_create`,
+`preflight.no_non_system_function_execute`,
+`preflight.no_non_system_relation_write`,
+`preflight.no_non_system_schema_create`.
+
+**Scoped metadata (5):** `metadata.source_version_class` (`EKO-V01`),
+`metadata.closed_candidate_columns` (`EKO-M10`), and
+`metadata.index.parent_encounter_key`, `metadata.index.child_four_part_key`,
+`metadata.index.patient_join_key` (`EKO-K20`).
+
+**All seven parent fields:** `parent_field.encounter_id`,
+`parent_field.chart_number`, `parent_field.patient_name`, `parent_field.sex`,
+`parent_field.age`, `parent_field.state`, `parent_field.hold_yn`.
+
+**All thirteen child fields:** `child_field.encounter_id`,
+`child_field.order_date`, `child_field.order_number`,
+`child_field.order_sequence`, `child_field.catalog_code`,
+`child_field.catalog_name`, `child_field.user_code`, `child_field.user_name`,
+`child_field.order_type`, `child_field.department_code`, `child_field.state`,
+`child_field.dc_yn`, `child_field.act_yn`.
+
+**Parent states and lifecycle:** `parent_state.waiting`,
+`parent_state.in_progress`, `parent_state.on_hold`,
+`parent_state.consultation_completed`, `parent_state.payment_completed`,
+`parent_lifecycle.cancellation`, `parent_lifecycle.restoration`.
+
+**Child state and qualifiers:** `child_semantics.active`,
+`child_semantics.cancelled`, `child_semantics.dc_yn`,
+`child_semantics.act_yn`.
+
+**Relations and all categories:** `relation.parent`, `relation.child`,
+`relation.patient_exact_one`, `category.fee`, `category.non_billing`,
+`category.medication`, `category.procedure`, `category.unclassified`.
+
+**Completeness and reconciliation:** `completeness.clinic_day`,
+`completeness.all_parents`, `completeness.no_order_parents`,
+`completeness.all_children`, `reconciliation.parent_counts`,
+`reconciliation.child_counts`, `reconciliation.duplicates`,
+`reconciliation.orphans`, `reconciliation.off_day`,
+`reconciliation.verified_empty`, `reconciliation.save_completion_fence`,
+`reconciliation.single_snapshot`.
+
+**Simultaneous caps:** `cap.parents_and_sentinel`,
+`cap.children_and_sentinel`, `cap.source_and_result_bytes`,
+`cap.atomic_peak_memory`, `cap.global_deadline`.
+
+**Owner policy:** `policy.age.leap_day_rule_a`.
+
+**All failure rules:** `failure.preflight`, `failure.inventory_mismatch`,
+`failure.unexpected_shape`, `failure.privacy_boundary`, `failure.row_limit`,
+`failure.byte_limit`, `failure.timeout`, `failure.cancel`, `failure.rollback`,
+`failure.cleanup`, `failure.version_mismatch`, `failure.capture_failed`,
+`failure.contradiction`, `failure.no_retry_no_broadening`.
+
+This explicit crosswalk does not imply evidence. The 19 M10 catalog candidates
+do not prove the 7+13 logical fields, relation authority, category coverage, or
+clinical semantics. P00 proves only its 15 booleans, not full least privilege.
+K20 proves only the three allowlisted matching-index summaries, not expected
+plans, authoritative keys, capacity, or complete relation coverage.
 
 Expected application-query plan and index identities are `not_applicable` to this
 metadata-only run because no patient-row, domain, aggregate, join, or application
@@ -213,13 +324,26 @@ and fake driver objects to prove:
    dynamic query;
 7. the four synthetic leap-day vectors above and adjacent ordinary birthdays; and
 8. immutable evidence provenance, expiry/revalidation triggers, and fixed reason
-   codes without host, role, path, PID, or raw time disclosure.
+   codes without host identity, PID, or raw time disclosure.
 
-No harness or product code is implemented in this documentation phase.
+The repository now includes a pure injected candidate harness at
+`KaosEghis/core/kaosorders_non_phi_evidence_capture.py` and synthetic tests at
+`tests/test_kaosorders_non_phi_evidence_capture.py`. It imports no source driver,
+filesystem, network, credential, runtime, logger, or deployment module. Its sink
+and source port are test-injected only; no production adapter or activation exists.
+
+Local verification on 2026-10-09: the exact focused file passed 36 tests under
+the repository-approved `--noconftest` pure-model path; 355 adjacent lifecycle,
+Orders, wire, Reception model, and Reception reader tests passed under the same
+isolation. The normal focused invocation reached 35 setup errors solely because
+the host cannot load PySide6 without `libxkbcommon.so.0`; all 36 cases failed at
+fixture setup before the pure tests ran. No system package was
+installed and this environmental blocker was not bypassed for the normal suite.
 
 ## Evidence provenance, expiry, and revalidation
 
-A later evidence file must bind to this exact Eghis commit, central `e341737`, the
+A later evidence file must bind to the eventual independently reviewed Eghis
+commit, central `e341737`, the
 nine statement digests, evidence date, `production-read-only` environment class,
 source/database version class, reviewer and authority roles, and the explicit
 expiry trigger. It expires immediately on source/database version change, schema,
@@ -257,3 +381,8 @@ sequence; this package cannot dynamically authorize it.
 - **2026-10-09:** Created the metadata-first closed run package, recorded leap-day
   rule A, fixed statement/output/bounds/non-echo/stop/cleanup requirements, and
   retained every source, credential, mapping, runtime, push, and deployment gate.
+- **2026-10-09:** Remediated Orders review findings with the exact eight-column
+  K20 shape, closed root/results/criteria/provenance schemas, fixed version range,
+  one admission-through-release deadline, explicit 91-ID crosswalk, and a pure
+  injected synthetic capture harness. No SQL, source, credential, patient data,
+  runtime, package execution, push, or deployment was introduced.

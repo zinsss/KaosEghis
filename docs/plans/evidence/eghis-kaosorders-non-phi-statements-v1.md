@@ -257,3 +257,7 @@ ROLLBACK;
   evidence statements for independent
   review. No statement was executed and no source, credential, host, row, value,
   runtime, mapping identity, or deployment was accessed or changed.
+- **2026-10-09:** Confirmed during Orders review remediation that the frozen
+  `EKO-K20` SELECT returns exactly eight allowlisted columns. Statement bytes and
+  all nine SHA-256 values are unchanged; only the owning package schema and pure
+  injected validator were corrected to match them.
