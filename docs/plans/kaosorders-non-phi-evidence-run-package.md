@@ -1,9 +1,9 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
-- **Status:** disabled composition/adapter review candidate; execution remains
-  blocked before authentication pending independent composition PASS,
-  non-secret identity/path and window records, immutable approval binding, and
-  fresh single-attempt authorization
+- **Status:** composition `e9e65e8` independently passed; execution remains
+  blocked before authentication pending non-secret identity/path and window
+  records, independently reviewed immutable approval binding, and fresh
+  single-attempt authorization
 - **Last updated:** 2026-10-09
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -23,6 +23,9 @@ records independent acceptance of executor/backend commit `1eaf325` but stops
 the execution gate. The owner separately authorized only the bounded disabled
 composition prerequisite described below. That approval does not authenticate,
 connect, execute a statement, activate runtime, or authorize an evidence attempt.
+Independent review subsequently passed the exact composition at
+`e9e65e8dd8452e07a20908c63aa3703c767e9c3f`; that PASS settles code review only
+and does not populate or waive the remaining prerequisite records.
 
 Independent review of `fa3e9cef41c495190e08b96f9c91f7f2401407b0`
 confirmed the prior ownership and cleanup fixes but found that direct synchronous
@@ -567,11 +570,48 @@ connection string, role dump, credential, secret-store locator, token, or live
 payload. Approval is invalid unless its date range covers the evidence date and
 its digest resolves to a separately reviewed non-secret attestation.
 
+#### Identity/path fail-closed proof checklist
+
+Current readiness is **BLOCKED**: `attestation_sha256`, `valid_from`, and
+`expires_on` have not been supplied by the database-security authority. No
+repository fact can substitute for that authority record. Before any future
+authentication, reviewed preflight must prove every item below; false, missing,
+expired, contradictory, unverifiable, or extra sensitive content stops before
+credential lookup or connection:
+
+1. The object has exactly the `IdentityPathAttestation` fields above, uses the
+   literal contract/decision/classes/authority role, and passes strict types
+   without coercion.
+2. `attestation_sha256` resolves to one independently reviewed, immutable,
+   privacy-safe non-secret attestation. The digest and reviewed artifact must
+   agree byte-for-byte; an absent artifact or digest mismatch is unproven.
+3. The authority attests a dedicated least-privilege read-only identity and the
+   existing serialized single-connection path. Shared/general-purpose identity,
+   pooling, fallback, discovery, retention, or a second connection is rejected.
+4. The attestation binds the exact P00 digest
+   `6b32e06db86fd62b7df3c6edb860b6f0e1482ec2f3e98b3304811688d0dcd3d6`
+   and states that P00's 15 booleans must all be literal true. The attestation
+   does not pre-prove those booleans; the bounded observation must still prove
+   them in-connection or stop.
+5. Its inclusive validity dates cover the exact KST evidence date, and no
+   revocation, identity/path change, privilege change, or contradictory evidence
+   has occurred since review. Any such event requires a new artifact and review.
+6. The artifact contains no credential, username, role dump, host/port/database,
+   connection property, secret locator, live payload, patient value, or raw log.
+7. The future caller binds the attested path only through the reviewed
+   `Psycopg2SingleConnectionPath` and `EghisFifoMutexLeaseBackend`; it cannot
+   replace either with a callback, duck-typed allocator, pool, or fallback.
+
+Passing this checklist is a prerequisite proof only. It does not authorize an
+attempt, assign a source identity/mapping revision, or permit credential details
+to enter this repository or handoff.
+
 The executor approval must provide exactly: approval contract/version ID,
 `approved` decision, review SHA-256, exact 40-hex executor commit matching the
 running build, reviewer role `independent-integration-review`, and package revision
-`review-candidate-3`. The prepared candidate is not approved until its final
-commit and tests receive independent PASS.
+`review-candidate-3`. For this frozen candidate, the running-build commit is
+`e9e65e8dd8452e07a20908c63aa3703c767e9c3f`; a different commit is rejected even
+when the executor file itself is byte-identical.
 
 The window record must provide exactly: window contract/version ID, `approved`
 decision, approval SHA-256, KST start/end no longer than 30 minutes and containing
@@ -602,6 +642,96 @@ time must fall inside it. No person name, contact detail, credential, host, or
 patient information is permitted. Owner intent does not populate or activate
 this record; it must be completed, independently reviewed, and reconfirmed before
 one attempt can be authorized.
+
+Current human-only window readiness is closed as follows:
+
+| Required value | Current state | Acceptance rule |
+| --- | --- | --- |
+| `approval_sha256` | **BLOCKED** | Exact lowercase 64-hex digest of the separately reviewed non-secret approval. |
+| `starts_at` | **BLOCKED** | Exact `+09:00` timestamp on the evidence date. |
+| `ends_at` | **BLOCKED** | Same KST date, strictly after start, duration at most 30 minutes. |
+| `operator_reference` | **BLOCKED** | Stable non-sensitive 1..64-character reference matching `[A-Za-z0-9][A-Za-z0-9._-]*`; no personal details. |
+| `cancellation_owner_reference` | **BLOCKED** | Distinctly assigned stable non-sensitive reference with the same closed syntax. |
+| attempt time and evidence date | **BLOCKED** | Inside the approved interval and identical KST calendar date. |
+
+The owner or authorized coordinator must supply these non-secret values after
+scheduling. Eghis must not guess them. Missing or stale values stop before
+credential lookup or connection; a general statement of intent is not a window.
+
+### Immutable approval-manifest candidate
+
+The remaining approval package must be rendered as canonical UTF-8 JSON with
+lexically ordered object keys, hashed with SHA-256, committed immutably, and
+independently reviewed before use. The candidate below is closed and deliberately
+`BLOCKED`; the literal `BLOCKED` values are not valid executor inputs and must
+never be silently replaced or treated as approval.
+
+```json
+{
+  "approval_manifest_sha256": "BLOCKED",
+  "components": [
+    {
+      "commit": "1eaf325ab313fbde5a39b41f59ac21483271e861",
+      "component_id": "executor",
+      "path": "KaosEghis/core/kaosorders_non_phi_evidence_executor.py",
+      "sha256": "cc8694535fdac41ffa3b60acb20f5ce4fd7135cbca144c05522fba9e79838faa",
+      "symbols": ["execute_reviewed_package_once", "SerializedReadLease"]
+    },
+    {
+      "commit": "1eaf325ab313fbde5a39b41f59ac21483271e861",
+      "component_id": "fifo-mutex-backend",
+      "path": "KaosEghis/core/kaosorders_non_phi_evidence_lease.py",
+      "sha256": "67f6c42b805a99a326201965a2a25a55efac65309863147dd777099921068949",
+      "symbols": ["EghisFifoMutexLeaseBackend", "build_disabled_orders_evidence_lease"]
+    },
+    {
+      "commit": "e9e65e8dd8452e07a20908c63aa3703c767e9c3f",
+      "component_id": "composition-adapter-sink",
+      "path": "KaosEghis/core/kaosorders_non_phi_evidence_composition.py",
+      "sha256": "536117212fe40a8ce4f19085a2a84845bcb99bab4c93aaf55cee626ccb641846",
+      "symbols": ["Psycopg2SingleConnectionPath", "ResourceOwningConnectionAdapter", "AtomicNoOverwriteMemorySink", "build_disabled_orders_evidence_composition"]
+    },
+    {
+      "commit": "dd394fe70ea2f8db4bf8dcbdffbbd749f8096952",
+      "component_id": "capture-contract",
+      "path": "KaosEghis/core/kaosorders_non_phi_evidence_capture.py",
+      "sha256": "95e7b292bbc1f2858a9621bfbc7e0fa19028fb2c01fd0107333c912cf1d47f96",
+      "symbols": ["STATEMENT_SPECS", "PACKAGE_REVISION"]
+    }
+  ],
+  "contract_id": "kaoseghis.orders-evidence-immutable-approval-manifest.v1",
+  "decision": "BLOCKED",
+  "independent_review_sha256": "BLOCKED",
+  "package_id": "eghis-kaosorders-non-phi-evidence-run-v1",
+  "package_revision": "review-candidate-3",
+  "prerequisites": {
+    "fresh_single_attempt_authorization_sha256": "BLOCKED",
+    "identity_path_attestation_sha256": "BLOCKED",
+    "window_approval_sha256": "BLOCKED"
+  },
+  "statement_inventory": {
+    "commit": "1fc38adb189988eba5b177c30e2a9f8cc4633e68",
+    "ids_in_order": ["EKO-C00", "EKO-C01", "EKO-C02", "EKO-C03", "EKO-P00", "EKO-V01", "EKO-M10", "EKO-K20", "EKO-C99"],
+    "path": "docs/plans/evidence/eghis-kaosorders-non-phi-statements-v1.md",
+    "sha256": "0f123faff860e6eb18b4c8f6309b65731b459774950b1cedaa143f8d7caf7575"
+  }
+}
+```
+
+The statement-inventory digest binds the exact nine BEGIN/END blocks and the
+per-statement SHA-256 table earlier in this document; both must reproduce before
+the manifest can leave `BLOCKED`. Component order, paths, symbols, commits, and
+content digests are exact. Any code, statement, package, review, attestation, or
+window change invalidates the manifest and requires regeneration plus review.
+
+Before `decision` can become `approved`, all three prerequisite digests, a fresh
+single-attempt authorization digest, the independent review digest, and the
+manifest's own canonical-content digest must be real non-secret immutable
+references. A review must also prove `main.py` and all application/runtime
+modules have no import, route, scheduler, settings, or startup binding to this
+composition. The manifest is not a credential carrier and may never contain a
+connection string, host, identity value, secret locator, clinical payload, or
+raw operational log.
 
 The candidate starts one monotonic 10-second fence before prerequisite and
 statement validation. It requires `evidence_date`, KST `now`, and both
@@ -644,24 +774,28 @@ existing EMR read-queue
 regression subset passed 45 with 3 platform skips; its four GUI consumer cases
 remain unexecutable because this host cannot load PySide6 without
 `libxkbcommon.so.0`. A further 355 lifecycle, Orders wire/fact, and Reception pure
-regressions passed. The normal focused invocation reached 114 setup errors for the
+regressions passed. The normal focused invocation reached 32 setup errors for the
 same host-library blocker. No host package was installed, and isolated
 verification is not reported as a full baseline.
 
 ## Next action
 
-1. Independently review the exact immutable composition commit, including its
-   frozen statement binding, one-shot path, resource ownership, deadline,
-   cleanup/poison behavior, no-overwrite sink, and disabled runtime boundary.
-2. Provide a reviewable non-secret attestation that identifies the approved
+1. Independently review this exact closed prerequisite package, including every
+   component digest, `BLOCKED` field, fail-closed checklist, and absence of
+   runtime/public activation.
+2. Have the database-security authority provide a reviewable non-secret
+   attestation that identifies the approved
    least-privilege read-only path and confirms how P00 can be executed without
    exposing credentials or connection details.
-3. Bind the resulting composition commit, executor, backend, and exact approved
-   connection path in the immutable executor approval record.
-4. Supply the bounded KST window plus non-sensitive operator and cancellation-owner
-   references.
-5. After all prerequisites pass, request a fresh single-attempt approval. Do not
-   connect or execute before then.
+3. Supply the bounded KST window plus non-sensitive operator and
+   cancellation-owner references; all current human-only values remain
+   `BLOCKED` until then.
+4. Replace `BLOCKED` manifest values only with independently reviewed immutable
+   non-secret digests, recompute the canonical manifest digest, and bind the
+   exact executor/backend/composition/adapter/statements/sink package.
+5. After every prerequisite and the final manifest pass review, request a fresh
+   single-attempt authorization. Do not authenticate, connect, or execute before
+   then.
 
 ## Revision history
 
@@ -768,3 +902,11 @@ verification is not reported as a full baseline.
   boundary and reject just-after completion for the helper, execute, fetch, and
   physical close; rejected results publish nothing and poison the shared lease.
   No statement, digest, schema, mapping, runtime, or stopped gate changed.
+- **2026-10-09:** After independent PASS of `e9e65e8`, prepared the remaining
+  pre-execution package without source access. Added the exact identity/path
+  fail-closed checklist, explicit `BLOCKED` KST window/operator/cancellation
+  owner readiness, and a closed immutable approval-manifest candidate binding
+  executor, FIFO/mutex backend, composition/adapter/sink, capture contract, and
+  frozen statement inventory by commit and privacy-safe SHA-256. Human-only
+  values, independent manifest review, and fresh attempt authorization remain
+  blocked; no runtime wiring, authentication, connection, or execution occurred.
