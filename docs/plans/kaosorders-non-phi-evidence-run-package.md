@@ -660,11 +660,11 @@ credential lookup or connection; a general statement of intent is not a window.
 
 ### Immutable approval-manifest candidate
 
-The remaining approval package must be rendered as canonical UTF-8 JSON with
-lexically ordered object keys, hashed with SHA-256, committed immutably, and
-independently reviewed before use. The candidate below is closed and deliberately
-`BLOCKED`; the literal `BLOCKED` values are not valid executor inputs and must
-never be silently replaced or treated as approval.
+The remaining approval package must be rendered as RFC 8785 JSON Canonicalization
+Scheme (JCS) UTF-8 bytes, hashed by the non-self-referential rule below,
+committed immutably, and independently reviewed before use. The candidate below
+is closed and deliberately `BLOCKED`; the literal `BLOCKED` values are not valid
+executor inputs and must never be silently replaced or treated as approval.
 
 ```json
 {
@@ -724,14 +724,45 @@ the manifest can leave `BLOCKED`. Component order, paths, symbols, commits, and
 content digests are exact. Any code, statement, package, review, attestation, or
 window change invalidates the manifest and requires regeneration plus review.
 
-Before `decision` can become `approved`, all three prerequisite digests, a fresh
-single-attempt authorization digest, the independent review digest, and the
-manifest's own canonical-content digest must be real non-secret immutable
-references. A review must also prove `main.py` and all application/runtime
-modules have no import, route, scheduler, settings, or startup binding to this
-composition. The manifest is not a credential carrier and may never contain a
-connection string, host, identity value, secret locator, clinical payload, or
-raw operational log.
+#### Non-self-referential manifest digest
+
+`approval_manifest_sha256` is an envelope checksum, not a member of its own
+preimage. Generation and verification use this exact algorithm:
+
+1. Parse the complete manifest as one JSON object. Reject duplicate keys,
+   trailing content, invalid Unicode (including lone surrogates), NaN, infinity,
+   or any value outside the RFC 8785/I-JSON domain.
+2. Require exactly one root `approval_manifest_sha256` field. For generation it
+   may contain the literal `BLOCKED`; for an approved final manifest it must be
+   exactly 64 lowercase hexadecimal characters.
+3. Make a logical copy and remove **only** that one root field. No nested field,
+   other digest, `BLOCKED` value, array item, or component may be omitted or
+   normalized away.
+4. Serialize the remaining object with RFC 8785 JCS: recursively sort object
+   property names by the RFC's UTF-16 code-unit ordering; emit no insignificant
+   whitespace or byte-order mark; serialize strings and escapes exactly as JCS;
+   and use ECMAScript shortest-round-trip number serialization. The current
+   manifest intentionally uses no JSON numbers, but a later number must still
+   obey this rule.
+5. Encode that canonical character sequence as exact UTF-8 bytes, compute
+   SHA-256, and encode the 32-byte result as lowercase hexadecimal.
+6. Insert that 64-hex value as the root `approval_manifest_sha256`. The final
+   stored/transmitted manifest itself must also be emitted as RFC 8785 JCS.
+7. To verify, parse with the same rejection rules, retain the supplied digest,
+   remove only the root digest field, reproduce steps 4–5, and compare the two
+   lowercase-hex values exactly. A mismatch, missing/duplicate field, alternate
+   canonicalization, or unverifiable implementation is fail-closed.
+
+This rule has no circular preimage: changing any other manifest value changes
+the digest, while changing only `approval_manifest_sha256` does not change the
+preimage and is caught by comparison. Before `decision` can become `approved`,
+all three prerequisite digests, a fresh single-attempt authorization digest,
+the independent review digest, and this reproducible manifest digest must be
+real non-secret immutable references. A review must also prove `main.py` and all
+application/runtime modules have no import, route, scheduler, settings, or
+startup binding to this composition. The manifest is not a credential carrier
+and may never contain a connection string, host, identity value, secret locator,
+clinical payload, or raw operational log.
 
 The candidate starts one monotonic 10-second fence before prerequisite and
 statement validation. It requires `evidence_date`, KST `now`, and both
@@ -910,3 +941,9 @@ verification is not reported as a full baseline.
   frozen statement inventory by commit and privacy-safe SHA-256. Human-only
   values, independent manifest review, and fresh attempt authorization remain
   blocked; no runtime wiring, authentication, connection, or execution occurred.
+- **2026-10-09:** Corrected the approval-manifest checksum after independent
+  review of `fe3a95d`. The SHA-256 preimage now omits only the root
+  `approval_manifest_sha256` field and otherwise uses exact RFC 8785 JCS UTF-8
+  bytes; verification repeats that transform and compares lowercase hex. This
+  removes self-reference without changing any component binding or `BLOCKED`
+  prerequisite.
