@@ -602,3 +602,9 @@ slice.
   missing PySide6 `libxkbcommon.so.0`; isolated pure verification is recorded in
   the handoff. No source SQL was executed and no runtime, credential, patient
   data, push, or deployment boundary changed.
+- **2026-10-09:** Applied the explicitly authorized second bounded correction
+  after Orders final review: a missing required M10 candidate column now fails
+  closed as an inventory mismatch, stops before K20, cannot publish complete
+  evidence, and leaves the closed-candidate criterion unproven. The package is
+  `review-candidate-3`; the nine statement bytes/digests and every source,
+  credential, mapping, runtime, push, and deployment gate remain unchanged.

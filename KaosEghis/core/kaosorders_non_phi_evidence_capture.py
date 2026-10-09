@@ -15,7 +15,7 @@ import json
 CONTRACT_ID = "kaoseghis.non-phi-source-evidence"
 CONTRACT_VERSION = 1
 PACKAGE_ID = "eghis-kaosorders-non-phi-evidence-run-v1"
-PACKAGE_REVISION = "review-candidate-2"
+PACKAGE_REVISION = "review-candidate-3"
 CENTRAL_COMMIT = "e3417375984acc2a58392315e26035e14c253219"
 ENVIRONMENT_CLASS = "production-read-only"
 ARTIFACT_PATH = "evidence/eghis-kaosorders-non-phi-evidence-v1.json"
@@ -297,6 +297,7 @@ def _validate_m10(result: InjectedResult) -> list[dict[str, object]]:
         if not present:
             if optional != (None, None, None, None):
                 raise CaptureRejected("unexpected_shape")
+            raise CaptureRejected("inventory_mismatch")
         else:
             _ascii(row["data_type"])
             if any(type(value) is not bool for value in optional[1:]):

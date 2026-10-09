@@ -6,7 +6,7 @@
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
 - **Central baseline:** orchestration `e341737`
 - **Package ID:** `eghis-kaosorders-non-phi-evidence-run-v1`
-- **Package revision:** `review-candidate-2`
+- **Package revision:** `review-candidate-3`
 
 ## Context and plan delta
 
@@ -88,7 +88,7 @@ is lexical):
 | `contract_id` | literal `kaoseghis.non-phi-source-evidence` |
 | `contract_version` | integer `1`; booleans rejected |
 | `package_id` | literal `eghis-kaosorders-non-phi-evidence-run-v1` |
-| `package_revision` | literal `review-candidate-2` |
+| `package_revision` | literal `review-candidate-3` |
 | `central_commit` | full literal `e3417375984acc2a58392315e26035e14c253219` |
 | `run_status` | exactly `complete` or `blocked` |
 | `fixed_reason` | exactly `none`, `preflight_failed`, `inventory_mismatch`, `unexpected_shape`, `privacy_boundary`, `row_limit`, `byte_limit`, `timeout`, `cancel_failed`, `cleanup_uncertain`, `version_mismatch`, or `capture_failed`; `none` is valid only with `complete` |
@@ -112,9 +112,12 @@ SQL, exception text, timestamp, PID, patient-derived value, or driver echo.
   was observed. A clean blocked envelope may retain an already validated version.
 - `m10` is null or exactly 19 objects in the frozen `(relation_id,column_id)`
   order. Each has exactly `relation_id`, `column_id`, `column_present`,
-  `data_type`, `nullable`, `generated`, `identity`. If `column_present` is false,
-  the last four fields are all null. If true, `data_type` is 1..128 printable
-  ASCII bytes and the other three fields are booleans.
+  `data_type`, `nullable`, `generated`, `identity`. Every required candidate must
+  have `column_present=true`; false with the four metadata fields null is a valid
+  catalog shape but an `inventory_mismatch` that blocks before K20, publishes no
+  complete artifact, and leaves `metadata.closed_candidate_columns` unproven.
+  When true, `data_type` is 1..128 printable ASCII bytes and the other three
+  fields are booleans.
 - `k20` is null or exactly three objects in the frozen `(relation_id,key_id)`
   order. Each has **exactly eight fields**: `relation_id`, `key_id`,
   `matching_index_count`, `any_unique`, `any_primary`, `all_valid`, `all_ready`,
@@ -332,11 +335,12 @@ The repository now includes a pure injected candidate harness at
 filesystem, network, credential, runtime, logger, or deployment module. Its sink
 and source port are test-injected only; no production adapter or activation exists.
 
-Local verification on 2026-10-09: the exact focused file passed 36 tests under
+Local verification on 2026-10-09 after the second bounded correction: the exact
+focused file passed 37 tests under
 the repository-approved `--noconftest` pure-model path; 355 adjacent lifecycle,
 Orders, wire, Reception model, and Reception reader tests passed under the same
-isolation. The normal focused invocation reached 35 setup errors solely because
-the host cannot load PySide6 without `libxkbcommon.so.0`; all 36 cases failed at
+isolation. The normal focused invocation reached 37 setup errors solely because
+the host cannot load PySide6 without `libxkbcommon.so.0`; all 37 cases failed at
 fixture setup before the pure tests ran. No system package was
 installed and this environmental blocker was not bypassed for the normal suite.
 
@@ -386,3 +390,10 @@ sequence; this package cannot dynamically authorize it.
   one admission-through-release deadline, explicit 91-ID crosswalk, and a pure
   injected synthetic capture harness. No SQL, source, credential, patient data,
   runtime, package execution, push, or deployment was introduced.
+- **2026-10-09:** Applied the user-authorized second bounded correction after
+  Orders final review: any one of the 19 required M10 candidates with
+  `column_present=false` now blocks as `inventory_mismatch`, cannot reach K20 or
+  a complete artifact, and leaves `metadata.closed_candidate_columns` unproven.
+  Package identity advanced to `review-candidate-3`; all nine statement bytes and
+  SHA-256 values, output schema, mappings, identities, and runtime boundaries are
+  unchanged.

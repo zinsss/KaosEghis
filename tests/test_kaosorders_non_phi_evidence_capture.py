@@ -181,7 +181,7 @@ def test_literal_contract_and_closed_k20_shape():
     assert capture.CONTRACT_ID == "kaoseghis.non-phi-source-evidence"
     assert capture.CONTRACT_VERSION == 1
     assert capture.PACKAGE_ID == "eghis-kaosorders-non-phi-evidence-run-v1"
-    assert capture.PACKAGE_REVISION == "review-candidate-2"
+    assert capture.PACKAGE_REVISION == "review-candidate-3"
     assert capture.CENTRAL_COMMIT == "e3417375984acc2a58392315e26035e14c253219"
     assert capture.ENVIRONMENT_CLASS == "production-read-only"
     assert capture.SOURCE_VERSION_MIN == 120000
@@ -254,7 +254,7 @@ def test_success_closes_envelope_provenance_results_and_crosswalk():
     assert criteria["failure.timeout"]["status"] == "not_applicable"
 
 
-def test_absent_metadata_and_index_facts_have_exact_null_behavior():
+def test_missing_required_candidate_column_blocks_before_k20_and_stays_unproven():
     results = default_results()
     rows = list(m10_rows())
     rows[0] = {
@@ -267,6 +267,30 @@ def test_absent_metadata_and_index_facts_have_exact_null_behavior():
         "identity": None,
     }
     results["EKO-M10"] = capture.InjectedResult(tuple(rows))
+    outcome, port, sink = run(port=FakePort(results=results))
+    assert outcome.status is capture.RunStatus.BLOCKED
+    assert outcome.fixed_reason is capture.FixedReason.INVENTORY_MISMATCH
+    assert "execute:EKO-K20" not in port.events
+    assert sink.final == outcome.artifact and sink.temp is None
+    body = decoded(outcome)
+    assert body["run_status"] == "blocked"
+    assert body["results"] == {
+        "k20": None,
+        "m10": None,
+        "p00": None,
+        "v01": {"source_version_class": "150000"},
+    }
+    criteria = {item["criterion_id"]: item for item in body["criteria"]}
+    assert criteria["metadata.closed_candidate_columns"] == {
+        "criterion_id": "metadata.closed_candidate_columns",
+        "status": "unproven",
+        "source_statement_id": None,
+        "fixed_reason": "inventory_mismatch",
+    }
+
+
+def test_absent_matching_index_retains_exact_k20_null_behavior():
+    results = default_results()
     indexes = list(k20_rows())
     indexes[0] = {
         "relation_id": indexes[0]["relation_id"],
@@ -281,7 +305,7 @@ def test_absent_metadata_and_index_facts_have_exact_null_behavior():
     results["EKO-K20"] = capture.InjectedResult(tuple(indexes))
     outcome, _, _ = run(port=FakePort(results=results))
     body = decoded(outcome)
-    assert body["results"]["m10"][0]["data_type"] is None
+    assert outcome.status is capture.RunStatus.COMPLETE
     assert body["results"]["k20"][0]["matching_index_count"] == 0
 
 
