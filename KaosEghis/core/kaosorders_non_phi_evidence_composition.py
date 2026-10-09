@@ -73,6 +73,10 @@ def _bounded_call(*, action: object, deadline: float, monotonic: object):
         except BaseException:
             state["value"] = _FAILED
         finally:
+            try:
+                state["completed_at"] = monotonic()
+            except BaseException:
+                state["completed_at"] = _FAILED
             finished.set()
 
     threading.Thread(
@@ -85,6 +89,20 @@ def _bounded_call(*, action: object, deadline: float, monotonic: object):
     except Exception:
         raise CompositionRejected("invalid_clock") from None
     if not finished.wait(remaining):
+        return False, None
+    try:
+        observed_at = monotonic()
+    except Exception:
+        return False, None
+    completed_at = state.get("completed_at", _FAILED)
+    if (
+        type(completed_at) not in (int, float)
+        or not math.isfinite(completed_at)
+        or type(observed_at) not in (int, float)
+        or not math.isfinite(observed_at)
+        or completed_at > deadline
+        or observed_at > deadline
+    ):
         return False, None
     return True, state.get("value", _FAILED)
 

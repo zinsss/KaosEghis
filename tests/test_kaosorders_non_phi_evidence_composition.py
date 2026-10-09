@@ -37,6 +37,9 @@ class Clock:
     def expire(self):
         self.value = capture.GLOBAL_DEADLINE_SECONDS + 0.001
 
+    def set(self, value):
+        self.value = value
+
 
 def prerequisites():
     p00 = next(item for item in capture.STATEMENT_SPECS if item.statement_id == "EKO-P00")
@@ -102,7 +105,8 @@ class RawCursor:
     def __init__(
         self, events, *, clock, execute_failure=None, close_false=False,
         close_raise=False, close_delay=0.0, execute_delay=0.0,
-        fetch_delay=0.0,
+        fetch_delay=0.0, execute_completion_time=None,
+        fetch_completion_time=None,
     ):
         self.events = events
         self.clock = clock
@@ -112,6 +116,8 @@ class RawCursor:
         self.close_delay = close_delay
         self.execute_delay = execute_delay
         self.fetch_delay = fetch_delay
+        self.execute_completion_time = execute_completion_time
+        self.fetch_completion_time = fetch_completion_time
         self.current = None
         self.description = None
         self.closed = False
@@ -126,6 +132,8 @@ class RawCursor:
         self.events.append(f"execute:{statement_id}")
         if self.execute_delay:
             time.sleep(self.execute_delay)
+        if self.execute_completion_time is not None:
+            self.clock.set(self.execute_completion_time)
         self.current = statement_id
         if statement_id == self.execute_failure:
             raise RuntimeError("PRIVATE_CANARY")
@@ -139,6 +147,8 @@ class RawCursor:
         self.events.append(f"fetch:{self.current}")
         if self.fetch_delay:
             time.sleep(self.fetch_delay)
+        if self.fetch_completion_time is not None:
+            self.clock.set(self.fetch_completion_time)
         if self.current == "EKO-P00":
             return [tuple(True for _ in capture.P00_COLUMNS)]
         if self.current == "EKO-V01":
@@ -169,6 +179,8 @@ class RawConnection:
         connection_close_raise=False, cancel_raise=False, notices=(),
         cancel_delay=0.0, connection_close_delay=0.0,
         execute_delay=0.0, fetch_delay=0.0,
+        execute_completion_time=None, fetch_completion_time=None,
+        connection_close_completion_time=None,
     ):
         self.events = events
         self.clock = clock
@@ -178,6 +190,7 @@ class RawConnection:
         self.cancel_raise = cancel_raise
         self.cancel_delay = cancel_delay
         self.connection_close_delay = connection_close_delay
+        self.connection_close_completion_time = connection_close_completion_time
         self.notices = notices
         self.cursor_value = RawCursor(
             events,
@@ -188,6 +201,8 @@ class RawConnection:
             close_delay=cursor_close_delay,
             execute_delay=execute_delay,
             fetch_delay=fetch_delay,
+            execute_completion_time=execute_completion_time,
+            fetch_completion_time=fetch_completion_time,
         )
 
     def _assert_open(self):
@@ -211,6 +226,8 @@ class RawConnection:
         self.events.append("raw_connection_close")
         if self.connection_close_delay:
             time.sleep(self.connection_close_delay)
+        if self.connection_close_completion_time is not None:
+            self.clock.set(self.connection_close_completion_time)
         if self.connection_close_raise:
             raise RuntimeError("PRIVATE_CANARY")
         if not self.connection_close_false:
@@ -551,6 +568,84 @@ def test_execute_and_fetch_share_deadline_and_block_post_deadline_source_use(
             item for item in events
             if item.startswith(("execute:", "fetch:"))
         ] == expected_executes + expected_fetches
+
+
+def test_bounded_call_accepts_exact_boundary_and_rejects_just_after():
+    exact_clock = Clock()
+
+    def complete_at_boundary():
+        exact_clock.set(0.05)
+        return "accepted"
+
+    completed, value = composition._bounded_call(
+        action=complete_at_boundary,
+        deadline=0.05,
+        monotonic=exact_clock,
+    )
+    assert completed is True and value == "accepted"
+
+    late_clock = Clock()
+
+    def complete_just_after():
+        late_clock.set(0.050001)
+        return "must-be-discarded"
+
+    completed, value = composition._bounded_call(
+        action=complete_just_after,
+        deadline=0.05,
+        monotonic=late_clock,
+    )
+    assert completed is False and value is None
+
+
+@pytest.mark.parametrize(
+    ("options", "expected_executes", "expected_fetches"),
+    [
+        (
+            {"execute_completion_time": 0.050001},
+            ["execute:EKO-C00"],
+            [],
+        ),
+        (
+            {"fetch_completion_time": 0.050001},
+            [
+                "execute:EKO-C00", "execute:EKO-C01", "execute:EKO-C02",
+                "execute:EKO-C03", "execute:EKO-P00",
+            ],
+            ["fetch:EKO-P00"],
+        ),
+        (
+            {"connection_close_completion_time": 0.050001},
+            [
+                "execute:EKO-C00", "execute:EKO-C01", "execute:EKO-C02",
+                "execute:EKO-C03", "execute:EKO-P00", "execute:EKO-V01",
+                "execute:EKO-M10", "execute:EKO-K20", "execute:EKO-C99",
+            ],
+            [
+                "fetch:EKO-P00", "fetch:EKO-V01", "fetch:EKO-M10",
+                "fetch:EKO-K20",
+            ],
+        ),
+    ],
+    ids=["execute-just-after", "fetch-just-after", "close-just-after"],
+)
+def test_just_after_deadline_completion_is_discarded_and_poisons_lease(
+    isolated_serialized_boundary, monkeypatch, options,
+    expected_executes, expected_fetches,
+):
+    events, _worker, boundary_patch = isolated_serialized_boundary
+    monkeypatch.setattr(capture, "GLOBAL_DEADLINE_SECONDS", 0.05)
+    comp, _physical, _clock, _driver = make_composition(
+        events, boundary_patch, clock=Clock(), connection_options=options,
+    )
+    outcome = execute(comp)
+    assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
+    assert outcome.artifact is None and comp.final_artifact is None
+    assert [item for item in events if item.startswith("execute:")] == expected_executes
+    assert [item for item in events if item.startswith("fetch:")] == expected_fetches
+    assert comp.connection_observation.physical_close_verified is False
+    assert emr_read_queue._unhealthy.is_set()
+    assert "mutex_released" not in events
 
 
 def test_composition_and_path_are_single_attempt(isolated_serialized_boundary):

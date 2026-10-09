@@ -32,6 +32,13 @@ those two calls and their synthetic slow/hanging probes. The exception is
 implementation/testing-only and does not authorize authentication, source
 connection, statement execution against a database, or an evidence attempt.
 
+Independent review of `3bee2c454a4c122e49b6c1afd3eb21f07f20fd26`
+then found a narrower helper race: `Event.wait()` could report success for a
+completion occurring just after its timeout, while the helper did not re-read
+the monotonic clock. At 2026-10-09 22:30 KST the owner authorized one additional
+correction limited to completion-time proof and deterministic boundary tests.
+This does not widen any source, schema, runtime, or evidence-attempt authority.
+
 The original evidence plan contemplated one broad evidence package. Exact
 demographic fields, authoritative joins, production types, and index identities
 are still unproven, so this revision deliberately closes only a metadata-first
@@ -505,6 +512,15 @@ the accepted lease poison path; normalization and the volatile sink remain
 unreachable until cursor, physical connection, and lease cleanup are all
 verified within the fence.
 
+The common bounded-call helper records a target-side monotonic completion time
+before signaling completion and re-reads monotonic time after a successful
+wait. A result is accepted only when both readings are finite and no later than
+the one absolute deadline. Completion exactly at the deadline is accepted;
+just-after-deadline or clock-uncertain completion is discarded as incomplete.
+Consequently execute/fetch ownership becomes uncertain and cleanup/lease
+poisoning applies, while physical close can never become verified from a late
+result.
+
 The sink is deliberately memory-only and atomic: it creates one temporary value,
 publishes only when no final exists, never overwrites a pre-existing value, and
 removes only values created by its own failed run. It is not filesystem or
@@ -620,10 +636,10 @@ or deleted. Allowed fixed validation reasons are preserved without raw error tex
 No runtime binding or activation is included.
 
 Local verification after the disabled composition preparation and bounded
-acquisition/deadline remediation: 28 composition/adapter/sink cases include
+acquisition/deadline remediation: 32 composition/adapter/sink cases include
 slow and hanging acquisition, execute, fetch, cancellation, cursor-close, and
 physical-close probes under a 50-millisecond synthetic fence. The final focused
-and adjacent isolated suites passed 124 and 355 tests respectively. The non-GUI
+and adjacent isolated suites passed 128 and 355 tests respectively. The non-GUI
 existing EMR read-queue
 regression subset passed 45 with 3 platform skips; its four GUI consumer cases
 remain unexecutable because this host cannot load PySide6 without
@@ -745,3 +761,10 @@ verification is not reported as a full baseline.
   statements/digests, result and mapping scope, one-connection/no-pooling
   boundary, disabled composition, volatile sink, and all evidence-attempt gates
   remain unchanged.
+- **2026-10-09:** Applied the owner-authorized 22:30 KST boundary-race
+  correction after review of `3bee2c4`. Completion acceptance now requires a
+  target-side monotonic completion timestamp and a post-wait monotonic reading,
+  both no later than the shared deadline. Deterministic tests accept the exact
+  boundary and reject just-after completion for the helper, execute, fetch, and
+  physical close; rejected results publish nothing and poison the shared lease.
+  No statement, digest, schema, mapping, runtime, or stopped gate changed.
