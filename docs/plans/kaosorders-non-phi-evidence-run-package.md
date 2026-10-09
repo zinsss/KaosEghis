@@ -1,6 +1,8 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
-- **Status:** review candidate; execution blocked pending independent PASS
+- **Status:** independently accepted and execution authorized; latest attempt
+  blocked before connection because no approved read-only identity/path was
+  available in the registered H4 development clone
 - **Last updated:** 2026-10-09
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -363,22 +365,48 @@ query is not part of this package. Patient demographics, DOB/resident identifier
 source rows, clinical aggregates, raw logs, and exact clinical counts remain
 prohibited.
 
-Actual execution remains blocked until Orders reviews coverage, independent
-integration review reproduces the statement digests and passes the exact commit,
-and the
-owner separately schedules the bounded read-only window. The run will still leave
-all row/domain/semantics/completeness/performance criteria unproven and therefore
-cannot ratify a mapping. A later expanded inventory must repeat the entire review
-sequence; this package cannot dynamically authorize it.
+Orders and independent integration review accepted the exact package and the owner
+authorized one bounded run, but execution remains fail-closed whenever the approved
+read-only identity/path, exact executor, or window cannot be proven. Even a
+successful metadata run would leave all row/domain/semantics/completeness/
+performance criteria unproven and therefore cannot ratify a mapping. A later
+expanded inventory must repeat the entire review sequence; this package cannot
+dynamically authorize it.
+
+## Authorized execution attempt: fail-closed pre-connection stop
+
+On 2026-10-09 the owner authorized exact package `review-candidate-3` at Eghis
+`dd394fe70ea2f8db4bf8dcbdffbbd749f8096952` under orchestration
+`042bd0409fdd12421d93946594eda25ab189726d` and cleanup clarification
+`8b6ae2ab822afbb7ee9c575e1587369eb850d1c8`. Repository synchronization and
+immutable commit checks passed, but the registered H4 development clone supplied
+no separately approved least-privilege read-only identity/path or production
+adapter capable of proving the P00 boundary. The only package implementation is
+the pure injected harness; `EghisSourceDayReader` remains unavailable.
+
+The attempt therefore stopped before authentication, connection, cursor creation,
+transaction start, or any statement. No credential store or value, connection
+string, source host, live checkout, service, or patient data was inspected. No
+cursor or physical connection existed, so closure is `not_applicable` rather than
+claimed. No evidence artifact or partial file was created, and all P00/V01/M10/K20
+and downstream mapping criteria remain unproven.
+
+The next attempt requires a separately reviewable non-secret identity/path
+attestation and an approved executor that reuses the existing serialized-read
+boundary while enforcing the exact statement bytes, order, one 10-second fence,
+in-connection shape/control validation, immediate cursor/physical-connection
+closure, and post-close-only artifact construction. This record does not
+authorize creating that adapter, inspecting credentials, or retrying.
 
 ## Next action
 
-1. Independently reproduce the nine frozen statement digests.
-2. Orders reviews whether this metadata-first boundary is useful and confirms that
-   it does not imply logical/source coverage.
-3. Integration review verifies statement bytes, schemas, non-echo rules, bounds,
-   and the planned synthetic matrix.
-4. Do not execute until all reviews pass and a separate bounded run is scheduled.
+1. Provide a reviewable non-secret attestation that identifies the approved
+   least-privilege read-only path and confirms how P00 can be executed without
+   exposing credentials or connection details.
+2. Review and authorize an exact bounded executor/adapter; the pure injected
+   harness alone cannot open a source connection.
+3. Reconfirm the execution window and exact package commit before one new attempt.
+4. Do not connect or execute while either prerequisite is absent.
 
 ## Revision history
 
@@ -397,3 +425,9 @@ sequence; this package cannot dynamically authorize it.
   Package identity advanced to `review-candidate-3`; all nine statement bytes and
   SHA-256 values, output schema, mappings, identities, and runtime boundaries are
   unchanged.
+- **2026-10-09:** Recorded the owner-authorized execution gate under orchestration
+  `042bd04`/`8b6ae2a` and the fail-closed pre-connection stop. The registered H4
+  clone could not prove an approved read-only identity/path and contains no
+  approved production executor, so no authentication, connection, cursor, SQL,
+  artifact, credential inspection, patient access, retry, runtime activation,
+  push, or deployment occurred. All evidence criteria remain unproven.
