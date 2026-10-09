@@ -4,7 +4,7 @@
   blocked before authentication pending the database-security-authority
   identity/path attestation, independently reviewed window record and immutable
   approval binding, and a then-current single-attempt authorization
-- **Last updated:** 2026-10-09
+- **Last updated:** 2026-10-10
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
 - **Central baseline:** orchestration `4603c61b85488da9da21c6720f080f3df673ea9e`
@@ -570,6 +570,29 @@ connection string, role dump, credential, secret-store locator, token, or live
 payload. Approval is invalid unless its date range covers the evidence date and
 its digest resolves to a separately reviewed non-secret attestation.
 
+#### Privacy-safe owner account-purpose attestation
+
+On 2026-10-10 the authorized owner attested that the repository-configured
+database account is a dedicated read-only least-privilege account and that the
+configured database is the intended target. The following record intentionally
+contains no person, contact, account, host, database, credential, connection, or
+secret-store identifier. It is serialized as the exact RFC 8785 JCS line shown:
+
+```json
+{"asserted_account_purpose":"dedicated-read-only-least-privilege","asserted_on":"2026-10-10","authority_scope":"authorized-owner-statement-only","contract_id":"kaoseghis.orders-evidence-owner-account-purpose-attestation.v1","decision":"attested","target_scope":"repository-configured-intended-database"}
+```
+
+The SHA-256 of those exact UTF-8 bytes, without a trailing line feed, is
+`4a64d3d82c1d66da7b2d71a2d017881bd457a3b1528788ab36bbb59c11f935b0`.
+This immutable digest proves only the recorded owner assertion. It is not the
+closed `attestation_sha256` below and is not inserted into the canonical
+approval manifest: the statement does not establish that the owner is acting as
+the required `database-security-authority`, does not attest the exact
+`existing-serialized-read-single-connection` path, does not bind the P00 digest,
+and supplies no validity interval. Effective privileges also remain runtime
+facts that P00 must prove in-connection before any substantive evidence
+statement; the owner assertion cannot pre-prove any of P00's 15 booleans.
+
 #### Identity/path fail-closed proof checklist
 
 Current readiness is **BLOCKED**: `attestation_sha256`, `valid_from`, and
@@ -678,10 +701,10 @@ Privacy-safe H4 inspection established only that the repository defines the
 `eghis_db_connection_string` setting key, defaults it to empty in tracked source,
 and has existing consumers that obtain a configured value through application
 settings. The registered H4 clone contained no local `.env`, SQLite, or database
-configuration artifact to inspect, and no value was read or printed. The owner
-statement that configured connection information exists does not prove that its
-identity is dedicated, least-privilege, and read-only; it also does not create
-the required database-security-authority artifact, validity interval, or digest.
+configuration artifact to inspect, and no value was read or printed. The new
+owner statement establishes the intended account purpose but does not create the
+required database-security-authority path attestation, validity interval, P00
+binding, or closed prerequisite digest.
 
 Therefore the identity/path checklist remains **BLOCKED** and the canonical
 manifest below is unchanged. The minimum non-secret input is one immutable,
@@ -996,3 +1019,10 @@ verification is not reported as a full baseline.
   reference may enter the closed field; out-of-band provenance is excluded.
   Manifest bytes, `BLOCKED` values, window semantics, and the pre-authentication
   stop are unchanged.
+- **2026-10-10:** Recorded the owner's privacy-safe assertion that the intended
+  repository-configured account is dedicated, read-only, and least-privilege as
+  an exact JCS record with an immutable SHA-256. The record contains no person,
+  contact, account, host, database, or secret identifier. It proves account
+  purpose only; database-security authority, exact serialized path, P00 binding,
+  validity dates, effective privileges, window approval, and the final manifest
+  remain blocked. No credential lookup, authentication, or connection occurred.
