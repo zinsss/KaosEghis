@@ -1,14 +1,14 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
-- **Status:** prerequisite preparation candidate; execution remains blocked
-  before connection pending non-secret identity/path and window records, an
-  independently reviewed concrete FIFO/mutex backend, and independent PASS of
-  the bounded executor candidate
+- **Status:** disabled composition/adapter review candidate; execution remains
+  blocked before authentication pending independent composition PASS,
+  non-secret identity/path and window records, immutable approval binding, and
+  fresh single-attempt authorization
 - **Last updated:** 2026-10-09
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
-- **Central baseline:** orchestration `e341737`
-- **Stopped execution protocol:** orchestration `74a5cda8fde27990fa538fdb7fb44b10f023eca5`
+- **Central baseline:** orchestration `4603c61b85488da9da21c6720f080f3df673ea9e`
+- **Orders readiness:** `239b9b948bbb6e8c54288d2196287fb70a38aba0`
 - **Package ID:** `eghis-kaosorders-non-phi-evidence-run-v1`
 - **Package revision:** `review-candidate-3`
 
@@ -18,11 +18,11 @@ Orchestration authorized the bounded non-PHI evidence protocol at immutable comm
 `e341737`. This package is the Eghis-owned, documentation-only first run package
 required before any source operation. It does not authorize or perform execution.
 
-Canonical protocol `74a5cda8fde27990fa538fdb7fb44b10f023eca5`
-records independent acceptance of executor commit `81e57dc7` but stops the
-execution gate. The owner's stated intent for a future attempt does not activate
-that gate. The exact backend, non-secret attestation, and bounded window must each
-pass review first; only then may the owner reconfirm one single bounded attempt.
+Canonical protocol `4603c61b85488da9da21c6720f080f3df673ea9e`
+records independent acceptance of executor/backend commit `1eaf325` but stops
+the execution gate. The owner separately authorized only the bounded disabled
+composition prerequisite described below. That approval does not authenticate,
+connect, execute a statement, activate runtime, or authorize an evidence attempt.
 
 The original evidence plan contemplated one broad evidence package. Exact
 demographic fields, authoritative joins, production types, and index identities
@@ -454,6 +454,41 @@ scope so Windows retains the named-mutex handle. It must not report normal lease
 release. This blocks both later local FIFO reads and cross-process readers pending
 operator recovery, and no evidence artifact may be published.
 
+### Disabled executable composition candidate
+
+`KaosEghis/core/kaosorders_non_phi_evidence_composition.py` is the sole non-test
+composition root prepared under the bounded owner approval. It is not imported
+by application runtime. Construction performs no queue submission,
+authentication, connection, cursor creation, statement execution, publication,
+or persistence. On an independently approved future call it binds exactly:
+
+- the nine statement blocks extracted only from the fixed repository document,
+  in `STATEMENT_SPECS` order, with every SHA-256 revalidated;
+- `execute_reviewed_package_once()` and
+  `build_disabled_orders_evidence_lease()`;
+- one `ResourceOwningConnectionAdapter` over one
+  `InjectedSerializedCredentialReadPath`; and
+- one volatile `AtomicNoOverwriteMemorySink`.
+
+The injected path is a one-shot capability, not credential discovery or a
+credential store. It must deliver exactly one physical connection or explicitly
+prove that none was allocated. A raised, malformed, repeated, or ambiguous
+acquisition never proves absence. If a connection was delivered before a path
+failure, the adapter retains ownership and closes it. The adapter wraps the sole
+cursor, records fixed non-sensitive acquisition/close observations, prohibits
+cursor and connection reuse, and verifies the physical driver's closed state.
+All source operations use the same absolute deadline supplied by the executor.
+An uncertain physical close is propagated into the accepted lease poison path;
+normalization and the volatile sink remain unreachable until cursor, physical
+connection, and lease cleanup are verified.
+
+The sink is deliberately memory-only and atomic: it creates one temporary value,
+publishes only when no final exists, never overwrites a pre-existing value, and
+removes only values created by its own failed run. It is not filesystem or
+production persistence. The composition is single-attempt and has no fallback,
+pool, retained idle connection, retry, settings, scheduler, route, source
+discovery, logging, or runtime activation.
+
 The owner-authorized exception after the second integration-review failure is
 limited to two executor defects: remove caller self-attestation of serialized
 lease state, and make the one 10-second fence govern validation through all
@@ -561,27 +596,29 @@ run-created visible final after failure; a pre-existing final is never overwritt
 or deleted. Allowed fixed validation reasons are preserved without raw error text.
 No runtime binding or activation is included.
 
-Local verification after the bounded cross-boundary remediation: 50 executor
-cases, 37 existing capture cases, and 9 backend cases passed together under the
-approved isolated pure-model path (96 passed). The non-GUI existing EMR read-queue
+Local verification after the disabled composition preparation: 50 executor
+cases, 37 capture cases, 9 backend cases, and 18 composition/adapter/sink cases
+passed under the approved isolated path (114 passed). The non-GUI existing EMR read-queue
 regression subset passed 45 with 3 platform skips; its four GUI consumer cases
 remain unexecutable because this host cannot load PySide6 without
 `libxkbcommon.so.0`. A further 355 lifecycle, Orders wire/fact, and Reception pure
-regressions passed. The normal focused invocation reached 96 setup errors for the
+regressions passed. The normal focused invocation reached 114 setup errors for the
 same host-library blocker. No host package was installed, and isolated
 verification is not reported as a full baseline.
 
 ## Next action
 
-1. Provide a reviewable non-secret attestation that identifies the approved
+1. Independently review the exact immutable composition commit, including its
+   frozen statement binding, one-shot path, resource ownership, deadline,
+   cleanup/poison behavior, no-overwrite sink, and disabled runtime boundary.
+2. Provide a reviewable non-secret attestation that identifies the approved
    least-privilege read-only path and confirms how P00 can be executed without
    exposing credentials or connection details.
-2. Independently review the new bounded executor candidate and bind its final
-   commit plus the exact concrete FIFO/mutex backend in the executor approval
-   record.
-3. Supply the bounded KST window plus non-sensitive operator and cancellation-owner
+3. Bind the resulting composition commit, executor, backend, and exact approved
+   connection path in the immutable executor approval record.
+4. Supply the bounded KST window plus non-sensitive operator and cancellation-owner
    references.
-4. After all three records pass, request a new single-attempt approval. Do not
+5. After all prerequisites pass, request a fresh single-attempt approval. Do not
    connect or execute before then.
 
 ## Revision history
@@ -654,3 +691,12 @@ verification is not reported as a full baseline.
   allowing normal release. Added concrete executor/backend tests for close false,
   close raise, and verified close. Frozen statements and all execution gates are
   unchanged.
+- **2026-10-09:** Under separate owner authorization, prepared the disabled
+  non-test composition, one-shot injected serialized path, resource-owning
+  connection/cursor adapter, and volatile atomic no-overwrite sink required by
+  canonical stopped gate `4603c61`. Added synthetic success, acquisition,
+  deadline, cancellation, cursor/physical close, no-overwrite, non-echo,
+  single-attempt, and post-close-order tests. No credential, authentication,
+  source connection, SQL execution, live data, runtime import, push, deployment,
+  or evidence attempt occurred. Attestation, window, immutable approval binding,
+  independent PASS, and fresh one-attempt authorization remain pending.
