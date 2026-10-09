@@ -1,8 +1,8 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
-- **Status:** independently accepted and execution authorized; latest attempt
-  blocked before connection because no approved read-only identity/path was
-  available in the registered H4 development clone
+- **Status:** prerequisite preparation candidate; execution remains blocked
+  before connection pending non-secret identity/path and window records plus
+  independent PASS of the bounded executor candidate
 - **Last updated:** 2026-10-09
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -413,15 +413,63 @@ cleanup operation occurred. Cursor and physical-connection closure are therefore
 consumes the authorized retry; another attempt requires new explicit approval
 after all three prerequisite records exist and pass review.
 
+## Prepared prerequisite contracts and executor candidate
+
+Owner approval at 20:01 KST authorizes preparation and review, not source access.
+The disabled candidate is
+`KaosEghis/core/kaosorders_non_phi_evidence_executor.py`; its synthetic contract
+tests are `tests/test_kaosorders_non_phi_evidence_executor.py`. It has no driver,
+settings, credential lookup, connection string, source discovery, CLI, scheduler,
+runtime import, or route. It accepts a connection factory and a deadline-aware
+serialized-read function only after three closed prerequisite objects validate.
+
+The non-secret identity/path attestation must provide exactly: contract/version
+ID, `approved` decision, privacy-safe attestation SHA-256, identity class
+`dedicated-least-privilege-read-only`, path class
+`existing-serialized-read-single-connection`, the frozen P00 statement digest,
+authority role `database-security-authority`, and validity dates covering the
+evidence date. No username, role dump, host, credential, or connection property is
+permitted. This attestation is **not available** and cannot be invented here.
+
+The executor approval must provide exactly: approval contract/version ID,
+`approved` decision, review SHA-256, exact 40-hex executor commit matching the
+running build, reviewer role `independent-integration-review`, and package revision
+`review-candidate-3`. The prepared candidate is not approved until its final
+commit and tests receive independent PASS.
+
+The window record must provide exactly: window contract/version ID, `approved`
+decision, approval SHA-256, KST start/end no longer than 30 minutes and containing
+the attempt time, plus non-sensitive stable references naming the operator and
+cancellation owner. Those values are **not available** and cannot be inferred from
+the owner's general approval.
+
+After validation, the candidate starts the 10-second monotonic fence before
+serialized admission, validates all nine statement bytes/digests, opens at most
+one injected connection, validates P00/V01/M10/K20 while connected, executes C99,
+and confirms cursor and physical-connection closure. Its serialized boundary must
+release the FIFO/mutex lease before returning. Only then may canonical artifact
+construction and atomic injected-sink publication occur. Any prerequisite,
+inventory, observation, timeout, cancellation, rollback, close, or lease
+uncertainty returns blocked with no artifact. No production binding is included.
+
+Local verification: 9 executor tests and 37 existing capture tests passed together
+under the approved isolated pure-model path (46 passed); 355 adjacent lifecycle,
+Orders wire/fact, and Reception pure regressions also passed. The normal executor
+test invocation reached 9 setup errors before test execution solely because this
+host cannot load PySide6 without `libxkbcommon.so.0`. No host package was installed,
+and isolated verification is not reported as a full baseline.
+
 ## Next action
 
 1. Provide a reviewable non-secret attestation that identifies the approved
    least-privilege read-only path and confirms how P00 can be executed without
    exposing credentials or connection details.
-2. Review and authorize an exact bounded executor/adapter; the pure injected
-   harness alone cannot open a source connection.
-3. Reconfirm the execution window and exact package commit before one new attempt.
-4. Do not connect or execute while either prerequisite is absent.
+2. Independently review the new bounded executor candidate and bind its final
+   commit in the executor approval record.
+3. Supply the bounded KST window plus non-sensitive operator and cancellation-owner
+   references.
+4. After all three records pass, request a new single-attempt approval. Do not
+   connect or execute before then.
 
 ## Revision history
 
@@ -452,3 +500,10 @@ after all three prerequisite records exist and pass review.
   record were all absent, so the retry was consumed without authentication,
   connection, SQL, artifact creation, credential inspection, patient access,
   runtime activation, push, or deployment.
+- **2026-10-09:** Under the 20:01 KST preparation approval, defined closed
+  non-secret contracts for identity/path attestation, executor approval, and the
+  bounded window, and added a disabled injected executor candidate with synthetic
+  deadline/order/cleanup/post-close-publication tests. Identity/path and human
+  window references remain absent; executor independent review remains pending.
+  No authentication, source connection, SQL, artifact, runtime activation, push,
+  or deployment occurred.

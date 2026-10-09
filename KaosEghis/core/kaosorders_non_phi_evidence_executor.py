@@ -1,0 +1,286 @@
+"""Disabled, injected executor candidate for the frozen Orders evidence package.
+
+There is no credential lookup, source discovery, runtime binding, or connection
+factory here.  Every external capability is injected after prerequisite review.
+"""
+
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from enum import StrEnum
+import re
+
+from KaosEghis.core import kaosorders_non_phi_evidence_capture as capture
+
+
+ATTESTATION_CONTRACT = "kaoseghis.orders-evidence-read-path-attestation.v1"
+EXECUTOR_APPROVAL_CONTRACT = "kaoseghis.orders-evidence-executor-approval.v1"
+WINDOW_CONTRACT = "kaoseghis.orders-evidence-window.v1"
+IDENTITY_CLASS = "dedicated-least-privilege-read-only"
+PATH_CLASS = "existing-serialized-read-single-connection"
+AUTHORITY_ROLE = "database-security-authority"
+REVIEWER_ROLE = "independent-integration-review"
+MAX_WINDOW_SECONDS = 1800
+_HEX = re.compile(r"[0-9a-f]{64}\Z")
+_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+_REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+
+
+class ExecutorReason(StrEnum):
+    PREREQUISITE_UNPROVEN = "prerequisite_unproven"
+    INVENTORY_MISMATCH = "inventory_mismatch"
+    TIMEOUT = "timeout"
+    OBSERVATION_REJECTED = "observation_rejected"
+    CLEANUP_UNCERTAIN = "cleanup_uncertain"
+    PUBLICATION_FAILED = "publication_failed"
+
+
+class ExecutorRejected(RuntimeError):
+    """Fixed non-sensitive executor rejection."""
+
+
+class _Redacted:
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__}: redacted>"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class IdentityPathAttestation(_Redacted):
+    contract_id: str
+    decision: str
+    attestation_sha256: str
+    identity_class: str
+    path_class: str
+    p00_statement_sha256: str
+    authority_role: str
+    valid_from: date
+    expires_on: date
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ExecutorApproval(_Redacted):
+    contract_id: str
+    decision: str
+    review_sha256: str
+    executor_commit: str
+    reviewer_role: str
+    package_revision: str
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ExecutionWindow(_Redacted):
+    contract_id: str
+    decision: str
+    approval_sha256: str
+    starts_at: datetime
+    ends_at: datetime
+    operator_reference: str
+    cancellation_owner_reference: str
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _Observation(_Redacted):
+    version: str
+    p00: dict[str, bool]
+    m10: list[dict[str, object]]
+    k20: list[dict[str, object]]
+
+
+def _approved_prerequisites(
+    *, identity: IdentityPathAttestation, approval: ExecutorApproval,
+    window: ExecutionWindow, runtime_commit: str, evidence_date: date,
+    now: datetime,
+) -> None:
+    p00_digest = next(
+        item.sha256_hex for item in capture.STATEMENT_SPECS if item.statement_id == "EKO-P00"
+    )
+    if (
+        type(identity) is not IdentityPathAttestation
+        or identity.contract_id != ATTESTATION_CONTRACT
+        or identity.decision != "approved"
+        or not _HEX.fullmatch(identity.attestation_sha256)
+        or identity.identity_class != IDENTITY_CLASS
+        or identity.path_class != PATH_CLASS
+        or identity.p00_statement_sha256 != p00_digest
+        or identity.authority_role != AUTHORITY_ROLE
+        or type(identity.valid_from) is not date
+        or type(identity.expires_on) is not date
+        or not identity.valid_from <= evidence_date <= identity.expires_on
+    ):
+        raise ExecutorRejected(ExecutorReason.PREREQUISITE_UNPROVEN.value)
+    if (
+        type(approval) is not ExecutorApproval
+        or approval.contract_id != EXECUTOR_APPROVAL_CONTRACT
+        or approval.decision != "approved"
+        or not _HEX.fullmatch(approval.review_sha256)
+        or not _COMMIT.fullmatch(approval.executor_commit)
+        or approval.executor_commit != runtime_commit
+        or approval.reviewer_role != REVIEWER_ROLE
+        or approval.package_revision != capture.PACKAGE_REVISION
+    ):
+        raise ExecutorRejected(ExecutorReason.PREREQUISITE_UNPROVEN.value)
+    if (
+        type(window) is not ExecutionWindow
+        or window.contract_id != WINDOW_CONTRACT
+        or window.decision != "approved"
+        or not _HEX.fullmatch(window.approval_sha256)
+        or type(window.starts_at) is not datetime
+        or type(window.ends_at) is not datetime
+        or type(now) is not datetime
+        or any(value.utcoffset() != timedelta(hours=9) for value in (window.starts_at, window.ends_at, now))
+        or not window.starts_at <= now <= window.ends_at
+        or not timedelta(0) < window.ends_at - window.starts_at <= timedelta(seconds=MAX_WINDOW_SECONDS)
+        or not _REFERENCE.fullmatch(window.operator_reference)
+        or not _REFERENCE.fullmatch(window.cancellation_owner_reference)
+    ):
+        raise ExecutorRejected(ExecutorReason.PREREQUISITE_UNPROVEN.value)
+
+
+def _verified_statements(statement_bytes: object) -> dict[str, bytes]:
+    expected = tuple(item.statement_id for item in capture.STATEMENT_SPECS)
+    if type(statement_bytes) is not dict or tuple(statement_bytes) != expected:
+        raise ExecutorRejected(ExecutorReason.INVENTORY_MISMATCH.value)
+    for spec in capture.STATEMENT_SPECS:
+        value = statement_bytes[spec.statement_id]
+        if type(value) is not bytes or capture.sha256(value).hexdigest() != spec.sha256_hex:
+            raise ExecutorRejected(ExecutorReason.INVENTORY_MISMATCH.value)
+    return statement_bytes
+
+
+def _rows(cursor: object, spec: capture.StatementSpec) -> capture.InjectedResult:
+    columns = tuple(item[0] for item in (cursor.description or ()))
+    if columns != spec.columns:
+        raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
+    fetched = cursor.fetchmany(spec.maximum_rows + 1)
+    if type(fetched) not in (list, tuple) or len(fetched) > spec.maximum_rows:
+        raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
+    rows = []
+    for values in fetched:
+        if type(values) not in (list, tuple) or len(values) != len(columns):
+            raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
+        rows.append(dict(zip(columns, values, strict=True)))
+    return capture.InjectedResult(tuple(rows))
+
+
+def _observe_and_close(*, connection_factory: object, statement_bytes: dict[str, bytes],
+                       deadline: float, monotonic: object) -> _Observation:
+    connection = cursor = None
+    c99_done = False
+    p00 = version = m10 = k20 = None
+    failure: Exception | None = None
+    try:
+        if monotonic() > deadline:
+            raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+        connection = connection_factory(deadline)
+        cursor = connection.cursor()
+        for spec in capture.STATEMENT_SPECS:
+            if monotonic() > deadline:
+                raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+            cursor.execute(statement_bytes[spec.statement_id].decode("ascii"))
+            if getattr(connection, "notices", ()):
+                raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
+            if spec.maximum_rows == 0:
+                if cursor.description is not None:
+                    raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
+                result = capture.InjectedResult(())
+                capture._validate_control(result)
+            else:
+                result = _rows(cursor, spec)
+                if spec.statement_id == "EKO-P00":
+                    p00 = capture._validate_p00(result)
+                elif spec.statement_id == "EKO-V01":
+                    version = capture._validate_version(result)
+                elif spec.statement_id == "EKO-M10":
+                    m10 = capture._validate_m10(result)
+                elif spec.statement_id == "EKO-K20":
+                    k20 = capture._validate_k20(result)
+            c99_done = spec.statement_id == "EKO-C99"
+            if monotonic() > deadline:
+                raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+    except Exception as error:
+        failure = error
+        if connection is not None:
+            try:
+                connection.cancel()
+            except Exception:
+                failure = ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        if cursor is not None and not c99_done:
+            try:
+                cursor.execute(statement_bytes["EKO-C99"].decode("ascii"))
+            except Exception:
+                failure = ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+    finally:
+        cleanup_ok = True
+        if cursor is not None:
+            try:
+                cursor.close()
+                cleanup_ok = getattr(cursor, "closed", None) is True and cleanup_ok
+            except Exception:
+                cleanup_ok = False
+        if connection is not None:
+            try:
+                connection.close()
+                closed = getattr(connection, "closed", None)
+                cleanup_ok = ((closed is True) or (type(closed) is int and closed > 0)) and cleanup_ok
+            except Exception:
+                cleanup_ok = False
+        if not cleanup_ok:
+            failure = ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        elif monotonic() > deadline and failure is None:
+            failure = ExecutorRejected(ExecutorReason.TIMEOUT.value)
+    if failure is not None:
+        if isinstance(failure, ExecutorRejected):
+            raise failure
+        if isinstance(failure, capture.CaptureRejected):
+            reason = str(failure)
+            if reason == ExecutorReason.INVENTORY_MISMATCH.value:
+                raise ExecutorRejected(reason) from None
+        raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value) from None
+    if type(version) is not str or p00 is None or m10 is None or k20 is None:
+        raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
+    return _Observation(version, p00, m10, k20)
+
+
+def execute_reviewed_package_once(
+    *, identity: IdentityPathAttestation, approval: ExecutorApproval,
+    window: ExecutionWindow, runtime_commit: str, evidence_date: date,
+    now: datetime, statement_bytes: dict[str, bytes], monotonic: object,
+    serialized_read_until: object, connection_factory: object, sink: object,
+) -> capture.CaptureOutcome:
+    """Execute only after all injected prerequisites are independently approved."""
+
+    try:
+        _approved_prerequisites(
+            identity=identity, approval=approval, window=window,
+            runtime_commit=runtime_commit, evidence_date=evidence_date, now=now,
+        )
+        statements = _verified_statements(statement_bytes)
+        started = monotonic()
+        deadline = started + capture.GLOBAL_DEADLINE_SECONDS
+        observation = serialized_read_until(
+            lambda: _observe_and_close(
+                connection_factory=connection_factory, statement_bytes=statements,
+                deadline=deadline, monotonic=monotonic,
+            ),
+            deadline,
+        )
+        if monotonic() > deadline or type(observation) is not _Observation:
+            raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+    except Exception as error:
+        try:
+            sink.discard()
+        except Exception:
+            pass
+        reason = str(error)
+        fixed = {
+            ExecutorReason.INVENTORY_MISMATCH.value: capture.FixedReason.INVENTORY_MISMATCH,
+            ExecutorReason.TIMEOUT.value: capture.FixedReason.TIMEOUT,
+            ExecutorReason.CLEANUP_UNCERTAIN.value: capture.FixedReason.CLEANUP_UNCERTAIN,
+        }.get(reason, capture.FixedReason.PREFLIGHT_FAILED)
+        return capture.CaptureOutcome(capture.RunStatus.BLOCKED, fixed, None)
+    return capture._publish(
+        sink=sink, evidence_date=evidence_date, run_status=capture.RunStatus.COMPLETE,
+        fixed_reason=capture.FixedReason.NONE, version=observation.version,
+        p00=observation.p00, m10=observation.m10, k20=observation.k20,
+    )
