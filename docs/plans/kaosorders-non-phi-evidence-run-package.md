@@ -711,7 +711,7 @@ The window record must provide exactly: window contract/version ID, `approved`
 decision, approval SHA-256, KST start/end no longer than 30 minutes and containing
 the attempt time, plus non-sensitive stable references naming the operator and
 cancellation owner. The references supplied at 07:30 KST remain syntactically
-valid, but the owner's latest `07:40` plus 30 minutes shorthand is only an
+valid, but the owner's latest `08:00` plus 30 minutes shorthand is only an
 incomplete candidate and is not a valid approved window.
 
 ### Bounded KST execution-window template
@@ -743,8 +743,8 @@ Current human-only window readiness is closed as follows:
 | Required value | Current state | Acceptance rule |
 | --- | --- | --- |
 | `approval_sha256` | **BLOCKED** | No compliant window artifact exists to hash. |
-| `starts_at` | Latest candidate literal `07:40`; **BLOCKED** | Seconds and an explicit approval are absent. |
-| `ends_at` | Candidate `08:10`; **BLOCKED** | Derived only from the Lead's interpretation of “30 minutes”; it is not an owner-supplied exact endpoint. |
+| `starts_at` | Latest candidate literal `08:00`; **BLOCKED** | Seconds and an explicit approval are absent. |
+| `ends_at` | Candidate `08:30`; **BLOCKED** | Derived only from the Lead's interpretation of “30 minutes”; it is not an owner-supplied exact endpoint. |
 | `operator_reference` | Prior candidate `kaosclinic-eghis`; **BLOCKED** | Passes the syntax, but the latest message does not explicitly bind it. |
 | `cancellation_owner_reference` | Prior candidate `kaosclinic-owner`; **BLOCKED** | Passes the syntax, but the latest message does not explicitly bind it. |
 | attempt time and evidence date | **BLOCKED** | Inside the approved interval and identical KST calendar date. |
@@ -753,9 +753,24 @@ The owner or authorized coordinator must supply these non-secret values after
 scheduling. Eghis must not guess them. Missing or stale values stop before
 credential lookup or connection; a general statement of intent is not a window.
 
-#### Latest incomplete `07:40` plus 30 minutes candidate
+#### Latest incomplete `08:00` plus 30 minutes candidate
 
-The owner's latest shorthand is the literal `7시40부터 30분간`. The Lead may
+At owner-message context 2026-10-10 07:41:20 KST and Lead validation time
+07:42:08 KST, the owner supplied the literal `8시부터 30분간`. The Lead may
+track this only as a candidate `08:00`–`08:30` minute interval. The start minute
+was future at validation and the interpreted duration is 30 minutes, but the
+owner did not supply seconds, an explicit approval statement, or the operator
+and cancellation-owner bindings in this message. Therefore no ISO endpoint is
+canonicalized, no prior reference is implicitly carried forward, and no active
+window artifact or digest is created.
+
+The next owner statement must use concrete future same-day `HH:MM:SS` endpoints,
+explicit approval, and both role references in the exact form shown below. Until
+then, `window_approval_sha256` remains `BLOCKED`.
+
+#### Earlier incomplete `07:40` plus 30 minutes candidate
+
+The owner's earlier shorthand is the literal `7시40부터 30분간`. The Lead may
 track this only as a candidate `07:40`–`08:10` interval. The owner did not supply
 seconds, an explicit approval statement, or the operator and cancellation-owner
 bindings in this message. Therefore no endpoint is canonicalized, no prior
@@ -844,7 +859,7 @@ historical evidence only; a new same-day bounded window, closed canonical role
 references, immutable window approval digest, and later fresh single-attempt
 authorization are required.
 
-Neither the earlier 07:00–12:00 request nor either later shorthand revives the
+Neither the earlier 07:00–12:00 request nor any later shorthand revives the
 expired scheduling candidate, satisfies independent review, or authorizes
 credential lookup, authentication, connection, or query.
 
@@ -1193,3 +1208,8 @@ verification is not reported as a full baseline.
   an incomplete `07:40`–`08:10` candidate. Seconds, explicit approval, and role
   bindings were absent, so no endpoint, artifact, digest, or execution authority
   was canonicalized; all gates remain blocked.
+- **2026-10-10:** Recorded the latest literal `8시부터 30분간` only as an
+  incomplete future `08:00`–`08:30` minute candidate. It fits the duration bound
+  at minute precision, but seconds, explicit approval, and role bindings were
+  absent, so no ISO endpoint, artifact, digest, or execution authority was
+  canonicalized.
