@@ -711,7 +711,8 @@ The window record must provide exactly: window contract/version ID, `approved`
 decision, approval SHA-256, KST start/end no longer than 30 minutes and containing
 the attempt time, plus non-sensitive stable references naming the operator and
 cancellation owner. The references supplied at 07:30 KST remain syntactically
-valid, but the owner's superseding 07:00–12:00 request is not a valid window.
+valid, but the owner's latest `07:40` plus 30 minutes shorthand is only an
+incomplete candidate and is not a valid approved window.
 
 ### Bounded KST execution-window template
 
@@ -742,17 +743,49 @@ Current human-only window readiness is closed as follows:
 | Required value | Current state | Acceptance rule |
 | --- | --- | --- |
 | `approval_sha256` | **BLOCKED** | No compliant window artifact exists to hash. |
-| `starts_at` | Requested `2026-10-10T07:00:00+09:00`; **REJECTED** | Start was already in the past at validation and cannot contain a later attempt. |
-| `ends_at` | Requested `2026-10-10T12:00:00+09:00`; **REJECTED** | Five-hour duration exceeds the closed 30-minute maximum. |
-| `operator_reference` | `kaosclinic-eghis` | Passes `[A-Za-z0-9][A-Za-z0-9._-]*` and is 1..64 characters with no personal detail. |
-| `cancellation_owner_reference` | `kaosclinic-owner` | Distinct, passes the same syntax, and contains no personal detail. |
+| `starts_at` | Latest candidate literal `07:40`; **BLOCKED** | Seconds and an explicit approval are absent. |
+| `ends_at` | Candidate `08:10`; **BLOCKED** | Derived only from the Lead's interpretation of “30 minutes”; it is not an owner-supplied exact endpoint. |
+| `operator_reference` | Prior candidate `kaosclinic-eghis`; **BLOCKED** | Passes the syntax, but the latest message does not explicitly bind it. |
+| `cancellation_owner_reference` | Prior candidate `kaosclinic-owner`; **BLOCKED** | Passes the syntax, but the latest message does not explicitly bind it. |
 | attempt time and evidence date | **BLOCKED** | Inside the approved interval and identical KST calendar date. |
 
 The owner or authorized coordinator must supply these non-secret values after
 scheduling. Eghis must not guess them. Missing or stale values stop before
 credential lookup or connection; a general statement of intent is not a window.
 
-#### Superseding noncompliant 07:00–12:00 KST request
+#### Latest incomplete `07:40` plus 30 minutes candidate
+
+The owner's latest shorthand is the literal `7시40부터 30분간`. The Lead may
+track this only as a candidate `07:40`–`08:10` interval. The owner did not supply
+seconds, an explicit approval statement, or the operator and cancellation-owner
+bindings in this message. Therefore no endpoint is canonicalized, no prior
+reference is implicitly carried forward, and no active window artifact or digest
+is created.
+
+The next owner statement must use concrete future same-day `HH:MM:SS` endpoints,
+explicit approval, and both role references in the exact form already shown
+below. Until then, `window_approval_sha256` remains `BLOCKED`.
+
+#### Latest noncompliant `07:36`–`08:06` shorthand
+
+The owner supplied the literal shorthand `7시36부터 8시6분`. The Lead observed
+2026-10-10 07:36:31 KST before validation. The request omits seconds; interpreting
+the minute endpoints as `:00` would make the start already past. Although the
+minute-to-minute difference is exactly 30 minutes, the request is fail-closed
+and does not become an active window, canonical artifact, digest, or execution
+authority. This document records only the literal requested minute endpoints and
+does not infer seconds.
+
+The role references remain valid candidate literals. The owner must choose new
+concrete future same-day `HH:MM:SS` endpoints with positive duration no longer
+than 30 minutes. The exact required form remains:
+
+> `2026-10-10 KST 실행 창을 <미래의 HH:MM:SS>부터 <같은 날이며 시작 후 30분 이내인 HH:MM:SS>까지 승인한다. operator_reference는 kaosclinic-eghis, cancellation_owner_reference는 kaosclinic-owner로 승인한다.`
+
+Placeholders are not approval values. Until a new exact statement passes
+validation and independent review, `window_approval_sha256` remains `BLOCKED`.
+
+#### Earlier superseded noncompliant 07:00–12:00 KST request
 
 The owner superseded the uncommitted 08:00–08:30 proposal with a five-hour
 07:00–12:00 KST request. The exact request is fail-closed because it exceeds the
@@ -811,9 +844,9 @@ historical evidence only; a new same-day bounded window, closed canonical role
 references, immutable window approval digest, and later fresh single-attempt
 authorization are required.
 
-The superseding 07:00–12:00 request does not revive the expired scheduling
-candidate, satisfy independent review, or authorize credential lookup,
-authentication, connection, or query.
+Neither the earlier 07:00–12:00 request nor either later shorthand revives the
+expired scheduling candidate, satisfies independent review, or authorizes
+credential lookup, authentication, connection, or query.
 
 ### Immutable approval-manifest candidate
 
@@ -1151,3 +1184,12 @@ verification is not reported as a full baseline.
   The accepted digest is eligible for later manifest population, but the
   manifest remains unchanged and `BLOCKED`; the rejected window and every
   authentication/execution gate remain stopped.
+- **2026-10-10:** Recorded the owner's latest literal `07:36`–`08:06` shorthand
+  fail-closed. At the observed 07:36:31 KST validation time, an inferred `:00`
+  start was already past, and the owner had not supplied seconds. No seconds,
+  active window, artifact, or digest were inferred; the syntax-valid role
+  references and all BLOCKED gates were preserved.
+- **2026-10-10:** Recorded the superseding literal `7시40부터 30분간` only as
+  an incomplete `07:40`–`08:10` candidate. Seconds, explicit approval, and role
+  bindings were absent, so no endpoint, artifact, digest, or execution authority
+  was canonicalized; all gates remain blocked.
