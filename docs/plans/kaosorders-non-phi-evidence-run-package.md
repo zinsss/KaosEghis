@@ -1,9 +1,9 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
-- **Status:** composition `e9e65e8`, identity/path attestation `722bef9`, and
-  window `7b9baca` independently passed; the fresh single-attempt authorization
-  and populated immutable manifest are recorded below, but execution remains
-  blocked before authentication pending independent final manifest review
+- **Status:** final manifest `0927dbcb…` independently passed; the authorized
+  single attempt was consumed by a fail-closed 08:01 KST pre-authentication stop
+  because the approved settings boundary had no configured opaque connection;
+  no evidence artifact exists and retry is prohibited
 - **Last updated:** 2026-10-10
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -438,6 +438,31 @@ cleanup operation occurred. Cursor and physical-connection closure are therefore
 `not_applicable`, not inferred. No evidence/partial artifact was created. This
 consumes the authorized retry; another attempt requires new explicit approval
 after all three prerequisite records exist and pass review.
+
+### 2026-10-10 final-manifest attempt: fail-closed pre-authentication stop
+
+Independent integration review passed exact Eghis commit
+`8d131d5cdfab7fb4df1ea3c4b45c7f136d479f59` and manifest SHA-256
+`0927dbcbbe54aa215a74f706a5751df4e99ecad213f9731e44dcde7efa753a0e`.
+The reviewed single-use authorization was consumed for its one preflight at
+2026-10-10 08:01 KST, inside the approved 08:00:00–08:30:00 KST window.
+
+Repository and package checks passed: exact HEAD, current component bytes,
+frozen statement inventory, manifest bindings, non-secret identity/path
+attestation, window, and driver availability all matched. The approved local
+settings boundary existed, but its opaque single-connection configuration was
+absent. Therefore the concrete resource-owning path could not establish that a
+dedicated approved identity was available. The closed no-fallback rule stopped
+the attempt before authentication. No alternate file, environment, host,
+credential store, or source path was searched.
+
+No credential value, connection string, host detail, authentication, physical
+connection, cursor, transaction, P00, later statement, live value, or patient
+data was accessed. Cursor/physical-connection/lease cleanup is `not_applicable`
+because no such resource was acquired. No partial or complete evidence artifact
+was created or published, and every evidence criterion remains unproven. The
+single-use authorization cannot be retried, extended, or reused even though the
+window had not yet expired at the stop.
 
 ## Prepared prerequisite contracts and executor candidate
 
@@ -1060,14 +1085,13 @@ verification is not reported as a full baseline.
 
 ## Next action
 
-1. Independently review the exact authorization bytes/digest and populated
-   manifest bytes/root digest against every immutable accepted input.
-2. Confirm the final manifest contains no runtime/public activation and that the
-   approved window is still active. Any mismatch or time at/after 08:30:00 KST
-   expires this authorization and requires a newly approved window and fresh
-   authorization; it must not be retried or extended.
-3. Do not look up credentials, authenticate, connect, or execute before that
-   final PASS. This commit only prepares the closed approval package.
+1. Keep authentication, connection, P00, later statements, and publication
+   stopped. The 07:55:13 authorization is consumed and must not be retried.
+2. Resolve the missing opaque connection configuration only through a separately
+   approved non-secret operational step; do not put its value or locator in this
+   repository, documentation, logs, or messages.
+3. Any future attempt requires a new bounded window, fresh single-attempt owner
+   authorization, regenerated manifest, and independent final review.
 
 ## Revision history
 
@@ -1271,3 +1295,10 @@ verification is not reported as a full baseline.
   execution, and the entire authorization expires fail-closed with the bound
   08:00:00–08:30:00 KST window. No credential, source, query, runtime, push, or
   deployment action occurred.
+- **2026-10-10:** Recorded independent final PASS for exact commit `8d131d5` and
+  manifest digest `0927dbcbbe54aa215a74f706a5751df4e99ecad213f9731e44dcde7efa753a0e`.
+  Consumed the single-use authorization for one 08:01 KST preflight. Exact
+  repository/package checks passed, but the approved settings boundary contained
+  no configured opaque connection, so execution stopped before authentication
+  with no resource acquisition or evidence artifact. No fallback discovery,
+  retry, live value access, runtime activation, push, or deployment occurred.
