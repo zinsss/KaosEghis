@@ -87,42 +87,73 @@ class _Observation(_Redacted):
     k20: list[dict[str, object]]
 
 
-class _SerializedLeaseGuard(_Redacted):
+class SerializedReadLease(_Redacted):
+    """Single-use reviewed wrapper around one concrete FIFO/mutex backend."""
+
     __slots__ = (
-        "_deadline", "_monotonic", "_operation", "_value",
-        "callback_count", "released", "released_within_deadline",
+        "_backend", "_acquisition_count", "_release_count",
+        "_acquisition_verified", "_release_verified", "_no_lease_proven",
     )
 
-    def __init__(self, *, operation: object, deadline: float, monotonic: object):
-        self._operation = operation
-        self._deadline = deadline
-        self._monotonic = monotonic
-        self._value = None
-        self.callback_count = 0
-        self.released = False
-        self.released_within_deadline = False
+    def __init__(self, backend: object):
+        self._backend = backend
+        self._acquisition_count = 0
+        self._release_count = 0
+        self._acquisition_verified = False
+        self._release_verified = False
+        self._no_lease_proven = False
 
-    def invoke(self):
-        self.callback_count += 1
-        if self.callback_count != 1:
-            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
-        if self._monotonic() > self._deadline:
-            raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
-        try:
-            self._value = self._operation()
-            return self._value
-        finally:
-            self.released = True
-            self.released_within_deadline = self._monotonic() <= self._deadline
+    @property
+    def acquisition_count(self) -> int:
+        return self._acquisition_count
 
-    def verified_value(self, returned: object) -> object:
-        if self.callback_count != 1 or self.released is not True:
+    @property
+    def release_count(self) -> int:
+        return self._release_count
+
+    @property
+    def acquisition_verified(self) -> bool:
+        return self._acquisition_verified
+
+    @property
+    def release_verified(self) -> bool:
+        return self._release_verified
+
+    @property
+    def no_lease_proven(self) -> bool:
+        return self._no_lease_proven
+
+    @property
+    def held(self) -> bool:
+        return self._backend.held_by_caller() is True
+
+    def acquire(self, deadline: float) -> None:
+        if self._acquisition_count != 0 or self._release_count != 0:
             raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
-        if self.released_within_deadline is not True:
-            raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
-        if returned is not self._value:
+        acquired = self._backend.acquire_until(deadline)
+        held = self._backend.held_by_caller()
+        if acquired is True and held is True:
+            self._acquisition_count = 1
+            self._acquisition_verified = True
+            self._no_lease_proven = False
+        elif acquired is False and held is False:
+            self._no_lease_proven = True
+        else:
             raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
-        return self._value
+
+    def release_owned(self, deadline: float) -> None:
+        held = self._backend.held_by_caller()
+        if held is True:
+            self._release_count += 1
+            released = self._backend.release_owned(deadline)
+            self._release_verified = (
+                released is True and self._backend.held_by_caller() is False
+            )
+            self._no_lease_proven = False
+        elif held is False:
+            self._no_lease_proven = self._acquisition_count == 0
+        else:
+            self._no_lease_proven = False
 
 
 def _raise_if_late(*, monotonic: object, deadline: float) -> None:
@@ -339,11 +370,71 @@ def _observe_and_close(*, connection_owner: object, statement_bytes: dict[str, b
     return _Observation(version, p00, m10, k20)
 
 
+def _observe_with_owned_lease(
+    *, serialized_lease: object, connection_owner: object,
+    statement_bytes: dict[str, bytes], deadline: float, monotonic: object,
+) -> _Observation:
+    observation = None
+    failure: Exception | None = None
+    try:
+        if type(serialized_lease) is not SerializedReadLease:
+            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
+        serialized_lease.acquire(deadline)
+        _raise_if_late(monotonic=monotonic, deadline=deadline)
+        if (
+            type(serialized_lease.acquisition_count) is not int
+            or serialized_lease.acquisition_count != 1
+            or serialized_lease.acquisition_verified is not True
+            or serialized_lease.held is not True
+        ):
+            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        observation = _observe_and_close(
+            connection_owner=connection_owner,
+            statement_bytes=statement_bytes,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
+    except Exception as error:
+        failure = error
+    finally:
+        cleanup_ok = True
+        try:
+            serialized_lease.release_owned(deadline)
+            if serialized_lease.release_count == 1:
+                cleanup_ok = (
+                    serialized_lease.release_verified is True
+                    and serialized_lease.held is False
+                )
+            elif serialized_lease.acquisition_count == 0:
+                cleanup_ok = (
+                    serialized_lease.no_lease_proven is True
+                    and serialized_lease.held is False
+                )
+            else:
+                cleanup_ok = False
+        except Exception:
+            cleanup_ok = False
+        if not cleanup_ok:
+            failure = ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        elif monotonic() > deadline:
+            failure = ExecutorRejected(ExecutorReason.TIMEOUT.value)
+    if failure is not None:
+        if isinstance(failure, ExecutorRejected):
+            raise failure
+        if isinstance(failure, capture.CaptureRejected):
+            raise ExecutorRejected(str(failure)) from None
+        raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value) from None
+    if type(observation) is not _Observation:
+        raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+    return observation
+
+
 def execute_reviewed_package_once(
     *, identity: IdentityPathAttestation, approval: ExecutorApproval,
     window: ExecutionWindow, runtime_commit: str, evidence_date: date,
     now: datetime, statement_bytes: dict[str, bytes], monotonic: object,
-    serialized_read_until: object, connection_owner: object, sink: object,
+    serialized_lease: object, connection_owner: object, sink: object,
 ) -> capture.CaptureOutcome:
     """Execute only after all injected prerequisites are independently approved."""
 
@@ -362,20 +453,14 @@ def execute_reviewed_package_once(
         sink_clean = True
         _raise_if_late(monotonic=monotonic, deadline=deadline)
 
-        def observe_once():
-            return _observe_and_close(
-                connection_owner=connection_owner, statement_bytes=statements,
-                deadline=deadline, monotonic=monotonic,
-            )
-
-        lease_guard = _SerializedLeaseGuard(
-            operation=observe_once, deadline=deadline, monotonic=monotonic,
+        observation = _observe_with_owned_lease(
+            serialized_lease=serialized_lease,
+            connection_owner=connection_owner,
+            statement_bytes=statements,
+            deadline=deadline,
+            monotonic=monotonic,
         )
-        serialized = serialized_read_until(lease_guard.invoke, deadline)
-        observation = lease_guard.verified_value(serialized)
         _raise_if_late(monotonic=monotonic, deadline=deadline)
-        if type(observation) is not _Observation:
-            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
     except Exception as error:
         fixed = _discard_and_classify(
             sink=sink, sink_clean=sink_clean, error=error,

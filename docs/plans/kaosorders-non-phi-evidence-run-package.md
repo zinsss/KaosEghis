@@ -1,8 +1,9 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
 - **Status:** prerequisite preparation candidate; execution remains blocked
-  before connection pending non-secret identity/path and window records plus
-  independent PASS of the bounded executor candidate
+  before connection pending non-secret identity/path and window records, an
+  independently reviewed concrete FIFO/mutex backend, and independent PASS of
+  the bounded executor candidate
 - **Last updated:** 2026-10-09
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -458,17 +459,23 @@ validates P00/V01/M10/K20 while connected, and marks C99 attempted before its so
 execution. A resource-owning acquisition context must prove either no connection
 was allocated or its owned connection was closed, including allocate-then-raise.
 
-The reviewed executor creates and owns the serialized lease guard. Only its
-callback can record entry; it enforces exactly one callback, releases in reviewed
-`finally` code, records whether release occurred within the deadline, and requires
-the serializer's returned object to be the exact callback value. A caller-created
-object claiming callback count, deadline binding, or release cannot authorize
-publication. Validation, connection acquisition, every statement, cancellation,
-C99 rollback, cursor close, physical-connection close, guard release, canonical
-artifact construction, atomic sink operations, and failure cleanup all share the
-same fence. Confirmed late cleanup returns `timeout`; uncertain cleanup returns
-`cleanup_uncertain`; either overrides an earlier ordinary rejection and prevents
-publication.
+The reviewed executor accepts only its exact concrete `SerializedReadLease`
+wrapper, not an arbitrary duck-typed state object. The wrapper directly invokes
+one backend `acquire_until(deadline)`, independently queries
+`held_by_caller()` before any connection, and directly invokes
+`release_owned(deadline)` in reviewed `finally` code. It queries ownership again
+after release. A positive acquire without observed ownership, no acquisition,
+an externally unreleased lease, a forged state object, multiple use, or uncertain
+release all block with no publication. The exact future FIFO/mutex backend must
+itself receive independent review and be bound by a later executor approval;
+there is no production backend or runtime binding in this candidate.
+
+Validation, lease acquisition, connection acquisition, every statement,
+cancellation, C99 rollback, cursor close, physical-connection close, lease
+release, canonical artifact construction, atomic sink operations, and failure
+cleanup all share the same fence. Confirmed late cleanup returns `timeout`;
+uncertain cleanup returns `cleanup_uncertain`; either overrides an earlier
+ordinary rejection and prevents publication.
 
 Only after all guards pass may canonical artifact construction and atomic
 no-overwrite publication occur. The sink must remove and verify absence of any
@@ -476,11 +483,11 @@ run-created visible final after failure; a pre-existing final is never overwritt
 or deleted. Allowed fixed validation reasons are preserved without raw error text.
 No production binding is included.
 
-Local verification after the owner-authorized second remediation: 45 executor
+Local verification after the owner-authorized final lease remediation: 47 executor
 cases and 37 existing capture tests passed together under the approved isolated
-pure-model path (82 passed); 355 adjacent lifecycle, Orders wire/fact, and
+pure-model path (84 passed); 355 adjacent lifecycle, Orders wire/fact, and
 Reception pure regressions also passed. The normal executor test invocation
-reached 45 setup errors before test execution solely because this host cannot load
+reached 47 setup errors before test execution solely because this host cannot load
 PySide6 without `libxkbcommon.so.0`. No host package was installed, and isolated
 verification is not reported as a full baseline.
 
@@ -490,7 +497,8 @@ verification is not reported as a full baseline.
    least-privilege read-only path and confirms how P00 can be executed without
    exposing credentials or connection details.
 2. Independently review the new bounded executor candidate and bind its final
-   commit in the executor approval record.
+   commit plus the exact concrete FIFO/mutex backend in the executor approval
+   record.
 3. Supply the bounded KST window plus non-sensitive operator and cancellation-owner
    references.
 4. After all three records pass, request a new single-attempt approval. Do not
@@ -545,3 +553,10 @@ verification is not reported as a full baseline.
   lease release, publication, and failure cleanup. Added forged-positive and late
   cleanup adversarial probes. Statements, evidence schemas, runtime boundaries,
   and all source/credential/deployment gates remain unchanged.
+- **2026-10-09:** Applied the owner-authorized remediation of the remaining lease
+  blocker. Replaced callback-finally lease state with the exact concrete
+  `SerializedReadLease` wrapper: executor code now calls acquire/release and
+  independently queries backend ownership before connection and after release.
+  Added no-lease, false-positive acquire, forged-object, acquire-then-raise, and
+  externally unreleased-backend probes. The production FIFO/mutex backend remains
+  absent and must be separately reviewed before any execution approval.

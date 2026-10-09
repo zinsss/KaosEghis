@@ -227,9 +227,50 @@ class ConnectionOwner:
         self.close_verified = self.connection.closed == 1
 
 
+class LeaseBackend:
+    def __init__(self, events, *, clock=None, no_lease=False, unreleased=False,
+                 false_positive_acquire=False, raise_after_acquire=False,
+                 late_acquire=False, late_release=False):
+        self.events = events
+        self.clock = clock
+        self.no_lease = no_lease
+        self.unreleased = unreleased
+        self.false_positive_acquire = false_positive_acquire
+        self.raise_after_acquire = raise_after_acquire
+        self.late_acquire = late_acquire
+        self.late_release = late_release
+        self.held = False
+
+    def acquire_until(self, _deadline):
+        self.events.append("lease:acquire")
+        if self.no_lease:
+            return False
+        if self.false_positive_acquire:
+            return True
+        self.held = True
+        self.events.append("lease:acquired")
+        if self.late_acquire:
+            self.clock.expire()
+        if self.raise_after_acquire:
+            raise RuntimeError("synthetic")
+        return True
+
+    def held_by_caller(self):
+        return self.held
+
+    def release_owned(self, _deadline):
+        self.events.append("lease:release")
+        if not self.unreleased:
+            self.held = False
+            self.events.append("lease:released")
+        if self.late_release:
+            self.clock.expire()
+        return True
+
+
 def run(*, identity=None, approval=None, window=None, connection_options=None,
-        owner_options=None, sink_options=None, serialized=None, clock=None,
-        evidence_date=DAY, now=NOW):
+        owner_options=None, sink_options=None, lease_options=None, lease_backend=None,
+        serialized_lease=None, clock=None, evidence_date=DAY, now=NOW):
     events = []
     identity0, approval0, window0 = prerequisites()
     clock = clock or Clock()
@@ -237,13 +278,10 @@ def run(*, identity=None, approval=None, window=None, connection_options=None,
     owner = ConnectionOwner(
         events, **(owner_options or {}), clock=clock, **(connection_options or {}),
     )
-
-    def serialized_default(operation, _deadline):
-        events.append("lease:acquired")
-        try:
-            return operation()
-        finally:
-            events.append("lease:released")
+    lease_backend = lease_backend or LeaseBackend(
+        events, clock=clock, **(lease_options or {}),
+    )
+    serialized_lease = serialized_lease or executor.SerializedReadLease(lease_backend)
 
     outcome = executor.execute_reviewed_package_once(
         identity=identity if identity is not None else identity0,
@@ -251,7 +289,7 @@ def run(*, identity=None, approval=None, window=None, connection_options=None,
         window=window if window is not None else window0,
         runtime_commit=COMMIT, evidence_date=evidence_date, now=now,
         statement_bytes=statement_bytes(), monotonic=clock,
-        serialized_read_until=serialized or serialized_default,
+        serialized_lease=serialized_lease,
         connection_owner=owner, sink=sink,
     )
     return outcome, events, sink
@@ -316,52 +354,67 @@ def test_uncertain_cursor_close_blocks_without_artifact():
     assert "connection:close" in events
 
 
-def test_queue_time_is_inside_global_deadline_and_prevents_connection():
+def test_lease_acquisition_time_is_inside_global_deadline_and_prevents_connection():
     clock = Clock()
-
-    def delayed(operation, deadline):
-        clock.value = deadline + 0.001
-        return operation()
-
-    outcome, events, _ = run(serialized=delayed, clock=clock)
+    outcome, events, _ = run(
+        lease_options={"late_acquire": True}, clock=clock,
+    )
     assert outcome.fixed_reason is capture.FixedReason.TIMEOUT
     assert "connection:create" not in events
 
 
-def test_forged_positive_serialized_result_without_guard_entry_fails_closed():
-    class ForgedPositive:
-        callback_count = 1
-        lease_released = True
-        deadline_bound = True
-        value = object()
-
-    def serialized(_operation, _deadline):
-        return ForgedPositive()
-
-    outcome, events, sink = run(serialized=serialized)
+def test_no_actual_lease_acquisition_fails_closed_before_connection():
+    outcome, events, sink = run(lease_options={"no_lease": True})
     assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
     assert outcome.artifact is None and sink.final is None
     assert "connection:create" not in events and "publish:commit" not in events
 
 
-def test_second_guard_callback_is_rejected_and_never_publishes():
-    def serialized(operation, _deadline):
-        operation()
-        return operation()
-
-    outcome, _events, sink = run(serialized=serialized)
+def test_positive_acquire_without_independently_observed_ownership_fails_closed():
+    outcome, events, sink = run(
+        lease_options={"false_positive_acquire": True},
+    )
     assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
     assert outcome.artifact is None and sink.final is None
+    assert "connection:create" not in events and "publish:commit" not in events
 
 
-def test_serialized_return_must_be_guard_recorded_callback_value():
-    def serialized(operation, _deadline):
-        operation()
-        return object()
+def test_forged_duck_typed_lease_state_is_rejected_before_connection():
+    class ForgedLease:
+        acquisition_count = 1
+        acquisition_verified = True
+        held = True
+        release_count = 1
+        release_verified = True
+        no_lease_proven = False
 
-    outcome, _events, sink = run(serialized=serialized)
+        def acquire(self, _deadline):
+            return None
+
+        def release_owned(self, _deadline):
+            return None
+
+    outcome, events, sink = run(serialized_lease=ForgedLease())
     assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
     assert outcome.artifact is None and sink.final is None
+    assert "connection:create" not in events and "publish:commit" not in events
+
+
+def test_unreleased_actual_lease_fails_closed_after_observation():
+    outcome, events, sink = run(lease_options={"unreleased": True})
+    assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
+    assert outcome.artifact is None and sink.final is None
+    assert "connection:close" in events and "lease:released" not in events
+    assert "publish:commit" not in events
+
+
+def test_acquire_then_raise_still_releases_owned_lease_once():
+    outcome, events, sink = run(lease_options={"raise_after_acquire": True})
+    assert outcome.artifact is None and sink.final is None
+    assert events.count("lease:acquire") == 1
+    assert events.count("lease:release") == 1
+    assert events.count("lease:released") == 1
+    assert "connection:create" not in events
 
 
 def test_validation_time_is_inside_global_deadline():
@@ -388,15 +441,11 @@ def test_late_cleanup_overrides_ordinary_failure_with_timeout(late_event):
     assert outcome.artifact is None and sink.final is None
 
 
-def test_late_serialized_release_boundary_blocks_publication():
+def test_late_concrete_lease_release_blocks_publication():
     clock = Clock()
-
-    def serialized(operation, _deadline):
-        value = operation()
-        clock.expire()
-        return value
-
-    outcome, events, sink = run(serialized=serialized, clock=clock)
+    outcome, events, sink = run(
+        lease_options={"late_release": True}, clock=clock,
+    )
     assert outcome.fixed_reason is capture.FixedReason.TIMEOUT
     assert outcome.artifact is None and sink.final is None
     assert "publish:commit" not in events
@@ -536,7 +585,9 @@ def test_statement_digest_change_stops_before_serialization():
     outcome = executor.execute_reviewed_package_once(
         identity=identity, approval=approval, window=window, runtime_commit=COMMIT,
         evidence_date=DAY, now=NOW, statement_bytes=statements, monotonic=Clock(),
-        serialized_read_until=lambda *_a: pytest.fail("serialized"),
+        serialized_lease=executor.SerializedReadLease(
+            LeaseBackend(events, clock=Clock()),
+        ),
         connection_owner=ConnectionOwner(events), sink=sink,
     )
     assert outcome.fixed_reason is capture.FixedReason.INVENTORY_MISMATCH
@@ -559,3 +610,6 @@ def test_static_boundary_has_no_driver_settings_credentials_or_runtime_activatio
     for forbidden in ("psycopg", "getenv", "settings", "connection_string", "socket", "logging", "print("):
         assert forbidden not in source
     assert repr(prerequisites()[0]) == "<IdentityPathAttestation: redacted>"
+    assert repr(executor.SerializedReadLease(LeaseBackend([], clock=Clock()))) == (
+        "<SerializedReadLease: redacted>"
+    )
