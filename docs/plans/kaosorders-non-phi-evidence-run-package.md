@@ -711,8 +711,8 @@ The window record must provide exactly: window contract/version ID, `approved`
 decision, approval SHA-256, KST start/end no longer than 30 minutes and containing
 the attempt time, plus non-sensitive stable references naming the operator and
 cancellation owner. The references supplied at 07:30 KST remain syntactically
-valid, but the owner's latest `08:00` plus 30 minutes shorthand is only an
-incomplete candidate and is not a valid approved window.
+valid, and the owner's 07:48:51 KST exact statement now supplies a complete
+08:00:00–08:30:00 KST window record below. It remains review-pending.
 
 ### Bounded KST execution-window template
 
@@ -742,18 +742,53 @@ Current human-only window readiness is closed as follows:
 
 | Required value | Current state | Acceptance rule |
 | --- | --- | --- |
-| `approval_sha256` | **BLOCKED** | No compliant window artifact exists to hash. |
-| `starts_at` | Latest candidate literal `08:00`; **BLOCKED** | Seconds and an explicit approval are absent. |
-| `ends_at` | Candidate `08:30`; **BLOCKED** | Derived only from the Lead's interpretation of “30 minutes”; it is not an owner-supplied exact endpoint. |
-| `operator_reference` | Prior candidate `kaosclinic-eghis`; **BLOCKED** | Passes the syntax, but the latest message does not explicitly bind it. |
-| `cancellation_owner_reference` | Prior candidate `kaosclinic-owner`; **BLOCKED** | Passes the syntax, but the latest message does not explicitly bind it. |
+| `approval_sha256` | `c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d` (**REVIEW PENDING**) | Exact lowercase 64-hex digest of the JCS artifact below. |
+| `starts_at` | `2026-10-10T08:00:00+09:00` | Exact owner-approved future KST timestamp. |
+| `ends_at` | `2026-10-10T08:30:00+09:00` | Same KST date, strictly after start, duration exactly 30 minutes. |
+| `operator_reference` | `kaosclinic-eghis` | Explicitly bound; passes `[A-Za-z0-9][A-Za-z0-9._-]*` and is 1..64 characters. |
+| `cancellation_owner_reference` | `kaosclinic-owner` | Explicitly bound, distinct, and passes the same closed syntax. |
 | attempt time and evidence date | **BLOCKED** | Inside the approved interval and identical KST calendar date. |
 
-The owner or authorized coordinator must supply these non-secret values after
-scheduling. Eghis must not guess them. Missing or stale values stop before
-credential lookup or connection; a general statement of intent is not a window.
+The completed record must receive independent review before manifest population.
+Missing, stale, expired, mismatched, or unreviewed values stop before credential
+lookup or connection.
 
-#### Latest incomplete `08:00` plus 30 minutes candidate
+#### Completed owner-approved 08:00:00–08:30:00 KST window
+
+At 2026-10-10 07:48:51 KST, the owner explicitly approved both seconds-bearing
+endpoints and both privacy-safe role references. The start was future at the
+07:49:26 KST validation time. The immutable approval artifact is this exact RFC
+8785 JCS line:
+
+```json
+{"cancellation_owner_reference":"kaosclinic-owner","contract_id":"kaoseghis.orders-evidence-window.v1","decision":"approved","ends_at":"2026-10-10T08:30:00+09:00","operator_reference":"kaosclinic-eghis","starts_at":"2026-10-10T08:00:00+09:00"}
+```
+
+The SHA-256 of those exact UTF-8 bytes, without a trailing line feed, is
+`c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d`.
+The closed envelope therefore has these exact values:
+
+```json
+{
+  "contract_id": "kaoseghis.orders-evidence-window.v1",
+  "decision": "approved",
+  "approval_sha256": "c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d",
+  "starts_at": "2026-10-10T08:00:00+09:00",
+  "ends_at": "2026-10-10T08:30:00+09:00",
+  "operator_reference": "kaosclinic-eghis",
+  "cancellation_owner_reference": "kaosclinic-owner"
+}
+```
+
+The references satisfy the closed literal syntax, both endpoints share the same
+KST date, and the duration is positive and exactly 30 minutes. Independent
+review must reproduce the digest and accept the record before
+`window_approval_sha256` can replace `BLOCKED` in the canonical manifest. The
+window record is not a fresh single-attempt authorization and does not activate
+authentication or execution. If all remaining gates and final manifest review
+do not complete before 08:30:00 KST, this record expires and cannot be reused.
+
+#### Earlier incomplete `08:00` plus 30 minutes candidate
 
 At owner-message context 2026-10-10 07:41:20 KST and Lead validation time
 07:42:08 KST, the owner supplied the literal `8시부터 30분간`. The Lead may
@@ -1213,3 +1248,9 @@ verification is not reported as a full baseline.
   at minute precision, but seconds, explicit approval, and role bindings were
   absent, so no ISO endpoint, artifact, digest, or execution authority was
   canonicalized.
+- **2026-10-10:** Processed the owner's exact 07:48:51 KST statement into a
+  complete 08:00:00–08:30:00 same-day window artifact and closed envelope.
+  Seconds, explicit approval, and both role bindings are present; the JCS
+  SHA-256 is `c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d`.
+  The record remains review-pending and does not populate the still-blocked
+  manifest or authorize authentication/execution.
