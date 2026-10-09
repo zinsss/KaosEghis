@@ -1,9 +1,8 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
-- **Status:** final manifest `0927dbcb…` independently passed; the authorized
-  single attempt was consumed by a fail-closed 08:01 KST pre-authentication stop
-  because the approved settings boundary had no configured opaque connection;
-  no evidence artifact exists and retry is prohibited
+- **Status:** the consumed attempt remains blocked with no evidence artifact;
+  a disabled, injected, read-only application-settings resolver is prepared for
+  review, but no new window, authorization, manifest, or execution exists
 - **Last updated:** 2026-10-10
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -463,6 +462,39 @@ because no such resource was acquired. No partial or complete evidence artifact
 was created or published, and every evidence criterion remains unproven. The
 single-use authorization cannot be retried, extended, or reused even though the
 window had not yet expired at the stop.
+
+### Approved non-secret settings-resolution correction
+
+After the stopped attempt, the owner separately approved only the operational
+correction needed to resolve the opaque connection value from the existing
+application settings store. The locator was recovered through sanitized session
+history and matched the repository's existing public configuration contract.
+Its literal, the store location, and the value are intentionally absent from
+this document, source additions, tests, commit messages, and handoff.
+
+`KaosEghis/core/kaosorders_non_phi_evidence_settings.py` is a new disabled,
+unwired boundary. A future separately authorized caller must inject one exact
+absolute settings-store path and one opaque locator. The resolver:
+
+- accepts no defaults, discovery, fallback, environment scan, or alternate
+  store;
+- opens exactly that existing regular file using SQLite `mode=ro`, enables and
+  verifies connection-local query-only mode, and uses one parameterized exact
+  lookup;
+- requires exactly one non-blank string row, rejects missing, duplicate,
+  malformed, relative-path, symlink, reused, or cleanup-uncertain cases with the
+  fixed `settings_resolution_failed` reason;
+- closes and verifies the cursor and settings connection before passing the
+  opaque value directly into the already reviewed
+  `Psycopg2SingleConnectionPath`; and
+- never returns the opaque value through its public factory, logs, exceptions,
+  representations, artifacts, or observations.
+
+The factory only constructs the existing disabled composition. It performs no
+source authentication or connection, and no application/runtime module imports
+it. The previous immutable manifest does not bind this new component and cannot
+be reused. No real setting value was read during implementation or tests; all
+fixtures are unmistakably synthetic.
 
 ## Prepared prerequisite contracts and executor candidate
 
@@ -1085,13 +1117,13 @@ verification is not reported as a full baseline.
 
 ## Next action
 
-1. Keep authentication, connection, P00, later statements, and publication
+1. Independently review the resolver code, synthetic tests, exact diff, fixed
+   non-echo failure behavior, and absence of runtime imports.
+2. Keep authentication, connection, P00, later statements, and publication
    stopped. The 07:55:13 authorization is consumed and must not be retried.
-2. Resolve the missing opaque connection configuration only through a separately
-   approved non-secret operational step; do not put its value or locator in this
-   repository, documentation, logs, or messages.
-3. Any future attempt requires a new bounded window, fresh single-attempt owner
-   authorization, regenerated manifest, and independent final review.
+3. After resolver PASS, any future attempt still requires a new bounded window,
+   fresh single-attempt owner authorization, regenerated manifest binding this
+   component, and independent final manifest review.
 
 ## Revision history
 
@@ -1302,3 +1334,10 @@ verification is not reported as a full baseline.
   no configured opaque connection, so execution stopped before authentication
   with no resource acquisition or evidence artifact. No fallback discovery,
   retry, live value access, runtime activation, push, or deployment occurred.
+- **2026-10-10:** Under separate owner approval, added only a disabled injected
+  read-only application-settings resolver and synthetic contract tests. The
+  out-of-band locator was checked against the existing config contract but was
+  not copied into any new source, test, document, output, or handoff. No real
+  setting value, credential, authentication, source connection, SQL, patient
+  data, runtime activation, retry, push, or deployment occurred. A new window,
+  fresh authorization, regenerated manifest, and final review remain required.
