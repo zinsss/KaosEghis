@@ -703,8 +703,8 @@ when the executor file itself is byte-identical.
 The window record must provide exactly: window contract/version ID, `approved`
 decision, approval SHA-256, KST start/end no longer than 30 minutes and containing
 the attempt time, plus non-sensitive stable references naming the operator and
-cancellation owner. Those values are **not available** and cannot be inferred from
-the owner's general approval.
+cancellation owner. The references supplied at 07:30 KST remain syntactically
+valid, but the owner's superseding 07:00–12:00 request is not a valid window.
 
 ### Bounded KST execution-window template
 
@@ -734,16 +734,37 @@ Current human-only window readiness is closed as follows:
 
 | Required value | Current state | Acceptance rule |
 | --- | --- | --- |
-| `approval_sha256` | **BLOCKED** | Exact lowercase 64-hex digest of the separately reviewed non-secret approval. |
-| `starts_at` | **BLOCKED** | Exact `+09:00` timestamp on the evidence date. |
-| `ends_at` | **BLOCKED** | Same KST date, strictly after start, duration at most 30 minutes. |
-| `operator_reference` | **BLOCKED** | Stable non-sensitive 1..64-character reference matching `[A-Za-z0-9][A-Za-z0-9._-]*`; no personal details. |
-| `cancellation_owner_reference` | **BLOCKED** | Distinctly assigned stable non-sensitive reference with the same closed syntax. |
+| `approval_sha256` | **BLOCKED** | No compliant window artifact exists to hash. |
+| `starts_at` | Requested `2026-10-10T07:00:00+09:00`; **REJECTED** | Start was already in the past at validation and cannot contain a later attempt. |
+| `ends_at` | Requested `2026-10-10T12:00:00+09:00`; **REJECTED** | Five-hour duration exceeds the closed 30-minute maximum. |
+| `operator_reference` | `kaosclinic-eghis` | Passes `[A-Za-z0-9][A-Za-z0-9._-]*` and is 1..64 characters with no personal detail. |
+| `cancellation_owner_reference` | `kaosclinic-owner` | Distinct, passes the same syntax, and contains no personal detail. |
 | attempt time and evidence date | **BLOCKED** | Inside the approved interval and identical KST calendar date. |
 
 The owner or authorized coordinator must supply these non-secret values after
 scheduling. Eghis must not guess them. Missing or stale values stop before
 credential lookup or connection; a general statement of intent is not a window.
+
+#### Superseding noncompliant 07:00–12:00 KST request
+
+The owner superseded the uncommitted 08:00–08:30 proposal with a five-hour
+07:00–12:00 KST request. The exact request is fail-closed because it exceeds the
+30-minute maximum, and its start had already passed when validated. It is not
+split, shortened, reinterpreted, canonicalized as an approved artifact, or given
+an approval digest. The earlier 08:00–08:30 artifact and digest were discarded
+before commit and cannot be reused without a new explicit owner approval.
+
+The two role references remain valid candidate literals because the owner changed
+only the time. To create a compliant record, the owner must send this exact form
+with newly selected concrete times:
+
+> `2026-10-10 KST 실행 창을 <미래의 HH:MM:SS>부터 <같은 날이며 시작 후 30분 이내인 HH:MM:SS>까지 승인한다. operator_reference는 kaosclinic-eghis, cancellation_owner_reference는 kaosclinic-owner로 승인한다.`
+
+Placeholders are not approval values. Both concrete endpoints must be future at
+validation, use the same 2026-10-10 KST date, have positive duration no longer
+than 30 minutes, and leave enough time for independent prerequisite and final
+manifest review. Until such a statement is received, `window_approval_sha256`
+remains `BLOCKED`.
 
 #### Owner-supplied candidate window and pre-authentication assessment
 
@@ -784,6 +805,10 @@ cannot be activated, extended, or reused. Its prior non-active values remain
 historical evidence only; a new same-day bounded window, closed canonical role
 references, immutable window approval digest, and later fresh single-attempt
 authorization are required.
+
+The superseding 07:00–12:00 request does not revive the expired scheduling
+candidate, satisfy independent review, or authorize credential lookup,
+authentication, connection, or query.
 
 ### Immutable approval-manifest candidate
 
@@ -1108,3 +1133,8 @@ verification is not reported as a full baseline.
   validity. Added its exact privacy-safe JCS artifact and SHA-256. The record is
   review-pending, does not pre-prove P00, and does not populate the still-blocked
   manifest or authorize authentication/execution.
+- **2026-10-10:** Before commit, the owner superseded the 08:00–08:30 proposal
+  with 07:00–12:00 KST. The five-hour request exceeds the closed 30-minute limit
+  and had a past start, so no window artifact or digest was finalized. Preserved
+  the two syntax-valid role references, documented the exact compliant approval
+  form needed, and kept the manifest and all execution gates blocked.
