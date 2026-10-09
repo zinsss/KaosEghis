@@ -771,10 +771,10 @@ when the executor file itself is byte-identical.
 The window record must provide exactly: window contract/version ID, `approved`
 decision, approval SHA-256, KST start/end no longer than 30 minutes and containing
 the attempt time, plus non-sensitive stable references naming the operator and
-cancellation owner. The references supplied at 07:30 KST remain syntactically
-valid, and the owner's 07:48:51 KST exact statement now supplies a complete
-08:00:00–08:30:00 KST window record below. Independent review accepted it at
-commit `7b9baca`.
+cancellation owner. The prior 08:00:00–08:30:00 record was consumed and is not
+reusable. The owner's 08:47:38 KST exact statement supplies a new complete
+09:00:00–09:30:00 KST candidate below; it is documentation-only and remains
+unusable until independent review PASS.
 
 ### Bounded KST execution-window template
 
@@ -804,17 +804,52 @@ Current human-only window readiness is closed as follows:
 
 | Required value | Current state | Acceptance rule |
 | --- | --- | --- |
-| `approval_sha256` | `c848e431379c76eb5d1f75d98c22da10899ab0a06f35466f7c78abc01caa252d` (**INDEPENDENT PASS**) | Exact lowercase 64-hex digest of the accepted JCS artifact below. |
-| `starts_at` | `2026-10-10T08:00:00+09:00` | Exact owner-approved future KST timestamp. |
-| `ends_at` | `2026-10-10T08:30:00+09:00` | Same KST date, strictly after start, duration exactly 30 minutes. |
+| `approval_sha256` | `fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c` (**REVIEW PENDING**) | Exact lowercase 64-hex digest of the new JCS artifact below. |
+| `starts_at` | `2026-10-10T09:00:00+09:00` | Exact owner-approved future KST timestamp at statement receipt. |
+| `ends_at` | `2026-10-10T09:30:00+09:00` | Same KST date, strictly after start, duration exactly 30 minutes. |
 | `operator_reference` | `kaosclinic-eghis` | Explicitly bound; passes `[A-Za-z0-9][A-Za-z0-9._-]*` and is 1..64 characters. |
 | `cancellation_owner_reference` | `kaosclinic-owner` | Explicitly bound, distinct, and passes the same closed syntax. |
 | attempt time and evidence date | **BLOCKED** | Inside the approved interval and identical KST calendar date. |
 
-Independent review accepted exact commit
-`7b9baca642b6d3d77ec9e182c0892202136a64ba` and the digest above. Missing,
+Independent review of the new exact record and its commit is pending. Missing,
 stale, expired, mismatched, or unreviewed values still stop before credential
-lookup or connection.
+lookup or connection. The prior accepted commit `7b9baca642b6d3d77ec9e182c0892202136a64ba`
+and its digest remain historical and non-reusable.
+
+#### Owner-approved 09:00:00–09:30:00 KST window — review pending
+
+At 2026-10-10 08:47:38 KST, the owner explicitly approved both seconds-bearing
+endpoints and both privacy-safe stable role references. The start was future at
+statement receipt. The immutable approval artifact is this exact RFC 8785 JCS
+line:
+
+```json
+{"cancellation_owner_reference":"kaosclinic-owner","contract_id":"kaoseghis.orders-evidence-window.v1","decision":"approved","ends_at":"2026-10-10T09:30:00+09:00","operator_reference":"kaosclinic-eghis","starts_at":"2026-10-10T09:00:00+09:00"}
+```
+
+The SHA-256 of those exact UTF-8 bytes, without a trailing line feed, is
+`fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c`.
+The closed envelope therefore has these exact values:
+
+```json
+{
+  "contract_id": "kaoseghis.orders-evidence-window.v1",
+  "decision": "approved",
+  "approval_sha256": "fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c",
+  "starts_at": "2026-10-10T09:00:00+09:00",
+  "ends_at": "2026-10-10T09:30:00+09:00",
+  "operator_reference": "kaosclinic-eghis",
+  "cancellation_owner_reference": "kaosclinic-owner"
+}
+```
+
+The references satisfy the closed literal syntax, both endpoints share the same
+KST date, and the duration is positive and exactly 1,800 seconds. This record is
+not a fresh single-attempt authorization, does not populate the resolver-bound
+manifest, and does not authorize setting read, authentication, connection, or
+execution. It expires fail-closed at 09:30:00 KST and cannot be reused. A fresh
+single-attempt authorization may be requested only after this exact artifact and
+commit receive independent PASS and while a viable reviewed window remains.
 
 #### Completed owner-approved 08:00:00–08:30:00 KST window
 
@@ -1175,14 +1210,14 @@ deployment actions remain stopped.
 
 ## Next action
 
-1. Independently review the exact resolver-bound candidate above, including
-   commit/path/symbol/content-digest bindings, unchanged frozen statements, and
-   the JCS preimage fingerprint.
+1. Independently review the exact resolver-bound candidate above and the new
+   09:00:00–09:30:00 window artifact, including their immutable bindings and
+   reproduced digests.
 2. Keep setting read, authentication, connection, P00, later statements, and
    publication stopped. Every prior window/authorization/manifest is non-reusable.
-3. Only after that PASS, collect and separately review a new bounded window,
-   then a fresh single-attempt authorization, then a regenerated populated
-   manifest and its final independent review.
+3. Only after both prerequisite reviews PASS, obtain a fresh single-attempt
+   authorization bound to their exact commits/digests, then regenerate the
+   populated manifest and obtain its separate final independent review.
 
 ## Revision history
 
@@ -1417,3 +1452,10 @@ deployment actions remain stopped.
   non-secret owner templates needed after review. No setting read,
   authentication, source access, evidence execution, publication, runtime
   activation, push, merge, or deployment occurred.
+- **2026-10-10:** Recorded the owner's exact 08:47:38 KST approval as a new
+  09:00:00–09:30:00 same-day window artifact with stable privacy-safe operator
+  and cancellation-owner references. Canonicalized the exact RFC 8785 JCS bytes
+  and SHA-256 while keeping independent review pending. The prior window,
+  authorization, and manifest remain non-reusable; no fresh authorization was
+  created or consumed and no setting, credential, source, runtime, push, merge,
+  or deployment action occurred.
