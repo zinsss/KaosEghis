@@ -445,6 +445,15 @@ An unconfirmed queued worker, deadline-expired held lease, worker failure, or
 release uncertainty marks the shared EMR reader unhealthy and blocks later reads.
 No connection or credential behavior is included.
 
+Normal lease release additionally requires executor-observed proof that the
+owned physical connection was either never acquired or was confirmed closed. A
+false or raised physical close is passed into the concrete lease as an unverified
+cleanup result. The backend marks the shared reader unhealthy and wakes its
+worker through the poison path; the worker raises inside the exclusive-reader
+scope so Windows retains the named-mutex handle. It must not report normal lease
+release. This blocks both later local FIFO reads and cross-process readers pending
+operator recovery, and no evidence artifact may be published.
+
 The owner-authorized exception after the second integration-review failure is
 limited to two executor defects: remove caller self-attestation of serialized
 lease state, and make the one 10-second fence govern validation through all
@@ -552,13 +561,13 @@ run-created visible final after failure; a pre-existing final is never overwritt
 or deleted. Allowed fixed validation reasons are preserved without raw error text.
 No runtime binding or activation is included.
 
-Local verification after concrete-backend preparation: 47 executor cases, 37
-existing capture cases, and 9 backend cases passed together under the approved
-isolated pure-model path (93 passed). The non-GUI existing EMR read-queue
+Local verification after the bounded cross-boundary remediation: 50 executor
+cases, 37 existing capture cases, and 9 backend cases passed together under the
+approved isolated pure-model path (96 passed). The non-GUI existing EMR read-queue
 regression subset passed 45 with 3 platform skips; its four GUI consumer cases
 remain unexecutable because this host cannot load PySide6 without
 `libxkbcommon.so.0`. A further 355 lifecycle, Orders wire/fact, and Reception pure
-regressions passed. The normal focused invocation reached 93 setup errors for the
+regressions passed. The normal focused invocation reached 96 setup errors for the
 same host-library blocker. No host package was installed, and isolated
 verification is not reported as a full baseline.
 
@@ -639,3 +648,9 @@ verification is not reported as a full baseline.
   closed non-secret identity/path and KST window templates. No values were
   invented and the evidence attempt remains stopped pending independent PASS and
   later authorization reconfirmation.
+- **2026-10-09:** After the first independent backend review, connected physical
+  connection-close proof to lease cleanup. An unverified or raised close now
+  poisons the shared reader and retains the cross-process mutex instead of
+  allowing normal release. Added concrete executor/backend tests for close false,
+  close raise, and verified close. Frozen statements and all execution gates are
+  unchanged.

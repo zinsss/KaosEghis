@@ -23,7 +23,8 @@ class EghisFifoMutexLeaseBackend:
     __slots__ = (
         "_acquired", "_attempted", "_capacity", "_exclusive_reader",
         "_finished", "_future", "_health_check", "_held", "_lock",
-        "_monotonic", "_release_requested", "_release_verified",
+        "_monotonic", "_poisoned", "_release_permitted", "_release_requested",
+        "_release_verified",
         "_ownership_uncertain", "_unhealthy", "_worker", "_worker_state",
     )
 
@@ -43,6 +44,8 @@ class EghisFifoMutexLeaseBackend:
         self._attempted = False
         self._held = False
         self._release_verified = False
+        self._release_permitted = False
+        self._poisoned = False
         self._ownership_uncertain = False
 
     def __repr__(self) -> str:
@@ -103,6 +106,14 @@ class EghisFifoMutexLeaseBackend:
                         raise emr_read_queue.EmrReadSafetyError(
                             "Serialized lease cleanup is uncertain; operator recovery required."
                         )
+                    with self._lock:
+                        release_permitted = (
+                            self._release_permitted and not self._poisoned
+                        )
+                    if not release_permitted:
+                        raise emr_read_queue.EmrReadSafetyError(
+                            "Serialized lease cleanup is uncertain; operator recovery required."
+                        )
                 self._set_held(False)
                 with self._lock:
                     self._release_verified = self._release_requested.is_set()
@@ -144,13 +155,28 @@ class EghisFifoMutexLeaseBackend:
             return False
         return self.held_by_caller()
 
-    def release_owned(self, deadline: float) -> bool:
+    def release_owned(
+        self, deadline: float, *, connection_cleanup_verified: bool,
+    ) -> bool:
         if not self._valid_deadline(deadline):
             raise EvidenceLeaseRejected("invalid_deadline")
+        if type(connection_cleanup_verified) is not bool:
+            raise EvidenceLeaseRejected("invalid_cleanup_proof")
+        with self._lock:
+            if connection_cleanup_verified:
+                if not self._poisoned:
+                    self._release_permitted = True
+            else:
+                self._poisoned = True
+                self._ownership_uncertain = True
+                self._unhealthy.set()
         self._release_requested.set()
         future = self._future
         if future is None:
-            return self.held_by_caller() is False
+            return (
+                connection_cleanup_verified
+                and self.held_by_caller() is False
+            )
         if not self._finished.wait(self._remaining(deadline)):
             self._unhealthy.set()
             return False

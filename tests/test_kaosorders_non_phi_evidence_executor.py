@@ -1,11 +1,16 @@
 import ast
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+import threading
 
 import pytest
 
+from KaosEghis.core import emr_read_queue
 from KaosEghis.core import kaosorders_non_phi_evidence_capture as capture
 from KaosEghis.core import kaosorders_non_phi_evidence_executor as executor
+from KaosEghis.core import kaosorders_non_phi_evidence_lease as lease_module
 
 
 KST = timezone(timedelta(hours=9), "KST")
@@ -176,6 +181,12 @@ class Connection:
         self.events = events
         self.clock = cursor_options.get("clock")
         self.late_event = cursor_options.get("late_event")
+        self.close_false = cursor_options.get("close_false", False)
+        self.close_raise = cursor_options.get("close_raise", False)
+        cursor_options = {
+            key: value for key, value in cursor_options.items()
+            if key not in {"close_false", "close_raise"}
+        }
         self.cursor_value = Cursor(events, **cursor_options)
         self.closed = 0
 
@@ -192,7 +203,10 @@ class Connection:
         self.events.append("connection:close")
         if self.late_event == "connection:close":
             self.clock.expire()
-        self.closed = 1
+        if self.close_raise:
+            raise RuntimeError("synthetic")
+        if not self.close_false:
+            self.closed = 1
 
 
 class ConnectionOwner:
@@ -258,9 +272,9 @@ class LeaseBackend:
     def held_by_caller(self):
         return self.held
 
-    def release_owned(self, _deadline):
+    def release_owned(self, _deadline, *, connection_cleanup_verified):
         self.events.append("lease:release")
-        if not self.unreleased:
+        if connection_cleanup_verified and not self.unreleased:
             self.held = False
             self.events.append("lease:released")
         if self.late_release:
@@ -270,8 +284,8 @@ class LeaseBackend:
 
 def run(*, identity=None, approval=None, window=None, connection_options=None,
         owner_options=None, sink_options=None, lease_options=None, lease_backend=None,
-        serialized_lease=None, clock=None, evidence_date=DAY, now=NOW):
-    events = []
+        serialized_lease=None, clock=None, evidence_date=DAY, now=NOW, events=None):
+    events = [] if events is None else events
     identity0, approval0, window0 = prerequisites()
     clock = clock or Clock()
     sink = Sink(events, clock=clock, **(sink_options or {}))
@@ -305,6 +319,69 @@ def test_complete_observation_closes_and_releases_before_publication():
     assert [event for event in events if event.startswith("execute:")] == [
         f"execute:{item.statement_id}" for item in capture.STATEMENT_SPECS
     ]
+
+
+@pytest.fixture
+def concrete_lease_environment(monkeypatch):
+    events = []
+    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="evidence-integration")
+
+    @contextmanager
+    def exclusive_reader(**_kwargs):
+        events.append("mutex:acquired")
+        try:
+            yield
+        except emr_read_queue.EmrReadSafetyError:
+            events.append("mutex:retained")
+            raise
+        else:
+            events.append("mutex:released")
+
+    monkeypatch.setattr(emr_read_queue, "_worker", worker)
+    monkeypatch.setattr(emr_read_queue, "_capacity", threading.BoundedSemaphore(64))
+    monkeypatch.setattr(emr_read_queue, "_exclusive_reader", exclusive_reader)
+    monkeypatch.setattr(emr_read_queue, "_unhealthy", threading.Event())
+    yield events
+    worker.shutdown(wait=True)
+
+
+@pytest.mark.parametrize("close_option", ["close_false", "close_raise"])
+def test_concrete_lease_poisons_mutex_when_physical_close_is_unverified(
+    concrete_lease_environment, close_option,
+):
+    events = concrete_lease_environment
+    clock = Clock()
+    backend = lease_module.EghisFifoMutexLeaseBackend(monotonic=clock)
+    outcome, returned_events, sink = run(
+        events=events,
+        lease_backend=backend,
+        clock=clock,
+        connection_options={close_option: True},
+    )
+    assert returned_events is events
+    assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
+    assert outcome.artifact is None and sink.final is None
+    assert emr_read_queue._unhealthy.is_set()
+    with pytest.raises(emr_read_queue.EmrReadSafetyError):
+        emr_read_queue._check_health()
+    assert "mutex:retained" in events and "mutex:released" not in events
+    assert "publish:commit" not in events
+
+
+def test_concrete_lease_releases_mutex_only_after_verified_physical_close(
+    concrete_lease_environment,
+):
+    events = concrete_lease_environment
+    clock = Clock()
+    backend = lease_module.EghisFifoMutexLeaseBackend(monotonic=clock)
+    outcome, _returned_events, sink = run(
+        events=events, lease_backend=backend, clock=clock,
+    )
+    assert outcome.status is capture.RunStatus.COMPLETE
+    assert sink.final == outcome.artifact
+    assert emr_read_queue._unhealthy.is_set() is False
+    assert events.index("connection:close") < events.index("mutex:released")
+    assert "mutex:retained" not in events
 
 
 def test_missing_identity_attestation_stops_before_serialization_or_connection():
@@ -391,7 +468,7 @@ def test_forged_duck_typed_lease_state_is_rejected_before_connection():
         def acquire(self, _deadline):
             return None
 
-        def release_owned(self, _deadline):
+        def release_owned(self, _deadline, *, connection_cleanup_verified):
             return None
 
     outcome, events, sink = run(serialized_lease=ForgedLease())

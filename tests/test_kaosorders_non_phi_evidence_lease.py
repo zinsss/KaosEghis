@@ -52,7 +52,7 @@ def test_concrete_backend_acquires_and_releases_existing_fifo_mutex(isolated_fif
     lease.acquire(deadline)
     assert lease.acquisition_count == 1
     assert lease.acquisition_verified is True and lease.held is True
-    lease.release_owned(deadline)
+    lease.release_owned(deadline, connection_cleanup_verified=True)
     assert lease.release_count == 1
     assert lease.release_verified is True and lease.held is False
     assert events == ["mutex:acquired", "mutex:released"]
@@ -79,7 +79,7 @@ def test_backend_queues_behind_existing_serialized_read(isolated_fifo):
         first.result(1)
         second.result(1)
         assert lease.held is True
-        lease.release_owned(deadline)
+        lease.release_owned(deadline, connection_cleanup_verified=True)
         assert lease.release_verified is True
 
 
@@ -113,7 +113,9 @@ def test_unreleased_deadline_marks_reader_unhealthy_and_remains_held(isolated_fi
         assert time.monotonic() < limit
         time.sleep(0.005)
     assert backend.held_by_caller() is True
-    assert backend.release_owned(deadline) is False
+    assert backend.release_owned(
+        deadline, connection_cleanup_verified=False,
+    ) is False
     with pytest.raises(emr_read_queue.EmrReadSafetyError):
         emr_read_queue._check_health()
 
@@ -123,7 +125,9 @@ def test_backend_is_single_attempt_even_after_verified_release(isolated_fifo):
     backend = lease_module.EghisFifoMutexLeaseBackend()
     deadline = time.monotonic() + 1
     assert backend.acquire_until(deadline) is True
-    assert backend.release_owned(deadline) is True
+    assert backend.release_owned(
+        deadline, connection_cleanup_verified=True,
+    ) is True
     with pytest.raises(lease_module.EvidenceLeaseRejected, match="^lease_reused$"):
         backend.acquire_until(deadline)
 

@@ -141,11 +141,20 @@ class SerializedReadLease(_Redacted):
         else:
             raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
 
-    def release_owned(self, deadline: float) -> None:
+    def release_owned(
+        self, deadline: float, *, connection_cleanup_verified: bool,
+    ) -> None:
+        if type(connection_cleanup_verified) is not bool:
+            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        if self._release_count != 0:
+            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
         held = self._backend.held_by_caller()
         if held is True:
             self._release_count += 1
-            released = self._backend.release_owned(deadline)
+            released = self._backend.release_owned(
+                deadline,
+                connection_cleanup_verified=connection_cleanup_verified,
+            )
             self._release_verified = (
                 released is True and self._backend.held_by_caller() is False
             )
@@ -400,7 +409,26 @@ def _observe_with_owned_lease(
     finally:
         cleanup_ok = True
         try:
-            serialized_lease.release_owned(deadline)
+            connection_cleanup_verified = (
+                type(connection_owner.acquisition_count) is int
+                and (
+                    (
+                        connection_owner.acquisition_count == 0
+                        and connection_owner.no_connection_proven is True
+                    )
+                    or (
+                        connection_owner.acquisition_count == 1
+                        and connection_owner.close_verified is True
+                    )
+                )
+            )
+        except Exception:
+            connection_cleanup_verified = False
+        try:
+            serialized_lease.release_owned(
+                deadline,
+                connection_cleanup_verified=connection_cleanup_verified,
+            )
             if serialized_lease.release_count == 1:
                 cleanup_ok = (
                     serialized_lease.release_verified is True
