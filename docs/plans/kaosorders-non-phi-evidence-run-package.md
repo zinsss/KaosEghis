@@ -467,20 +467,31 @@ or persistence. On an independently approved future call it binds exactly:
 - `execute_reviewed_package_once()` and
   `build_disabled_orders_evidence_lease()`;
 - one `ResourceOwningConnectionAdapter` over one
-  `InjectedSerializedCredentialReadPath`; and
+  exact `Psycopg2SingleConnectionPath`; and
 - one volatile `AtomicNoOverwriteMemorySink`.
 
-The injected path is a one-shot capability, not credential discovery or a
-credential store. It must deliver exactly one physical connection or explicitly
-prove that none was allocated. A raised, malformed, repeated, or ambiguous
-acquisition never proves absence. If a connection was delivered before a path
-failure, the adapter retains ownership and closes it. The adapter wraps the sole
-cursor, records fixed non-sensitive acquisition/close observations, prohibits
-cursor and connection reuse, and verifies the physical driver's closed state.
-All source operations use the same absolute deadline supplied by the executor.
-An uncertain physical close is propagated into the accepted lease poison path;
-normalization and the volatile sink remain unreachable until cursor, physical
-connection, and lease cleanup are verified.
+The path no longer accepts a caller allocator, receiver callback, or caller-
+asserted acquisition enum. Reviewed code invokes exactly one
+`psycopg2.connect` call with the future-approved opaque connection string and
+fixed application/connect-timeout options. The string is injected only at
+construction, is never discovered, logged, observed, or represented, and is
+cleared when the single attempt starts. The exact owner derives `no connection`
+only when that concrete driver call raises before returning an object. There is
+no second-delivery callback surface and no caller-controlled success/absence
+result.
+
+Connection acquisition is daemon-contained by the same absolute deadline as
+the executor. A late return is owned by that containment path and receives a
+best-effort close, but is never reported as timely closure: ownership remains
+uncertain and the FIFO/mutex lease is poisoned pending operator recovery. The
+adapter wraps the sole cursor, records fixed non-sensitive acquisition/close
+observations, prohibits cursor and connection reuse, and verifies the physical
+driver's closed state. Cancellation, cursor creation/close, and physical close
+are likewise deadline-contained. A timeout or exception never claims closure,
+even if the daemon operation later finishes. Any uncertain acquisition, cancel,
+cursor cleanup, or physical close is propagated into the accepted lease poison
+path; normalization and the volatile sink remain unreachable until cursor,
+physical connection, and lease cleanup are all verified within the fence.
 
 The sink is deliberately memory-only and atomic: it creates one temporary value,
 publishes only when no final exists, never overwrites a pre-existing value, and
@@ -596,9 +607,12 @@ run-created visible final after failure; a pre-existing final is never overwritt
 or deleted. Allowed fixed validation reasons are preserved without raw error text.
 No runtime binding or activation is included.
 
-Local verification after the disabled composition preparation: 50 executor
-cases, 37 capture cases, 9 backend cases, and 18 composition/adapter/sink cases
-passed under the approved isolated path (114 passed). The non-GUI existing EMR read-queue
+Local verification after the disabled composition preparation and bounded
+acquisition/deadline remediation: 24 composition/adapter/sink cases include
+slow and hanging acquisition, cancellation, cursor-close, and physical-close
+probes under a 50-millisecond synthetic fence. The broader focused and adjacent
+isolated suites passed 120 and 355 tests respectively. The non-GUI existing
+EMR read-queue
 regression subset passed 45 with 3 platform skips; its four GUI consumer cases
 remain unexecutable because this host cannot load PySide6 without
 `libxkbcommon.so.0`. A further 355 lifecycle, Orders wire/fact, and Reception pure
@@ -700,3 +714,13 @@ verification is not reported as a full baseline.
   source connection, SQL execution, live data, runtime import, push, deployment,
   or evidence attempt occurred. Attestation, window, immutable approval binding,
   independent PASS, and fresh one-attempt authorization remain pending.
+- **2026-10-09:** Applied the single bounded composition review remediation.
+  Removed the arbitrary allocator callback and caller-asserted acquisition enum
+  in favor of one exact owner-controlled `psycopg2.connect` boundary; added
+  deadline containment and fail-closed lease poisoning for acquisition,
+  cancellation, cursor cleanup, and physical close. Synthetic slow/hanging
+  probes prove bounded return, no statement use on ambiguous acquisition, no
+  artifact publication, and no normal mutex release. Frozen statement bytes,
+  digests, package schema, disabled/unwired status, and every prerequisite gate
+  remain unchanged; no authentication, source access, or evidence attempt
+  occurred.

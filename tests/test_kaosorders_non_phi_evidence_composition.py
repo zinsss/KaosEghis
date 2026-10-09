@@ -3,7 +3,10 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+import inspect
+import sys
 import threading
+import time
 
 import pytest
 
@@ -98,13 +101,14 @@ def k20_rows():
 class RawCursor:
     def __init__(
         self, events, *, clock, execute_failure=None, close_false=False,
-        close_raise=False,
+        close_raise=False, close_delay=0.0,
     ):
         self.events = events
         self.clock = clock
         self.execute_failure = execute_failure
         self.close_false = close_false
         self.close_raise = close_raise
+        self.close_delay = close_delay
         self.current = None
         self.description = None
         self.closed = False
@@ -140,6 +144,8 @@ class RawCursor:
 
     def close(self):
         self.events.append("raw_cursor_close")
+        if self.close_delay:
+            time.sleep(self.close_delay)
         if self.close_raise:
             raise RuntimeError("PRIVATE_CANARY")
         if not self.close_false:
@@ -151,8 +157,10 @@ class RawConnection:
 
     def __init__(
         self, events, *, clock, execute_failure=None, cursor_close_false=False,
-        cursor_close_raise=False, connection_close_false=False,
+        cursor_close_raise=False, cursor_close_delay=0.0,
+        connection_close_false=False,
         connection_close_raise=False, cancel_raise=False, notices=(),
+        cancel_delay=0.0, connection_close_delay=0.0,
     ):
         self.events = events
         self.clock = clock
@@ -160,6 +168,8 @@ class RawConnection:
         self.connection_close_false = connection_close_false
         self.connection_close_raise = connection_close_raise
         self.cancel_raise = cancel_raise
+        self.cancel_delay = cancel_delay
+        self.connection_close_delay = connection_close_delay
         self.notices = notices
         self.cursor_value = RawCursor(
             events,
@@ -167,6 +177,7 @@ class RawConnection:
             execute_failure=execute_failure,
             close_false=cursor_close_false,
             close_raise=cursor_close_raise,
+            close_delay=cursor_close_delay,
         )
 
     def _assert_open(self):
@@ -181,15 +192,39 @@ class RawConnection:
     def cancel(self):
         self._assert_open()
         self.events.append("raw_cancel")
+        if self.cancel_delay:
+            time.sleep(self.cancel_delay)
         if self.cancel_raise:
             raise RuntimeError("PRIVATE_CANARY")
 
     def close(self):
         self.events.append("raw_connection_close")
+        if self.connection_close_delay:
+            time.sleep(self.connection_close_delay)
         if self.connection_close_raise:
             raise RuntimeError("PRIVATE_CANARY")
         if not self.connection_close_false:
             self.closed = 1
+class FakePsycopg2:
+    def __init__(
+        self, events, physical, *, mode="return", delay=0.0,
+    ):
+        self.events = events
+        self.physical = physical
+        self.mode = mode
+        self.delay = delay
+        self.calls = 0
+        self.arguments = None
+
+    def connect(self, connection_string, **options):
+        self.calls += 1
+        self.arguments = (connection_string, options)
+        self.events.append("path_called")
+        if self.delay:
+            time.sleep(self.delay)
+        if self.mode == "raise":
+            raise RuntimeError("PRIVATE_CANARY")
+        return self.physical
 
 
 @pytest.fixture
@@ -212,45 +247,36 @@ def isolated_serialized_boundary(monkeypatch):
     monkeypatch.setattr(emr_read_queue, "_capacity", threading.BoundedSemaphore(64))
     monkeypatch.setattr(emr_read_queue, "_exclusive_reader", exclusive_reader)
     monkeypatch.setattr(emr_read_queue, "_unhealthy", threading.Event())
-    yield events, worker
+    yield events, worker, monkeypatch
     worker.shutdown(wait=True)
 
 
 def make_composition(
-    events, *, clock=None, path_mode="delivered", connection_options=None,
+    events, monkeypatch, *, clock=None, path_mode="return",
+    path_delay=0.0, connection_options=None,
 ):
     clock = clock or Clock()
     connection_options = connection_options or {}
     physical = RawConnection(events, clock=clock, **connection_options)
 
-    def acquire_one(deadline, receiver):
-        events.append("path_called")
-        assert deadline == capture.GLOBAL_DEADLINE_SECONDS
-        if path_mode == "no_connection":
-            return composition.PathAcquisition.NO_CONNECTION
-        if path_mode == "raise_before":
-            raise RuntimeError("PRIVATE_CANARY")
-        receiver(physical)
-        if path_mode == "deliver_twice":
-            receiver(physical)
-        if path_mode == "raise_after":
-            raise RuntimeError("PRIVATE_CANARY")
-        if path_mode == "expire_after_delivery":
-            clock.expire()
-        return composition.PathAcquisition.DELIVERED
-
-    path = composition.InjectedSerializedCredentialReadPath(acquire_one)
+    driver = FakePsycopg2(
+        events, physical, mode=path_mode, delay=path_delay,
+    )
+    monkeypatch.setitem(sys.modules, "psycopg2", driver)
+    path = composition.Psycopg2SingleConnectionPath(
+        "postgresql://synthetic.invalid/review",
+    )
     comp = composition.build_disabled_orders_evidence_composition(
         path=path, monotonic=clock,
     )
-    return comp, physical, clock
+    return comp, physical, clock, driver
 
 
 def test_success_binds_frozen_inventory_serialized_path_cleanup_and_atomic_sink(
     isolated_serialized_boundary,
 ):
-    events, _worker = isolated_serialized_boundary
-    comp, physical, _clock = make_composition(events)
+    events, _worker, monkeypatch = isolated_serialized_boundary
+    comp, physical, _clock, driver = make_composition(events, monkeypatch)
     outcome = execute(comp)
     assert outcome.status is capture.RunStatus.COMPLETE
     assert comp.final_artifact == outcome.artifact
@@ -258,6 +284,14 @@ def test_success_binds_frozen_inventory_serialized_path_cleanup_and_atomic_sink(
     assert events.index("raw_cursor_close") < events.index("raw_connection_close")
     assert events.index("raw_connection_close") < events.index("mutex_released")
     assert events.count("path_called") == 1
+    assert driver.calls == 1
+    assert driver.arguments == (
+        "postgresql://synthetic.invalid/review",
+        {
+            "connect_timeout": 10,
+            "application_name": "KaosEghis-OrdersEvidence",
+        },
+    )
     assert events[events.index("raw_connection_close") + 1:] == ["mutex_released"]
     assert physical.closed == 1
     observation = comp.connection_observation
@@ -268,72 +302,56 @@ def test_success_binds_frozen_inventory_serialized_path_cleanup_and_atomic_sink(
     assert len(comp.statement_digests) == 9
 
 
-@pytest.mark.parametrize("path_mode", ["no_connection", "raise_before"])
-def test_acquire_failure_is_closed_and_never_executes_or_publishes(
-    isolated_serialized_boundary, path_mode,
+def test_driver_failure_derives_no_connection_and_never_executes_or_publishes(
+    isolated_serialized_boundary,
 ):
-    events, _worker = isolated_serialized_boundary
-    comp, _physical, _clock = make_composition(events, path_mode=path_mode)
+    events, _worker, monkeypatch = isolated_serialized_boundary
+    comp, _physical, _clock, driver = make_composition(
+        events, monkeypatch, path_mode="raise",
+    )
     outcome = execute(comp)
     assert outcome.status is capture.RunStatus.BLOCKED
     assert outcome.artifact is None and comp.final_artifact is None
     assert not any(item.startswith("execute:") for item in events)
-    if path_mode == "no_connection":
-        assert comp.connection_observation.no_connection_proven is True
-        assert "mutex_released" in events
-    else:
-        assert comp.connection_observation.no_connection_proven is False
-        assert emr_read_queue._unhealthy.is_set()
-        assert "mutex_retained" in events
+    assert driver.calls == 1
+    assert comp.connection_observation.no_connection_proven is True
+    assert "mutex_released" in events
 
 
-def test_allocate_then_raise_is_owned_closed_and_never_published(
+def test_exact_boundary_has_no_callback_or_caller_asserted_acquisition_result(
     isolated_serialized_boundary,
 ):
-    events, _worker = isolated_serialized_boundary
-    comp, physical, _clock = make_composition(events, path_mode="raise_after")
-    outcome = execute(comp)
-    assert outcome.status is capture.RunStatus.BLOCKED
-    assert outcome.artifact is None and comp.final_artifact is None
-    assert physical.closed == 1
-    assert comp.connection_observation.physical_close_verified is True
-    assert "mutex_released" in events and "mutex_retained" not in events
+    events, _worker, monkeypatch = isolated_serialized_boundary
+    comp, _physical, _clock, driver = make_composition(events, monkeypatch)
+    parameters = inspect.signature(
+        composition.Psycopg2SingleConnectionPath.acquire_until,
+    ).parameters
+    assert tuple(parameters) == ("self", "deadline", "monotonic")
+    assert not hasattr(composition, "PathAcquisition")
+    assert not hasattr(composition, "InjectedSerializedCredentialReadPath")
+    assert execute(comp).status is capture.RunStatus.COMPLETE
+    assert driver.calls == 1
 
 
-def test_second_connection_delivery_is_uncertain_and_poisons_serialization(
+def test_concrete_owner_performs_one_driver_allocation_with_no_delivery_surface(
     isolated_serialized_boundary,
 ):
-    events, _worker = isolated_serialized_boundary
-    comp, physical, _clock = make_composition(events, path_mode="deliver_twice")
-    outcome = execute(comp)
-    assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
-    assert outcome.artifact is None and comp.final_artifact is None
-    assert physical.closed == 1
-    assert comp.connection_observation.physical_close_verified is False
-    assert emr_read_queue._unhealthy.is_set()
-    assert "mutex_retained" in events and "mutex_released" not in events
-
-
-def test_shared_deadline_covers_path_and_all_cleanup(
-    isolated_serialized_boundary,
-):
-    events, _worker = isolated_serialized_boundary
-    comp, physical, _clock = make_composition(
-        events, path_mode="expire_after_delivery",
-    )
-    outcome = execute(comp)
-    assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
-    assert outcome.artifact is None and comp.final_artifact is None
-    assert physical.closed == 1
-    assert comp.connection_observation.physical_close_verified is True
+    events, _worker, monkeypatch = isolated_serialized_boundary
+    comp, physical, _clock, driver = make_composition(events, monkeypatch)
+    assert execute(comp).status is capture.RunStatus.COMPLETE
+    assert driver.calls == 1 and physical.closed == 1
+    source = Path(composition.__file__).read_text(encoding="utf-8")
+    assert "receiver" not in source and "PathAcquisition" not in source
+    assert source.count("driver.connect(") == 1
 
 
 def test_source_failure_cancels_rolls_back_closes_and_never_echoes(
     isolated_serialized_boundary,
 ):
-    events, _worker = isolated_serialized_boundary
-    comp, physical, _clock = make_composition(
-        events, connection_options={"execute_failure": "EKO-P00"},
+    events, _worker, monkeypatch = isolated_serialized_boundary
+    comp, physical, _clock, _driver = make_composition(
+        events, monkeypatch,
+        connection_options={"execute_failure": "EKO-P00"},
     )
     outcome = execute(comp)
     assert outcome.status is capture.RunStatus.BLOCKED
@@ -347,9 +365,9 @@ def test_source_failure_cancels_rolls_back_closes_and_never_echoes(
 def test_cancel_failure_is_cleanup_uncertain_but_still_closes_every_resource(
     isolated_serialized_boundary,
 ):
-    events, _worker = isolated_serialized_boundary
-    comp, physical, _clock = make_composition(
-        events,
+    events, _worker, monkeypatch = isolated_serialized_boundary
+    comp, physical, _clock, _driver = make_composition(
+        events, monkeypatch,
         connection_options={
             "execute_failure": "EKO-P00",
             "cancel_raise": True,
@@ -367,16 +385,17 @@ def test_cancel_failure_is_cleanup_uncertain_but_still_closes_every_resource(
 def test_cursor_close_uncertainty_blocks_without_post_close_use(
     isolated_serialized_boundary, option,
 ):
-    events, _worker = isolated_serialized_boundary
-    comp, physical, _clock = make_composition(
-        events, connection_options={option: True},
+    events, _worker, monkeypatch = isolated_serialized_boundary
+    comp, physical, _clock, _driver = make_composition(
+        events, monkeypatch, connection_options={option: True},
     )
     outcome = execute(comp)
     assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
     assert outcome.artifact is None and comp.final_artifact is None
     assert comp.connection_observation.cursor_close_verified is False
     assert physical.closed == 1
-    assert events[-2:] == ["raw_connection_close", "mutex_released"]
+    assert events[-2:] == ["raw_connection_close", "mutex_retained"]
+    assert emr_read_queue._unhealthy.is_set()
 
 
 @pytest.mark.parametrize(
@@ -385,24 +404,25 @@ def test_cursor_close_uncertainty_blocks_without_post_close_use(
 def test_physical_close_uncertainty_poisons_mutex_and_blocks_publication(
     isolated_serialized_boundary, option,
 ):
-    events, _worker = isolated_serialized_boundary
-    comp, _physical, _clock = make_composition(
-        events, connection_options={option: True},
+    events, _worker, monkeypatch = isolated_serialized_boundary
+    comp, _physical, _clock, _driver = make_composition(
+        events, monkeypatch, connection_options={option: True},
     )
     outcome = execute(comp)
     assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
     assert outcome.artifact is None and comp.final_artifact is None
     assert comp.connection_observation.physical_close_verified is False
     assert emr_read_queue._unhealthy.is_set()
-    assert "mutex_retained" in events and "mutex_released" not in events
+    assert "mutex_released" not in events
 
 
 def test_notice_is_rejected_without_echo_and_cleanup_precedes_result(
     isolated_serialized_boundary,
 ):
-    events, _worker = isolated_serialized_boundary
-    comp, physical, _clock = make_composition(
-        events, connection_options={"notices": ("PRIVATE_CANARY",)},
+    events, _worker, monkeypatch = isolated_serialized_boundary
+    comp, physical, _clock, _driver = make_composition(
+        events, monkeypatch,
+        connection_options={"notices": ("PRIVATE_CANARY",)},
     )
     outcome = execute(comp)
     assert outcome.status is capture.RunStatus.BLOCKED
@@ -411,9 +431,67 @@ def test_notice_is_rejected_without_echo_and_cleanup_precedes_result(
     assert "PRIVATE_CANARY" not in repr(outcome)
 
 
+@pytest.mark.parametrize("delay", [0.20, 2.0], ids=["slow", "hanging"])
+def test_acquisition_is_deadline_bounded_and_late_result_poisons(
+    isolated_serialized_boundary, monkeypatch, delay,
+):
+    events, _worker, boundary_patch = isolated_serialized_boundary
+    monkeypatch.setattr(capture, "GLOBAL_DEADLINE_SECONDS", 0.05)
+    comp, _physical, _clock, driver = make_composition(
+        events, boundary_patch, clock=time.monotonic, path_delay=delay,
+    )
+    started = time.monotonic()
+    outcome = execute(comp)
+    elapsed = time.monotonic() - started
+    assert elapsed < 0.15
+    assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
+    assert outcome.artifact is None and comp.final_artifact is None
+    assert driver.calls == 1
+    assert not any(item.startswith("execute:") for item in events)
+    assert comp.connection_observation.no_connection_proven is False
+    assert emr_read_queue._unhealthy.is_set()
+    assert "mutex_released" not in events
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"execute_failure": "EKO-P00", "cancel_delay": 0.20},
+        {"execute_failure": "EKO-P00", "cancel_delay": 2.0},
+        {"cursor_close_delay": 0.20},
+        {"cursor_close_delay": 2.0},
+        {"connection_close_delay": 0.20},
+        {"connection_close_delay": 2.0},
+    ],
+    ids=[
+        "slow-cancel", "hanging-cancel", "slow-cursor-close",
+        "hanging-cursor-close", "slow-physical-close",
+        "hanging-physical-close",
+    ],
+)
+def test_cleanup_primitives_share_deadline_and_never_claim_timed_out_close(
+    isolated_serialized_boundary, monkeypatch, options,
+):
+    events, _worker, boundary_patch = isolated_serialized_boundary
+    monkeypatch.setattr(capture, "GLOBAL_DEADLINE_SECONDS", 0.05)
+    comp, _physical, _clock, _driver = make_composition(
+        events, boundary_patch, clock=time.monotonic,
+        connection_options=options,
+    )
+    started = time.monotonic()
+    outcome = execute(comp)
+    elapsed = time.monotonic() - started
+    assert elapsed < 0.15
+    assert outcome.fixed_reason is capture.FixedReason.CLEANUP_UNCERTAIN
+    assert outcome.artifact is None and comp.final_artifact is None
+    assert comp.connection_observation.physical_close_verified is False
+    assert emr_read_queue._unhealthy.is_set()
+    assert "mutex_released" not in events
+
+
 def test_composition_and_path_are_single_attempt(isolated_serialized_boundary):
-    events, _worker = isolated_serialized_boundary
-    comp, _physical, _clock = make_composition(events)
+    events, _worker, monkeypatch = isolated_serialized_boundary
+    comp, _physical, _clock, _driver = make_composition(events, monkeypatch)
     assert execute(comp).status is capture.RunStatus.COMPLETE
     with pytest.raises(composition.CompositionRejected, match="^composition_reused$"):
         execute(comp)
@@ -430,8 +508,8 @@ def test_atomic_sink_never_overwrites_or_discards_preexisting_final():
 
 def test_frozen_statement_bytes_order_and_digests_match_document():
     comp = composition.build_disabled_orders_evidence_composition(
-        path=composition.InjectedSerializedCredentialReadPath(
-            lambda _deadline, _receiver: composition.PathAcquisition.NO_CONNECTION
+        path=composition.Psycopg2SingleConnectionPath(
+            "postgresql://synthetic.invalid/review",
         ),
         monotonic=Clock(),
     )
@@ -448,11 +526,12 @@ def test_frozen_statement_bytes_order_and_digests_match_document():
 def test_construction_is_disabled_and_submits_no_worker(
     isolated_serialized_boundary,
 ):
-    _events, worker = isolated_serialized_boundary
-    comp, _physical, _clock = make_composition([])
+    _events, worker, monkeypatch = isolated_serialized_boundary
+    comp, _physical, _clock, driver = make_composition([], monkeypatch)
     assert comp.final_artifact is None
     assert comp.connection_observation.acquisition_count == 0
     assert worker._work_queue.qsize() == 0
+    assert driver.calls == 0
 
 
 def test_static_boundary_has_no_driver_credentials_runtime_or_activation():
@@ -469,19 +548,20 @@ def test_static_boundary_has_no_driver_credentials_runtime_or_activation():
         if isinstance(node, ast.ImportFrom) and node.module
     )
     assert imported <= {
-        "dataclasses", "datetime", "enum", "math", "pathlib", "time",
+        "dataclasses", "datetime", "importlib", "math", "pathlib",
+        "threading", "time",
         "KaosEghis",
     }
     source = path.read_text(encoding="utf-8")
     for forbidden in (
-        "psycopg", "socket", "requests", "credential_store", "getenv(",
+        "socket", "requests", "credential_store", "getenv(",
         "logging", "print(",
     ):
         assert forbidden not in source
     assert repr(
-        composition.InjectedSerializedCredentialReadPath(
-            lambda _deadline, _receiver: composition.PathAcquisition.NO_CONNECTION
+        composition.Psycopg2SingleConnectionPath(
+            "postgresql://synthetic.invalid/review",
         )
-    ) == "<InjectedSerializedCredentialReadPath: redacted>"
+    ) == "<Psycopg2SingleConnectionPath: redacted>"
     main_source = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
     assert "kaosorders_non_phi_evidence_composition" not in main_source

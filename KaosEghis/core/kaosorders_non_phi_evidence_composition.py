@@ -1,16 +1,17 @@
 """Disabled composition for the reviewed Orders non-PHI evidence package.
 
-This module has no runtime import, credential lookup, database driver, network
-client, scheduler, route, or activation.  A future approved caller must inject
-one already-reviewed serialized credential/read path.  Construction and tests
-perform no authentication or source access.
+This module has no runtime import, credential lookup, scheduler, route, or
+activation.  A future approved caller must inject one opaque connection string
+into the exact one-shot psycopg2 boundary.  Construction and tests perform no
+authentication or source access.
 """
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from enum import StrEnum
+import importlib
 import math
 from pathlib import Path
+import threading
 import time
 
 from KaosEghis.core import kaosorders_non_phi_evidence_capture as capture
@@ -28,11 +29,6 @@ _STATEMENT_DOCUMENT = (
 
 class CompositionRejected(RuntimeError):
     """Fixed non-sensitive composition rejection."""
-
-
-class PathAcquisition(StrEnum):
-    DELIVERED = "delivered"
-    NO_CONNECTION = "no_connection"
 
 
 class _Redacted:
@@ -53,6 +49,44 @@ def _valid_deadline(deadline: object) -> bool:
 def _raise_if_late(*, monotonic: object, deadline: float) -> None:
     if not callable(monotonic) or monotonic() > deadline:
         raise CompositionRejected("deadline_exceeded")
+
+
+_FAILED = object()
+
+
+def _bounded_call(*, action: object, deadline: float, monotonic: object):
+    """Run one potentially blocking driver primitive within an absolute fence.
+
+    The daemon containment thread is never treated as proof of completion.  A
+    timeout returns immediately and the caller must retain/poison its lease.
+    Exceptions and values remain private to this module and are never echoed.
+    """
+
+    if not callable(action) or not _valid_deadline(deadline):
+        raise CompositionRejected("invalid_deadline_operation")
+    finished = threading.Event()
+    state: dict[str, object] = {}
+
+    def target() -> None:
+        try:
+            state["value"] = action()
+        except BaseException:
+            state["value"] = _FAILED
+        finally:
+            finished.set()
+
+    threading.Thread(
+        target=target,
+        name="eghis-evidence-bounded-call",
+        daemon=True,
+    ).start()
+    try:
+        remaining = max(0.0, deadline - monotonic())
+    except Exception:
+        raise CompositionRejected("invalid_clock") from None
+    if not finished.wait(remaining):
+        return False, None
+    return True, state.get("value", _FAILED)
 
 
 def _load_frozen_statements() -> tuple[tuple[str, bytes], ...]:
@@ -81,36 +115,132 @@ def _load_frozen_statements() -> tuple[tuple[str, bytes], ...]:
     return tuple(statements)
 
 
-class InjectedSerializedCredentialReadPath(_Redacted):
-    """One-shot capability supplied only after separate path approval.
+class Psycopg2SingleConnectionPath(_Redacted):
+    """Exact one-shot allocation owner; never a caller-supplied allocator.
 
-    The callback receives the shared absolute deadline and a receiver.  It must
-    either deliver exactly one physical connection and return DELIVERED, or
-    allocate nothing and return NO_CONNECTION.  A raised or malformed outcome
-    never proves that no connection exists.
+    The opaque value is consumed once by this exact implementation, cleared
+    immediately, and never exposed by repr, observations, errors, or artifacts.
+    The driver call is contained by the shared deadline.  If it returns late,
+    this owner closes the returned object itself while the serialized lease
+    remains poisoned because timely cleanup was not proven.
     """
 
-    __slots__ = ("_acquire_one", "_attempted")
+    __slots__ = (
+        "_attempted", "_connection_string", "_late_close", "_lock",
+        "_no_connection_proven", "_owned", "_ownership_uncertain",
+    )
 
-    def __init__(self, acquire_one: object):
-        if not callable(acquire_one):
+    def __init__(self, connection_string: object):
+        if type(connection_string) is not str or not connection_string:
             raise CompositionRejected("invalid_connection_path")
-        self._acquire_one = acquire_one
+        self._connection_string = connection_string
         self._attempted = False
+        self._lock = threading.Lock()
+        self._owned = None
+        self._late_close = False
+        self._no_connection_proven = False
+        self._ownership_uncertain = False
 
-    def acquire_one_until(
-        self, deadline: float, receiver: object,
-    ) -> PathAcquisition:
-        if self._attempted or not _valid_deadline(deadline) or not callable(receiver):
+    @property
+    def no_connection_proven(self) -> bool:
+        return self._no_connection_proven
+
+    @property
+    def ownership_uncertain(self) -> bool:
+        return self._ownership_uncertain
+
+    @staticmethod
+    def _connect(
+        *, connection_string: str, connect_timeout: int,
+    ) -> object:
+        driver = importlib.import_module("psycopg2")
+        return driver.connect(
+            connection_string,
+            connect_timeout=connect_timeout,
+            application_name="KaosEghis-OrdersEvidence",
+        )
+
+    def acquire_until(self, *, deadline: float, monotonic: object) -> object:
+        if self._attempted or not _valid_deadline(deadline):
             raise CompositionRejected("connection_path_reused")
         self._attempted = True
         try:
-            outcome = self._acquire_one(deadline, receiver)
+            remaining = deadline - monotonic()
         except Exception:
-            raise CompositionRejected("connection_path_failed") from None
-        if type(outcome) is not PathAcquisition:
-            raise CompositionRejected("connection_path_failed")
-        return outcome
+            raise CompositionRejected("invalid_clock") from None
+        if remaining <= 0:
+            self._connection_string = ""
+            self._ownership_uncertain = True
+            raise CompositionRejected("deadline_exceeded")
+        connection_string = self._connection_string
+        self._connection_string = ""
+        connect_timeout = max(1, min(10, math.ceil(remaining)))
+        done = threading.Event()
+        state: dict[str, object] = {}
+
+        def target() -> None:
+            physical = None
+            try:
+                physical = self._connect(
+                    connection_string=connection_string,
+                    connect_timeout=connect_timeout,
+                )
+                if physical is None:
+                    state["failed"] = True
+                else:
+                    with self._lock:
+                        if self._late_close:
+                            state["late"] = physical
+                        else:
+                            self._owned = physical
+            except BaseException:
+                state["failed"] = True
+            finally:
+                done.set()
+            late = state.get("late")
+            if late is not None:
+                try:
+                    late.close()
+                except BaseException:
+                    pass
+
+        threading.Thread(
+            target=target,
+            name="eghis-evidence-connect",
+            daemon=True,
+        ).start()
+        try:
+            wait_remaining = max(0.0, deadline - monotonic())
+            clock_failed = False
+        except Exception:
+            wait_remaining = 0.0
+            clock_failed = True
+        completed = done.wait(wait_remaining)
+        if clock_failed or not completed:
+            with self._lock:
+                self._late_close = True
+                physical = self._owned
+                self._owned = None
+            self._ownership_uncertain = True
+            if physical is not None:
+                self._owned = physical
+            raise CompositionRejected("deadline_exceeded")
+        with self._lock:
+            physical = self._owned
+            self._owned = None
+        if state.get("failed") is True and physical is None:
+            self._no_connection_proven = True
+            raise CompositionRejected("connection_unavailable")
+        if physical is None:
+            self._ownership_uncertain = True
+            raise CompositionRejected("connection_acquisition_failed")
+        return physical
+
+    def take_owned_after_failure(self) -> object | None:
+        with self._lock:
+            physical = self._owned
+            self._owned = None
+        return physical
 
 
 class _OwnedCursor(_Redacted):
@@ -147,14 +277,18 @@ class _OwnedCursor(_Redacted):
 
     def close(self) -> None:
         self._adapter._events.append("cursor_close_started")
-        try:
-            self._cursor.close()
-            verified = getattr(self._cursor, "closed", None) is True
-        except Exception:
-            self._adapter._cursor_close_verified = False
-            raise CompositionRejected("cursor_close_unverified") from None
+        completed, value = _bounded_call(
+            action=self._cursor.close,
+            deadline=self._adapter._deadline,
+            monotonic=self._adapter._monotonic,
+        )
+        verified = (
+            completed and value is not _FAILED
+            and getattr(self._cursor, "closed", None) is True
+        )
         self._adapter._cursor_close_verified = verified
         if not verified:
+            self._adapter._ownership_uncertain = True
             raise CompositionRejected("cursor_close_unverified")
         self._adapter._events.append("cursor_close_verified")
 
@@ -174,9 +308,13 @@ class _OwnedConnection(_Redacted):
         self._adapter._before_source_operation()
         if self._adapter.cursor_acquisition_count != 0:
             raise CompositionRejected("cursor_reused")
-        try:
-            cursor = self._connection.cursor()
-        except Exception:
+        completed, cursor = _bounded_call(
+            action=self._connection.cursor,
+            deadline=self._adapter._deadline,
+            monotonic=self._adapter._monotonic,
+        )
+        if not completed or cursor is _FAILED:
+            self._adapter._ownership_uncertain = True
             raise CompositionRejected("cursor_acquisition_failed") from None
         if cursor is None:
             raise CompositionRejected("cursor_acquisition_failed")
@@ -187,9 +325,13 @@ class _OwnedConnection(_Redacted):
 
     def cancel(self) -> None:
         self._adapter._events.append("cancel_started")
-        try:
-            self._connection.cancel()
-        except Exception:
+        completed, value = _bounded_call(
+            action=self._connection.cancel,
+            deadline=self._adapter._deadline,
+            monotonic=self._adapter._monotonic,
+        )
+        if not completed or value is _FAILED:
+            self._adapter._ownership_uncertain = True
             raise CompositionRejected("cancel_failed") from None
         self._adapter._events.append("cancel_finished")
 
@@ -217,10 +359,10 @@ class ResourceOwningConnectionAdapter(_Redacted):
     )
 
     def __init__(
-        self, path: InjectedSerializedCredentialReadPath, *,
+        self, path: Psycopg2SingleConnectionPath, *,
         monotonic=time.monotonic,
     ):
-        if type(path) is not InjectedSerializedCredentialReadPath:
+        if type(path) is not Psycopg2SingleConnectionPath:
             raise CompositionRejected("invalid_connection_path")
         if not callable(monotonic):
             raise CompositionRejected("invalid_clock")
@@ -288,10 +430,10 @@ class ResourceOwningConnectionAdapter(_Redacted):
     def _after_source_operation(self) -> None:
         _raise_if_late(monotonic=self._monotonic, deadline=self._deadline)
 
-    def _receive(self, physical: object) -> None:
+    def _register(self, physical: object) -> None:
         if self._acquisition_count != 0 or physical is None:
             self._ownership_uncertain = True
-            raise CompositionRejected("multiple_connections_rejected")
+            raise CompositionRejected("connection_acquisition_failed")
         self._physical = physical
         self._connection = _OwnedConnection(self, physical)
         self._acquisition_count = 1
@@ -305,34 +447,40 @@ class ResourceOwningConnectionAdapter(_Redacted):
         self._deadline = deadline
         _raise_if_late(monotonic=self._monotonic, deadline=deadline)
         try:
-            outcome = self._path.acquire_one_until(deadline, self._receive)
+            physical = self._path.acquire_until(
+                deadline=deadline, monotonic=self._monotonic,
+            )
         except Exception:
+            physical = self._path.take_owned_after_failure()
+            if physical is not None:
+                self._register(physical)
+            self._no_connection_proven = self._path.no_connection_proven
+            self._ownership_uncertain = (
+                self._ownership_uncertain or self._path.ownership_uncertain
+            )
             raise CompositionRejected("connection_acquisition_failed") from None
+        self._register(physical)
         _raise_if_late(monotonic=self._monotonic, deadline=deadline)
-        if outcome is PathAcquisition.NO_CONNECTION and self._acquisition_count == 0:
-            self._no_connection_proven = True
-            self._events.append("no_connection_proven")
-            raise CompositionRejected("connection_unavailable")
-        if outcome is not PathAcquisition.DELIVERED or self._acquisition_count != 1:
-            self._ownership_uncertain = True
-            raise CompositionRejected("connection_acquisition_failed")
         self._acquisition_complete = True
         self._events.append("connection_acquisition_complete")
 
-    def close_owned(self, _deadline: float) -> None:
+    def close_owned(self, deadline: float) -> None:
         if self._close_attempted:
             raise CompositionRejected("connection_close_reused")
         self._close_attempted = True
         if self._physical is None:
             return
         self._events.append("physical_close_started")
-        try:
-            self._physical.close()
-            closed = getattr(self._physical, "closed", None)
-            verified = type(closed) is int and closed > 0
-        except Exception:
-            self._close_verified = False
-            raise CompositionRejected("physical_close_unverified") from None
+        completed, value = _bounded_call(
+            action=self._physical.close,
+            deadline=deadline,
+            monotonic=self._monotonic,
+        )
+        closed = getattr(self._physical, "closed", None)
+        verified = (
+            completed and value is not _FAILED
+            and type(closed) is int and closed > 0
+        )
         self._close_verified = verified and not self._ownership_uncertain
         if not self._close_verified:
             raise CompositionRejected("physical_close_unverified")
@@ -396,7 +544,7 @@ class DisabledOrdersEvidenceComposition(_Redacted):
     )
 
     def __init__(
-        self, path: InjectedSerializedCredentialReadPath, *,
+        self, path: Psycopg2SingleConnectionPath, *,
         monotonic=time.monotonic,
     ):
         self._statement_items = _load_frozen_statements()
@@ -447,7 +595,7 @@ class DisabledOrdersEvidenceComposition(_Redacted):
 
 
 def build_disabled_orders_evidence_composition(
-    *, path: InjectedSerializedCredentialReadPath,
+    *, path: Psycopg2SingleConnectionPath,
     monotonic=time.monotonic,
 ) -> DisabledOrdersEvidenceComposition:
     """Construct the disabled composition without acquiring any resource."""
