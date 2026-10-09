@@ -1,9 +1,9 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
-- **Status:** composition `e9e65e8` independently passed; execution remains
-  blocked before authentication pending the database-security-authority
-  identity/path attestation, independently reviewed window record and immutable
-  approval binding, and a then-current single-attempt authorization
+- **Status:** composition `e9e65e8` and identity/path attestation `722bef9`
+  independently passed; execution remains blocked before authentication pending
+  a compliant independently reviewed window, immutable approval binding, and a
+  then-current single-attempt authorization
 - **Last updated:** 2026-10-10
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -544,7 +544,8 @@ ID, `approved` decision, privacy-safe attestation SHA-256, identity class
 authority role `database-security-authority`, and validity dates covering the
 evidence date. No username, role dump, host, credential, or connection property is
 permitted. The owner supplied the complete substantive record below on
-2026-10-10; it remains pending independent review and is not execution authority.
+2026-10-10, and independent review accepted it at commit `722bef9`; it is not
+execution authority.
 
 ### Non-secret identity/path attestation template
 
@@ -603,12 +604,17 @@ The closed envelope therefore has these exact values:
 ```
 
 This supplies every owner-controlled substantive field in the closed
-identity/path attestation and its privacy-safe immutable digest. It does not
+identity/path attestation and its privacy-safe immutable digest. Independent
+review accepted exact commit `722bef966f5496c4b21df8db35053705a4fdc861`
+and digest
+`4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401`.
+The attestation does not
 pre-prove effective database privileges: after all prerequisites and the final
 manifest pass review, P00 must still prove all 15 booleans in the same bounded
-connection before any substantive evidence statement. Independent review must
-also reproduce the artifact digest and accept the envelope before
-`identity_path_attestation_sha256` can replace `BLOCKED` in the manifest.
+connection before any substantive evidence statement. The accepted digest is an
+eligible future manifest input, but `identity_path_attestation_sha256` remains
+`BLOCKED` until all remaining prerequisites are complete and the final manifest
+is populated and independently reviewed.
 
 #### Privacy-safe owner account-purpose attestation
 
@@ -659,9 +665,10 @@ does not authorize credential lookup, authentication, connection, or execution.
 
 #### Identity/path fail-closed proof checklist
 
-Current readiness is **REVIEW PENDING**: the owner-supplied record now populates
-`attestation_sha256`, `valid_from`, and `expires_on`, but independent review has
-not accepted it and the manifest remains `BLOCKED`. Before any future
+Current readiness is **INDEPENDENT PASS**: the owner-supplied record populates
+`attestation_sha256`, `valid_from`, and `expires_on`, and independent review
+accepted exact commit `722bef966f5496c4b21df8db35053705a4fdc861` and its
+digest. The manifest still remains `BLOCKED`. Before any future
 authentication, reviewed preflight must prove every item below; false, missing,
 expired, contradictory, unverifiable, or extra sensitive content stops before
 credential lookup or connection:
@@ -791,13 +798,11 @@ account-purpose statement alone did not create the closed attestation. The later
 07:05 KST authority statement now supplies the exact substantive path,
 authority, P00, and validity fields in the completed artifact above.
 
-The identity/path record is therefore **REVIEW PENDING**, while the canonical
-manifest below remains unchanged and `BLOCKED`. Independent review must
-reproduce the JCS digest, accept the literal fields, and confirm that no
-prohibited identifier entered the artifact. No username, host, database, role
-dump, connection property, credential, or secret-store locator is needed or
-permitted. This review cannot revive the expired window; a new bounded window
-and later fresh single-attempt authorization remain required.
+The identity/path record is therefore **INDEPENDENT PASS**, while the canonical
+manifest below remains unchanged and `BLOCKED`. No username, host, database,
+role dump, connection property, credential, or secret-store locator is needed or
+permitted. This PASS cannot revive an expired or rejected window; a new compliant
+bounded window and later fresh single-attempt authorization remain required.
 
 At the 2026-10-10 06:57 KST assessment, that endpoint had passed without the
 required prerequisite PASS. The candidate window is therefore **EXPIRED** and
@@ -1130,11 +1135,19 @@ verification is not reported as a full baseline.
   substantive identity/path attestation: literal database-security authority,
   dedicated least-privilege read-only identity class, existing serialized
   single-connection path, frozen P00 digest, and 2026-10-10 through 2026-10-12
-  validity. Added its exact privacy-safe JCS artifact and SHA-256. The record is
-  review-pending, does not pre-prove P00, and does not populate the still-blocked
-  manifest or authorize authentication/execution.
+  validity. Added its exact privacy-safe JCS artifact and SHA-256. At that commit
+  the record awaited review; the later PASS is recorded below. It does not
+  pre-prove P00, populate the still-blocked manifest, or authorize
+  authentication/execution.
 - **2026-10-10:** Before commit, the owner superseded the 08:00–08:30 proposal
   with 07:00–12:00 KST. The five-hour request exceeds the closed 30-minute limit
   and had a past start, so no window artifact or digest was finalized. Preserved
   the two syntax-valid role references, documented the exact compliant approval
   form needed, and kept the manifest and all execution gates blocked.
+- **2026-10-10:** Corrected stale downstream status after integration review
+  confirmed independent PASS for identity/path attestation commit `722bef9` and
+  digest
+  `4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401`.
+  The accepted digest is eligible for later manifest population, but the
+  manifest remains unchanged and `BLOCKED`; the rejected window and every
+  authentication/execution gate remain stopped.
