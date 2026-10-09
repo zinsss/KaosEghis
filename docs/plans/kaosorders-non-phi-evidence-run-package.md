@@ -398,6 +398,21 @@ in-connection shape/control validation, immediate cursor/physical-connection
 closure, and post-close-only artifact construction. This record does not
 authorize creating that adapter, inspecting credentials, or retrying.
 
+At 2026-10-09 19:57 KST the owner authorized exactly one new retry, explicitly
+without waiving any prerequisite. Repository sync preflight was repeated and the
+exact Eghis, orchestration, and Orders commits were verified. The retry again
+stopped before authentication because none of the following was available as a
+reviewable non-secret record: an approved least-privilege identity/path
+attestation; an independently approved bounded production executor; or a bounded
+window naming its operator and cancellation owner. The approval timestamp alone
+was not treated as proof of those prerequisites.
+
+No authentication, connection, cursor, transaction, statement, cancellation, or
+cleanup operation occurred. Cursor and physical-connection closure are therefore
+`not_applicable`, not inferred. No evidence/partial artifact was created. This
+consumes the authorized retry; another attempt requires new explicit approval
+after all three prerequisite records exist and pass review.
+
 ## Next action
 
 1. Provide a reviewable non-secret attestation that identifies the approved
@@ -431,3 +446,9 @@ authorize creating that adapter, inspecting credentials, or retrying.
   approved production executor, so no authentication, connection, cursor, SQL,
   artifact, credential inspection, patient access, retry, runtime activation,
   push, or deployment occurred. All evidence criteria remain unproven.
+- **2026-10-09:** Recorded the separately authorized 19:57 KST one-retry gate and
+  its second fail-closed pre-authentication stop. The read-only identity/path
+  attestation, approved executor, and bounded window/operator/cancellation-owner
+  record were all absent, so the retry was consumed without authentication,
+  connection, SQL, artifact creation, credential inspection, patient access,
+  runtime activation, push, or deployment.
