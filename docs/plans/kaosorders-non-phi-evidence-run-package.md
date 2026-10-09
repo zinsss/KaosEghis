@@ -1,8 +1,9 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
 - **Status:** the consumed attempt remains blocked with no evidence artifact;
-  a disabled, injected, read-only application-settings resolver is prepared for
-  review, but no new window, authorization, manifest, or execution exists
+  a new resolver-bound approval-manifest candidate is prepared for independent
+  review, but its package-review, window, authorization, and final manifest
+  fields remain `BLOCKED`; no execution authority exists
 - **Last updated:** 2026-10-10
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -1118,15 +1119,70 @@ regressions passed. The normal focused invocation reached 32 setup errors for th
 same host-library blocker. No host package was installed, and isolated
 verification is not reported as a full baseline.
 
+### Resolver-bound approval-manifest candidate — blocked review input
+
+The owner authorized preparation and independent review only for a new manifest
+candidate bound to Eghis commit
+`4565605845617de1ed3099c7abb887fbc45daabe`. The candidate adds the exact
+disabled application-settings resolver component while retaining every
+previously reviewed executor, FIFO/mutex, composition/adapter/sink, capture, and
+nine-statement binding. Orders readiness remains complete at
+`239b9b948bbb6e8c54288d2196287fb70a38aba0`; it requires no contract or schema
+change.
+
+The prior manifest, window, and authorization were consumed or expired and are
+not reusable. The accepted identity/path attestation digest remains an eligible
+privacy-safe prerequisite reference within its recorded validity interval, but
+it does not authorize setting resolution, authentication, connection, or source
+access. No identity/path value, operator, cancellation owner, window, or new
+authorization is inferred here.
+
+The following single line is the exact RFC 8785 JCS candidate. `BLOCKED` is
+deliberate in the root checksum, decision, independent-review, window, and
+fresh-authorization fields. This is a review input only, not a populated final
+manifest and not execution authority:
+
+```json
+{"approval_manifest_sha256":"BLOCKED","components":[{"commit":"1eaf325ab313fbde5a39b41f59ac21483271e861","component_id":"executor","path":"KaosEghis/core/kaosorders_non_phi_evidence_executor.py","sha256":"cc8694535fdac41ffa3b60acb20f5ce4fd7135cbca144c05522fba9e79838faa","symbols":["execute_reviewed_package_once","SerializedReadLease"]},{"commit":"1eaf325ab313fbde5a39b41f59ac21483271e861","component_id":"fifo-mutex-backend","path":"KaosEghis/core/kaosorders_non_phi_evidence_lease.py","sha256":"67f6c42b805a99a326201965a2a25a55efac65309863147dd777099921068949","symbols":["EghisFifoMutexLeaseBackend","build_disabled_orders_evidence_lease"]},{"commit":"e9e65e8dd8452e07a20908c63aa3703c767e9c3f","component_id":"composition-adapter-sink","path":"KaosEghis/core/kaosorders_non_phi_evidence_composition.py","sha256":"536117212fe40a8ce4f19085a2a84845bcb99bab4c93aaf55cee626ccb641846","symbols":["Psycopg2SingleConnectionPath","ResourceOwningConnectionAdapter","AtomicNoOverwriteMemorySink","build_disabled_orders_evidence_composition"]},{"commit":"dd394fe70ea2f8db4bf8dcbdffbbd749f8096952","component_id":"capture-contract","path":"KaosEghis/core/kaosorders_non_phi_evidence_capture.py","sha256":"95e7b292bbc1f2858a9621bfbc7e0fa19028fb2c01fd0107333c912cf1d47f96","symbols":["STATEMENT_SPECS","PACKAGE_REVISION"]},{"commit":"4565605845617de1ed3099c7abb887fbc45daabe","component_id":"application-settings-resolver","path":"KaosEghis/core/kaosorders_non_phi_evidence_settings.py","sha256":"71977c3cb3fc475b679a3fa35152322f066fc7af6ef0ea393493d40202cd986d","symbols":["ApplicationSettingsOpaqueResolver","build_disabled_orders_evidence_composition_from_settings"]}],"contract_id":"kaoseghis.orders-evidence-immutable-approval-manifest.v1","decision":"BLOCKED","independent_review_sha256":"BLOCKED","package_id":"eghis-kaosorders-non-phi-evidence-run-v1","package_revision":"review-candidate-3","prerequisites":{"fresh_single_attempt_authorization_sha256":"BLOCKED","identity_path_attestation_sha256":"4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401","window_approval_sha256":"BLOCKED"},"statement_inventory":{"commit":"1fc38adb189988eba5b177c30e2a9f8cc4633e68","ids_in_order":["EKO-C00","EKO-C01","EKO-C02","EKO-C03","EKO-P00","EKO-V01","EKO-M10","EKO-K20","EKO-C99"],"path":"docs/plans/evidence/eghis-kaosorders-non-phi-statements-v1.md","sha256":"0f123faff860e6eb18b4c8f6309b65731b459774950b1cedaa143f8d7caf7575"}}
+```
+
+For review reproducibility only, removing the root
+`approval_manifest_sha256` field and hashing the exact RFC 8785 JCS UTF-8
+preimage yields
+`1cdff065ee2ec33993a8f5563423a3d5b8da86c9a59e186f4656f8ef0a8938a6`.
+This fingerprint is not inserted into the candidate and must not be mistaken
+for a final approval-manifest digest. Independent review must reproduce every
+component and statement digest, confirm the fifth component is disabled and
+unwired, and issue a separate immutable package-review record before that
+candidate field can be populated.
+
+After that review, the minimum non-secret owner inputs are, in order:
+
+1. A new future same-`Asia/Seoul`-day window no longer than 30 minutes, with
+   explicit seconds and exact non-personal role references. Copyable form:
+   `YYYY-MM-DD KST 실행 창을 HH:MM:SS부터 HH:MM:SS까지 승인한다. operator_reference는 <reference>, cancellation_owner_reference는 <reference>로 승인한다.`
+2. Only after the window record independently passes, one fresh single-attempt
+   authorization bound to this resolver implementation, the independently
+   reviewed candidate-package commit/digest, the accepted identity/path digest,
+   and the new window commit/digest. Copyable form:
+   `KaosEghis non-PHI evidence package eghis-kaosorders-non-phi-evidence-run-v1 / review-candidate-3, implementation commit 4565605845617de1ed3099c7abb887fbc45daabe, resolver digest 71977c3cb3fc475b679a3fa35152322f066fc7af6ef0ea393493d40202cd986d, package-review digest <reviewed digest>, identity/path digest 4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401, window commit <reviewed commit> 및 window digest <reviewed digest> (<start ISO 8601>–<end ISO 8601>)에 바인딩하여, 그 window 안에서 정확히 1회의 bounded non-PHI evidence attempt를 승인한다. retry, scope expansion, runtime activation, push, deploy는 승인하지 않는다.`
+
+Placeholders are instructions, not values or approval. After those records pass,
+Eghis must regenerate a fully populated canonical manifest with no `BLOCKED`
+field and obtain a separate final independent manifest PASS. Until then, setting
+read, authentication, connection, statements, publication, and all runtime or
+deployment actions remain stopped.
+
 ## Next action
 
-1. Independently review the resolver code, synthetic tests, exact diff, fixed
-   non-echo failure behavior, and absence of runtime imports.
-2. Keep authentication, connection, P00, later statements, and publication
-   stopped. The 07:55:13 authorization is consumed and must not be retried.
-3. After resolver PASS, any future attempt still requires a new bounded window,
-   fresh single-attempt owner authorization, regenerated manifest binding this
-   component, and independent final manifest review.
+1. Independently review the exact resolver-bound candidate above, including
+   commit/path/symbol/content-digest bindings, unchanged frozen statements, and
+   the JCS preimage fingerprint.
+2. Keep setting read, authentication, connection, P00, later statements, and
+   publication stopped. Every prior window/authorization/manifest is non-reusable.
+3. Only after that PASS, collect and separately review a new bounded window,
+   then a fresh single-attempt authorization, then a regenerated populated
+   manifest and its final independent review.
 
 ## Revision history
 
@@ -1351,3 +1407,13 @@ verification is not reported as a full baseline.
   verification failures. Every failure consumes the resolver once, attempts all
   available cleanup, returns only `settings_resolution_failed`, constructs no
   composition, and emits no locator/value. All execution gates remain stopped.
+- **2026-10-10:** Prepared the owner-approved resolver-bound approval-manifest
+  candidate for independent review only. Added exact commit/path/symbol/SHA-256
+  binding for the disabled resolver at `4565605`, retained all accepted
+  component and nine-statement bindings, preserved the accepted privacy-safe
+  identity/path digest, and left the independent-review, window, fresh
+  authorization, decision, and root manifest fields explicitly `BLOCKED`.
+  Recorded a reproducible candidate preimage fingerprint and the exact ordered
+  non-secret owner templates needed after review. No setting read,
+  authentication, source access, evidence execution, publication, runtime
+  activation, push, merge, or deployment occurred.
