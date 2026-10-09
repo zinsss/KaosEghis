@@ -420,8 +420,9 @@ The disabled candidate is
 `KaosEghis/core/kaosorders_non_phi_evidence_executor.py`; its synthetic contract
 tests are `tests/test_kaosorders_non_phi_evidence_executor.py`. It has no driver,
 settings, credential lookup, connection string, source discovery, CLI, scheduler,
-runtime import, or route. It accepts a connection factory and a deadline-aware
-serialized-read function only after three closed prerequisite objects validate.
+runtime import, or route. It accepts a resource-owning connection context, a
+deadline-aware serialized-read function, and an atomic no-overwrite sink only
+after three closed prerequisite objects validate.
 
 The non-secret identity/path attestation must provide exactly: contract/version
 ID, `approved` decision, privacy-safe attestation SHA-256, identity class
@@ -443,19 +444,26 @@ the attempt time, plus non-sensitive stable references naming the operator and
 cancellation owner. Those values are **not available** and cannot be inferred from
 the owner's general approval.
 
-After validation, the candidate starts the 10-second monotonic fence before
-serialized admission, validates all nine statement bytes/digests, opens at most
-one injected connection, validates P00/V01/M10/K20 while connected, executes C99,
-and confirms cursor and physical-connection closure. Its serialized boundary must
-release the FIFO/mutex lease before returning. Only then may canonical artifact
-construction and atomic injected-sink publication occur. Any prerequisite,
-inventory, observation, timeout, cancellation, rollback, close, or lease
-uncertainty returns blocked with no artifact. No production binding is included.
+After validation, the candidate requires `evidence_date`, KST `now`, and both
+approved-window endpoints to share one exact KST date before connection, starts
+the 10-second monotonic fence before serialized admission, validates all nine
+statement bytes/digests, opens at
+most one injected connection, validates P00/V01/M10/K20 while connected, and marks
+C99 attempted before its sole execution. A resource-owning acquisition context
+must prove either no connection was allocated or its owned connection was closed,
+including allocate-then-raise. The serialized result must prove exactly one local
+callback, deadline binding, and FIFO/mutex lease release. Only then may canonical
+artifact construction and atomic no-overwrite publication occur. The sink must
+remove and verify absence of any run-created visible final after failure; a
+pre-existing final is never overwritten or deleted. Allowed fixed validation
+reasons are preserved without raw error text. Any uncertainty returns blocked
+with no artifact. No production binding is included.
 
-Local verification: 9 executor tests and 37 existing capture tests passed together
-under the approved isolated pure-model path (46 passed); 355 adjacent lifecycle,
+Local verification after the first integration-review remediation: 36 executor
+cases and 37 existing capture tests passed together under the approved isolated
+pure-model path (73 passed); 355 adjacent lifecycle,
 Orders wire/fact, and Reception pure regressions also passed. The normal executor
-test invocation reached 9 setup errors before test execution solely because this
+test invocation reached 36 setup errors before test execution solely because this
 host cannot load PySide6 without `libxkbcommon.so.0`. No host package was installed,
 and isolated verification is not reported as a full baseline.
 
@@ -507,3 +515,9 @@ and isolated verification is not reported as a full baseline.
   window references remain absent; executor independent review remains pending.
   No authentication, source connection, SQL, artifact, runtime activation, push,
   or deployment occurred.
+- **2026-10-09:** Remediated the first executor review return with closed
+  single-callback/deadline-bound/released-lease proof, resource-owning acquisition,
+  atomic no-overwrite/final-absence publication, one-attempt C99, exact KST
+  evidence-date binding, and fixed reason preservation. Added synthetic probes for
+  every failure path. Identity/path and window records and independent re-review
+  remain pending; no source access or runtime activation occurred.

@@ -87,6 +87,14 @@ class _Observation(_Redacted):
     k20: list[dict[str, object]]
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class SerializedReadResult(_Redacted):
+    callback_count: int
+    lease_released: bool
+    deadline_bound: bool
+    value: object
+
+
 def _approved_prerequisites(
     *, identity: IdentityPathAttestation, approval: ExecutorApproval,
     window: ExecutionWindow, runtime_commit: str, evidence_date: date,
@@ -130,6 +138,12 @@ def _approved_prerequisites(
         or type(now) is not datetime
         or any(value.utcoffset() != timedelta(hours=9) for value in (window.starts_at, window.ends_at, now))
         or not window.starts_at <= now <= window.ends_at
+        or not (
+            evidence_date
+            == now.date()
+            == window.starts_at.date()
+            == window.ends_at.date()
+        )
         or not timedelta(0) < window.ends_at - window.starts_at <= timedelta(seconds=MAX_WINDOW_SECONDS)
         or not _REFERENCE.fullmatch(window.operator_reference)
         or not _REFERENCE.fullmatch(window.cancellation_owner_reference)
@@ -151,19 +165,21 @@ def _verified_statements(statement_bytes: object) -> dict[str, bytes]:
 def _rows(cursor: object, spec: capture.StatementSpec) -> capture.InjectedResult:
     columns = tuple(item[0] for item in (cursor.description or ()))
     if columns != spec.columns:
-        raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
+        raise ExecutorRejected(capture.FixedReason.UNEXPECTED_SHAPE.value)
     fetched = cursor.fetchmany(spec.maximum_rows + 1)
-    if type(fetched) not in (list, tuple) or len(fetched) > spec.maximum_rows:
-        raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
+    if type(fetched) not in (list, tuple):
+        raise ExecutorRejected(capture.FixedReason.UNEXPECTED_SHAPE.value)
+    if len(fetched) > spec.maximum_rows:
+        raise ExecutorRejected(capture.FixedReason.ROW_LIMIT.value)
     rows = []
     for values in fetched:
         if type(values) not in (list, tuple) or len(values) != len(columns):
-            raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
+            raise ExecutorRejected(capture.FixedReason.UNEXPECTED_SHAPE.value)
         rows.append(dict(zip(columns, values, strict=True)))
     return capture.InjectedResult(tuple(rows))
 
 
-def _observe_and_close(*, connection_factory: object, statement_bytes: dict[str, bytes],
+def _observe_and_close(*, connection_owner: object, statement_bytes: dict[str, bytes],
                        deadline: float, monotonic: object) -> _Observation:
     connection = cursor = None
     c99_done = False
@@ -172,11 +188,18 @@ def _observe_and_close(*, connection_factory: object, statement_bytes: dict[str,
     try:
         if monotonic() > deadline:
             raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
-        connection = connection_factory(deadline)
+        connection_owner.acquire(deadline)
+        if (connection_owner.acquisition_count != 1
+                or connection_owner.acquisition_complete is not True
+                or connection_owner.connection is None):
+            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        connection = connection_owner.connection
         cursor = connection.cursor()
         for spec in capture.STATEMENT_SPECS:
             if monotonic() > deadline:
                 raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
+            if spec.statement_id == "EKO-C99":
+                c99_done = True
             cursor.execute(statement_bytes[spec.statement_id].decode("ascii"))
             if getattr(connection, "notices", ()):
                 raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
@@ -195,11 +218,13 @@ def _observe_and_close(*, connection_factory: object, statement_bytes: dict[str,
                     m10 = capture._validate_m10(result)
                 elif spec.statement_id == "EKO-K20":
                     k20 = capture._validate_k20(result)
-            c99_done = spec.statement_id == "EKO-C99"
             if monotonic() > deadline:
                 raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
     except Exception as error:
-        failure = error
+        failure = (
+            ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+            if c99_done else error
+        )
         if connection is not None:
             try:
                 connection.cancel()
@@ -207,6 +232,7 @@ def _observe_and_close(*, connection_factory: object, statement_bytes: dict[str,
                 failure = ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
         if cursor is not None and not c99_done:
             try:
+                c99_done = True
                 cursor.execute(statement_bytes["EKO-C99"].decode("ascii"))
             except Exception:
                 failure = ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
@@ -218,13 +244,14 @@ def _observe_and_close(*, connection_factory: object, statement_bytes: dict[str,
                 cleanup_ok = getattr(cursor, "closed", None) is True and cleanup_ok
             except Exception:
                 cleanup_ok = False
-        if connection is not None:
-            try:
-                connection.close()
-                closed = getattr(connection, "closed", None)
-                cleanup_ok = ((closed is True) or (type(closed) is int and closed > 0)) and cleanup_ok
-            except Exception:
-                cleanup_ok = False
+        try:
+            connection_owner.close_owned(deadline)
+            if connection_owner.acquisition_count == 0:
+                cleanup_ok = connection_owner.no_connection_proven is True and cleanup_ok
+            else:
+                cleanup_ok = connection_owner.close_verified is True and cleanup_ok
+        except Exception:
+            cleanup_ok = False
         if not cleanup_ok:
             failure = ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
         elif monotonic() > deadline and failure is None:
@@ -233,9 +260,7 @@ def _observe_and_close(*, connection_factory: object, statement_bytes: dict[str,
         if isinstance(failure, ExecutorRejected):
             raise failure
         if isinstance(failure, capture.CaptureRejected):
-            reason = str(failure)
-            if reason == ExecutorReason.INVENTORY_MISMATCH.value:
-                raise ExecutorRejected(reason) from None
+            raise ExecutorRejected(str(failure)) from None
         raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value) from None
     if type(version) is not str or p00 is None or m10 is None or k20 is None:
         raise ExecutorRejected(ExecutorReason.OBSERVATION_REJECTED.value)
@@ -246,41 +271,90 @@ def execute_reviewed_package_once(
     *, identity: IdentityPathAttestation, approval: ExecutorApproval,
     window: ExecutionWindow, runtime_commit: str, evidence_date: date,
     now: datetime, statement_bytes: dict[str, bytes], monotonic: object,
-    serialized_read_until: object, connection_factory: object, sink: object,
+    serialized_read_until: object, connection_owner: object, sink: object,
 ) -> capture.CaptureOutcome:
     """Execute only after all injected prerequisites are independently approved."""
 
+    sink_clean = False
     try:
         _approved_prerequisites(
             identity=identity, approval=approval, window=window,
             runtime_commit=runtime_commit, evidence_date=evidence_date, now=now,
         )
         statements = _verified_statements(statement_bytes)
+        if sink.final_exists() is not False:
+            raise ExecutorRejected(ExecutorReason.PUBLICATION_FAILED.value)
+        sink_clean = True
         started = monotonic()
         deadline = started + capture.GLOBAL_DEADLINE_SECONDS
-        observation = serialized_read_until(
-            lambda: _observe_and_close(
-                connection_factory=connection_factory, statement_bytes=statements,
+        callback_count = 0
+
+        def observe_once():
+            nonlocal callback_count
+            callback_count += 1
+            if callback_count != 1:
+                raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+            return _observe_and_close(
+                connection_owner=connection_owner, statement_bytes=statements,
                 deadline=deadline, monotonic=monotonic,
-            ),
+            )
+
+        serialized = serialized_read_until(
+            observe_once,
             deadline,
         )
+        if (type(serialized) is not SerializedReadResult or callback_count != 1
+                or serialized.callback_count != 1
+                or serialized.lease_released is not True or serialized.deadline_bound is not True):
+            raise ExecutorRejected(ExecutorReason.CLEANUP_UNCERTAIN.value)
+        observation = serialized.value
         if monotonic() > deadline or type(observation) is not _Observation:
             raise ExecutorRejected(ExecutorReason.TIMEOUT.value)
     except Exception as error:
+        cleanup_uncertain = False
         try:
-            sink.discard()
+            if sink_clean:
+                sink.discard_all()
+            cleanup_uncertain = sink.final_exists() is not False
         except Exception:
-            pass
+            cleanup_uncertain = True
         reason = str(error)
-        fixed = {
-            ExecutorReason.INVENTORY_MISMATCH.value: capture.FixedReason.INVENTORY_MISMATCH,
-            ExecutorReason.TIMEOUT.value: capture.FixedReason.TIMEOUT,
-            ExecutorReason.CLEANUP_UNCERTAIN.value: capture.FixedReason.CLEANUP_UNCERTAIN,
-        }.get(reason, capture.FixedReason.PREFLIGHT_FAILED)
+        allowed = {
+            item.value: item for item in capture.FixedReason
+            if item is not capture.FixedReason.NONE
+        }
+        fixed = allowed.get(reason, capture.FixedReason.PREFLIGHT_FAILED)
+        if cleanup_uncertain:
+            fixed = capture.FixedReason.CLEANUP_UNCERTAIN
         return capture.CaptureOutcome(capture.RunStatus.BLOCKED, fixed, None)
-    return capture._publish(
-        sink=sink, evidence_date=evidence_date, run_status=capture.RunStatus.COMPLETE,
-        fixed_reason=capture.FixedReason.NONE, version=observation.version,
-        p00=observation.p00, m10=observation.m10, k20=observation.k20,
-    )
+    try:
+        if sink.final_exists() is not False:
+            raise ExecutorRejected(ExecutorReason.PUBLICATION_FAILED.value)
+        artifact = capture._build_artifact(
+            evidence_date=evidence_date, run_status=capture.RunStatus.COMPLETE,
+            fixed_reason=capture.FixedReason.NONE, version=observation.version,
+            p00=observation.p00, m10=observation.m10, k20=observation.k20,
+        )
+        sink.create_new_no_overwrite()
+        sink.write(artifact)
+        sink.publish_no_overwrite()
+        if sink.final_exists() is not True:
+            raise ExecutorRejected(ExecutorReason.PUBLICATION_FAILED.value)
+        return capture.CaptureOutcome(capture.RunStatus.COMPLETE, capture.FixedReason.NONE, artifact)
+    except Exception as error:
+        try:
+            sink.discard_all()
+            absent = sink.final_exists() is False
+        except Exception:
+            absent = False
+        reason = str(error)
+        allowed = {
+            item.value: item for item in capture.FixedReason
+            if item is not capture.FixedReason.NONE
+        }
+        return capture.CaptureOutcome(
+            capture.RunStatus.BLOCKED,
+            allowed.get(reason, capture.FixedReason.CAPTURE_FAILED)
+            if absent else capture.FixedReason.CLEANUP_UNCERTAIN,
+            None,
+        )
