@@ -1,9 +1,9 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
 - **Status:** composition `e9e65e8` independently passed; execution remains
-  blocked before authentication pending non-secret identity/path and window
-  records, independently reviewed immutable approval binding, and fresh
-  single-attempt authorization
+  blocked before authentication pending the database-security-authority
+  identity/path attestation, independently reviewed window record and immutable
+  approval binding, and a then-current single-attempt authorization
 - **Last updated:** 2026-10-09
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -658,6 +658,42 @@ The owner or authorized coordinator must supply these non-secret values after
 scheduling. Eghis must not guess them. Missing or stale values stop before
 credential lookup or connection; a general statement of intent is not a window.
 
+#### Owner-supplied candidate window and pre-authentication assessment
+
+At 2026-10-09 23:52 KST, the owner confirmation supplied the following
+non-secret candidate values for independent review. They are recorded as
+proposed inputs only; they do not change the closed template or make its
+`approval_sha256` valid:
+
+| Field | Candidate value | Readiness |
+| --- | --- | --- |
+| `starts_at` | `2026-10-10T00:30:00+09:00` | Supplied; not activated pending the prerequisite PASS and immutable approval digest. |
+| `ends_at` | `2026-10-10T01:00:00+09:00` | Supplied; same KST day and exactly 30 minutes, but not reusable after expiry. |
+| `operator_reference` | `agent:kaosclinic-eghis:main` | Supplied, but the colon characters do not match the closed `[A-Za-z0-9][A-Za-z0-9._-]*` syntax; a compliant canonical reference requires owner confirmation and cannot be normalized implicitly. |
+| `cancellation_owner_reference` | `LeeJS_Gdd` | Supplied compliant stable reference; Telegram sender reference `8406158172` is provenance only and is not copied into the canonical field. Independent review remains pending. |
+| `approval_sha256` | **BLOCKED** | No immutable privacy-safe approval artifact and digest has been reviewed. |
+| attempt time/evidence date | **BLOCKED** | No attempt occurred; a future attempt must begin inside the approved interval on 2026-10-10 KST. |
+
+Privacy-safe H4 inspection established only that the repository defines the
+`eghis_db_connection_string` setting key, defaults it to empty in tracked source,
+and has existing consumers that obtain a configured value through application
+settings. The registered H4 clone contained no local `.env`, SQLite, or database
+configuration artifact to inspect, and no value was read or printed. The owner
+statement that configured connection information exists does not prove that its
+identity is dedicated, least-privilege, and read-only; it also does not create
+the required database-security-authority artifact, validity interval, or digest.
+
+Therefore the identity/path checklist remains **BLOCKED** and the canonical
+manifest below is unchanged. The minimum non-secret input is one immutable,
+privacy-reviewed attestation in the exact template above, issued by an authorized
+database-security authority, explicitly attesting the dedicated least-privilege
+read-only identity and existing serialized single-connection path, binding the
+P00 digest, and supplying validity dates covering 2026-10-10. No username, host,
+database, role dump, connection property, credential, or secret-store locator is
+needed or permitted. If that attestation and the final manifest do not receive
+independent PASS before `2026-10-10T01:00:00+09:00`, this candidate window expires
+and a new bounded window plus fresh single-attempt authorization are required.
+
 ### Immutable approval-manifest candidate
 
 The remaining approval package must be rendered as RFC 8785 JSON Canonicalization
@@ -947,3 +983,11 @@ verification is not reported as a full baseline.
   bytes; verification repeats that transform and compares lowercase hex. This
   removes self-reference without changing any component binding or `BLOCKED`
   prerequisite.
+- **2026-10-09:** Assessed the owner's proposed 2026-10-10 00:30–01:00 KST
+  window and supplied operator/cancellation-owner references without accessing
+  credentials or a source. Privacy-safe repository inspection confirmed only a
+  configured-setting key and code path, not a database-security-authority proof
+  of a dedicated least-privilege read-only identity. The identity/path
+  attestation, window approval digest, immutable manifest, and attempt remain
+  blocked; the candidate window expires rather than being reused if prerequisite
+  review does not complete in time.
