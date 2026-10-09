@@ -24,6 +24,14 @@ the execution gate. The owner separately authorized only the bounded disabled
 composition prerequisite described below. That approval does not authenticate,
 connect, execute a statement, activate runtime, or authorize an evidence attempt.
 
+Independent review of `fa3e9cef41c495190e08b96f9c91f7f2401407b0`
+confirmed the prior ownership and cleanup fixes but found that direct synchronous
+`cursor.execute()` and `fetchmany()` could outlive the common deadline. At
+2026-10-09 22:19 KST the owner authorized exactly one exception remediation for
+those two calls and their synthetic slow/hanging probes. The exception is
+implementation/testing-only and does not authorize authentication, source
+connection, statement execution against a database, or an evidence attempt.
+
 The original evidence plan contemplated one broad evidence package. Exact
 demographic fields, authoritative joins, production types, and index identities
 are still unproven, so this revision deliberately closes only a metadata-first
@@ -486,12 +494,16 @@ best-effort close, but is never reported as timely closure: ownership remains
 uncertain and the FIFO/mutex lease is poisoned pending operator recovery. The
 adapter wraps the sole cursor, records fixed non-sensitive acquisition/close
 observations, prohibits cursor and connection reuse, and verifies the physical
-driver's closed state. Cancellation, cursor creation/close, and physical close
-are likewise deadline-contained. A timeout or exception never claims closure,
-even if the daemon operation later finishes. Any uncertain acquisition, cancel,
-cursor cleanup, or physical close is propagated into the accepted lease poison
-path; normalization and the volatile sink remain unreachable until cursor,
-physical connection, and lease cleanup are all verified within the fence.
+driver's closed state. Statement execution, bounded fetch, cancellation, cursor
+creation/close, and physical close are all deadline-contained. A timed-out
+execute/fetch is never treated as a result, marks ownership uncertain, prevents
+any later statement/fetch admission, and poisons the lease; only cleanup calls
+may be attempted after the deadline. A timeout or exception never claims
+closure, even if the daemon operation later finishes. Any uncertain acquisition,
+statement/fetch, cancel, cursor cleanup, or physical close is propagated into
+the accepted lease poison path; normalization and the volatile sink remain
+unreachable until cursor, physical connection, and lease cleanup are all
+verified within the fence.
 
 The sink is deliberately memory-only and atomic: it creates one temporary value,
 publishes only when no final exists, never overwrites a pre-existing value, and
@@ -608,11 +620,11 @@ or deleted. Allowed fixed validation reasons are preserved without raw error tex
 No runtime binding or activation is included.
 
 Local verification after the disabled composition preparation and bounded
-acquisition/deadline remediation: 24 composition/adapter/sink cases include
-slow and hanging acquisition, cancellation, cursor-close, and physical-close
-probes under a 50-millisecond synthetic fence. The broader focused and adjacent
-isolated suites passed 120 and 355 tests respectively. The non-GUI existing
-EMR read-queue
+acquisition/deadline remediation: 28 composition/adapter/sink cases include
+slow and hanging acquisition, execute, fetch, cancellation, cursor-close, and
+physical-close probes under a 50-millisecond synthetic fence. The final focused
+and adjacent isolated suites passed 124 and 355 tests respectively. The non-GUI
+existing EMR read-queue
 regression subset passed 45 with 3 platform skips; its four GUI consumer cases
 remain unexecutable because this host cannot load PySide6 without
 `libxkbcommon.so.0`. A further 355 lifecycle, Orders wire/fact, and Reception pure
@@ -724,3 +736,12 @@ verification is not reported as a full baseline.
   digests, package schema, disabled/unwired status, and every prerequisite gate
   remain unchanged; no authentication, source access, or evidence attempt
   occurred.
+- **2026-10-09:** Applied the owner-authorized 22:19 KST exception remediation
+  after final review of `fa3e9ce`. Wrapped synchronous `cursor.execute()` and
+  `fetchmany()` in the same absolute-deadline containment used by acquisition
+  and cleanup. A slow/hanging operation now returns within the synthetic fence,
+  yields no result or artifact, admits no later statement/fetch, and poisons the
+  FIFO/mutex lease. Added four slow/hanging execute/fetch regressions. Frozen
+  statements/digests, result and mapping scope, one-connection/no-pooling
+  boundary, disabled composition, volatile sink, and all evidence-attempt gates
+  remain unchanged.

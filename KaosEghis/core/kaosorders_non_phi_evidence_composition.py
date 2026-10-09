@@ -260,17 +260,29 @@ class _OwnedCursor(_Redacted):
 
     def execute(self, statement: str) -> None:
         self._adapter._before_source_operation()
-        try:
-            self._cursor.execute(statement)
-        except Exception:
+        completed, value = _bounded_call(
+            action=lambda: self._cursor.execute(statement),
+            deadline=self._adapter._deadline,
+            monotonic=self._adapter._monotonic,
+        )
+        if not completed:
+            self._adapter._ownership_uncertain = True
+            raise CompositionRejected("source_operation_timeout")
+        if value is _FAILED:
             raise CompositionRejected("source_operation_failed") from None
         self._adapter._after_source_operation()
 
     def fetchmany(self, maximum: int):
         self._adapter._before_source_operation()
-        try:
-            rows = self._cursor.fetchmany(maximum)
-        except Exception:
+        completed, rows = _bounded_call(
+            action=lambda: self._cursor.fetchmany(maximum),
+            deadline=self._adapter._deadline,
+            monotonic=self._adapter._monotonic,
+        )
+        if not completed:
+            self._adapter._ownership_uncertain = True
+            raise CompositionRejected("source_operation_timeout")
+        if rows is _FAILED:
             raise CompositionRejected("source_operation_failed") from None
         self._adapter._after_source_operation()
         return rows
