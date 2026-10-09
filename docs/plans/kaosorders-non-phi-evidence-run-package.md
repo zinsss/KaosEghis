@@ -543,7 +543,8 @@ ID, `approved` decision, privacy-safe attestation SHA-256, identity class
 `existing-serialized-read-single-connection`, the frozen P00 statement digest,
 authority role `database-security-authority`, and validity dates covering the
 evidence date. No username, role dump, host, credential, or connection property is
-permitted. This attestation is **not available** and cannot be invented here.
+permitted. The owner supplied the complete substantive record below on
+2026-10-10; it remains pending independent review and is not execution authority.
 
 ### Non-secret identity/path attestation template
 
@@ -569,6 +570,45 @@ The attestation must not contain a username, host, port, database name,
 connection string, role dump, credential, secret-store locator, token, or live
 payload. Approval is invalid unless its date range covers the evidence date and
 its digest resolves to a separately reviewed non-secret attestation.
+
+#### Completed privacy-safe identity/path attestation
+
+At 2026-10-10 07:05 KST, the owner explicitly acted as the
+`database-security-authority`, approved the exact literal identity/path classes,
+bound the frozen P00 digest, and supplied the inclusive validity dates. The
+immutable attestation artifact is the following exact RFC 8785 JCS line; it
+contains no name, contact, messaging, account, host, database, credential,
+connection, or secret-store identifier:
+
+```json
+{"authority_role":"database-security-authority","contract_id":"kaoseghis.orders-evidence-read-path-attestation.v1","decision":"approved","expires_on":"2026-10-12","identity_class":"dedicated-least-privilege-read-only","p00_statement_sha256":"6b32e06db86fd62b7df3c6edb860b6f0e1482ec2f3e98b3304811688d0dcd3d6","path_class":"existing-serialized-read-single-connection","valid_from":"2026-10-10"}
+```
+
+The SHA-256 of those exact UTF-8 bytes, without a trailing line feed, is
+`4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401`.
+The closed envelope therefore has these exact values:
+
+```json
+{
+  "contract_id": "kaoseghis.orders-evidence-read-path-attestation.v1",
+  "decision": "approved",
+  "attestation_sha256": "4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401",
+  "identity_class": "dedicated-least-privilege-read-only",
+  "path_class": "existing-serialized-read-single-connection",
+  "p00_statement_sha256": "6b32e06db86fd62b7df3c6edb860b6f0e1482ec2f3e98b3304811688d0dcd3d6",
+  "authority_role": "database-security-authority",
+  "valid_from": "2026-10-10",
+  "expires_on": "2026-10-12"
+}
+```
+
+This supplies every owner-controlled substantive field in the closed
+identity/path attestation and its privacy-safe immutable digest. It does not
+pre-prove effective database privileges: after all prerequisites and the final
+manifest pass review, P00 must still prove all 15 booleans in the same bounded
+connection before any substantive evidence statement. Independent review must
+also reproduce the artifact digest and accept the envelope before
+`identity_path_attestation_sha256` can replace `BLOCKED` in the manifest.
 
 #### Privacy-safe owner account-purpose attestation
 
@@ -619,9 +659,9 @@ does not authorize credential lookup, authentication, connection, or execution.
 
 #### Identity/path fail-closed proof checklist
 
-Current readiness is **BLOCKED**: `attestation_sha256`, `valid_from`, and
-`expires_on` have not been supplied by the database-security authority. No
-repository fact can substitute for that authority record. Before any future
+Current readiness is **REVIEW PENDING**: the owner-supplied record now populates
+`attestation_sha256`, `valid_from`, and `expires_on`, but independent review has
+not accepted it and the manifest remains `BLOCKED`. Before any future
 authentication, reviewed preflight must prove every item below; false, missing,
 expired, contradictory, unverifiable, or extra sensitive content stops before
 credential lookup or connection:
@@ -725,21 +765,18 @@ Privacy-safe H4 inspection established only that the repository defines the
 `eghis_db_connection_string` setting key, defaults it to empty in tracked source,
 and has existing consumers that obtain a configured value through application
 settings. The registered H4 clone contained no local `.env`, SQLite, or database
-configuration artifact to inspect, and no value was read or printed. The new
-owner statement establishes the intended account purpose but does not create the
-required database-security-authority path attestation, validity interval, P00
-binding, or closed prerequisite digest.
+configuration artifact to inspect, and no value was read or printed. The earlier
+account-purpose statement alone did not create the closed attestation. The later
+07:05 KST authority statement now supplies the exact substantive path,
+authority, P00, and validity fields in the completed artifact above.
 
-Therefore the identity/path checklist remains **BLOCKED** and the canonical
-manifest below is unchanged. The minimum non-secret input is one immutable,
-privacy-reviewed attestation in the exact template above, issued by an authorized
-database-security authority, explicitly attesting the dedicated least-privilege
-read-only identity and existing serialized single-connection path, binding the
-P00 digest, and supplying validity dates covering 2026-10-10. No username, host,
-database, role dump, connection property, credential, or secret-store locator is
-needed or permitted. If that attestation and the final manifest do not receive
-independent PASS before `2026-10-10T01:00:00+09:00`, this candidate window expires
-and a new bounded window plus fresh single-attempt authorization are required.
+The identity/path record is therefore **REVIEW PENDING**, while the canonical
+manifest below remains unchanged and `BLOCKED`. Independent review must
+reproduce the JCS digest, accept the literal fields, and confirm that no
+prohibited identifier entered the artifact. No username, host, database, role
+dump, connection property, credential, or secret-store locator is needed or
+permitted. This review cannot revive the expired window; a new bounded window
+and later fresh single-attempt authorization remain required.
 
 At the 2026-10-10 06:57 KST assessment, that endpoint had passed without the
 required prerequisite PASS. The candidate window is therefore **EXPIRED** and
@@ -1064,3 +1101,10 @@ verification is not reported as a full baseline.
   or fresh single-attempt fields. Recorded that the prior 00:30–01:00 KST
   candidate window expired without activation. Authentication and execution
   remain stopped.
+- **2026-10-10:** Processed the owner's 07:05 KST statement as the complete
+  substantive identity/path attestation: literal database-security authority,
+  dedicated least-privilege read-only identity class, existing serialized
+  single-connection path, frozen P00 digest, and 2026-10-10 through 2026-10-12
+  validity. Added its exact privacy-safe JCS artifact and SHA-256. The record is
+  review-pending, does not pre-prove P00, and does not populate the still-blocked
+  manifest or authorize authentication/execution.
