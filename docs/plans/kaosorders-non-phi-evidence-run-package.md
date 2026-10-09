@@ -593,6 +593,30 @@ and supplies no validity interval. Effective privileges also remain runtime
 facts that P00 must prove in-connection before any substantive evidence
 statement; the owner assertion cannot pre-prove any of P00's 15 booleans.
 
+#### Privacy-safe owner authority/approval assertion
+
+On 2026-10-10 the owner additionally stated that the speaker is the relevant
+authority and approves. The statement is recorded without a personal, contact,
+messaging, account, host, database, credential, connection, or secret-store
+identifier. Its bounded semantic scope is prerequisite-attestation processing
+only, represented by this exact RFC 8785 JCS line:
+
+```json
+{"asserted_on":"2026-10-10","authority_claim":"relevant-authority","contract_id":"kaoseghis.orders-evidence-owner-authority-approval-assertion.v1","decision":"approved","scope":"prerequisite-attestation-processing-only"}
+```
+
+The SHA-256 of those exact UTF-8 bytes, without a trailing line feed, is
+`740a56a5fc8301e8a357676cffdf59c1779be4ff426f43f0a3344cd0b41cc81a`.
+This record establishes only that the unidentified speaker claims relevant
+authority and approves the stated prerequisite-processing scope. It does not
+state the literal `database-security-authority` role, identify or attest the
+exact serialized path, bind P00, provide validity dates, name canonical
+operator/cancellation-owner references, approve an active window, or provide
+the post-prerequisite fresh single-attempt authorization required by the central
+protocol. It therefore is not inserted as `attestation_sha256`,
+`window_approval_sha256`, or `fresh_single_attempt_authorization_sha256`, and it
+does not authorize credential lookup, authentication, connection, or execution.
+
 #### Identity/path fail-closed proof checklist
 
 Current readiness is **BLOCKED**: `attestation_sha256`, `valid_from`, and
@@ -693,7 +717,7 @@ proposed inputs only; they do not change the closed template or make its
 | `starts_at` | `2026-10-10T00:30:00+09:00` | Supplied; not activated pending the prerequisite PASS and immutable approval digest. |
 | `ends_at` | `2026-10-10T01:00:00+09:00` | Supplied; same KST day and exactly 30 minutes, but not reusable after expiry. |
 | `operator_reference` | `agent:kaosclinic-eghis:main` | Supplied, but the colon characters do not match the closed `[A-Za-z0-9][A-Za-z0-9._-]*` syntax; a compliant canonical reference requires owner confirmation and cannot be normalized implicitly. |
-| `cancellation_owner_reference` | `LeeJS_Gdd` | Supplied compliant stable reference; out-of-band provenance is excluded from the canonical field. Independent review remains pending. |
+| `cancellation_owner_reference` | **BLOCKED** | The owner-supplied reference is identity-bearing and remains out of band; no privacy-safe canonical value may be invented. |
 | `approval_sha256` | **BLOCKED** | No immutable privacy-safe approval artifact and digest has been reviewed. |
 | attempt time/evidence date | **BLOCKED** | No attempt occurred; a future attempt must begin inside the approved interval on 2026-10-10 KST. |
 
@@ -716,6 +740,13 @@ database, role dump, connection property, credential, or secret-store locator is
 needed or permitted. If that attestation and the final manifest do not receive
 independent PASS before `2026-10-10T01:00:00+09:00`, this candidate window expires
 and a new bounded window plus fresh single-attempt authorization are required.
+
+At the 2026-10-10 06:57 KST assessment, that endpoint had passed without the
+required prerequisite PASS. The candidate window is therefore **EXPIRED** and
+cannot be activated, extended, or reused. Its prior non-active values remain
+historical evidence only; a new same-day bounded window, closed canonical role
+references, immutable window approval digest, and later fresh single-attempt
+authorization are required.
 
 ### Immutable approval-manifest candidate
 
@@ -1026,3 +1057,10 @@ verification is not reported as a full baseline.
   purpose only; database-security authority, exact serialized path, P00 binding,
   validity dates, effective privileges, window approval, and the final manifest
   remain blocked. No credential lookup, authentication, or connection occurred.
+- **2026-10-10:** Canonicalized the owner's claim of relevant authority and
+  approval as a privacy-safe JCS record scoped only to prerequisite-attestation
+  processing. It contains no identity/contact/source detail and cannot satisfy
+  the literal database-security role, path/P00/validity, window, canonical role,
+  or fresh single-attempt fields. Recorded that the prior 00:30–01:00 KST
+  candidate window expired without activation. Authentication and execution
+  remain stopped.
