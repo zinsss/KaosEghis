@@ -54,7 +54,7 @@ assign clinical meaning.
 | `chart_number` | The eventual Eghis mapping requires one nonblank chart number, but no Orders-v1 source column is accepted. Reception uses `h1opdin.ptnt_no` only as a join key; that does not establish chart-number meaning. | Approved source field and meaning, exact type/text conversion, authoritative exact-one join path, length/content domain, conflict rejection, and confirmation that it stays inside the accepted chart-number boundary. Missing, blank, malformed, or conflicting values reject the whole observation. |
 | `patient_name` | The eventual Eghis mapping requires one nonblank patient name. Reception's separate mapping reads `hz_mst_ptnt.ptnt_nm` as display-only name after an exact-one join, but that destination-specific evidence is not automatically an Orders mapping. | Orders-specific approval of provenance and use, authoritative exact-one join, nonblank/unpadded/128-code-point domain, conflict rejection, and proof that no fallback or alternate name is required. |
 | `sex` | The accepted logical schema permits `M`, `F`, or null, but the authorized eventual Eghis mapping is stricter: it may publish only exact `M` or `F`. No current Orders statement selects a field. | Approved source field, exact domain and exact-one join/cardinality evidence. True SQL null, blank, unknown, other, malformed, or conflicting source values reject the whole observation; they are not coerced to logical null or another code. |
-| `age` | The eventual Eghis mapping requires an exact integer age in completed years on the `Asia/Seoul` clinic day, in 0..130. No safe source or derivation is accepted. | One explicitly privacy-reviewed source or derivation, required inputs, exact birthday/leap-day convention, exact-one join/cardinality, and range proof. Missing, invalid, conflicting, or uncomputable age rejects the whole observation. DOB or resident identifiers require separate explicit privacy approval as transient source inputs and may never be retained, emitted, or logged. |
+| `age` | The eventual Eghis mapping requires an exact integer age in completed years on the `Asia/Seoul` clinic day, in 0..130. Rule A is settled: a 29-February birth uses 28 February as the anniversary in non-leap years and increments at 00:00 KST. No safe source or derivation is accepted. | One explicitly privacy-reviewed source or derivation, required inputs, exact-one join/cardinality, range proof, and synthetic anniversary-boundary verification. Missing, invalid, conflicting, or uncomputable age rejects the whole observation. DOB or resident identifiers require separate explicit privacy approval as transient source inputs and may never be retained, emitted, or logged. |
 | parent `state` | `h1opdin.proc_gb` is the candidate code. Sampled UI associations exist for 10/20/25/30/40/50, but they are not a complete truth table. | A versioned human clinical decision mapping every allowed code plus `hold_yn` combination to `WAITING`, `IN_PROGRESS`, `ON_HOLD`, `CONSULTATION_COMPLETED`, `PAYMENT_COMPLETED`, or excluded cancelled; unknown/null/blank/conflicting values must reject the whole observation. |
 | `qualifiers.hold_yn` | Candidate `h1opdin.hold_yn`; strict `Y`/`N` shape is tested. | Full production domain and the clinical interaction with `proc_gb`. `hold_opd` remains prohibited and cannot be reacquired to resolve ambiguity. |
 | child-parent relation | Candidate `h2opd_doct_ord.recept_no = h1opdin.recept_no`; current draft uses `EXISTS` to avoid multiplying child candidates. | Proof that this is the complete child relation for every included parent/category, that no alternate readable source is required, and that every returned child links to exactly one included parent. |
@@ -135,8 +135,11 @@ a clinically complete save; repeated equal reads or UI readiness are not substit
 
 ### Non-PHI production evidence package
 
-No production evidence acquisition is authorized by this document. A later
-separately reviewed procedure may return only a machine-readable, bounded package
+The owner authorized the central bounded protocol at orchestration `e341737`, but
+execution remains blocked until the exact Eghis
+[closed run package](plans/kaosorders-non-phi-evidence-run-package.md) receives
+Orders and independent integration review PASS and a bounded window is scheduled.
+That reviewed procedure may return only a machine-readable, bounded package
 containing:
 
 - PostgreSQL/server version applicability; allowlisted relation/column names,
@@ -206,7 +209,8 @@ decisions, which observations must not silently invent:
    `dc_yn`/`act_yn`, across every included order category;
 3. authoritative parent and child relations, exact fields and exact-one joins,
    including no-order parents, cancellation/restoration, and conflict handling;
-4. the exact completed-years leap-day convention, with fictional boundary tests;
+4. synthetic proof that the settled 29-February/28-February anniversary rule is
+   implemented exactly at 00:00 `Asia/Seoul`, without approving a source field;
 5. the authoritative clinical save/completion fence that prevents a `FULL`
    snapshot between related EMR commits; and
 6. exhaustive category/relation coverage, including disappearance, restoration,
@@ -362,8 +366,9 @@ Detailed provenance and limitations remain in
   null/blank/other value. The 2026-10-09 owner clarification requires exact M/F
   for the eventual mapping and rejects SQL null, blank, unknown, other, malformed,
   or conflicting values for the whole observation. It also requires a completed-
-  years age at the KST clinic day in 0..130. That policy does not prove a safe age
-  source/calculation or settle the leap-day convention.
+  years age at the KST clinic day in 0..130. Rule A now fixes the non-leap-year
+  anniversary at 28 February from 00:00 KST, but does not prove a safe age source,
+  source expression, or exact-one join.
 - Catalog checks showed SELECT access to candidate base tables. They did not prove
   least privilege. A dictionary permission denial was not bypassed.
 
@@ -384,7 +389,7 @@ evidence, and no gate is closed merely because a fixture can represent the resul
 | 4. States/retained qualifiers | Supervised codes 10/20/25/30/40/50 and some exact flag combinations. | Versioned state truth table including hold_yn Y/N, transient states, unknown/null/blank combinations and consultation versus payment completion. No default mapping from a column name or sample. |
 | 5. State without excluded field | v2 excludes hold_opd; receiver has no raw-field business requirement. | Compare operator-confirmed states with only approved retained facts; seek ambiguous combinations rather than assume independence. If state remains ambiguous, keep it blocked; a privacy-safe semantic would need separate review. Never retrieve the excluded raw value to guess. |
 | 6. All-category lifecycle | Sampled edits, deletion, restoration, parent cancellation and key reuse. | Definitions and a separately approved category/path matrix for dc_yn/act_yn, physical disappearance, restorations and identity reuse. Neither act_yn nor disappearance proves clinical completion/cancellation. |
-| 7. Sex/age | Eventual mapping policy requires exact M/F and completed-years age 0..130 on the KST clinic day; sampled evidence observed M/F only. The broader logical schema remains unchanged. | Controlled source-domain and exact-one-join evidence, whole-observation rejection for SQL null/blank/unknown/other/malformed/conflicting sex and missing/invalid/conflicting/uncomputable age, plus a separately privacy-reviewed age source/function and explicit synthetic birthday/leap-day convention tests. No DOB or resident-identifier retrieval is authorized by this decision. |
+| 7. Sex/age | Eventual mapping policy requires exact M/F and completed-years age 0..130 on the KST clinic day; sampled evidence observed M/F only. Rule A fixes a 29-February birthday to a 28-February anniversary in non-leap years at 00:00 KST. The broader logical schema remains unchanged. | Controlled source-domain and exact-one-join evidence, whole-observation rejection for SQL null/blank/unknown/other/malformed/conflicting sex and missing/invalid/conflicting/uncomputable age, plus a separately privacy-reviewed age source/function and synthetic boundary proof for the settled rule. No DOB or resident-identifier retrieval is authorized by this decision. |
 | 8. Least privilege | Verified read-only sessions; selected table/column non-SELECT capabilities absent on the two sources; no observed superuser/admin/owner-role capabilities. | Effective CREATE capability in public was observed and remains a blocker. Admin review of a restricted reader identity/grants is needed; other schemas/functions and effective paths are not fully audited. Never test with a production write or change shared grants automatically. |
 
 ## Vendor/Admin Definition Request
@@ -617,6 +622,10 @@ validators, fixtures/hashes, source block and transport restrictions stay intact
 
 ## Revision history
 
+- **2026-10-09:** Recorded owner-approved leap-day rule A and central protocol
+  `e341737`; linked the documentation-only metadata-first closed run package and
+  kept execution blocked on Orders and independent review. No source, credential,
+  patient value, mapping identity, runtime, push, or deployment was accessed.
 - **2026-10-09:** Recorded the authorized owner clarification without changing the
   accepted Orders v1 logical contract: retained all five parent states, verified
   cancelled-parent exclusion, explicit child cancellation/state, and all no-order

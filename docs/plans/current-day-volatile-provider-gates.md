@@ -208,8 +208,9 @@ from technical observations. The 2026-10-09 owner clarification keeps Orders v1
 unchanged, includes every no-order parent, rejects cross-day children, and fixes a
 stricter fail-closed eventual demographic policy without assigning any source
 field or mapping revision. The remaining blockers are the complete raw parent and
-child truth tables, authoritative relations/fields/exact-one joins, the leap-day
-convention, the save-completion fence, and exhaustive category/relation coverage.
+child truth tables, authoritative relations/fields/exact-one joins, synthetic proof
+of the settled leap-day rule, the save-completion fence, and exhaustive category/
+relation coverage.
 The evidence input also records why the current
 offline candidate SQL is not a production-v1 mapping statement. No evidence was
 acquired and no mapping revision was assigned in this documentation phase.
@@ -519,10 +520,11 @@ route or deployment.
 
 The non-PHI production-source evidence/mapping procedure is accepted centrally at
 orchestration `34073204ea8b4deda636b4ab09f7ba2aebab34fa`, with the 2026-10-09
-owner decisions recorded at `f699b755b8643c42a3a2eff99d9ca393ba0d8f0b`.
-The next step is independent review of this
-Eghis documentation alignment; any evidence acquisition still needs its own
-explicitly authorized, reviewed non-PHI protocol. Orders receiver
+owner decisions and leap-day rule carried forward into the authorized bounded
+protocol at `e341737`. The Eghis metadata-first
+[closed run package](kaosorders-non-phi-evidence-run-package.md) now requires
+Orders coverage review, independent digest/diff review, and a separately scheduled
+bounded window before any evidence statement may execute. Orders receiver
 implementation is already limited to its accepted injected, disabled parser/client
 and volatile lifecycle/freshness tests; that acceptance does not authorize a source
 mapping, FastAPI/runtime wiring, real credentials, network access, board cutover,
@@ -585,3 +587,9 @@ slice.
   acquisition, runtime, activation, push, or deployment was authorized; the raw
   truth tables, authoritative joins, leap-day rule, save fence, and exhaustive
   category coverage remain blocked.
+- **2026-10-09:** Recorded leap-day rule A and prepared the documentation-only
+  metadata-first non-PHI closed run package against orchestration `e341737`, with
+  nine frozen statement digests, exact output/bounds/non-echo/cleanup rules, and
+  a synthetic verification plan. Execution remains blocked on Orders and
+  independent review; no source, credential, patient value, runtime, push, or
+  deployment was accessed.
