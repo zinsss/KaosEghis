@@ -543,7 +543,7 @@ def test_projection_requires_one_atomic_lifecycle_snapshot_and_exact_count():
         )
 
 
-def test_module_is_pure_disabled_and_not_imported_by_runtime():
+def test_wire_module_stays_pure_and_only_opt_in_adapter_imports_it():
     path = Path(wire.__file__)
     tree = ast.parse(path.read_text(encoding="utf-8"))
     imports = {
@@ -568,6 +568,10 @@ def test_module_is_pure_disabled_and_not_imported_by_runtime():
         "settings", "QApplication", "threading", "subprocess",
     }
     root = path.parents[1]
+    importers = []
     for other in root.rglob("*.py"):
-        if other != path:
-            assert "kaosorders_current_day_wire" not in other.read_text(encoding="utf-8-sig")
+        if other != path and "kaosorders_current_day_wire" in other.read_text(
+            encoding="utf-8-sig"
+        ):
+            importers.append(other.relative_to(root).as_posix())
+    assert importers == ["service/kaosorders_synthetic_api.py"]

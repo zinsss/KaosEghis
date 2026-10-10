@@ -34,6 +34,15 @@ def run() -> int:
         if patient_context_runtime is not None:
             app.aboutToQuit.connect(patient_context_runtime.stop)
 
+        # Explicitly opt-in, loopback-only, invented-data integration harness.
+        from KaosEghis.service.kaosorders_synthetic_api import (
+            start_server_in_thread as start_synthetic_orders_server,
+        )
+
+        synthetic_orders_runtime = start_synthetic_orders_server()
+        if synthetic_orders_runtime is not None:
+            app.aboutToQuit.connect(synthetic_orders_runtime.stop)
+
         # Qt establishes the Windows GUI thread as STA. Import automation modules
         # only afterward so they cannot initialize COM as MTA and disable OLE drag/drop.
         stage("Building workspace...")
