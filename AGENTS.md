@@ -12,8 +12,9 @@ Baseline checks:
 - run only when explicitly needed: `python main.py`
 
 Create a task branch, avoid unrelated changes, never force-push, merge, or
-deploy. Report cross-repository contracts using the KaosClinic handoff schema,
-including PACS/Orders/Reception implications.
+deploy. A concise result is sufficient for routine local work. Use the
+KaosClinic handoff schema only when PACS/Orders/Reception interfaces,
+authentication, schemas, migrations, or deployment ordering actually change.
 
 ## Repository synchronization
 
@@ -28,17 +29,8 @@ the central `/srv/projects/KaosClinic/orchestration/architecture/repository-sync
 
 ## Durable documentation
 
-Before reporting a task complete, create or update Markdown for material ideas;
-plan, scope, or acceptance changes; decisions and rationale; blockers, risks,
-and durable follow-ups; and cross-project dependencies or operational impact.
-Use `docs/plans/<topic>.md` for active project plans and
-`docs/decisions/<topic>.md` for settled project decisions, updating an existing
-topic document instead of duplicating it.
-
-As applicable, include status and date, affected projects, context, the original
-plan and plan delta, rationale, impact, dependencies, safety constraints,
-evidence, open questions, next action, and a dated revision history. Never record
-credentials, patient information, live clinical payloads, or unredacted
-production logs. The structured handoff must name changed Markdown documents or
-explain why none was needed. See the central
-`/srv/projects/KaosClinic/orchestration/architecture/documentation-policy-v1.md`.
+Follow the central documentation policy. Routine bug fixes, small features,
+local refactors, tests, and completed same-task plans need no new Markdown.
+Document only durable architecture, cross-project contracts, operational or
+safety decisions, migrations, and unresolved follow-up. Never record
+credentials, patient information, live clinical payloads, or unredacted logs.
