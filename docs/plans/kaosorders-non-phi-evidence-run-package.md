@@ -1,9 +1,8 @@
 # KaosOrders Non-PHI Source Evidence Run Package
 
-- **Status:** the consumed attempt remains blocked with no evidence artifact;
-  the resolver-bound package and 09:00–09:30 KST window have independent PASS,
-  and a fresh authorization plus populated manifest are review-ready; final
-  manifest PASS remains absent, so no execution authority exists
+- **Status:** the authorized attempt was consumed by a fail-closed pre-authentication
+  path-prerequisite stop at 2026-10-10T09:13:54+09:00; no setting was read, no
+  connection was attempted, and no evidence artifact exists; retry is prohibited
 - **Last updated:** 2026-10-10
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -1251,14 +1250,41 @@ authority. Setting read, authentication, connection, statements, publication,
 runtime activation, push, merge, and deployment remain stopped until exact
 independent final manifest PASS and a fresh in-window preflight.
 
+### Single authorized attempt result — consumed, blocked before authentication
+
+Independent final review passed the exact manifest at 09:12:39 KST. The single
+authorized attempt began its required pre-authentication checks at
+`2026-10-10T09:13:54+09:00`, inside the accepted window. Exact HEAD, manifest,
+authorization, component, and statement bindings were unchanged.
+
+The approved settings/path prerequisite was not available in the registered H4
+execution context. The current process is the Linux H4 development clone, while
+the approved store path is a different platform path class and cannot satisfy
+the resolver's exact native absolute-path predicate here. This was determined
+without reading the store, resolving a setting, authenticating, loading a DB
+driver, opening a source connection, or running any statement. No fallback,
+path translation, remote-host contact, discovery, or scope broadening was
+attempted.
+
+The fixed privacy-safe outcome is `blocked` / `preflight_failed`.
+Authorization SHA-256
+`6c055d264a81829140f0803bab95820935e223f5cd67f694e2f9a86fa193ce84`
+is consumed and non-reusable. Manifest root
+`cf65f32ac3735f7c897826cdf152586ba27a4764cd0758b1ff3e0d71aa9deb50`
+cannot be reused for another attempt. There was no cursor, physical connection,
+transaction, lease acquisition, sink publication, evidence artifact, raw log,
+or cleanup uncertainty because execution stopped before those resources existed.
+
 ## Next action
 
-1. Independently review the exact authorization record and populated manifest,
-   reproducing both SHA-256 values and every immutable binding.
+1. Independently review this exact fail-closed attempt-result record and confirm
+   that no setting/source resource was acquired and no evidence artifact exists.
 2. Keep setting read, authentication, connection, P00, later statements, and
-   publication stopped. Every prior window/authorization/manifest is non-reusable.
-3. If final review does not PASS while the window remains safely viable, let it
-   expire fail-closed; do not reuse the authorization or manifest.
+   publication stopped. The authorization and manifest are consumed and non-reusable.
+3. Any future attempt requires a separately reviewed execution context capable
+   of satisfying the approved native path without touching a live checkout,
+   followed by a new window, fresh one-attempt authorization, regenerated
+   manifest, and final independent PASS.
 
 ## Revision history
 
@@ -1518,3 +1544,10 @@ independent final manifest PASS and a fresh in-window preflight.
   Both artifacts remain final-review pending and unconsumed; no setting read,
   authentication, connection, statement, publication, runtime, push, merge, or
   deployment action occurred.
+- **2026-10-10:** After final independent PASS at 09:12:39 KST, consumed the
+  single authorization on the required 09:13:54 KST pre-authentication check.
+  The approved settings path could not satisfy the reviewed resolver's native
+  absolute-path requirement in the Linux H4 context, so the attempt stopped as
+  `preflight_failed` before any store read, credential resolution,
+  authentication, driver load, connection, SQL, lease, or publication. No
+  evidence artifact or cleanup uncertainty exists; no retry or fallback occurred.
