@@ -206,6 +206,50 @@ class SyntheticOrdersProjection(_Redacted):
             raise OrdersWireRejected("projection_invalid")
 
 
+def build_empty_synthetic_fixture(
+    now: datetime,
+) -> tuple[lifecycle.ProviderState, SyntheticOrdersProjection]:
+    """Build the runtime adapter's synthetic empty snapshot inside the wire boundary."""
+
+    day = lifecycle.clinic_day_at(now)
+    facts = facts_model.validate_synthetic_collection(
+        "synthetic-eghis", day, (), (), synthetic_fixture=True
+    )
+    lease = lifecycle.SingletonLeaseClaim(
+        lifecycle.OpaqueIdentity("synthetic-orders-runtime"),
+        lifecycle.OpaqueIdentity("synthetic-orders-runtime-lease"),
+        True,
+    )
+    state = lifecycle.start_provider(
+        now=now,
+        provider_session_id=lifecycle.OpaqueIdentity("synthetic-runtime-session"),
+        provider_generation=lifecycle.OpaqueIdentity("synthetic-runtime-generation"),
+        lease=lease,
+        stable_jitter_seconds=0,
+    )
+    state, ticket = lifecycle.request_refresh(state, now=now)
+    empty = lifecycle.DestinationState(
+        lifecycle.ProjectionAvailability.VERIFIED_EMPTY, 0, 0
+    )
+    state = lifecycle.complete_success(
+        state,
+        ticket,
+        lifecycle.ObservationCandidate(day, now, empty, empty),
+        now=now,
+        lease=lease,
+    )
+    scope = SyntheticOrdersScope(
+        "synthetic-clinic",
+        "synthetic-eghis",
+        "synthetic-mapping-v1",
+        synthetic_fixture=True,
+    )
+    projection = SyntheticOrdersProjection(
+        scope, state.snapshot, facts, synthetic_fixture=True
+    )
+    return state, projection
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class InProcessOrdersRequest(_Redacted):
     method: object

@@ -277,6 +277,18 @@ def test_verified_empty_canonical_fixture_bytes_and_digest_are_exact():
     )
 
 
+def test_runtime_fixture_factory_builds_verified_empty_projection_inside_wire_boundary():
+    state, projection = wire.build_empty_synthetic_fixture(NOW)
+
+    assert state.snapshot is projection.snapshot
+    assert projection.scope.source_id == "synthetic-eghis"
+    assert projection.facts.parents == projection.facts.children == ()
+    assert (
+        state.snapshot.orders.availability
+        is lifecycle.ProjectionAvailability.VERIFIED_EMPTY
+    )
+
+
 def test_success_handler_has_exact_closed_envelope_headers_and_ordered_facts():
     response = handle()
     assert response.status == 200

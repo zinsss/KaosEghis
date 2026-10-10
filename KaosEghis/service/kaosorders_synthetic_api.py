@@ -8,8 +8,6 @@ import os
 import threading
 from urllib.parse import urlsplit
 
-from KaosEghis.core import current_day_provider_lifecycle as lifecycle
-from KaosEghis.core import kaosorders_current_day_orders as facts_model
 from KaosEghis.core import kaosorders_current_day_wire as wire
 
 ENABLED_ENV = "KAOSEGHIS_ORDERS_SYNTHETIC_ENABLED"
@@ -22,49 +20,6 @@ DEFAULT_PORT = 8766
 
 def is_enabled() -> bool:
     return os.environ.get(ENABLED_ENV, "").strip() == "1"
-
-
-def _identity(value: str) -> lifecycle.OpaqueIdentity:
-    return lifecycle.OpaqueIdentity(value)
-
-
-def _build_fixture(now: datetime):
-    day = lifecycle.clinic_day_at(now)
-    facts = facts_model.validate_synthetic_collection(
-        "synthetic-eghis", day, (), (), synthetic_fixture=True
-    )
-    lease = lifecycle.SingletonLeaseClaim(
-        _identity("synthetic-orders-runtime"),
-        _identity("synthetic-orders-runtime-lease"),
-        True,
-    )
-    state = lifecycle.start_provider(
-        now=now,
-        provider_session_id=_identity("synthetic-runtime-session"),
-        provider_generation=_identity("synthetic-runtime-generation"),
-        lease=lease,
-        stable_jitter_seconds=0,
-    )
-    state, ticket = lifecycle.request_refresh(state, now=now)
-    empty = lifecycle.DestinationState(
-        lifecycle.ProjectionAvailability.VERIFIED_EMPTY, 0, 0
-    )
-    state = lifecycle.complete_success(
-        state,
-        ticket,
-        lifecycle.ObservationCandidate(day, now, empty, empty),
-        now=now,
-        lease=lease,
-    )
-    scope = wire.SyntheticOrdersScope(
-        "synthetic-clinic",
-        "synthetic-eghis",
-        "synthetic-mapping-v1",
-        synthetic_fixture=True,
-    )
-    return state, wire.SyntheticOrdersProjection(
-        scope, state.snapshot, facts, synthetic_fixture=True
-    )
 
 
 class SyntheticOrdersRuntime:
@@ -98,7 +53,7 @@ def create_server(
 
         def do_GET(self) -> None:  # noqa: N802
             now = datetime.now(timezone.utc)
-            state, projection = _build_fixture(now)
+            state, projection = wire.build_empty_synthetic_fixture(now)
             parsed = urlsplit(self.path)
             request = wire.InProcessOrdersRequest(
                 "GET", parsed.path, parsed.query,
