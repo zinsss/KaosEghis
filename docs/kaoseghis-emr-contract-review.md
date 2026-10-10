@@ -1,10 +1,21 @@
 # EMR Source Contract Review
 
-Reviewed: 2026-10-05
+Reviewed: 2026-10-10
 
 Status: **v1 synthetic parity and v2 receiver-only synthetic proofs complete;
 production source authority remains unresolved**.
 This is not an approved HTTP endpoint, production query or deployment change.
+
+**2026-10-10 independent complete-order parity:** the separate
+[synthetic current-day model and memory collection](kaoseghis-current-day-orders-parity.md)
+matches exact receiver `0f3b8c13e77b03994d66da7e8d5a7414e035a3ea` on 339 shared
+value-based cases in independent processes. The sender's 340 focused tests include
+a runtime/dependency guard. All order texts, strict flags and explicit nullable
+Decimal facts are retained without reinterpretation. Scale and signed zero remain
+observable differences. This supersedes the earlier synthetic numeric deferral,
+not the source-evidence gates. Production mapping is unassigned; readers, old
+contracts/fixtures/hashes, text proof and runtime remain unchanged. No wire,
+session, persistence or live operation is implemented by this milestone.
 
 **2026-10-07 full-field checkpoint:** a separately approved, capped
 [one-shot current-day diagnostic](kaoseghis-current-day-read-evidence.md) observed
@@ -15,7 +26,7 @@ This establishes successful full-field extraction and internal structural checks
 for one statement scope, not authoritative membership or multi-commit save
 consistency. All production gates and the UNAVAILABLE runtime block remain.
 
-**2026-10-07 current design:** receiver `3813b52` accepts the four independent
+**2026-10-07 historical design:** receiver `3813b52` accepts the four independent
 nullable order-text facts for synthetic use (reported 315 focused / 709 full
 tests). The sender's [complete current-day order design](kaoseghis-current-day-orders-design.md)
 accepts `kaosorders.current-day-orders` version 1 and

@@ -1,6 +1,6 @@
 # KaosOrders Source-Side Shadow Foundation
 
-Last updated: 2026-10-07
+Last updated: 2026-10-10
 
 ## Status and Current Decisions
 
@@ -16,7 +16,9 @@ subsequently read 269 current-day candidate receptions and 1,025 linked orders,
 including 7 no-order receptions, with verified closure in 74.467 ms. Only sanitized
 counts/timings were reported. This is a one-shot observation, not runtime enablement
 or complete source authority; the original draft SQL remains unchanged.
-This does not add fields to a receiver model or silently assign dose semantics.
+Those source observations did not change a receiver model or assign dose semantics.
+The later independent synthetic model below adds explicit numeric facts only;
+it does not approve production source mapping or clinical units.
 
 **Preferred polling direction, not enabled:** the
 [full-snapshot recommendation](kaoseghis-current-day-read-evidence.md#full-snapshot-polling-recommendation)
@@ -32,12 +34,14 @@ preserve valid same-day state on source failure, and leave session/transport and
 all production source-evidence gates unresolved. No receiver or runtime change is
 authorized by this recommendation.
 
-**Current implementation handoff:** the [2026-10-07 complete-order design](kaoseghis-current-day-orders-design.md)
-records receiver `3813b52` acceptance of the four synthetic text facts and the
-sender decision for a separate `kaosorders.current-day-orders` version 1 /
-`kaosorders-current-day-orders-v1` identity. The production mapping revision is
-unassigned. Receiver review must precede a new complete synthetic model; v2 and
-the existing coordinator cannot accept it. This milestone is documentation-only.
+**Current implementation handoff:** the [2026-10-10 independent synthetic proof](kaoseghis-current-day-orders-parity.md)
+matches receiver `0f3b8c13e77b03994d66da7e8d5a7414e035a3ea` for complete order facts
+and memory collection semantics. The same 339 value-based cases pass independently
+on both implementations, including exact Decimal tuple distinctions. Identity is
+`kaosorders.current-day-orders` version 1 / `kaosorders-current-day-orders-v1`;
+production mapping revision is unassigned. Next is receiver compatibility review
+and design of the separate volatile-session fact boundary, not runtime/session
+wiring. Existing v1/v2, text proof, fixtures/hashes/stores and PACS remain unchanged.
 
 **Latest operator decision:** [current-day, memory-only board](#current-day-memory-only-decision-2026-10-06).
 The EMR database is the sole durable source of patient/order truth. KaosOrders
