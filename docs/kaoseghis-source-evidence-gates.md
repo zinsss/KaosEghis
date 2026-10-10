@@ -4,6 +4,15 @@ Reviewed: 2026-10-05
 
 Status: **source authority unresolved; production day reader remains UNAVAILABLE**.
 
+**Current complete-order review (2026-10-10):** see the
+[new gate matrix and encounter-boundary decision](kaoseghis-current-day-source-gate-review.md)
+against exact receiver `d6316753151f2cbcda36f1e9ea7a7b049ca22b43`. It uses the
+latest request's gate numbering: 1-6 PARTIAL, 7 UNRESOLVED, 8 BLOCKED. None is
+approved for production; the crosswalk preserves the historical numbering below.
+There is no closed-hours live-read approval for that review, and no new EMR
+operation was performed. The prior authorizations recorded below are historical,
+not permission for another query. Mapping revision remains unassigned.
+
 The [2026-10-07 current-day full-order design](kaoseghis-current-day-orders-design.md)
 records receiver agreement on synthetic order-text representation only. All eight
 gates below remain unresolved, including normalization without the excluded

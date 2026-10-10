@@ -4,6 +4,17 @@ Last updated: 2026-10-10
 
 ## Status and Current Decisions
 
+**Latest source-evidence handoff (2026-10-10):** exact receiver
+`d6316753151f2cbcda36f1e9ea7a7b049ca22b43` has completed its independent
+complete-order volatile session. The
+[current-day gate review](kaoseghis-current-day-source-gate-review.md) distinguishes
+bounded historical observations from production authority: gates 1-6 PARTIAL,
+7 UNRESOLVED, 8 BLOCKED. There is no current-session closed-hours approval and
+no new live read. No gate is production-approved or mapping revision allocated.
+The next receiver work is conditional wire/auth **design discussion only** plus
+review of a separately versioned minimal encounter boundary; no implicit v2 join,
+wire implementation or runtime activation. This supersedes older next-step lists.
+
 **Latest grid-detail request:** the operator wants the EMR-selected patient's
 prescription name, daily quantity, frequency/count and days as shown in its orders
 grid. An [offline current-day query draft](kaoseghis-current-day-orders-query.md)
@@ -39,9 +50,11 @@ matches receiver `0f3b8c13e77b03994d66da7e8d5a7414e035a3ea` for complete order f
 and memory collection semantics. The same 339 value-based cases pass independently
 on both implementations, including exact Decimal tuple distinctions. Identity is
 `kaosorders.current-day-orders` version 1 / `kaosorders-current-day-orders-v1`;
-production mapping revision is unassigned. Next is receiver compatibility review
-and design of the separate volatile-session fact boundary, not runtime/session
-wiring. Existing v1/v2, text proof, fixtures/hashes/stores and PACS remain unchanged.
+production mapping revision is unassigned. Receiver `d631675` has since completed
+compatibility review and its separate synthetic volatile session. Current work is
+source evidence and the linked encounter-boundary review, not another session
+implementation. Existing v1/v2, text proof, fixtures/hashes/stores and PACS remain
+unchanged.
 
 **Latest operator decision:** [current-day, memory-only board](#current-day-memory-only-decision-2026-10-06).
 The EMR database is the sole durable source of patient/order truth. KaosOrders

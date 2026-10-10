@@ -6,6 +6,17 @@ Status: **v1 synthetic parity and v2 receiver-only synthetic proofs complete;
 production source authority remains unresolved**.
 This is not an approved HTTP endpoint, production query or deployment change.
 
+**Latest source-evidence review (2026-10-10):** receiver
+`d6316753151f2cbcda36f1e9ea7a7b049ca22b43` has completed the separate synthetic
+complete-order volatile session. The
+[current-day gate review](kaoseghis-current-day-source-gate-review.md) records
+existing evidence only: no current-session live-read approval or EMR operation.
+It proposes a separately versioned minimal encounter boundary, not a v2 join,
+and lists the exact prerequisites to a production mapping revision. No complete
+gate passes; least privilege is concretely blocked. Its conditional design-only
+receiver handoff supersedes older next-step wording, without changing any model,
+validator, fixture, query, runtime reader or transport.
+
 **2026-10-10 independent complete-order parity:** the separate
 [synthetic current-day model and memory collection](kaoseghis-current-day-orders-parity.md)
 matches exact receiver `0f3b8c13e77b03994d66da7e8d5a7414e035a3ea` on 339 shared
