@@ -2,8 +2,8 @@
 
 - **Status:** the consumed attempt remains blocked with no evidence artifact;
   the resolver-bound package and 09:00–09:30 KST window have independent PASS,
-  but fresh authorization and the populated final manifest remain `BLOCKED`;
-  no execution authority exists
+  and a fresh authorization plus populated manifest are review-ready; final
+  manifest PASS remains absent, so no execution authority exists
 - **Last updated:** 2026-10-10
 - **Owner:** KaosEghis
 - **Affected projects:** KaosEghis, KaosOrders, orchestration, integration review
@@ -1213,42 +1213,52 @@ unwired, and issued the immutable package-review record and digest
 recorded above. It also accepted window commit `ecc59a4` and digest
 `fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c`.
 
-### Exact fresh single-attempt authorization text — not yet supplied
+### Fresh single-attempt authorization — review-ready, not consumed
 
-The remaining owner input is the following exact statement. It is copyable as
-one message; the text below is a request template only and has not been stated,
-hashed, inserted into a manifest, or consumed:
+At exact source timestamp `2026-10-10T09:06:47+09:00`, the owner sent the
+following exact statement byte-for-byte:
 
 > `KaosEghis non-PHI evidence package eghis-kaosorders-non-phi-evidence-run-v1 / review-candidate-3, resolver-bound candidate commit d9288d4b113a8d74c812beaded4ba7f901d4a85d, implementation commit 4565605845617de1ed3099c7abb887fbc45daabe, resolver SHA-256 71977c3cb3fc475b679a3fa35152322f066fc7af6ef0ea393493d40202cd986d, package-review SHA-256 72e0c74e3c6f9232029f9c7ca370f90496c6fdc33cabc9174c39043f7a7c0c52, identity/path SHA-256 4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401, window commit ecc59a4bfc45e0269d9dcdd4f967da7fa09add0d 및 window SHA-256 fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c (2026-10-10T09:00:00+09:00–2026-10-10T09:30:00+09:00, operator_reference=kaosclinic-eghis, cancellation_owner_reference=kaosclinic-owner)에 바인딩하여, 그 window 안에서 정확히 1회의 bounded non-PHI evidence attempt를 승인한다. retry, scope expansion, runtime activation, push, merge, deploy는 승인하지 않는다.`
 
-Only after the owner sends that exact text during a viable window may Eghis
-construct the closed authorization record. Its preimage has exactly four string
-fields and this shape; `authorized_at` is the exact source-message receipt time
-to whole seconds in `Asia/Seoul`, which is intentionally not guessed now:
+The closed four-string authorization record is the following exact RFC 8785 JCS
+UTF-8 line without BOM or trailing line feed:
 
 ```json
-{"authorization_text":"<the exact statement above, byte-for-byte>","authorized_at":"<owner-message receipt YYYY-MM-DDTHH:MM:SS+09:00>","contract_id":"kaoseghis.orders-evidence-single-attempt-authorization.v1","decision":"approved"}
+{"authorization_text":"KaosEghis non-PHI evidence package eghis-kaosorders-non-phi-evidence-run-v1 / review-candidate-3, resolver-bound candidate commit d9288d4b113a8d74c812beaded4ba7f901d4a85d, implementation commit 4565605845617de1ed3099c7abb887fbc45daabe, resolver SHA-256 71977c3cb3fc475b679a3fa35152322f066fc7af6ef0ea393493d40202cd986d, package-review SHA-256 72e0c74e3c6f9232029f9c7ca370f90496c6fdc33cabc9174c39043f7a7c0c52, identity/path SHA-256 4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401, window commit ecc59a4bfc45e0269d9dcdd4f967da7fa09add0d 및 window SHA-256 fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c (2026-10-10T09:00:00+09:00–2026-10-10T09:30:00+09:00, operator_reference=kaosclinic-eghis, cancellation_owner_reference=kaosclinic-owner)에 바인딩하여, 그 window 안에서 정확히 1회의 bounded non-PHI evidence attempt를 승인한다. retry, scope expansion, runtime activation, push, merge, deploy는 승인하지 않는다.","authorized_at":"2026-10-10T09:06:47+09:00","contract_id":"kaoseghis.orders-evidence-single-attempt-authorization.v1","decision":"approved"}
 ```
 
-Generation must substitute only those two bracketed values, reject any text
-difference or non-KST/missing/subsecond timestamp, serialize the resulting
-four-string object with RFC 8785 JCS as exact UTF-8 without BOM or trailing line
-feed, and SHA-256 those bytes to lowercase hexadecimal. The digest cannot exist
-before the exact owner message and receipt timestamp exist. Afterward Eghis must
-regenerate a fully populated canonical manifest with no `BLOCKED` field and
-obtain a separate final independent manifest PASS. Until then, setting read,
-authentication, connection, statements, publication, and all runtime or
-deployment actions remain stopped.
+Its SHA-256 is
+`6c055d264a81829140f0803bab95820935e223f5cd67f694e2f9a86fa193ce84`.
+The authorization is bound to one attempt in the accepted window, but it is not
+consumed by documentation or manifest preparation and cannot be used before the
+populated manifest below receives independent final PASS.
+
+### Resolver-bound populated approval manifest — final review pending
+
+The following is the exact final RFC 8785 JCS line. Its root digest follows the
+reviewed non-self-referential procedure: remove only root
+`approval_manifest_sha256`, canonicalize the complete remaining object, hash
+exact UTF-8 bytes with SHA-256, then insert the lowercase digest.
+
+```json
+{"approval_manifest_sha256":"cf65f32ac3735f7c897826cdf152586ba27a4764cd0758b1ff3e0d71aa9deb50","components":[{"commit":"1eaf325ab313fbde5a39b41f59ac21483271e861","component_id":"executor","path":"KaosEghis/core/kaosorders_non_phi_evidence_executor.py","sha256":"cc8694535fdac41ffa3b60acb20f5ce4fd7135cbca144c05522fba9e79838faa","symbols":["execute_reviewed_package_once","SerializedReadLease"]},{"commit":"1eaf325ab313fbde5a39b41f59ac21483271e861","component_id":"fifo-mutex-backend","path":"KaosEghis/core/kaosorders_non_phi_evidence_lease.py","sha256":"67f6c42b805a99a326201965a2a25a55efac65309863147dd777099921068949","symbols":["EghisFifoMutexLeaseBackend","build_disabled_orders_evidence_lease"]},{"commit":"e9e65e8dd8452e07a20908c63aa3703c767e9c3f","component_id":"composition-adapter-sink","path":"KaosEghis/core/kaosorders_non_phi_evidence_composition.py","sha256":"536117212fe40a8ce4f19085a2a84845bcb99bab4c93aaf55cee626ccb641846","symbols":["Psycopg2SingleConnectionPath","ResourceOwningConnectionAdapter","AtomicNoOverwriteMemorySink","build_disabled_orders_evidence_composition"]},{"commit":"dd394fe70ea2f8db4bf8dcbdffbbd749f8096952","component_id":"capture-contract","path":"KaosEghis/core/kaosorders_non_phi_evidence_capture.py","sha256":"95e7b292bbc1f2858a9621bfbc7e0fa19028fb2c01fd0107333c912cf1d47f96","symbols":["STATEMENT_SPECS","PACKAGE_REVISION"]},{"commit":"4565605845617de1ed3099c7abb887fbc45daabe","component_id":"application-settings-resolver","path":"KaosEghis/core/kaosorders_non_phi_evidence_settings.py","sha256":"71977c3cb3fc475b679a3fa35152322f066fc7af6ef0ea393493d40202cd986d","symbols":["ApplicationSettingsOpaqueResolver","build_disabled_orders_evidence_composition_from_settings"]}],"contract_id":"kaoseghis.orders-evidence-immutable-approval-manifest.v1","decision":"approved","independent_review_sha256":"72e0c74e3c6f9232029f9c7ca370f90496c6fdc33cabc9174c39043f7a7c0c52","package_id":"eghis-kaosorders-non-phi-evidence-run-v1","package_revision":"review-candidate-3","prerequisites":{"fresh_single_attempt_authorization_sha256":"6c055d264a81829140f0803bab95820935e223f5cd67f694e2f9a86fa193ce84","identity_path_attestation_sha256":"4c2165d10df152d6e68b878e160c47fc1e6087c05d4a46796be5f2cd639cd401","window_approval_sha256":"fa11d56b6bb1aa72ea0d224ad83e64bef1e7195814e65deb7d9b4031d22d654c"},"statement_inventory":{"commit":"1fc38adb189988eba5b177c30e2a9f8cc4633e68","ids_in_order":["EKO-C00","EKO-C01","EKO-C02","EKO-C03","EKO-P00","EKO-V01","EKO-M10","EKO-K20","EKO-C99"],"path":"docs/plans/evidence/eghis-kaosorders-non-phi-statements-v1.md","sha256":"0f123faff860e6eb18b4c8f6309b65731b459774950b1cedaa143f8d7caf7575"}}
+```
+
+Removing only the root digest and repeating the reviewed procedure yields
+`cf65f32ac3735f7c897826cdf152586ba27a4764cd0758b1ff3e0d71aa9deb50`,
+exactly matching the supplied root. The manifest is review-ready, not execution
+authority. Setting read, authentication, connection, statements, publication,
+runtime activation, push, merge, and deployment remain stopped until exact
+independent final manifest PASS and a fresh in-window preflight.
 
 ## Next action
 
-1. Ask the owner to send the exact fresh single-attempt statement above while
-   the independently accepted 09:00:00–09:30:00 KST window remains viable.
+1. Independently review the exact authorization record and populated manifest,
+   reproducing both SHA-256 values and every immutable binding.
 2. Keep setting read, authentication, connection, P00, later statements, and
    publication stopped. Every prior window/authorization/manifest is non-reusable.
-3. After the exact owner message, freeze its four-field JCS record/digest,
-   regenerate the populated manifest, and obtain its separate final independent
-   review before any attempt.
+3. If final review does not PASS while the window remains safely viable, let it
+   expire fail-closed; do not reuse the authorization or manifest.
 
 ## Revision history
 
@@ -1499,3 +1509,12 @@ deployment actions remain stopped.
   four-field canonicalization rule without inventing its future receipt time or
   digest. No authorization was claimed, populated, hashed, or consumed; all
   setting/source/runtime/deployment gates remain stopped.
+- **2026-10-10:** Preserved the owner's exact 09:06:47 KST single-attempt
+  statement in a closed four-field RFC 8785 JCS record with SHA-256
+  `6c055d264a81829140f0803bab95820935e223f5cd67f694e2f9a86fa193ce84`.
+  Populated the resolver-bound manifest with every reviewed prerequisite and
+  computed non-self-referential root digest
+  `cf65f32ac3735f7c897826cdf152586ba27a4764cd0758b1ff3e0d71aa9deb50`.
+  Both artifacts remain final-review pending and unconsumed; no setting read,
+  authentication, connection, statement, publication, runtime, push, merge, or
+  deployment action occurred.
