@@ -5,6 +5,7 @@ from pathlib import Path
 from time import monotonic
 import threading
 import logging
+import sqlite3
 
 from PySide6.QtCore import QCoreApplication, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QPainter, QStandardItem, QWheelEvent
@@ -338,6 +339,11 @@ class VaccineTab(QWidget):
             counter.setWordWrap(True)
             counter.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             counter.setMinimumHeight(76)
+        self.reload_counters_button = QPushButton("Reload counters")
+        self.reload_counters_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
+        )
+        self.reload_counters_button.clicked.connect(self.reload_counters)
         self.influenza_check_button = QPushButton("Check influenza program")
         self.influenza_check_button.clicked.connect(self.check_influenza_program)
         self.influenza_check_result = QLabel("Influenza program: Not checked.")
@@ -564,6 +570,21 @@ class VaccineTab(QWidget):
         self._update_today_counts(settings, counts, exception_counts)
         self._refresh_previews()
         self._refresh_today_record_menu()
+
+    def reload_counters(self) -> None:
+        today = datetime.now().date().isoformat()
+        try:
+            with connect(self._db_path) as connection:
+                settings = get_settings(connection)
+                counts = get_today_vaccine_counts(connection, today)
+                exception_counts = get_today_vaccine_exception_counts(connection, today)
+        except sqlite3.Error:
+            self.status_label.setText(
+                "Could not reload vaccine counters from the database. Previous counts retained."
+            )
+            return
+        self._update_today_counts(settings, counts, exception_counts)
+        self.status_label.setText("Today's vaccine counters reloaded.")
 
     def fetch_current_patient_from_emr(self) -> bool:
         if self._shortcut_in_progress:
@@ -2452,6 +2473,7 @@ class VaccineTab(QWidget):
         check_actions.addWidget(self.influenza_check_button)
         check_actions.addWidget(self.covid_check_button)
         check_actions.addStretch()
+        check_actions.addWidget(self.reload_counters_button)
         program_layout.addLayout(check_actions)
         check_results = QGridLayout()
         check_results.addWidget(self.influenza_check_result, 0, 0)
