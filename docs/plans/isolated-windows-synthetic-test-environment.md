@@ -720,6 +720,40 @@ operator decision because they are host changes. If setup fails before
 isolation is proven, remove the new staging run only and report blocked; do not fall
 back to host pytest.
 
+## 2026-10-11 v5r4 prelaunch gate journal
+
+The corrected independent deadline/process-containment gate and the read-only
+artifact adoption gate both passed for the v5r4 candidate. This entry records gate
+evidence only; it does not authorize or claim staging, extraction, prelaunch, or a
+Windows Sandbox launch.
+
+- Windows execution context: `YHSHFM\\leejs`, Windows PowerShell
+  `5.1.26100.9444`, RunId `df747812403e419493b340fc6093aa65`.
+- The module was 6,061 bytes with SHA-256
+  `832164a5d1aef5c0faa5bb0a7d7fb47542c2038828906ad69c24962e28181a73`;
+  the corrected harness was 4,903 bytes with SHA-256
+  `11b442f087a2be4e33bbc8cc93e390697a4dbd2469f3168189d3b291d43f93c2`.
+  Both parsed with zero errors.
+- The independent gate was invoked exactly once. Case A returned
+  `bounded_process_timeout`; Case B returned `global_deadline_exceeded`. In both
+  cases the recorded parent and child processes were absent afterward, late and
+  later-stage markers were absent, and stdout/stderr were 29/29 bytes within the
+  4,096-byte bound. Case A retained 12,227 ms, exceeding the 8,000 ms deadline
+  reserve.
+- The disposable root and descendants had zero reparse points. Cleanup removed
+  only the exact disposable root and verified it absent.
+- The read-only adoption gate matched the coordinator source and existing Windows
+  destination as regular, non-link/non-reparse files of 299,566,763 bytes with
+  SHA-256 `3dbe8e7756b2d648800f860a82b3e26751bf271a0c60aa729caffa8b2449a3ce`.
+- No SCP, retry, overwrite, staging, extraction, prelaunch, Sandbox launch,
+  live-data access, feature/security/network change, or reboot occurred. An earlier
+  overlong preparation command failed before launch and created nothing; it was not
+  a gate invocation.
+
+The next separately controlled phase is staging, prelaunch verification, and at
+most one Sandbox launch. It remains unperformed and requires its applicable exact
+scope approval and safety checks.
+
 ## Open decisions and next action
 
 - Preserve the v2 result as the canonical first-run evidence. Do not reuse its run
@@ -775,6 +809,14 @@ Do not contact YHSHFM, retry Sandbox, alter v2 bytes, or clean up host artifacts
 until the applicable next action is separately approved and reviewed.
 
 ## Revision history
+
+- **2026-10-11:** Recorded the corrected v5r4 independent gate PASS and read-only
+  adoption gate PASS. The corrected gate ran exactly once and proved both fixed
+  timeout reasons, parent/child termination, marker suppression, bounded output,
+  deadline reserve, and exact-root cleanup. Coordinator and Windows ZIP identities
+  matched the locked size and SHA-256. No transfer, overwrite, staging, extraction,
+  prelaunch, Sandbox launch, live-data access, host configuration change, or reboot
+  occurred.
 
 - **2026-10-08:** Created the documentation-only Windows Sandbox plan from the
   supplied read-only workstation inventory and repository dependency/test guards.
