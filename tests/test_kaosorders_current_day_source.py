@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 import sqlite3
 import sys
 from types import SimpleNamespace
@@ -11,6 +12,14 @@ from KaosEghis.core import kaosorders_current_day_source as source
 
 DAY = date(2026, 10, 12)
 NOW = datetime(2026, 10, 12, 12, tzinfo=source.KST)
+
+
+def test_windows_timezone_dependency_is_declared():
+    root = Path(__file__).resolve().parents[1]
+    requirement = 'tzdata>=2024.1; sys_platform == "win32"'
+    package_requirement = "tzdata>=2024.1; sys_platform == 'win32'"
+    assert requirement in (root / "requirements.txt").read_text(encoding="utf-8")
+    assert package_requirement in (root / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def row(**changes):
