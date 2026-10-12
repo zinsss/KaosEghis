@@ -23,6 +23,15 @@ def test_theme_uses_compact_flat_bracketed_buttons() -> None:
     assert "font-weight: 700;" in NORD_QSS
 
 
+def test_theme_lightly_highlights_only_the_vaccine_shortcuts_card() -> None:
+    from KaosEghis.ui.theme import NORD_QSS
+
+    selector = "QGroupBox#vaccineShortcutsCard"
+    assert NORD_QSS.count(selector) == 1
+    rule = NORD_QSS.split(selector, 1)[1].split("}", 1)[0]
+    assert "background-color: #343a48;" in rule
+
+
 def test_button_proxy_applies_explicit_brackets_and_reserves_width() -> None:
     _app()
 

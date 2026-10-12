@@ -1227,6 +1227,7 @@ def test_vaccine_tab_uses_three_internal_pages(tmp_path) -> None:
 
     from KaosEghis.db.database import initialize_database
     from KaosEghis.ui.tabs.vaccine_tab import VaccineTab
+    from PySide6.QtWidgets import QGroupBox
 
     db_path = tmp_path / "KaosEghis.sqlite"
     initialize_database(db_path)
@@ -1237,6 +1238,9 @@ def test_vaccine_tab_uses_three_internal_pages(tmp_path) -> None:
     assert set(page.nav_buttons) == {"Main", "DB", "Settings"}
     assert page.print_button.text() == "Print label"
     assert page.settings_page.printer_name_input.text() == "4BARCODE 4B-2054L"
+    shortcuts_card = page.findChild(QGroupBox, "vaccineShortcutsCard")
+    assert shortcuts_card is not None
+    assert shortcuts_card.title() == "Vaccine Shortcuts"
 
 
 def test_new_vaccine_record_retains_patient_context_for_simultaneous_vaccinations(

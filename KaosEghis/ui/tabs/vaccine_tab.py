@@ -5,6 +5,7 @@ from pathlib import Path
 from time import monotonic
 import threading
 import logging
+import sqlite3
 
 from PySide6.QtCore import QCoreApplication, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QPainter, QStandardItem, QWheelEvent
@@ -338,6 +339,11 @@ class VaccineTab(QWidget):
             counter.setWordWrap(True)
             counter.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             counter.setMinimumHeight(76)
+        self.reload_counters_button = QPushButton("Reload counters")
+        self.reload_counters_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
+        )
+        self.reload_counters_button.clicked.connect(self.reload_counters)
         self.influenza_check_button = QPushButton("Check influenza program")
         self.influenza_check_button.clicked.connect(self.check_influenza_program)
         self.influenza_check_result = QLabel("Influenza program: Not checked.")
@@ -434,6 +440,14 @@ class VaccineTab(QWidget):
         self.general_records_table = self._create_records_table()
         self.flu_records_table = self._create_records_table()
         self.covid_records_table = self._create_records_table()
+        self._record_tables = (
+            self.general_records_table, self.flu_records_table,
+            self.covid_records_table, self.records_table,
+        )
+        for table in self._record_tables:
+            table.itemSelectionChanged.connect(
+                lambda source=table: self._on_record_selection_changed(source)
+            )
 
         self.fetch_button = QPushButton("Fetch from EMR")
         self.fetch_button.setObjectName("vaccineFetchButton")
@@ -564,6 +578,21 @@ class VaccineTab(QWidget):
         self._update_today_counts(settings, counts, exception_counts)
         self._refresh_previews()
         self._refresh_today_record_menu()
+
+    def reload_counters(self) -> None:
+        today = datetime.now().date().isoformat()
+        try:
+            with connect(self._db_path) as connection:
+                settings = get_settings(connection)
+                counts = get_today_vaccine_counts(connection, today)
+                exception_counts = get_today_vaccine_exception_counts(connection, today)
+        except sqlite3.Error:
+            self.status_label.setText(
+                "Could not reload vaccine counters from the database. Previous counts retained."
+            )
+            return
+        self._update_today_counts(settings, counts, exception_counts)
+        self.status_label.setText("Today's vaccine counters reloaded.")
 
     def fetch_current_patient_from_emr(self) -> bool:
         if self._shortcut_in_progress:
@@ -2408,6 +2437,7 @@ class VaccineTab(QWidget):
     ) -> QWidget:
         page = QWidget()
         shortcuts = QGroupBox("Vaccine Shortcuts")
+        shortcuts.setObjectName("vaccineShortcutsCard")
         shortcut_layout = QHBoxLayout(shortcuts)
         for button in self.shortcut_buttons.values():
             shortcut_layout.addWidget(button, 1)
@@ -2452,6 +2482,7 @@ class VaccineTab(QWidget):
         check_actions.addWidget(self.influenza_check_button)
         check_actions.addWidget(self.covid_check_button)
         check_actions.addStretch()
+        check_actions.addWidget(self.reload_counters_button)
         program_layout.addLayout(check_actions)
         check_results = QGridLayout()
         check_results.addWidget(self.influenza_check_result, 0, 0)
@@ -2570,24 +2601,31 @@ class VaccineTab(QWidget):
         )
         return table
 
+    def _on_record_selection_changed(self, source: QTableWidget) -> None:
+        if not source.selectedItems():
+            return
+        # Shared record actions must never target a stale selection in another list.
+        for table in self._record_tables:
+            if table is not source:
+                table.clearSelection()
+                table.setCurrentItem(None)
+
     def _selected_record_id(self) -> int | None:
-        for table in (
-            self.general_records_table,
-            self.flu_records_table,
-            self.covid_records_table,
-            self.records_table,
-        ):
-            selected = table.selectedItems()
-            if not selected:
-                continue
-            item = table.item(selected[0].row(), 0)
-            if item is None:
-                continue
-            try:
-                return int(item.text())
-            except ValueError:
-                return None
-        return None
+        selections = [
+            (table, table.selectedItems()) for table in self._record_tables
+            if table.selectedItems()
+        ]
+        if len(selections) != 1:
+            return None
+        table, selected = selections[0]
+        row = selected[0].row()
+        item = table.item(row, 0)
+        if item is None or table.isRowHidden(row):
+            return None
+        try:
+            return int(item.text())
+        except ValueError:
+            return None
 
     def _refresh_previews(self) -> None:
         self.record_state_label.setText(

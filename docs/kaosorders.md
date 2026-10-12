@@ -1,8 +1,19 @@
 # KaosOrders Source-Side Shadow Foundation
 
-Last updated: 2026-10-07
+Last updated: 2026-10-10
 
 ## Status and Current Decisions
+
+**Latest source-evidence handoff (2026-10-10):** exact receiver
+`d6316753151f2cbcda36f1e9ea7a7b049ca22b43` has completed its independent
+complete-order volatile session. The
+[current-day gate review](kaoseghis-current-day-source-gate-review.md) distinguishes
+bounded historical observations from production authority: gates 1-6 PARTIAL,
+7 UNRESOLVED, 8 BLOCKED. There is no current-session closed-hours approval and
+no new live read. No gate is production-approved or mapping revision allocated.
+The next receiver work is conditional wire/auth **design discussion only** plus
+review of a separately versioned minimal encounter boundary; no implicit v2 join,
+wire implementation or runtime activation. This supersedes older next-step lists.
 
 **Latest grid-detail request:** the operator wants the EMR-selected patient's
 prescription name, daily quantity, frequency/count and days as shown in its orders
@@ -16,7 +27,9 @@ subsequently read 269 current-day candidate receptions and 1,025 linked orders,
 including 7 no-order receptions, with verified closure in 74.467 ms. Only sanitized
 counts/timings were reported. This is a one-shot observation, not runtime enablement
 or complete source authority; the original draft SQL remains unchanged.
-This does not add fields to a receiver model or silently assign dose semantics.
+Those source observations did not change a receiver model or assign dose semantics.
+The later independent synthetic model below adds explicit numeric facts only;
+it does not approve production source mapping or clinical units.
 
 **Preferred polling direction, not enabled:** the
 [full-snapshot recommendation](kaoseghis-current-day-read-evidence.md#full-snapshot-polling-recommendation)
@@ -32,25 +45,30 @@ preserve valid same-day state on source failure, and leave session/transport and
 all production source-evidence gates unresolved. No receiver or runtime change is
 authorized by this recommendation.
 
-**Current implementation handoff:** the [2026-10-07 complete-order design](kaoseghis-current-day-orders-design.md)
-records receiver `3813b52` acceptance of the four synthetic text facts and the
-sender decision for a separate `kaosorders.current-day-orders` version 1 /
-`kaosorders-current-day-orders-v1` identity. Orders acceptance commit
-`182db514b5404b69d4d10c2b30fbc2bb2ce3725d` closes the logical model review.
-Eghis now has a separate pure synthetic immutable model and in-memory collection
-validator/comparator in `core/kaosorders_current_day_orders.py`. The production
-mapping revision remains unassigned; v2 and the existing coordinator cannot accept
-the new model, and no parser, serializer, fixture or runtime hookup exists.
-The accepted parent vocabulary uses `WAITING` (not `REGISTERED`), bounds
-`patient_name` to 128 code points, and represents parent and child qualifiers as
-closed nested objects. Every valid same-source/day comparison is a FULL replacement;
-its upsert/missing results are derived content summaries only.
+**Current implementation handoff:** the [2026-10-10 independent synthetic proof](kaoseghis-current-day-orders-parity.md)
+matches receiver `0f3b8c13e77b03994d66da7e8d5a7414e035a3ea` for complete order facts
+and memory collection semantics. The same 339 value-based cases pass independently
+on both implementations, including exact Decimal tuple distinctions. Identity is
+`kaosorders.current-day-orders` version 1 / `kaosorders-current-day-orders-v1`;
+production mapping revision is unassigned. Receiver `d631675` has since completed
+compatibility review and its separate synthetic volatile session. Current work is
+source evidence and the linked encounter-boundary review, not another session
+implementation. Existing v1/v2, text proof, fixtures/hashes/stores and PACS remain
+unchanged.
+
+This feature branch also provides an explicitly opt-in HTTP adapter for the
+invented empty synthetic fixture. It is disabled unless
+`KAOSEGHIS_ORDERS_SYNTHETIC_ENABLED=1`, accepts only `127.0.0.1` or `localhost`,
+and exercises the synthetic bearer/wire contract without an EMR reader or clinical
+database. It is a local integration harness, not a production source, mapping,
+transport approval or runtime activation.
 
 The [source semantics matrix](kaoseghis-orders-source-semantics-matrix.md) pins
 the receiver's disabled memory-only read-gate and accepted logical-contract
 milestones, and separates repository facts, recorded product decisions and
 unresolved production source meanings. The synthetic implementation closes no
-source gate and authorizes no parser, serializer, HTTP/auth or runtime integration.
+source gate and authorizes no production parser, serializer, HTTP/auth or runtime
+integration.
 
 **Latest operator decision:** [current-day, memory-only board](#current-day-memory-only-decision-2026-10-06).
 The EMR database is the sole durable source of patient/order truth. KaosOrders

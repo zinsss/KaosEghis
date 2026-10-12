@@ -1,7 +1,39 @@
+import gc
+import os
 import sys
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def windows_offscreen_fonts():
+    if sys.platform != "win32" or os.environ.get("QT_QPA_PLATFORM", "").split(":")[0] != "offscreen":
+        yield
+        return
+
+    from PySide6.QtGui import QFontDatabase
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    # Windows' offscreen plugin may expose zero system fonts and measure missing-glyph boxes.
+    fonts = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+    for filename in ("malgun.ttf", "malgunbd.ttf", "segoeui.ttf", "segoeuib.ttf"):
+        if QFontDatabase.addApplicationFont(str(fonts / filename)) < 0:
+            pytest.fail(f"Windows offscreen tests require system font: {filename}")
+    yield app
+
+
+@pytest.fixture(autouse=True)
+def windows_offscreen_cleanup(windows_offscreen_fonts):
+    yield
+    if windows_offscreen_fonts is not None:
+        from PySide6.QtCore import QCoreApplication, QEvent
+
+        # Collect widget cycles on Qt's owner thread, not a later test's DB worker.
+        gc.collect()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 @pytest.fixture(autouse=True)

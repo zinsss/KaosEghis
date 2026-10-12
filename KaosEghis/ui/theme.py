@@ -531,6 +531,10 @@ QGroupBox {
     padding-top: 8px;
 }
 
+QGroupBox#vaccineShortcutsCard {
+    background-color: #343a48;
+}
+
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;

@@ -1,5 +1,10 @@
 # Current-Day Complete Order Design
 
+Historical design checkpoint. The [2026-10-10 independent synthetic implementation](kaoseghis-current-day-orders-parity.md)
+supersedes the numeric deferral and unimplemented-model status below for synthetic
+use only. It does not approve a production mapping, source reader, wire or session.
+This document retains the earlier decision and evidence ledger for provenance.
+
 Date: 2026-10-07. **Design and documentation only.** No model code, parser,
 serializer, canonical fixture, wire schema, source query or runtime connection is
 implemented by this decision.

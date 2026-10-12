@@ -1,13 +1,25 @@
 # KaosEghis-emr
 
-Last updated: 2026-10-07
+Last updated: 2026-10-10
 
-The latest [current-day complete-order decision](kaoseghis-current-day-orders-design.md)
-is documentation-only. Receiver `3813b52` accepts the four synthetic code/name
-fields; a separate complete order is designed under `kaosorders.current-day-orders`
-version 1 / `kaosorders-current-day-orders-v1`, with mapping revision unassigned.
-The existing text component, v1/v2 code, fixtures and runtime remain untouched.
-All source-evidence gates and the production reader block remain in force.
+The latest [complete-order source-gate review](kaoseghis-current-day-source-gate-review.md)
+pins receiver `d6316753151f2cbcda36f1e9ea7a7b049ca22b43`, whose separate
+synthetic volatile session is complete. This sender stage reviews existing
+evidence and mocked safety boundaries only; no closed-hours live operation was
+approved or performed in this session. All production gates remain open and
+`EghisSourceDayReader` remains UNAVAILABLE. The proposed minimal encounter facts
+need a separate versioned review, not an implicit v2 join. No production mapping,
+PACS behavior, source query, session wiring or delivery changes follow.
+
+The latest [independent current-day complete-order proof](kaoseghis-current-day-orders-parity.md)
+implements only a pure synthetic model and memory collection against receiver
+`0f3b8c13e77b03994d66da7e8d5a7414e035a3ea`. It retains independent text facts,
+strict qualifiers and exact nullable daily-quantity/frequency/day Decimals under
+`kaosorders.current-day-orders` version 1 / `kaosorders-current-day-orders-v1`.
+Production mapping remains unassigned. The existing text component, v1/v2 code,
+fixtures, readers and runtime remain untouched. No wire/session/persistence or
+live read was added. All source-evidence gates and the production reader block
+remain in force; synthetic parity is not source authority.
 
 The [2026-10-07 bounded full-field read](kaoseghis-current-day-read-evidence.md)
 observed 269 candidate reception records, 1,025 linked orders and 7 no-order
