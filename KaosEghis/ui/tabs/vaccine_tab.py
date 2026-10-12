@@ -2437,6 +2437,7 @@ class VaccineTab(QWidget):
     ) -> QWidget:
         page = QWidget()
         shortcuts = QGroupBox("Vaccine Shortcuts")
+        shortcuts.setObjectName("vaccineShortcutsCard")
         shortcut_layout = QHBoxLayout(shortcuts)
         for button in self.shortcut_buttons.values():
             shortcut_layout.addWidget(button, 1)
