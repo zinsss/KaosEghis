@@ -28,6 +28,15 @@ class EghisEvidenceRejectedError(RuntimeError):
     """Fixed diagnostic reason, without provider text or query values."""
 
 
+def _connect_postgres(connection_string, **connection_options):
+    """Import and invoke the PostgreSQL driver only at the shared boundary."""
+    try:
+        import psycopg2  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise EghisDbUnavailableError("psycopg2 is not installed.") from exc
+    return psycopg2.connect(connection_string, **connection_options)
+
+
 def run_verified_evidence_query(connection_string, query, *, params, proof):
     """Explicit inspection only: trusted aggregate SQL, at most 257 result rows.
 
@@ -41,12 +50,10 @@ def run_verified_evidence_query(connection_string, query, *, params, proof):
 
 
 def _verified_evidence_read(connection_string, query, params, proof):
-    import psycopg2
-
     started = perf_counter()
     connection = cursor = None
     try:
-        connection = psycopg2.connect(
+        connection = _connect_postgres(
             connection_string, connect_timeout=3,
             application_name="KaosEghis-source-evidence",
         )
@@ -127,11 +134,6 @@ def _read_and_close(
             "Configured SQL was rejected by the read-only safety gate."
         )
 
-    try:
-        import psycopg2  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise EghisDbUnavailableError("psycopg2 is not installed.") from exc
-
     connection_options = {}
     statement_timeout_ms = None
     if statement_timeout_seconds is not None:
@@ -145,7 +147,7 @@ def _read_and_close(
         )
     if application_name is not None:
         connection_options["application_name"] = application_name
-    connection = psycopg2.connect(connection_string, **connection_options)
+    connection = _connect_postgres(connection_string, **connection_options)
     try:
         record_stage("connected")
         try:

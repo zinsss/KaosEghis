@@ -17,7 +17,7 @@ from unicodedata import category
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from KaosEghis.core.eghis_db import _WRITE_SQL_PATTERN
+from KaosEghis.core.eghis_db import _WRITE_SQL_PATTERN, _connect_postgres
 from KaosEghis.core.emr_read_queue import EmrConnectionCloseError, run_serialized_read
 
 
@@ -264,10 +264,9 @@ def _query_text():
 
 
 def _read_source(connection_string, query, params):
-    import psycopg2
     connection = cursor = None
     try:
-        connection = psycopg2.connect(
+        connection = _connect_postgres(
             connection_string, connect_timeout=3,
             application_name="KaosEghis-current-day-orders",
         )
