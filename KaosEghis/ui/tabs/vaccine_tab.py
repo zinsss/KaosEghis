@@ -440,6 +440,14 @@ class VaccineTab(QWidget):
         self.general_records_table = self._create_records_table()
         self.flu_records_table = self._create_records_table()
         self.covid_records_table = self._create_records_table()
+        self._record_tables = (
+            self.general_records_table, self.flu_records_table,
+            self.covid_records_table, self.records_table,
+        )
+        for table in self._record_tables:
+            table.itemSelectionChanged.connect(
+                lambda source=table: self._on_record_selection_changed(source)
+            )
 
         self.fetch_button = QPushButton("Fetch from EMR")
         self.fetch_button.setObjectName("vaccineFetchButton")
@@ -2592,24 +2600,31 @@ class VaccineTab(QWidget):
         )
         return table
 
+    def _on_record_selection_changed(self, source: QTableWidget) -> None:
+        if not source.selectedItems():
+            return
+        # Shared record actions must never target a stale selection in another list.
+        for table in self._record_tables:
+            if table is not source:
+                table.clearSelection()
+                table.setCurrentItem(None)
+
     def _selected_record_id(self) -> int | None:
-        for table in (
-            self.general_records_table,
-            self.flu_records_table,
-            self.covid_records_table,
-            self.records_table,
-        ):
-            selected = table.selectedItems()
-            if not selected:
-                continue
-            item = table.item(selected[0].row(), 0)
-            if item is None:
-                continue
-            try:
-                return int(item.text())
-            except ValueError:
-                return None
-        return None
+        selections = [
+            (table, table.selectedItems()) for table in self._record_tables
+            if table.selectedItems()
+        ]
+        if len(selections) != 1:
+            return None
+        table, selected = selections[0]
+        row = selected[0].row()
+        item = table.item(row, 0)
+        if item is None or table.isRowHidden(row):
+            return None
+        try:
+            return int(item.text())
+        except ValueError:
+            return None
 
     def _refresh_previews(self) -> None:
         self.record_state_label.setText(

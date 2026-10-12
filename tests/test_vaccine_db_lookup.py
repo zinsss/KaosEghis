@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from KaosEghis.core.vaccine_system_input import VaccineHandoffRequest, VaccineHandoffResult
 from KaosEghis.db.database import connect, initialize_database
@@ -115,6 +115,142 @@ def test_db_tables_separate_private_flu_without_changing_records(page):
         assert {int(table.item(row, 0).text()) for row in range(table.rowCount())} == ids
     with connect(page._db_path) as connection:
         assert list_vaccine_records(connection) == before
+
+
+@pytest.mark.parametrize("program", ["general", "general_influenza", "national_influenza", "national_covid"])
+def test_delete_uses_last_selected_table_and_preserves_other_records(page, monkeypatch, program):
+    with connect(page._db_path) as connection:
+        before = list_vaccine_records(connection)
+    page.records_table.selectRow(0)
+    for previous in page.test_records:
+        table, row = record_row(page, previous)
+        table.selectRow(row)
+    table, row = record_row(page, program)
+    table.selectRow(row)
+    selected_id = page.test_records[program].id
+    assert page._selected_record_id() == selected_id
+    for other in (page.records_table, page.general_records_table, page.flu_records_table, page.covid_records_table):
+        if other is not table:
+            assert not other.selectedItems()
+    confirmations = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: (
+        confirmations.append(args) or QMessageBox.StandardButton.Yes
+    ))
+
+    page.delete_button.setFocus()
+    page.delete_button.click()
+
+    assert len(confirmations) == 1
+    assert confirmations[0][-1] == QMessageBox.StandardButton.No
+    assert page.status_label.text() == "Vaccine record deleted."
+    with connect(page._db_path) as connection:
+        assert list_vaccine_records(connection) == [record for record in before if record.id != selected_id]
+        deleted = connection.execute(
+            "SELECT vaccine_record_id FROM vaccine_audit_events WHERE event_type = 'deleted'"
+        ).fetchall()
+        assert [entry[0] for entry in deleted] == [selected_id]
+
+
+def test_cancelled_covid_deletion_preserves_form_and_all_records(page, monkeypatch):
+    flu, flu_row = record_row(page, "national_influenza")
+    covid, covid_row = record_row(page, "national_covid")
+    flu.selectRow(flu_row)
+    covid.selectRow(covid_row)
+    before_form = form_snapshot(page)
+    with connect(page._db_path) as connection:
+        before = list_vaccine_records(connection)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.StandardButton.No)
+
+    page.delete_button.click()
+
+    assert page._selected_record_id() == page.test_records["national_covid"].id
+    assert form_snapshot(page) == before_form
+    with connect(page._db_path) as connection:
+        assert list_vaccine_records(connection) == before
+
+
+def test_ambiguous_selection_does_not_delete_any_record(page, monkeypatch):
+    for program in ("national_influenza", "national_covid"):
+        table, row = record_row(page, program)
+        table.blockSignals(True)
+        try:
+            table.selectRow(row)
+        finally:
+            table.blockSignals(False)
+    with connect(page._db_path) as connection:
+        before = list_vaccine_records(connection)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: pytest.fail("Ambiguous selection must not prompt"))
+
+    page.delete_button.click()
+
+    assert page._selected_record_id() is None
+    assert page.status_label.text() == "Select a vaccine record to delete."
+    with connect(page._db_path) as connection:
+        assert list_vaccine_records(connection) == before
+
+
+def test_real_covid_click_replaces_flu_selection_for_record_actions(page):
+    page.resize(1000, 800)
+    page.show_page(1)
+    page.show()
+    QApplication.instance().processEvents()
+    flu, flu_row = record_row(page, "national_influenza")
+    covid, covid_row = record_row(page, "national_covid")
+    for table, row in ((flu, flu_row), (covid, covid_row)):
+        point = table.visualItemRect(table.item(row, 3)).center()
+        QTest.mouseClick(table.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    page.delete_button.setFocus()
+    assert not flu.selectedItems()
+    assert page._selected_record_id() == page.test_records["national_covid"].id
+    covid.clearSelection()
+    assert page._selected_record_id() is None
+
+
+@pytest.mark.parametrize("button,status", [
+    ("load_button", "prepared"), ("complete_button", "completed"),
+    ("cancel_record_button", "cancelled"),
+])
+def test_other_record_actions_use_covid_selection_not_previous_flu(page, monkeypatch, button, status):
+    flu, flu_row = record_row(page, "national_influenza")
+    covid, covid_row = record_row(page, "national_covid")
+    flu.selectRow(flu_row)
+    covid.selectRow(covid_row)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.StandardButton.Yes)
+
+    getattr(page, button).click()
+
+    with connect(page._db_path) as connection:
+        assert get_vaccine_record(connection, page.test_records["national_influenza"].id) == page.test_records["national_influenza"]
+        assert get_vaccine_record(connection, page.test_records["national_covid"].id).status == status
+    if button == "load_button":
+        assert page._current_record_id == page.test_records["national_covid"].id
+
+
+@pytest.mark.parametrize("counted", [True, False])
+def test_deleting_completed_covid_updates_only_covid_counters(page, monkeypatch, counted):
+    today = vaccine_tab.datetime.now().date().isoformat()
+    with connect(page._db_path) as connection:
+        for program in ("national_influenza", "national_covid"):
+            mark_vaccine_record_completed(
+                connection, page.test_records[program].id, counts_toward_cap=counted,
+                completed_at=f"{today}T09:00:00+09:00",
+            )
+    page.refresh_view()
+    flu_before = page.today_influenza_count_label.text()
+    covid_before = page.today_covid_count_label.text()
+    flu, flu_row = record_row(page, "national_influenza")
+    covid, covid_row = record_row(page, "national_covid")
+    flu.selectRow(flu_row)
+    covid.selectRow(covid_row)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args: QMessageBox.StandardButton.Yes)
+
+    page.delete_button.click()
+
+    assert page.today_influenza_count_label.text() == flu_before
+    assert page.today_covid_count_label.text() != covid_before
+    assert page.today_covid_count_label.text() == "COVID-19 today: 0\u00a0/\u00a0100\n\uc608\uc678: 0"
+    assert page.covid_records_table.rowCount() == 0
+    assert page.flu_records_table.rowCount() == 1
 
 
 @pytest.mark.parametrize("program,system", [
