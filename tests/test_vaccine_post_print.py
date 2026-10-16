@@ -545,9 +545,10 @@ def test_charting_worker_blocks_other_input_and_stop_does_not_repeat_lookup(page
         entered.append(True) or VaccineHandoffResult(True, "Sent.")
     ))
 
-    def paste(_settings, text, *, cancelled):
+    def paste(_settings, text, *, order_text, cancelled):
         assert threading.get_ident() != main_thread
         assert text == expected
+        assert order_text == ""
         assert page.test_clipboard == [expected]
         started.set()
         assert release.wait(3)
