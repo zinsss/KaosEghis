@@ -23,6 +23,11 @@ def desktop(monkeypatch):
     ))
     monkeypatch.setattr(charting, "_emr_input_ready", lambda _handle, _pid: True)
     monkeypatch.setattr(charting, "_send_keys", lambda keys: events.append(keys))
+    monkeypatch.setattr(
+        charting,
+        "_send_unicode_text",
+        lambda text: events.append(("type", text)) or True,
+    )
     return events
 
 
@@ -31,6 +36,46 @@ def test_exact_sequence_no_final_enter_and_no_clipboard_rewrite(desktop):
     assert result.success
     assert desktop == [("focus", 123), "{F1}", "{ENTER}", "^v"]
     assert "paste input sent" in result.message
+
+
+def test_checked_order_runs_only_after_charting_paste(desktop):
+    result = charting.paste_vaccine_charting(
+        {},
+        "Test charting note",
+        order_text="독감 예방접종",
+    )
+    assert result.success
+    assert desktop == [
+        ("focus", 123),
+        "{F1}",
+        "{ENTER}",
+        "^v",
+        "{F3}",
+        ("type", "독감 예방접종"),
+        "{ENTER}",
+    ]
+    assert "order input sent" in result.message
+
+
+def test_order_control_character_is_rejected_before_focus(desktop):
+    result = charting.paste_vaccine_charting(
+        {},
+        "Test charting note",
+        order_text="first\nsecond",
+    )
+    assert not result.success
+    assert desktop == []
+
+
+def test_failed_order_typing_does_not_submit_or_retry(desktop, monkeypatch):
+    monkeypatch.setattr(charting, "_send_unicode_text", lambda _text: False)
+    result = charting.paste_vaccine_charting(
+        {},
+        "Test charting note",
+        order_text="synthetic order",
+    )
+    assert not result.success
+    assert desktop == [("focus", 123), "{F1}", "{ENTER}", "^v", "{F3}"]
 
 
 @pytest.mark.parametrize("block", ["empty", "cancel", "locked", "held_key", "clipboard", "disconnected"])

@@ -31,10 +31,12 @@ def page(tmp_path, monkeypatch):
     clipboard = []
     monkeypatch.setattr(vaccine_tab, "copy_text", clipboard.append)
     charted = []
+    ordered = []
 
     def paste(_settings, text, **_kw):
         assert clipboard[-1] == text
         charted.append(text)
+        ordered.append(_kw.get("order_text"))
         return VaccineHandoffResult(True, "EMR paste input sent.")
 
     monkeypatch.setattr(vaccine_tab, "paste_vaccine_charting", paste)
@@ -44,6 +46,7 @@ def page(tmp_path, monkeypatch):
     panel = vaccine_tab.VaccineTab(db)
     panel.test_clipboard = clipboard
     panel.test_charted = charted
+    panel.test_ordered = ordered
     panel._select_vaccine_type(None, "Test General")
     panel.patient_chart_no_input.setText("0000")
     panel.patient_name_input.setText("Test Patient")
@@ -149,10 +152,29 @@ def test_yes_uses_printed_snapshot_and_clears_after_success(page, monkeypatch):
     assert entered[0].charting_text == charting_text
     assert page.test_clipboard == [charting_text]
     assert page.test_charted == [charting_text]
+    assert page.test_ordered == [""]
     assert "700101" not in page.test_clipboard[0]
     assert "copied to clipboard" in page.status_label.text()
     assert page.patient_resident_id_input.text() == ""
     assert page._pending_handoffs == []
+
+
+def test_checked_order_text_is_snapshotted_for_post_charting_entry(page, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "question", lambda *_a: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(
+        vaccine_tab,
+        "enter_vaccine_resident",
+        lambda *_a, **_kw: VaccineHandoffResult(True, "Sent."),
+    )
+    assert not page.enter_order_checkbox.isChecked()
+    assert not page.order_text_input.isEnabled()
+    page.enter_order_checkbox.setChecked(True)
+    page.order_text_input.setText("synthetic vaccine order")
+
+    page.print_label()
+    _wait(page)
+
+    assert page.test_ordered == ["synthetic vaccine order"]
 
 
 def test_failure_retains_form_and_retry_does_not_print_or_count(page, monkeypatch):

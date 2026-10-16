@@ -421,6 +421,15 @@ class VaccineTab(QWidget):
         self.charting_text_preview = QPlainTextEdit()
         self.charting_text_preview.setReadOnly(True)
         self.charting_text_preview.setPlaceholderText("Prepared charting text appears here.")
+        self.enter_order_checkbox = QCheckBox("Enter order after charting")
+        self.enter_order_checkbox.setObjectName("vaccineEnterOrderCheckbox")
+        self.enter_order_checkbox.setChecked(False)
+        self.order_text_input = QLineEdit()
+        self.order_text_input.setObjectName("vaccineOrderTextInput")
+        self.order_text_input.setMaxLength(256)
+        self.order_text_input.setPlaceholderText("Order text sent after F3")
+        self.order_text_input.setEnabled(False)
+        self.enter_order_checkbox.toggled.connect(self.order_text_input.setEnabled)
         for widget in (
             self.patient_chart_no_input,
             self.patient_resident_id_input,
@@ -1346,6 +1355,12 @@ class VaccineTab(QWidget):
             self.charting_text_preview.setPlainText(charting_text)
 
     def _start_emr_charting(self, charting_text: str) -> None:
+        order_text = (
+            self.order_text_input.text().strip()
+            if self.enter_order_checkbox.isChecked()
+            else ""
+        )
+
         def worker() -> None:
             initialized = False
             result = VaccineHandoffResult(False, "EMR charting could not be started. Paste manually after reviewing the chart.")
@@ -1364,7 +1379,12 @@ class VaccineTab(QWidget):
                         window_title_contains=profile.window_title_contains or settings.get("eghis_window_title_contains"),
                         executable_path=profile.executable_path or settings.get("eghis_executable_path"),
                     )
-                    result = paste_vaccine_charting(settings, charting_text, cancelled=self._handoff_cancel.is_set)
+                    result = paste_vaccine_charting(
+                        settings,
+                        charting_text,
+                        order_text=order_text,
+                        cancelled=self._handoff_cancel.is_set,
+                    )
                 else:
                     result = VaccineHandoffResult(False, "No enabled EMR profile is available. Paste charting text manually.")
             except Exception:
@@ -1379,7 +1399,12 @@ class VaccineTab(QWidget):
 
         self._handoff_thread = threading.Thread(target=worker, name="Vaccine EMR charting", daemon=True)
         self._set_kdca_busy(True)
-        self.status_label.setText("Charting text copied to clipboard. Focusing EMR for F1, Enter, paste...")
+        suffix = " then F3 order entry" if order_text else ""
+        self.status_label.setText(
+            "Charting text copied to clipboard. Focusing EMR for F1, Enter, paste"
+            + suffix
+            + "..."
+        )
         self._handoff_thread.start()
 
     def _finish_emr_charting(self, result: VaccineHandoffResult) -> None:
@@ -1426,6 +1451,10 @@ class VaccineTab(QWidget):
             self.settings_page.system_targets_editor.session_reset_now_button,
         ):
             widget.setEnabled(not blocked)
+        self.enter_order_checkbox.setEnabled(not blocked)
+        self.order_text_input.setEnabled(
+            not blocked and self.enter_order_checkbox.isChecked()
+        )
         for button in (
             self.kdca_login_button, self.open_general_system_button,
             self.open_influenza_system_button, self.open_covid_system_button,
@@ -2516,6 +2545,11 @@ class VaccineTab(QWidget):
         combined_actions.addStretch()
         preparation_layout.addLayout(combined_actions)
         preparation_layout.addWidget(self.prepared_pair_label)
+
+        order_actions = QHBoxLayout()
+        order_actions.addWidget(self.enter_order_checkbox)
+        order_actions.addWidget(self.order_text_input, 1)
+        preparation_layout.addLayout(order_actions)
 
         self.vaccine_preview_tabs = QTabWidget()
         self.vaccine_preview_tabs.setObjectName("vaccinePreviewTabs")

@@ -10,6 +10,7 @@ from KaosEghis.core.eghis_connector import (
     focus_cached_eghis_process_window,
     validate_cached_connection_identity,
 )
+from KaosEghis.core.kdca_certificate_login import _send_unicode_text
 from KaosEghis.core.vaccine_session_keeper import _input_is_idle
 from KaosEghis.core.vaccine_system_input import (
     VaccineHandoffResult, _focus_belongs_to_window, _focused_native_handle, _send_keys,
@@ -21,15 +22,25 @@ def paste_vaccine_charting(
     settings: dict[str, str],
     charting_text: str,
     *,
+    order_text: str = "",
     cancelled: Callable[[], bool] = lambda: False,
 ) -> VaccineHandoffResult:
-    """Focus the connected EMR, then F1, Enter, Ctrl+V; never retry or submit.
+    """Focus EMR, paste charting, then optionally enter one F3 order.
 
     The caller has already copied this exact note. Success means key dispatch,
     not verification of the chart contents or of the currently selected patient.
     """
     if not charting_text.strip():
         return VaccineHandoffResult(False, "No charting text is available.")
+    order_text = order_text.strip()
+    if len(order_text) > 256 or any(
+        ord(character) < 32 or 0xD800 <= ord(character) <= 0xDFFF
+        for character in order_text
+    ):
+        return VaccineHandoffResult(
+            False,
+            "Order text contains unsupported characters. No EMR keys were sent.",
+        )
 
     def allowed() -> bool:
         return (
@@ -73,7 +84,35 @@ def paste_vaccine_charting(
             if not ready():
                 return VaccineHandoffResult(False, "EMR charting stopped before the next key.")
             _send_keys(keys)
-        return VaccineHandoffResult(True, "EMR paste input sent. Review the current chart.")
+        if not order_text:
+            return VaccineHandoffResult(True, "EMR paste input sent. Review the current chart.")
+
+        if not settle(0.2):
+            return VaccineHandoffResult(
+                False,
+                "Charting was pasted, but EMR focus/input changed before order entry.",
+            )
+        _send_keys("{F3}")
+        if not settle(0.2):
+            return VaccineHandoffResult(
+                False,
+                "Charting was pasted and F3 sent, but order entry was interrupted.",
+            )
+        if not _send_unicode_text(order_text):
+            return VaccineHandoffResult(
+                False,
+                "Charting was pasted, but order text entry could not be confirmed. Review the order field.",
+            )
+        if not settle(0.2):
+            return VaccineHandoffResult(
+                False,
+                "Charting was pasted and order text entered, but submission was interrupted.",
+            )
+        _send_keys("{ENTER}")
+        return VaccineHandoffResult(
+            True,
+            "EMR paste and order input sent. Review the current chart and order.",
+        )
     except Exception:
         # Never retry an uncertain paste or expose text from provider errors.
         return VaccineHandoffResult(False, "EMR charting could not be confirmed. Review before pasting manually.")
