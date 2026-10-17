@@ -6,7 +6,7 @@ $ExpectedInstallerHash = '5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f
 $ExpectedRuntimeHash = '1965edbb4b97913c2cd689a63b2a49624686ec85729525fe0219a267e6b057d5'
 $ExpectedRuntimeManifestHash = '75ccb5515181c316e050f29bb5629d90eaffa6756a31f7b2a126297cf7806460'
 $ExpectedPythonSmokeHash = '9b77223a802be2539f0f7a2d3c849b472133d454aac919f54941ed4c55e52f09'
-$GlobalDeadlineSeconds = 480
+$GlobalDeadlineSeconds = 1200
 $StepBudgets = [ordered]@{
     PythonProvision = 180
     PythonVersion = 30
@@ -269,6 +269,9 @@ $focusedArgs = @(
     "--basetemp=$(Join-Path $RunRoot 'pytest-focused-temp')",
     '-o', "cache_dir=$(Join-Path $RunRoot 'pytest-focused-cache')",
     "--junitxml=$(Join-Path $Results 'focused-junit.xml')",
+    'tests/test_app_notification_ui.py',
+    'tests/test_emr_signal_probe.py',
+    'tests/test_kdca_portal_launch.py',
     'tests/test_vaccine_emr_charting.py',
     'tests/test_vaccine_post_print.py'
 )

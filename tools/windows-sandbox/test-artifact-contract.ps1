@@ -24,7 +24,7 @@ if ($absenceCall -lt 0 -or $firstCreate -lt 0 -or $firstAclMutation -lt 0 -or
 $runner = Get-Content -LiteralPath $runnerPath -Raw
 $packager = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'package-reviewed-results.ps1') -Raw
 foreach ($literal in @(
-    '$GlobalDeadlineSeconds = 480',
+    '$GlobalDeadlineSeconds = 1200',
     'PythonProvision = 180',
     'PythonVersion = 30',
     'PythonBaseSmoke = 30',
@@ -35,6 +35,9 @@ foreach ($literal in @(
     'DependencyInventory = 60',
     'FocusedPytest = 600',
     'FullPytest = 3300',
+    "'tests/test_app_notification_ui.py'",
+    "'tests/test_emr_signal_probe.py'",
+    "'tests/test_kdca_portal_launch.py'",
     'Invoke-DeadlineProcess $FilePath',
     'Assert-WithinGlobalDeadline $Deadline',
     "Stop-FailClosed 'global_deadline_exceeded'",
@@ -83,7 +86,7 @@ if ($budgetTotal -ne 5130) { throw 'runner_budget_total_invalid' }
     ExactVgpuTag = $true
     WrongCaseVgpuAbsent = $true
     AbsenceGatePrecedesMutation = $true
-    GlobalDeadlineSeconds = 480
+    GlobalDeadlineSeconds = 1200
     ChildBudgetTotalSeconds = $budgetTotal
     ChildBudgetsCappedByGlobalDeadline = $true
     ProvisionEvidenceAllowlisted = $true
