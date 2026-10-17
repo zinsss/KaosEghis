@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$ExpectedSourceCommit = '16e16303da4a4c34774e008e705b0075c4462843'
+$ExpectedSourceCommit = 'f253a2ecc4f1878ff86f8bbc9d865c6b2ff9cf06'
 $ExpectedInstallerHash = '5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde'
 $ExpectedRuntimeHash = '1965edbb4b97913c2cd689a63b2a49624686ec85729525fe0219a267e6b057d5'
 $ExpectedRuntimeManifestHash = '75ccb5515181c316e050f29bb5629d90eaffa6756a31f7b2a126297cf7806460'
@@ -36,14 +36,14 @@ $VenvRoot = Join-Path $RunRoot 'venv'
 $VenvPython = Join-Path $VenvRoot 'Scripts\python.exe'
 $Wheelhouse = Join-Path $Inbound 'wheelhouse'
 $LockFile = Join-Path $Inbound 'requirements-win311.lock'
-$SourceArchive = Join-Path $Inbound 'KaosEghis-16e16303da4a-source.zip'
+$SourceArchive = Join-Path $Inbound 'KaosEghis-f253a2ecc4f1-source.zip'
 $Manifest = Join-Path $Inbound 'artifact-manifest.sha256'
 $RuntimeArchive = Join-Path $Inbound 'python-3.11.9-runtime-v5.zip'
 $RuntimeManifest = Join-Path $Inbound 'python-runtime-manifest-v5.json'
 $RuntimeProvisioner = Join-Path $Inbound 'provision-python-runtime.ps1'
 $PythonSmokeScript = Join-Path $Inbound 'python-runtime-smoke.py'
 $VcRedist = Join-Path $Inbound 'vc_redist.x64.exe'
-$ExpectedSourceRoot = Join-Path $RunRoot 'src\KaosEghis-16e16303da4a'
+$ExpectedSourceRoot = Join-Path $RunRoot 'src\KaosEghis-f253a2ecc4f1'
 $Win32UiSmokeCode = "print(__import__('win32ui').__file__)"
 
 function Stop-FailClosed([string]$Reason) {
@@ -308,10 +308,10 @@ if ($resultBytes -gt 200MB) { Stop-FailClosed 'result_size_limit_exceeded' }
 [PSCustomObject]@{
     Status = if ($focusedExit -eq 0 -and $fullExit -eq 0) { 'passed' } else { 'failed' }
     SourceCommit = $ExpectedSourceCommit
-    SourceTree = '2750899fc3a962f664e1c9bd6f608624f9e63fcc'
+    SourceTree = '4b47c5c4fa064b46bb14faeaa9ab5cc826924763'
     ToolingBaseCommit = 'a65be51483f6a1b306fd6bf88027e26ebadd39e8'
     VcRuntimeSha256 = $ExpectedVcRedistHash
-    ReviewContract = 'v10_exact_byte_review_required'
+    ReviewContract = 'v11_exact_byte_review_required'
     PythonSourceInstallerSha256 = $ExpectedInstallerHash
     PythonRuntimeSha256 = $ExpectedRuntimeHash
     PythonRuntimeManifestSha256 = $ExpectedRuntimeManifestHash

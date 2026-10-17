@@ -1,14 +1,14 @@
-Bundle ID: eghis-16e16303da4a-win311-v10
-Run ID: eghis-16e16303da4a-win311-v10-run-10
-Source commit: 16e16303da4a4c34774e008e705b0075c4462843
-Source tree: 2750899fc3a962f664e1c9bd6f608624f9e63fcc
-Application base commit: 576e1d3fd5d60c48c81b49a34ed44b22068629be
+Bundle ID: eghis-f253a2ecc4f1-win311-v11
+Run ID: eghis-f253a2ecc4f1-win311-v11-run-11
+Source commit: f253a2ecc4f1878ff86f8bbc9d865c6b2ff9cf06
+Source tree: 4b47c5c4fa064b46bb14faeaa9ab5cc826924763
+Application base commit: 16e16303da4a4c34774e008e705b0075c4462843
 Tooling commit: pending
 Tooling tree: pending
-Tooling base commit: b6e260056ffed87ddf110be6ee75fb7a02dc9254
+Tooling base commit: 13649c10b640b0c9605809962827decb784364d4
 Independent source/prerequisite review SHA-256: dacd3e755c8c4a5fcb098915629f629be6f63271b3d2c4989c983098ef944102
-Independent v10 run-10 exact-byte review: required before transfer
-Archive filename: eghis-16e16303da4a-win311-v10.zip
+Independent v11 run-11 exact-byte review: required before transfer
+Archive filename: eghis-f253a2ecc4f1-win311-v11.zip
 Archive size bytes: 0
 Archive SHA-256: pending
 Internal manifest entries: 61
@@ -23,12 +23,12 @@ VC++ runtime size/SHA-256: 25635768 / cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6
 VC++ runtime Authenticode: Valid Microsoft Corporation signature, independently verified on GPD
 Stage expected package size/hash: 0 / pending
 Verify expected package size/hash: 0 / pending
-Approved GPD/YHSHFM staging suffix: KaosEghis-16e16303da4a4c34774e008e705b0075c4462843-v10-run-10
-Expected result suffix: Results\eghis-16e16303da4a-win311-v10-run-10
+Approved GPD/YHSHFM staging suffix: KaosEghis-f253a2ecc4f1878ff86f8bbc9d865c6b2ff9cf06-v11-run-11
+Expected result suffix: Results\eghis-f253a2ecc4f1-win311-v11-run-11
 Expected maximum Sandbox duration: 1200 seconds
 Focused Sandbox selection: 264 tests across app notification UI, EMR signal probe, KDCA portal launch, vaccine EMR charting, and vaccine post-print
 Provision/install evidence allowlist: python-provision-process.json and vc-runtime-install-process.json record fixed non-sensitive process evidence
 Win32UI gate: pip check must be followed by bounded `import win32ui` smoke before any pytest selection
-GPD bare-metal validation: pending run-10 tooling contract, full candidate tests, and exact-byte review
-Prior v8/run-07, v9/run-08, and v9/run-09 package identities are permanently closed and must not be rerun
-Status: provisional v10/run-10 candidate pending package construction, GPD validation, and independent exact-byte review; no YHSHFM transfer or execution performed
+GPD bare-metal validation: pending run-11 tooling contract, full candidate tests, and exact-byte review
+Prior v8/run-07, v9/run-08, v9/run-09, and provisional v10/run-10 identities are permanently closed and must not be rerun
+Status: provisional v11/run-11 candidate pending package construction, GPD validation, and independent exact-byte review; no YHSHFM transfer or execution performed

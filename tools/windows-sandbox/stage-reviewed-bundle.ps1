@@ -3,9 +3,9 @@ Set-StrictMode -Version Latest
 
 $ExpectedComputer = 'YHSHFM'
 $ExpectedAccount = 'YHSHFM\leejs'
-$BundleId = 'eghis-16e16303da4a-win311-v10'
-$RunId = 'eghis-16e16303da4a-win311-v10-run-10'
-$Root = 'E:\Kaos\.staging\KaosEghis-16e16303da4a4c34774e008e705b0075c4462843-v10-run-10'
+$BundleId = 'eghis-f253a2ecc4f1-win311-v11'
+$RunId = 'eghis-f253a2ecc4f1-win311-v11-run-11'
+$Root = 'E:\Kaos\.staging\KaosEghis-f253a2ecc4f1878ff86f8bbc9d865c6b2ff9cf06-v11-run-11'
 $Package = Join-Path $Root "$BundleId.zip"
 $ExpectedPackageHash = '0000000000000000000000000000000000000000000000000000000000000000'
 $ExpectedPackageSize = 0
