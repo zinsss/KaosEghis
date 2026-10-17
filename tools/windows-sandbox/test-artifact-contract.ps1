@@ -25,7 +25,8 @@ $runner = Get-Content -LiteralPath $runnerPath -Raw
 $packager = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'package-reviewed-results.ps1') -Raw
 foreach ($literal in @(
     '$GlobalDeadlineSeconds = 1200',
-    'VcRuntimeInstall = 180',
+    'VcRuntimeInstall = 300',
+    "Sum).Sum -gt 5460",
     'PythonProvision = 180',
     'PythonVersion = 30',
     'PythonBaseSmoke = 30',
@@ -85,8 +86,8 @@ foreach ($literal in @(
 )) {
     if (-not $packager.Contains($literal)) { throw 'packager_junit_contract_missing' }
 }
-$budgetTotal = 180 + 180 + 30 + 30 + 30 + 120 + 720 + 60 + 30 + 60 + 600 + 3300
-if ($budgetTotal -ne 5340) { throw 'runner_budget_total_invalid' }
+$budgetTotal = 300 + 180 + 30 + 30 + 30 + 120 + 720 + 60 + 30 + 60 + 600 + 3300
+if ($budgetTotal -ne 5460) { throw 'runner_budget_total_invalid' }
 
 [PSCustomObject]@{
     ExactVgpuTag = $true

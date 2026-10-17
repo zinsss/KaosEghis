@@ -1,5 +1,5 @@
 Bundle ID: eghis-576e1d3fd5d6-win311-v9
-Run ID: eghis-576e1d3fd5d6-win311-v9-run-08
+Run ID: eghis-576e1d3fd5d6-win311-v9-run-09
 Source commit: 576e1d3fd5d60c48c81b49a34ed44b22068629be
 Source tree: 9d00a06db3ebbf128572b63509fe2af4c89d64bd
 Application base commit: d059874f0df97fd158a771ca39935bd07139e662
@@ -23,12 +23,12 @@ VC++ runtime size/SHA-256: 25635768 / cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6
 VC++ runtime Authenticode: Valid Microsoft Corporation signature, independently verified on GPD
 Stage expected package size/hash: 324719148 / 907e86e0d7310e24a33670741bd37e2221de3884efea1f99134db24316d24e1e
 Verify expected package size/hash: 324719148 / 907e86e0d7310e24a33670741bd37e2221de3884efea1f99134db24316d24e1e
-Approved GPD/YHSHFM staging suffix: KaosEghis-576e1d3fd5d60c48c81b49a34ed44b22068629be-v9-run-08
-Expected result suffix: Results\eghis-576e1d3fd5d6-win311-v9-run-08
+Approved GPD/YHSHFM staging suffix: KaosEghis-576e1d3fd5d60c48c81b49a34ed44b22068629be-v9-run-09
+Expected result suffix: Results\eghis-576e1d3fd5d6-win311-v9-run-09
 Expected maximum Sandbox duration: 1200 seconds
 Focused Sandbox selection: 264 tests across app notification UI, EMR signal probe, KDCA portal launch, vaccine EMR charting, and vaccine post-print
 Provision/install evidence allowlist: python-provision-process.json and vc-runtime-install-process.json record fixed non-sensitive process evidence
 Win32UI gate: pip check must be followed by bounded `import win32ui` smoke before any pytest selection
 GPD bare-metal validation: v9 tooling contract PASS (native exit 0); unchanged candidate source default 5,044/5,044 and focused 206/206 passed in a clean detached worktree
-Prior v8/run-07 package SHA-256 5615f782754ef8ac528a5ab335e0acffd6db6f6cd022bea0d0c45cf969c90020 is permanently closed and must not be rerun
+Prior v8/run-07 package SHA-256 5615f782754ef8ac528a5ab335e0acffd6db6f6cd022bea0d0c45cf969c90020 and v9/run-08 package SHA-256 907e86e0d7310e24a33670741bd37e2221de3884efea1f99134db24316d24e1e are permanently closed and must not be rerun
 Status: v9 candidate passed GPD bare-metal validation and final exact-byte review; ready for YHSHFM transfer; no YHSHFM execution performed

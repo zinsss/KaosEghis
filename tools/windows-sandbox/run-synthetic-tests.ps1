@@ -9,7 +9,7 @@ $ExpectedPythonSmokeHash = '9b77223a802be2539f0f7a2d3c849b472133d454aac919f54941
 $ExpectedVcRedistHash = 'cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b'
 $GlobalDeadlineSeconds = 1200
 $StepBudgets = [ordered]@{
-    VcRuntimeInstall = 180
+    VcRuntimeInstall = 300
     PythonProvision = 180
     PythonVersion = 30
     PythonBaseSmoke = 30
@@ -22,7 +22,7 @@ $StepBudgets = [ordered]@{
     FocusedPytest = 600
     FullPytest = 3300
 }
-if (($StepBudgets.Values | Measure-Object -Sum).Sum -gt 5340) { throw 'invalid_step_budget_total' }
+if (($StepBudgets.Values | Measure-Object -Sum).Sum -gt 5460) { throw 'invalid_step_budget_total' }
 $Deadline = [PSCustomObject]@{
     LimitSeconds = $GlobalDeadlineSeconds
     Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
