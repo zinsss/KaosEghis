@@ -6,6 +6,14 @@ from uuid import uuid4
 
 import pytest
 
+# Windows Sandbox runs pytest with ``python -I`` so ambient working-directory
+# and PYTHONPATH entries cannot make the checkout importable.  Add only this
+# reviewed source root before pytest imports test modules.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+repository_root = str(REPOSITORY_ROOT)
+if repository_root not in sys.path:
+    sys.path.insert(0, repository_root)
+
 
 @pytest.fixture(scope="session", autouse=True)
 def windows_offscreen_fonts():
