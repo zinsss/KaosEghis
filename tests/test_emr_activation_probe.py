@@ -235,6 +235,7 @@ def test_real_uia_registration_roundtrip_on_our_own_hidden_button(
 
     import pythoncom
     import win32gui
+    import comtypes  # Bootstrap on this STA thread before the MTA worker.
 
     parent = win32gui.CreateWindowEx(0, "STATIC", "probe-test", 0, 0, 0, 100, 100, 0, 0, 0, None)
     button = win32gui.CreateWindowEx(0, "BUTTON", "probe-test", 0x40000000, 0, 0, 80, 20, parent, 1234, 0, None)
