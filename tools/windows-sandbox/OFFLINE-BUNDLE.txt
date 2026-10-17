@@ -31,4 +31,4 @@ Provision/install evidence allowlist: python-provision-process.json and vc-runti
 Win32UI gate: pip check must be followed by bounded `import win32ui` smoke before any pytest selection
 GPD routine validation: pending v9 tooling contract on bare metal; candidate source default 5,044/5,044 and focused 206/206 already passed in a clean detached worktree
 Prior v8/run-07 package SHA-256 5615f782754ef8ac528a5ab335e0acffd6db6f6cd022bea0d0c45cf969c90020 is permanently closed and must not be rerun
-Status: provisional v9 candidate pending independent exact-byte review and GPD Sandbox validation; no YHSHFM transfer or execution performed
+Status: provisional v9 candidate pending independent exact-byte review and GPD bare-metal tooling validation; no YHSHFM transfer or execution performed
