@@ -3,32 +3,32 @@ Run ID: eghis-f253a2ecc4f1-win311-v11-run-11
 Source commit: f253a2ecc4f1878ff86f8bbc9d865c6b2ff9cf06
 Source tree: 4b47c5c4fa064b46bb14faeaa9ab5cc826924763
 Application base commit: 16e16303da4a4c34774e008e705b0075c4462843
-Tooling commit: pending
-Tooling tree: pending
+Tooling commit: 49a70e4b445a344ea8e3813023c25dc760d2ebab
+Tooling tree: eb3d0f73ca1d4b905ae0b5c09202ab457faea5be
 Tooling base commit: 13649c10b640b0c9605809962827decb784364d4
-Independent source/prerequisite review SHA-256: dacd3e755c8c4a5fcb098915629f629be6f63271b3d2c4989c983098ef944102
+Independent source/prerequisite review SHA-256: 9cb278d0245ba26b278ef6083204b55a1bd80e25326a43b8e74a4ccee13a0373
 Independent v11 run-11 exact-byte review: required before transfer
 Archive filename: eghis-f253a2ecc4f1-win311-v11.zip
-Archive size bytes: 0
-Archive SHA-256: pending
+Archive size bytes: 325133921
+Archive SHA-256: 55bdfa82464d87f12f3fc8639ffcc6417db3072bdf863d3ed5f837dd9735d4f9
 Internal manifest entries: 61
-Internal manifest SHA-256: 95940e2a30c64c3c768ead707124781521b991d351a46fd981883fdcdfb5a599
+Internal manifest SHA-256: 72abbaf63645ea26a8d9fbc4e38fc891df75d9a7ab87d0bc09e12b75e250de4e
 Wheel count: 42
-Source archive SHA-256: pending
-Complete-history Git bundle SHA-256: pending
+Source archive SHA-256: 7c44a9af602bc2a706ee142fee2dd79f69418eacfe6f828fb62990f1f41c1a1c
+Complete-history Git bundle SHA-256: 9fe390110e5035001992a2677b2d063cb728c4851dc22e7eeb10907c9ba2bf1c
 Dependency lock SHA-256: 5c3518548758b3d82efc2ac8bb666ab98456e5c05ef4b8e8a7ef2b036a429788
 Runtime archive SHA-256: 1965edbb4b97913c2cd689a63b2a49624686ec85729525fe0219a267e6b057d5
 Runtime manifest SHA-256: 75ccb5515181c316e050f29bb5629d90eaffa6756a31f7b2a126297cf7806460
 VC++ runtime size/SHA-256: 25635768 / cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b
 VC++ runtime Authenticode: Valid Microsoft Corporation signature, independently verified on GPD
-Stage expected package size/hash: 0 / pending
-Verify expected package size/hash: 0 / pending
+Stage expected package size/hash: 325133921 / 55bdfa82464d87f12f3fc8639ffcc6417db3072bdf863d3ed5f837dd9735d4f9
+Verify expected package size/hash: 325133921 / 55bdfa82464d87f12f3fc8639ffcc6417db3072bdf863d3ed5f837dd9735d4f9
 Approved GPD/YHSHFM staging suffix: KaosEghis-f253a2ecc4f1878ff86f8bbc9d865c6b2ff9cf06-v11-run-11
 Expected result suffix: Results\eghis-f253a2ecc4f1-win311-v11-run-11
 Expected maximum Sandbox duration: 1200 seconds
 Focused Sandbox selection: 264 tests across app notification UI, EMR signal probe, KDCA portal launch, vaccine EMR charting, and vaccine post-print
 Provision/install evidence allowlist: python-provision-process.json and vc-runtime-install-process.json record fixed non-sensitive process evidence
 Win32UI gate: pip check must be followed by bounded `import win32ui` smoke before any pytest selection
-GPD bare-metal validation: pending run-11 tooling contract, full candidate tests, and exact-byte review
+GPD bare-metal validation: app/tooling clean detached worktrees; isolated button 1/1, chart 1/1, forward button-to-chart 2/2, identity 10/10, focused 264/264, full 5,054/5,054; all failures/errors/skips 0/0/0; contract 12/12; guards 11/11; exact win32ui smoke exit 0
 Prior v8/run-07, v9/run-08, v9/run-09, and provisional v10/run-10 identities are permanently closed and must not be rerun
-Status: provisional v11/run-11 candidate pending package construction, GPD validation, and independent exact-byte review; no YHSHFM transfer or execution performed
+Status: immutable v11/run-11 package constructed after GPD PASS; independent GPD exact-byte review is required before any YHSHFM transfer or execution
