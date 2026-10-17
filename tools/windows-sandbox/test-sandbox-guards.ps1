@@ -24,7 +24,14 @@ try {
     $junction = Join-Path $root 'parent-junction'
     New-Item -ItemType Directory -Path $junctionTarget | Out-Null
     'unchanged' | Set-Content -LiteralPath (Join-Path $junctionTarget 'sentinel.txt') -Encoding ASCII
-    New-Item -ItemType SymbolicLink -Path $junction -Target $junctionTarget | Out-Null
+    # Directory junctions are reparse points and can be created by the normal
+    # non-admin Windows test account.  This keeps the guard test representative
+    # without requiring Developer Mode or SeCreateSymbolicLinkPrivilege.
+    New-Item -ItemType Junction -Path $junction -Target $junctionTarget | Out-Null
+    if (-not ((Get-Item -LiteralPath $junction -Force).Attributes -band
+        [System.IO.FileAttributes]::ReparsePoint)) {
+        throw 'parent_junction_is_not_a_reparse_point'
+    }
     try {
         Assert-PathSetAbsent @($junction)
         throw 'parent_junction_was_accepted'
@@ -72,7 +79,11 @@ try {
     'unchanged' | Set-Content -LiteralPath $nestedSentinel -Encoding ASCII
     $nestedSentinelHash = (Get-FileHash -LiteralPath $nestedSentinel -Algorithm SHA256).Hash
     $nestedJunction = Join-Path $wheelhouse 'nested-junction'
-    New-Item -ItemType SymbolicLink -Path $nestedJunction -Target $nestedTarget | Out-Null
+    New-Item -ItemType Junction -Path $nestedJunction -Target $nestedTarget | Out-Null
+    if (-not ((Get-Item -LiteralPath $nestedJunction -Force).Attributes -band
+        [System.IO.FileAttributes]::ReparsePoint)) {
+        throw 'nested_junction_is_not_a_reparse_point'
+    }
     try {
         Assert-ExactArtifactTree $tree $manifest @('wheelhouse')
         throw 'nested_junction_was_accepted'
