@@ -31,8 +31,15 @@ def windows_offscreen_cleanup(windows_offscreen_fonts):
     if windows_offscreen_fonts is not None:
         from PySide6.QtCore import QCoreApplication, QEvent
 
-        # Collect widget cycles on Qt's owner thread, not a later test's DB worker.
+        # Tests build independent windows, including Qt WebEngine views.  Closing
+        # and deleting every surviving top-level widget on Qt's owner thread
+        # prevents native objects from being torn down during interpreter exit.
+        for widget in windows_offscreen_fonts.topLevelWidgets():
+            widget.close()
+            widget.deleteLater()
         gc.collect()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        windows_offscreen_fonts.processEvents()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
