@@ -1,34 +1,34 @@
-Bundle ID: eghis-576e1d3fd5d6-win311-v9
-Run ID: eghis-576e1d3fd5d6-win311-v9-run-09
-Source commit: 576e1d3fd5d60c48c81b49a34ed44b22068629be
-Source tree: 9d00a06db3ebbf128572b63509fe2af4c89d64bd
-Application base commit: d059874f0df97fd158a771ca39935bd07139e662
-Tooling commit: 71bce4b2a557e668c46deda0d6f24f3872efd9b9
-Tooling tree: 33bf4bdcafaeba8bf2e9345de7f021e17bd322e3
-Tooling base commit: 8a6fb2bf802ca31edbcaca645fe55325174663da
+Bundle ID: eghis-16e16303da4a-win311-v10
+Run ID: eghis-16e16303da4a-win311-v10-run-10
+Source commit: 16e16303da4a4c34774e008e705b0075c4462843
+Source tree: 2750899fc3a962f664e1c9bd6f608624f9e63fcc
+Application base commit: 576e1d3fd5d60c48c81b49a34ed44b22068629be
+Tooling commit: pending
+Tooling tree: pending
+Tooling base commit: b6e260056ffed87ddf110be6ee75fb7a02dc9254
 Independent source/prerequisite review SHA-256: dacd3e755c8c4a5fcb098915629f629be6f63271b3d2c4989c983098ef944102
-Independent v9 run-09 exact-byte review: required before transfer
-Archive filename: eghis-576e1d3fd5d6-win311-v9.zip
-Archive size bytes: 324719144
-Archive SHA-256: e4a31514892d87b7213be84f30f8ccf93063ab0a31b691772f5373c9966ecdfd
+Independent v10 run-10 exact-byte review: required before transfer
+Archive filename: eghis-16e16303da4a-win311-v10.zip
+Archive size bytes: 0
+Archive SHA-256: pending
 Internal manifest entries: 61
 Internal manifest SHA-256: 95940e2a30c64c3c768ead707124781521b991d351a46fd981883fdcdfb5a599
 Wheel count: 42
-Source archive SHA-256: 7c4509bfc38cc12c17fbb4d2f048a0a4b77a16598c91633979c70d56d67c0b31
-Complete-history Git bundle SHA-256: 3496c2bff24784f79a285180bd61ecf2e9e390833d145376b58c744899864c3b
+Source archive SHA-256: pending
+Complete-history Git bundle SHA-256: pending
 Dependency lock SHA-256: 5c3518548758b3d82efc2ac8bb666ab98456e5c05ef4b8e8a7ef2b036a429788
 Runtime archive SHA-256: 1965edbb4b97913c2cd689a63b2a49624686ec85729525fe0219a267e6b057d5
 Runtime manifest SHA-256: 75ccb5515181c316e050f29bb5629d90eaffa6756a31f7b2a126297cf7806460
 VC++ runtime size/SHA-256: 25635768 / cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b
 VC++ runtime Authenticode: Valid Microsoft Corporation signature, independently verified on GPD
-Stage expected package size/hash: 324719144 / e4a31514892d87b7213be84f30f8ccf93063ab0a31b691772f5373c9966ecdfd
-Verify expected package size/hash: 324719144 / e4a31514892d87b7213be84f30f8ccf93063ab0a31b691772f5373c9966ecdfd
-Approved GPD/YHSHFM staging suffix: KaosEghis-576e1d3fd5d60c48c81b49a34ed44b22068629be-v9-run-09
-Expected result suffix: Results\eghis-576e1d3fd5d6-win311-v9-run-09
+Stage expected package size/hash: 0 / pending
+Verify expected package size/hash: 0 / pending
+Approved GPD/YHSHFM staging suffix: KaosEghis-16e16303da4a4c34774e008e705b0075c4462843-v10-run-10
+Expected result suffix: Results\eghis-16e16303da4a-win311-v10-run-10
 Expected maximum Sandbox duration: 1200 seconds
 Focused Sandbox selection: 264 tests across app notification UI, EMR signal probe, KDCA portal launch, vaccine EMR charting, and vaccine post-print
 Provision/install evidence allowlist: python-provision-process.json and vc-runtime-install-process.json record fixed non-sensitive process evidence
 Win32UI gate: pip check must be followed by bounded `import win32ui` smoke before any pytest selection
-GPD bare-metal validation: pending run-09 tooling contract and exact-byte review; unchanged candidate source default 5,044/5,044 and focused 206/206 previously passed in a clean detached worktree
-Prior v8/run-07 package SHA-256 5615f782754ef8ac528a5ab335e0acffd6db6f6cd022bea0d0c45cf969c90020 and v9/run-08 package SHA-256 907e86e0d7310e24a33670741bd37e2221de3884efea1f99134db24316d24e1e are permanently closed and must not be rerun
-Status: provisional v9/run-09 candidate pending GPD bare-metal validation and independent exact-byte review; no YHSHFM transfer or execution performed
+GPD bare-metal validation: pending run-10 tooling contract, full candidate tests, and exact-byte review
+Prior v8/run-07, v9/run-08, and v9/run-09 package identities are permanently closed and must not be rerun
+Status: provisional v10/run-10 candidate pending package construction, GPD validation, and independent exact-byte review; no YHSHFM transfer or execution performed

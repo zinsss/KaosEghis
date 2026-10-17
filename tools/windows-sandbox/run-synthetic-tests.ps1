@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$ExpectedSourceCommit = '576e1d3fd5d60c48c81b49a34ed44b22068629be'
+$ExpectedSourceCommit = '16e16303da4a4c34774e008e705b0075c4462843'
 $ExpectedInstallerHash = '5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde'
 $ExpectedRuntimeHash = '1965edbb4b97913c2cd689a63b2a49624686ec85729525fe0219a267e6b057d5'
 $ExpectedRuntimeManifestHash = '75ccb5515181c316e050f29bb5629d90eaffa6756a31f7b2a126297cf7806460'
@@ -36,14 +36,15 @@ $VenvRoot = Join-Path $RunRoot 'venv'
 $VenvPython = Join-Path $VenvRoot 'Scripts\python.exe'
 $Wheelhouse = Join-Path $Inbound 'wheelhouse'
 $LockFile = Join-Path $Inbound 'requirements-win311.lock'
-$SourceArchive = Join-Path $Inbound 'KaosEghis-576e1d3fd5d6-source.zip'
+$SourceArchive = Join-Path $Inbound 'KaosEghis-16e16303da4a-source.zip'
 $Manifest = Join-Path $Inbound 'artifact-manifest.sha256'
 $RuntimeArchive = Join-Path $Inbound 'python-3.11.9-runtime-v5.zip'
 $RuntimeManifest = Join-Path $Inbound 'python-runtime-manifest-v5.json'
 $RuntimeProvisioner = Join-Path $Inbound 'provision-python-runtime.ps1'
 $PythonSmokeScript = Join-Path $Inbound 'python-runtime-smoke.py'
 $VcRedist = Join-Path $Inbound 'vc_redist.x64.exe'
-$ExpectedSourceRoot = Join-Path $RunRoot 'src\KaosEghis-576e1d3fd5d6'
+$ExpectedSourceRoot = Join-Path $RunRoot 'src\KaosEghis-16e16303da4a'
+$Win32UiSmokeCode = "print(__import__('win32ui').__file__)"
 
 function Stop-FailClosed([string]$Reason) {
     $safeReason = if ($Reason -match '^[a-z0-9_]{1,80}$') { $Reason } else { 'unspecified_failure' }
@@ -241,7 +242,7 @@ if ((Invoke-RunProcess $VenvPython @(
 if ((Invoke-RunProcess $VenvPython @('-I', '-m', 'pip', 'check') $StepBudgets.PipCheck 'pip-check.txt' 'pip-check-error.txt') -ne 0) {
     Stop-FailClosed 'pip_check_failed'
 }
-if ((Invoke-RunProcess $VenvPython @('-I', '-c', 'import win32ui; print(win32ui.__file__)') $StepBudgets.Win32UiSmoke 'win32ui-smoke.txt' 'win32ui-smoke-error.txt') -ne 0) {
+if ((Invoke-RunProcess $VenvPython @('-I', '-c', $Win32UiSmokeCode) $StepBudgets.Win32UiSmoke 'win32ui-smoke.txt' 'win32ui-smoke-error.txt') -ne 0) {
     Stop-FailClosed 'win32ui_import_failed'
 }
 if ((Invoke-RunProcess $VenvPython @('-I', '-m', 'pip', 'freeze', '--all') $StepBudgets.DependencyInventory 'dependency-inventory.txt' 'dependency-inventory-error.txt') -ne 0) {
@@ -307,10 +308,10 @@ if ($resultBytes -gt 200MB) { Stop-FailClosed 'result_size_limit_exceeded' }
 [PSCustomObject]@{
     Status = if ($focusedExit -eq 0 -and $fullExit -eq 0) { 'passed' } else { 'failed' }
     SourceCommit = $ExpectedSourceCommit
-    SourceTree = '9d00a06db3ebbf128572b63509fe2af4c89d64bd'
+    SourceTree = '2750899fc3a962f664e1c9bd6f608624f9e63fcc'
     ToolingBaseCommit = 'a65be51483f6a1b306fd6bf88027e26ebadd39e8'
     VcRuntimeSha256 = $ExpectedVcRedistHash
-    ReviewContract = 'v9_exact_byte_review_required'
+    ReviewContract = 'v10_exact_byte_review_required'
     PythonSourceInstallerSha256 = $ExpectedInstallerHash
     PythonRuntimeSha256 = $ExpectedRuntimeHash
     PythonRuntimeManifestSha256 = $ExpectedRuntimeManifestHash

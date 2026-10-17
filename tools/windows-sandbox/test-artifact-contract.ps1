@@ -56,6 +56,11 @@ foreach ($literal in @(
 )) {
     if (-not $runner.Contains($literal)) { throw 'runner_deadline_contract_missing' }
 }
+$win32UiSmokeLiteral = "print(__import__('win32ui').__file__)"
+if (-not $runner.Contains($win32UiSmokeLiteral) -or $win32UiSmokeLiteral.Contains(' ') -or
+    $runner.Contains('import win32ui; print(win32ui.__file__)')) {
+    throw 'win32ui_smoke_argument_not_atomic'
+}
 $guards = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'SandboxGuards.psm1') -Raw
 foreach ($literal in @('$process.WaitForExit()', '$process.Refresh()', 'DurationMilliseconds')) {
     if (-not $guards.Contains($literal)) { throw 'process_exit_stabilization_missing' }

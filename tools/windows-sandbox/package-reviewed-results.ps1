@@ -3,8 +3,8 @@ Set-StrictMode -Version Latest
 
 $ExpectedComputer = 'YHSHFM'
 $ExpectedAccount = 'YHSHFM\leejs'
-$RunId = 'eghis-576e1d3fd5d6-win311-v9-run-09'
-$Root = 'E:\Kaos\.staging\KaosEghis-576e1d3fd5d60c48c81b49a34ed44b22068629be-v9-run-09'
+$RunId = 'eghis-16e16303da4a-win311-v10-run-10'
+$Root = 'E:\Kaos\.staging\KaosEghis-16e16303da4a4c34774e008e705b0075c4462843-v10-run-10'
 $Results = Join-Path (Join-Path $Root 'Results') $RunId
 $ReturnArchive = Join-Path $Root "$RunId-results.zip"
 $AllowedNames = @(
