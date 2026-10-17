@@ -9,12 +9,12 @@
   <MemoryInMB>8192</MemoryInMB>
   <MappedFolders>
     <MappedFolder>
-      <HostFolder>C:\KaosClinic-Test\Eghis\Inbound\eghis-d1777c1834e1-win311-v2</HostFolder>
+      <HostFolder>E:\Kaos\.staging\KaosEghis-1dc9250dae01d236e3cfca45b8142e98519478bb-v5-run-04\Inbound\eghis-1dc9250dae01-win311-v5</HostFolder>
       <SandboxFolder>C:\MappedInbound</SandboxFolder>
       <ReadOnly>true</ReadOnly>
     </MappedFolder>
     <MappedFolder>
-      <HostFolder>C:\KaosClinic-Test\Eghis\Results\eghis-d1777c1834e1-win311-v2-run-01</HostFolder>
+      <HostFolder>E:\Kaos\.staging\KaosEghis-1dc9250dae01d236e3cfca45b8142e98519478bb-v5-run-04\Results\eghis-1dc9250dae01-win311-v5-run-04</HostFolder>
       <SandboxFolder>C:\MappedResults</SandboxFolder>
       <ReadOnly>false</ReadOnly>
     </MappedFolder>

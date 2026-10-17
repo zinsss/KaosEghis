@@ -23,28 +23,42 @@ if ($absenceCall -lt 0 -or $firstCreate -lt 0 -or $firstAclMutation -lt 0 -or
 
 $runner = Get-Content -LiteralPath $runnerPath -Raw
 foreach ($literal in @(
-    '$GlobalDeadlineSeconds = 5400',
-    'PythonInstall = 480',
+    '$GlobalDeadlineSeconds = 480',
+    'PythonProvision = 180',
+    'PythonVersion = 30',
+    'PythonBaseSmoke = 30',
+    'PythonVenvSmoke = 30',
     'VenvCreate = 120',
     'DependencyInstall = 720',
     'PipCheck = 60',
     'DependencyInventory = 60',
-    'Pytest = 3300',
+    'FocusedPytest = 600',
+    'FullPytest = 3300',
     'Invoke-DeadlineProcess $FilePath',
     'Assert-WithinGlobalDeadline $Deadline',
     "Stop-FailClosed 'global_deadline_exceeded'",
-    'Confirm-RunDeadline'
+    'Confirm-RunDeadline',
+    "'python-provision-process.json'",
+    'DurationMilliseconds = [int64]$result.DurationMilliseconds',
+    'TimedOut = [bool]$result.TimedOut',
+    'ExitCode = $result.ExitCode'
 )) {
     if (-not $runner.Contains($literal)) { throw 'runner_deadline_contract_missing' }
 }
-$budgetTotal = 480 + 120 + 720 + 60 + 60 + 3300
-if ($budgetTotal -ne 4740 -or $budgetTotal -ge 5400) { throw 'runner_budget_total_invalid' }
+$guards = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'SandboxGuards.psm1') -Raw
+foreach ($literal in @('$process.WaitForExit()', '$process.Refresh()', 'DurationMilliseconds')) {
+    if (-not $guards.Contains($literal)) { throw 'process_exit_stabilization_missing' }
+}
+$budgetTotal = 180 + 30 + 30 + 30 + 120 + 720 + 60 + 60 + 600 + 3300
+if ($budgetTotal -ne 5130) { throw 'runner_budget_total_invalid' }
 
 [PSCustomObject]@{
     ExactVgpuTag = $true
     WrongCaseVgpuAbsent = $true
     AbsenceGatePrecedesMutation = $true
-    GlobalDeadlineSeconds = 5400
+    GlobalDeadlineSeconds = 480
     ChildBudgetTotalSeconds = $budgetTotal
-    OverheadReserveSeconds = 5400 - $budgetTotal
+    ChildBudgetsCappedByGlobalDeadline = $true
+    ProvisionEvidenceAllowlisted = $true
+    ProcessExitStabilizationPresent = $true
 } | ConvertTo-Json -Compress

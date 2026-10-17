@@ -3,13 +3,17 @@ Set-StrictMode -Version Latest
 
 $ExpectedComputer = 'YHSHFM'
 $ExpectedAccount = 'YHSHFM\leejs'
-$RunId = 'eghis-d1777c1834e1-win311-v2-run-01'
-$Root = 'C:\KaosClinic-Test\Eghis'
+$RunId = 'eghis-1dc9250dae01-win311-v5-run-04'
+$Root = 'E:\Kaos\.staging\KaosEghis-1dc9250dae01d236e3cfca45b8142e98519478bb-v5-run-04'
 $Results = Join-Path (Join-Path $Root 'Results') $RunId
 $ReturnArchive = Join-Path $Root "$RunId-results.zip"
 $AllowedNames = @(
-    'status.json', 'failure.txt', 'junit.xml', 'pytest-full.txt', 'pytest-error.txt',
-    'python-version.txt', 'python-install.txt', 'python-install-error.txt',
+    'status.json', 'failure.txt', 'focused-junit.xml', 'full-junit.xml',
+    'pytest-focused.txt', 'pytest-focused-error.txt', 'pytest-full.txt', 'pytest-error.txt',
+    'python-version.txt', 'python-version-error.txt',
+    'python-provision.txt', 'python-provision-error.txt', 'python-provision-process.json',
+    'python-smoke-base.txt', 'python-smoke-base-error.txt',
+    'python-smoke-venv.txt', 'python-smoke-venv-error.txt',
     'venv-create.txt', 'venv-create-error.txt', 'dependency-install.txt',
     'dependency-install-error.txt', 'pip-check.txt', 'pip-check-error.txt',
     'dependency-inventory.txt', 'dependency-inventory-error.txt'
@@ -59,7 +63,8 @@ $returnHash = (Get-FileHash -LiteralPath $ReturnArchive -Algorithm SHA256).Hash.
     Files = @($files.Name | Sort-Object)
     TotalBytes = $totalBytes
     Status = $status.Status
-    JunitPresent = (Test-Path -LiteralPath (Join-Path $Results 'junit.xml') -PathType Leaf)
+    FocusedJunitPresent = (Test-Path -LiteralPath (Join-Path $Results 'focused-junit.xml') -PathType Leaf)
+    FullJunitPresent = (Test-Path -LiteralPath (Join-Path $Results 'full-junit.xml') -PathType Leaf)
     ReturnArchive = $ReturnArchive
     ReturnArchiveSha256 = $returnHash
     RetainUntilUtc = [DateTime]::UtcNow.AddDays(7).ToString('o')

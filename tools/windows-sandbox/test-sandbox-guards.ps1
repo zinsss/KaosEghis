@@ -91,7 +91,25 @@ try {
     if (-not $result.TimedOut -or $result.Reason -ne 'global_deadline_exceeded') {
         throw 'global_deadline_was_not_enforced'
     }
+    if ($null -eq $result.PSObject.Properties['ExitCode'] -or
+        $null -eq $result.PSObject.Properties['DurationMilliseconds'] -or
+        $result.DurationMilliseconds -lt 1000 -or $result.DurationMilliseconds -ge 6000) {
+        throw 'bounded_timeout_evidence_invalid'
+    }
     if ($deadline.Stopwatch.Elapsed.TotalSeconds -ge 6) { throw 'global_deadline_termination_was_late' }
+
+    $successChild = Join-Path $root 'success-child.ps1'
+    "'ok'; exit 0" | Set-Content -LiteralPath $successChild -Encoding ASCII
+    $successDeadline = New-GlobalDeadline 10
+    $successResult = Invoke-DeadlineProcess $PSHOME/pwsh @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $successChild) 5 $successDeadline `
+        (Join-Path $root 'success-out.txt') (Join-Path $root 'success-error.txt')
+    if ($successResult.ExitCode -ne 0 -or $successResult.TimedOut -or $null -ne $successResult.Reason -or
+        $successResult.DurationMilliseconds -lt 0 -or $successResult.DurationMilliseconds -ge 5000) {
+        throw 'successful_process_evidence_invalid'
+    }
+    if ((Get-Content -LiteralPath (Join-Path $root 'success-out.txt') -Raw).Trim() -ne 'ok') {
+        throw 'successful_process_output_not_flushed'
+    }
 
     [PSCustomObject]@{
         NonemptyParentRejectedWithoutMutation = $true
@@ -99,6 +117,9 @@ try {
         UnexpectedEmptyDirectoryRejected = $true
         NestedJunctionRejected = $true
         GlobalDeadlineKilledLongChild = $true
+        TimeoutEvidenceRecorded = $true
+        SuccessfulExitCodeAndDurationRecorded = $true
+        RedirectedOutputFlushed = $true
     } | ConvertTo-Json -Compress
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue

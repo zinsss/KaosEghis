@@ -3,11 +3,14 @@ Set-StrictMode -Version Latest
 
 $ExpectedComputer = 'YHSHFM'
 $ExpectedAccount = 'YHSHFM\leejs'
-$BundleId = 'eghis-d1777c1834e1-win311-v2'
-$RunId = 'eghis-d1777c1834e1-win311-v2-run-01'
-$Root = 'C:\KaosClinic-Test\Eghis'
+$BundleId = 'eghis-1dc9250dae01-win311-v5'
+$RunId = 'eghis-1dc9250dae01-win311-v5-run-04'
+$Root = 'E:\Kaos\.staging\KaosEghis-1dc9250dae01d236e3cfca45b8142e98519478bb-v5-run-04'
 $Package = Join-Path $Root "$BundleId.zip"
-$ExpectedPackageHash = 'f7e3ca423d5252fa2d261831592d9df57992b0f5cb3fc6d24d0ec912710c9fd7'
+$ExpectedPackageHash = '7ce1dc72f7fe4f9ae685772fc6438c3b2b31df6105877bd1d4c7805391acd5f6'
+$ExpectedPackageSize = 299243663
+$ExpectedRuntimeHash = '1965edbb4b97913c2cd689a63b2a49624686ec85729525fe0219a267e6b057d5'
+$ExpectedRuntimeManifestHash = '75ccb5515181c316e050f29bb5629d90eaffa6756a31f7b2a126297cf7806460'
 $Inbound = Join-Path (Join-Path $Root 'Inbound') $BundleId
 $Results = Join-Path (Join-Path $Root 'Results') $RunId
 
@@ -42,7 +45,10 @@ if ((Get-ChildItem -LiteralPath $Results -Force | Measure-Object).Count -ne 0) {
 if ([string](Get-WindowsOptionalFeature -Online -FeatureName 'Containers-DisposableClientVM').State -ne 'Enabled') { throw 'sandbox_feature_not_enabled' }
 $packageItem = Get-Item -LiteralPath $Package -Force
 if (($packageItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'package_reparse_point' }
+if ([int64]$packageItem.Length -ne $ExpectedPackageSize) { throw 'package_size_mismatch' }
 if ((Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedPackageHash) { throw 'package_hash_mismatch' }
+if ((Get-FileHash -LiteralPath (Join-Path $Inbound 'python-3.11.9-runtime-v5.zip') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedRuntimeHash) { throw 'python_runtime_hash_mismatch' }
+if ((Get-FileHash -LiteralPath (Join-Path $Inbound 'python-runtime-manifest-v5.json') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedRuntimeManifestHash) { throw 'python_runtime_manifest_hash_mismatch' }
 
 $manifest = Join-Path $Inbound 'artifact-manifest.sha256'
 $descendants = @(Get-ChildItem -LiteralPath $Inbound -Force -Recurse)

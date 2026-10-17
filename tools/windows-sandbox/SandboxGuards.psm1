@@ -114,9 +114,16 @@ function Invoke-DeadlineProcess {
         [Parameter(Mandatory = $true)][string]$StdoutPath,
         [Parameter(Mandatory = $true)][string]$StderrPath
     )
+    $processStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $remainingMilliseconds = Get-RemainingDeadlineMilliseconds $Deadline
     if ($remainingMilliseconds -le 0) {
-        return [PSCustomObject]@{ ExitCode = $null; TimedOut = $true; Reason = 'global_deadline_exceeded' }
+        $processStopwatch.Stop()
+        return [PSCustomObject]@{
+            ExitCode = $null
+            TimedOut = $true
+            DurationMilliseconds = [int64]$processStopwatch.ElapsedMilliseconds
+            Reason = 'global_deadline_exceeded'
+        }
     }
     $stepMilliseconds = [int64]$StepTimeoutSeconds * 1000
     $effectiveMilliseconds = [math]::Min($stepMilliseconds, $remainingMilliseconds)
@@ -129,18 +136,38 @@ function Invoke-DeadlineProcess {
             & taskkill.exe /PID $process.Id /T /F *> $null
         } else {
             $process.Kill($true)
-            $process.WaitForExit()
         }
+        $terminationObserved = $process.WaitForExit(2000)
+        if ($terminationObserved) { $process.Refresh() }
+        $processStopwatch.Stop()
+        $timedOutExitCode = if ($terminationObserved) { try { [int]$process.ExitCode } catch { $null } } else { $null }
         return [PSCustomObject]@{
-            ExitCode = $null
+            ExitCode = $timedOutExitCode
             TimedOut = $true
+            DurationMilliseconds = [int64]$processStopwatch.ElapsedMilliseconds
             Reason = if ($globalLimited) { 'global_deadline_exceeded' } else { 'bounded_process_timeout' }
         }
     }
+    # Complete the unbounded wait only after the bounded wait proved termination.
+    # This flushes redirected streams and refreshes the stable process exit code.
+    $process.WaitForExit()
+    $process.Refresh()
+    $exitCode = [int]$process.ExitCode
+    $processStopwatch.Stop()
     if ((Get-RemainingDeadlineMilliseconds $Deadline) -le 0) {
-        return [PSCustomObject]@{ ExitCode = $null; TimedOut = $true; Reason = 'global_deadline_exceeded' }
+        return [PSCustomObject]@{
+            ExitCode = $exitCode
+            TimedOut = $true
+            DurationMilliseconds = [int64]$processStopwatch.ElapsedMilliseconds
+            Reason = 'global_deadline_exceeded'
+        }
     }
-    return [PSCustomObject]@{ ExitCode = $process.ExitCode; TimedOut = $false; Reason = $null }
+    return [PSCustomObject]@{
+        ExitCode = $exitCode
+        TimedOut = $false
+        DurationMilliseconds = [int64]$processStopwatch.ElapsedMilliseconds
+        Reason = $null
+    }
 }
 
 Export-ModuleMember -Function Assert-PathSetAbsent, Read-ArtifactManifest, Assert-ExactArtifactTree, `
