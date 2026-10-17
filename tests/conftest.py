@@ -15,6 +15,47 @@ if repository_root not in sys.path:
     sys.path.insert(0, repository_root)
 
 
+def _is_windows_sandbox_identity(platform, username):
+    """Return true only for Windows Sandbox's documented local account."""
+    if platform != "win32" or not isinstance(username, str):
+        return False
+    account = username.strip().replace("/", "\\").rsplit("\\", 1)[-1]
+    return account.casefold() == "wdagutilityaccount"
+
+
+def _current_windows_username():
+    """Read the authenticated Windows username without environment data."""
+    if sys.platform != "win32":
+        return ""
+
+    import ctypes
+    from ctypes import wintypes
+
+    size = wintypes.DWORD(0)
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    get_username = advapi32.GetUserNameW
+    get_username.argtypes = (wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD))
+    get_username.restype = wintypes.BOOL
+    get_username(None, ctypes.byref(size))
+    if size.value == 0:
+        return ""
+    buffer = ctypes.create_unicode_buffer(size.value)
+    if not get_username(buffer, ctypes.byref(size)):
+        return ""
+    return buffer.value
+
+
+def _skip_windows_sandbox_uia_integration(platform, username):
+    if _is_windows_sandbox_identity(platform, username):
+        pytest.skip("Windows Sandbox does not expose stable UIA identity for synthetic controls")
+
+
+@pytest.fixture
+def skip_windows_sandbox_uia_integration():
+    """Skip only real-control UIA integration unsupported by Windows Sandbox."""
+    _skip_windows_sandbox_uia_integration(sys.platform, _current_windows_username())
+
+
 @pytest.fixture(scope="session", autouse=True)
 def windows_offscreen_fonts():
     if sys.platform != "win32" or os.environ.get("QT_QPA_PLATFORM", "").split(":")[0] != "offscreen":

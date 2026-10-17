@@ -226,7 +226,9 @@ def test_com_removal_failure_still_makes_late_callbacks_inert(com_backend):
     assert not subscription.handler.active
 
 
-def test_real_uia_registration_roundtrip_on_our_own_hidden_button():
+def test_real_uia_registration_roundtrip_on_our_own_hidden_button(
+    skip_windows_sandbox_uia_integration,
+):
     import os
     import threading
     import time

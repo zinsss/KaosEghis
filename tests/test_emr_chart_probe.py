@@ -284,7 +284,9 @@ def test_variant_payload_diagnostics_match_unwrapped_payload(com_backend, value,
     assert not rejected
 
 
-def test_real_property_event_on_our_own_hidden_text():
+def test_real_property_event_on_our_own_hidden_text(
+    skip_windows_sandbox_uia_integration,
+):
     import os
     import threading
     import time
