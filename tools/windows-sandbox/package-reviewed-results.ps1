@@ -19,6 +19,38 @@ $AllowedNames = @(
     'dependency-inventory.txt', 'dependency-inventory-error.txt'
 )
 
+function Read-PassingJUnit([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'passing_junit_missing' }
+    try {
+        $document = [xml](Get-Content -LiteralPath $Path -Raw -Encoding UTF8)
+        $suites = @($document.SelectNodes('//testsuite[not(descendant::testsuite)]'))
+        if ($suites.Count -lt 1) { throw 'passing_junit_invalid' }
+        $tests = [int64]0
+        $errors = [int64]0
+        $failures = [int64]0
+        foreach ($suite in $suites) {
+            foreach ($attribute in @('tests', 'errors', 'failures')) {
+                $value = [int64]0
+                if ($null -eq $suite.Attributes[$attribute] -or
+                    -not [int64]::TryParse($suite.Attributes[$attribute].Value, [ref]$value) -or
+                    $value -lt 0) {
+                    throw 'passing_junit_invalid'
+                }
+                switch ($attribute) {
+                    'tests' { $tests += $value }
+                    'errors' { $errors += $value }
+                    'failures' { $failures += $value }
+                }
+            }
+        }
+    } catch {
+        if ($_.Exception.Message -in @('passing_junit_missing', 'passing_junit_invalid')) { throw }
+        throw 'passing_junit_invalid'
+    }
+    if ($tests -lt 1 -or $errors -ne 0 -or $failures -ne 0) { throw 'passing_junit_contradiction' }
+    return [PSCustomObject]@{ Tests = $tests; Errors = $errors; Failures = $failures }
+}
+
 if (-not [string]::Equals($env:COMPUTERNAME, $ExpectedComputer, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'unexpected_computer' }
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not [string]::Equals($identity.Name, $ExpectedAccount, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'unexpected_account' }
@@ -51,6 +83,26 @@ $statusPath = Join-Path $Results 'status.json'
 if (-not (Test-Path -LiteralPath $statusPath -PathType Leaf)) { throw 'status_missing' }
 $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
 if ($status.Status -notin @('passed', 'failed', 'blocked')) { throw 'unexpected_status' }
+if ($status.Status -eq 'passed') {
+    $focusedJUnit = Read-PassingJUnit (Join-Path $Results 'focused-junit.xml')
+    $fullJUnit = Read-PassingJUnit (Join-Path $Results 'full-junit.xml')
+    foreach ($property in @(
+        'FocusedPytestExitCode', 'FullPytestExitCode',
+        'FocusedJUnitTests', 'FocusedJUnitErrors', 'FocusedJUnitFailures',
+        'FullJUnitTests', 'FullJUnitErrors', 'FullJUnitFailures'
+    )) {
+        if ($null -eq $status.PSObject.Properties[$property]) { throw 'passing_status_incomplete' }
+    }
+    if ($status.FocusedPytestExitCode -ne 0 -or $status.FullPytestExitCode -ne 0 -or
+        $status.FocusedJUnitTests -ne $focusedJUnit.Tests -or
+        $status.FocusedJUnitErrors -ne $focusedJUnit.Errors -or
+        $status.FocusedJUnitFailures -ne $focusedJUnit.Failures -or
+        $status.FullJUnitTests -ne $fullJUnit.Tests -or
+        $status.FullJUnitErrors -ne $fullJUnit.Errors -or
+        $status.FullJUnitFailures -ne $fullJUnit.Failures) {
+        throw 'passing_status_junit_mismatch'
+    }
+}
 if (Test-Path -LiteralPath $ReturnArchive) { throw 'return_archive_already_exists' }
 
 # An approving reviewer must inspect the fixed result file set for synthetic-only,

@@ -88,6 +88,22 @@ function Confirm-RunDeadline {
     }
 }
 
+function Confirm-PytestJUnitPassed(
+    [string]$Path,
+    [int]$ProcessExitCode,
+    [string]$Scope
+) {
+    if ($Scope -notin @('focused', 'full')) { Stop-FailClosed 'invalid_pytest_scope' }
+    if ($ProcessExitCode -ne 0) { Stop-FailClosed "${Scope}_pytest_failed" }
+    try {
+        return Read-PytestJUnitSummary $Path
+    } catch {
+        if ($_.Exception.Message -eq 'pytest_junit_missing') { Stop-FailClosed "${Scope}_junit_missing" }
+        if ($_.Exception.Message -eq 'pytest_junit_not_passing') { Stop-FailClosed "${Scope}_junit_not_passing" }
+        Stop-FailClosed "${Scope}_junit_invalid"
+    }
+}
+
 if (-not (Test-Path -LiteralPath $Inbound -PathType Container)) { throw 'missing_inbound_mapping' }
 if (-not (Test-Path -LiteralPath $Results -PathType Container)) { throw 'missing_results_mapping' }
 if ((Get-ChildItem -LiteralPath $Results -Force | Measure-Object).Count -ne 0) { throw 'results_not_empty' }
@@ -258,6 +274,7 @@ $focusedArgs = @(
 )
 $focusedExit = Invoke-RunProcess $VenvPython $focusedArgs $StepBudgets.FocusedPytest 'pytest-focused.txt' 'pytest-focused-error.txt'
 Confirm-RunDeadline
+$focusedJUnit = Confirm-PytestJUnitPassed (Join-Path $Results 'focused-junit.xml') $focusedExit 'focused'
 $fullArgs = @(
     '-I', '-m', 'pytest', '-ra',
     "--basetemp=$(Join-Path $RunRoot 'pytest-full-temp')",
@@ -266,6 +283,7 @@ $fullArgs = @(
 )
 $fullExit = Invoke-RunProcess $VenvPython $fullArgs $StepBudgets.FullPytest 'pytest-full.txt' 'pytest-error.txt'
 Confirm-RunDeadline
+$fullJUnit = Confirm-PytestJUnitPassed (Join-Path $Results 'full-junit.xml') $fullExit 'full'
 $resultBytes = (Get-ChildItem -LiteralPath $Results -File | Measure-Object -Property Length -Sum).Sum
 if ($resultBytes -gt 200MB) { Stop-FailClosed 'result_size_limit_exceeded' }
 
@@ -281,6 +299,12 @@ if ($resultBytes -gt 200MB) { Stop-FailClosed 'result_size_limit_exceeded' }
     NetworkIsolationVerified = $true
     FocusedPytestExitCode = $focusedExit
     FullPytestExitCode = $fullExit
+    FocusedJUnitTests = $focusedJUnit.Tests
+    FocusedJUnitErrors = $focusedJUnit.Errors
+    FocusedJUnitFailures = $focusedJUnit.Failures
+    FullJUnitTests = $fullJUnit.Tests
+    FullJUnitErrors = $fullJUnit.Errors
+    FullJUnitFailures = $fullJUnit.Failures
 } | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $Results 'status.json') -Encoding UTF8
 if ($focusedExit -ne 0) { exit $focusedExit }
 exit $fullExit

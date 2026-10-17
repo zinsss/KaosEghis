@@ -122,6 +122,32 @@ try {
         throw 'successful_process_output_not_flushed'
     }
 
+    $passingJunit = Join-Path $root 'passing-junit.xml'
+    '<testsuites><testsuite tests="2" errors="0" failures="0"><testcase/><testcase/></testsuite></testsuites>' |
+        Set-Content -LiteralPath $passingJunit -Encoding UTF8
+    $junitSummary = Read-PytestJUnitSummary $passingJunit
+    if ($junitSummary.Tests -ne 2 -or $junitSummary.Errors -ne 0 -or $junitSummary.Failures -ne 0) {
+        throw 'passing_junit_summary_invalid'
+    }
+    $errorJunit = Join-Path $root 'error-junit.xml'
+    '<testsuites><testsuite tests="2" errors="2" failures="0"><testcase/><testcase/></testsuite></testsuites>' |
+        Set-Content -LiteralPath $errorJunit -Encoding UTF8
+    try {
+        Read-PytestJUnitSummary $errorJunit
+        throw 'error_junit_was_accepted'
+    } catch {
+        if ($_.Exception.Message -ne 'pytest_junit_not_passing') { throw }
+    }
+    $malformedJunit = Join-Path $root 'malformed-junit.xml'
+    '<testsuites><testsuite tests="not-a-number" errors="0" failures="0"/></testsuites>' |
+        Set-Content -LiteralPath $malformedJunit -Encoding UTF8
+    try {
+        Read-PytestJUnitSummary $malformedJunit
+        throw 'malformed_junit_was_accepted'
+    } catch {
+        if ($_.Exception.Message -ne 'pytest_junit_invalid') { throw }
+    }
+
     [PSCustomObject]@{
         NonemptyParentRejectedWithoutMutation = $true
         ParentJunctionRejectedWithoutMutation = $true
@@ -131,6 +157,9 @@ try {
         TimeoutEvidenceRecorded = $true
         SuccessfulExitCodeAndDurationRecorded = $true
         RedirectedOutputFlushed = $true
+        PassingJUnitAccepted = $true
+        ErrorJUnitRejected = $true
+        MalformedJUnitRejected = $true
     } | ConvertTo-Json -Compress
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue

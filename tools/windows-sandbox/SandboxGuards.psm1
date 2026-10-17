@@ -170,6 +170,55 @@ function Invoke-DeadlineProcess {
     }
 }
 
+function Read-PytestJUnitSummary {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'pytest_junit_missing' }
+
+    $reader = $null
+    try {
+        $settings = [System.Xml.XmlReaderSettings]::new()
+        $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver = $null
+        $reader = [System.Xml.XmlReader]::Create($Path, $settings)
+        $document = [System.Xml.XmlDocument]::new()
+        $document.XmlResolver = $null
+        $document.Load($reader)
+        $suites = @($document.SelectNodes('//testsuite[not(descendant::testsuite)]'))
+        if ($suites.Count -lt 1) { throw 'pytest_junit_invalid' }
+        $tests = [int64]0
+        $errors = [int64]0
+        $failures = [int64]0
+        foreach ($suite in $suites) {
+            foreach ($attribute in @('tests', 'errors', 'failures')) {
+                $value = [int64]0
+                if ($null -eq $suite.Attributes[$attribute] -or
+                    -not [int64]::TryParse($suite.Attributes[$attribute].Value, [ref]$value) -or
+                    $value -lt 0) {
+                    throw 'pytest_junit_invalid'
+                }
+                switch ($attribute) {
+                    'tests' { $tests += $value }
+                    'errors' { $errors += $value }
+                    'failures' { $failures += $value }
+                }
+            }
+        }
+    } catch {
+        if ($_.Exception.Message -in @('pytest_junit_missing', 'pytest_junit_invalid')) { throw }
+        throw 'pytest_junit_invalid'
+    } finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+    }
+    if ($tests -lt 1 -or $errors -ne 0 -or $failures -ne 0) {
+        throw 'pytest_junit_not_passing'
+    }
+    return [PSCustomObject]@{
+        Tests = $tests
+        Errors = $errors
+        Failures = $failures
+    }
+}
+
 Export-ModuleMember -Function Assert-PathSetAbsent, Read-ArtifactManifest, Assert-ExactArtifactTree, `
     New-GlobalDeadline, Get-RemainingDeadlineMilliseconds, Assert-WithinGlobalDeadline, `
-    Invoke-DeadlineProcess
+    Invoke-DeadlineProcess, Read-PytestJUnitSummary

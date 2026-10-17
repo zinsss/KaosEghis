@@ -22,6 +22,7 @@ if ($absenceCall -lt 0 -or $firstCreate -lt 0 -or $firstAclMutation -lt 0 -or
 }
 
 $runner = Get-Content -LiteralPath $runnerPath -Raw
+$packager = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'package-reviewed-results.ps1') -Raw
 foreach ($literal in @(
     '$GlobalDeadlineSeconds = 480',
     'PythonProvision = 180',
@@ -49,6 +50,32 @@ $guards = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'SandboxGuards.psm1'
 foreach ($literal in @('$process.WaitForExit()', '$process.Refresh()', 'DurationMilliseconds')) {
     if (-not $guards.Contains($literal)) { throw 'process_exit_stabilization_missing' }
 }
+foreach ($literal in @(
+    'Confirm-PytestJUnitPassed',
+    'if ($ProcessExitCode -ne 0)',
+    'Read-PytestJUnitSummary $Path',
+    'FocusedJUnitTests = $focusedJUnit.Tests',
+    'FullJUnitTests = $fullJUnit.Tests'
+)) {
+    if (-not $runner.Contains($literal)) { throw 'runner_junit_contract_missing' }
+}
+foreach ($literal in @(
+    'function Read-PytestJUnitSummary',
+    "SelectNodes('//testsuite[not(descendant::testsuite)]')",
+    '$tests -lt 1 -or $errors -ne 0 -or $failures -ne 0',
+    "throw 'pytest_junit_not_passing'"
+)) {
+    if (-not $guards.Contains($literal)) { throw 'junit_parser_contract_missing' }
+}
+foreach ($literal in @(
+    'Read-PassingJUnit',
+    "if (`$status.Status -eq 'passed')",
+    "throw 'passing_junit_contradiction'",
+    "throw 'passing_status_incomplete'",
+    "throw 'passing_status_junit_mismatch'"
+)) {
+    if (-not $packager.Contains($literal)) { throw 'packager_junit_contract_missing' }
+}
 $budgetTotal = 180 + 30 + 30 + 30 + 120 + 720 + 60 + 60 + 600 + 3300
 if ($budgetTotal -ne 5130) { throw 'runner_budget_total_invalid' }
 
@@ -61,4 +88,6 @@ if ($budgetTotal -ne 5130) { throw 'runner_budget_total_invalid' }
     ChildBudgetsCappedByGlobalDeadline = $true
     ProvisionEvidenceAllowlisted = $true
     ProcessExitStabilizationPresent = $true
+    PytestJUnitCrossCheckPresent = $true
+    PackagerJUnitCrossCheckPresent = $true
 } | ConvertTo-Json -Compress
