@@ -3,8 +3,8 @@ Set-StrictMode -Version Latest
 
 $ExpectedComputer = 'YHSHFM'
 $ExpectedAccount = 'YHSHFM\leejs'
-$RunId = 'eghis-1dc9250dae01-win311-v5-run-04'
-$Root = 'E:\Kaos\.staging\KaosEghis-1dc9250dae01d236e3cfca45b8142e98519478bb-v5-run-04'
+$RunId = 'eghis-576e1d3fd5d6-win311-v9-run-08'
+$Root = 'E:\Kaos\.staging\KaosEghis-576e1d3fd5d60c48c81b49a34ed44b22068629be-v9-run-08'
 $Results = Join-Path (Join-Path $Root 'Results') $RunId
 $ReturnArchive = Join-Path $Root "$RunId-results.zip"
 $AllowedNames = @(
@@ -14,8 +14,10 @@ $AllowedNames = @(
     'python-provision.txt', 'python-provision-error.txt', 'python-provision-process.json',
     'python-smoke-base.txt', 'python-smoke-base-error.txt',
     'python-smoke-venv.txt', 'python-smoke-venv-error.txt',
+    'vc-runtime-install.txt', 'vc-runtime-install-error.txt', 'vc-runtime-install-process.json',
     'venv-create.txt', 'venv-create-error.txt', 'dependency-install.txt',
     'dependency-install-error.txt', 'pip-check.txt', 'pip-check-error.txt',
+    'win32ui-smoke.txt', 'win32ui-smoke-error.txt',
     'dependency-inventory.txt', 'dependency-inventory-error.txt'
 )
 

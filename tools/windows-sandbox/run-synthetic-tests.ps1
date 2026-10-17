@@ -1,13 +1,15 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$ExpectedSourceCommit = '1dc9250dae01d236e3cfca45b8142e98519478bb'
+$ExpectedSourceCommit = '576e1d3fd5d60c48c81b49a34ed44b22068629be'
 $ExpectedInstallerHash = '5ee42c4eee1e6b4464bb23722f90b45303f79442df63083f05322f1785f5fdde'
 $ExpectedRuntimeHash = '1965edbb4b97913c2cd689a63b2a49624686ec85729525fe0219a267e6b057d5'
 $ExpectedRuntimeManifestHash = '75ccb5515181c316e050f29bb5629d90eaffa6756a31f7b2a126297cf7806460'
 $ExpectedPythonSmokeHash = '9b77223a802be2539f0f7a2d3c849b472133d454aac919f54941ed4c55e52f09'
+$ExpectedVcRedistHash = 'cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b'
 $GlobalDeadlineSeconds = 1200
 $StepBudgets = [ordered]@{
+    VcRuntimeInstall = 180
     PythonProvision = 180
     PythonVersion = 30
     PythonBaseSmoke = 30
@@ -15,6 +17,7 @@ $StepBudgets = [ordered]@{
     VenvCreate = 120
     DependencyInstall = 720
     PipCheck = 60
+    Win32UiSmoke = 30
     DependencyInventory = 60
     FocusedPytest = 600
     FullPytest = 3300
@@ -33,13 +36,14 @@ $VenvRoot = Join-Path $RunRoot 'venv'
 $VenvPython = Join-Path $VenvRoot 'Scripts\python.exe'
 $Wheelhouse = Join-Path $Inbound 'wheelhouse'
 $LockFile = Join-Path $Inbound 'requirements-win311.lock'
-$SourceArchive = Join-Path $Inbound 'KaosEghis-1dc9250dae01-source.zip'
+$SourceArchive = Join-Path $Inbound 'KaosEghis-576e1d3fd5d6-source.zip'
 $Manifest = Join-Path $Inbound 'artifact-manifest.sha256'
 $RuntimeArchive = Join-Path $Inbound 'python-3.11.9-runtime-v5.zip'
 $RuntimeManifest = Join-Path $Inbound 'python-runtime-manifest-v5.json'
 $RuntimeProvisioner = Join-Path $Inbound 'provision-python-runtime.ps1'
 $PythonSmokeScript = Join-Path $Inbound 'python-runtime-smoke.py'
-$ExpectedSourceRoot = Join-Path $RunRoot 'src\KaosEghis-1dc9250dae01'
+$VcRedist = Join-Path $Inbound 'vc_redist.x64.exe'
+$ExpectedSourceRoot = Join-Path $RunRoot 'src\KaosEghis-576e1d3fd5d6'
 
 function Stop-FailClosed([string]$Reason) {
     $safeReason = if ($Reason -match '^[a-z0-9_]{1,80}$') { $Reason } else { 'unspecified_failure' }
@@ -183,6 +187,9 @@ if ((Get-FileHash -LiteralPath $RuntimeManifest -Algorithm SHA256).Hash.ToLowerI
 if ((Get-FileHash -LiteralPath $PythonSmokeScript -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedPythonSmokeHash) {
     Stop-FailClosed 'python_runtime_smoke_hash_mismatch'
 }
+if ((Get-FileHash -LiteralPath $VcRedist -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedVcRedistHash) {
+    Stop-FailClosed 'vc_runtime_hash_mismatch'
+}
 
 $env:PYTHONDONTWRITEBYTECODE = '1'
 $env:PYTHONNOUSERSITE = '1'
@@ -197,6 +204,10 @@ foreach ($name in @(
 }
 
 New-Item -ItemType Directory -Path $RunRoot -ErrorAction Stop | Out-Null
+$vcRuntimeArgs = @('/install', '/quiet', '/norestart')
+if ((Invoke-RunProcess $VcRedist $vcRuntimeArgs $StepBudgets.VcRuntimeInstall 'vc-runtime-install.txt' 'vc-runtime-install-error.txt' 'vc_runtime_install_timeout' 'vc-runtime-install-process.json') -ne 0) {
+    Stop-FailClosed 'vc_runtime_install_failed'
+}
 $provisionArgs = @(
     '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
     '-File', $RuntimeProvisioner, '-ArchivePath', $RuntimeArchive,
@@ -229,6 +240,9 @@ if ((Invoke-RunProcess $VenvPython @(
 }
 if ((Invoke-RunProcess $VenvPython @('-I', '-m', 'pip', 'check') $StepBudgets.PipCheck 'pip-check.txt' 'pip-check-error.txt') -ne 0) {
     Stop-FailClosed 'pip_check_failed'
+}
+if ((Invoke-RunProcess $VenvPython @('-I', '-c', 'import win32ui; print(win32ui.__file__)') $StepBudgets.Win32UiSmoke 'win32ui-smoke.txt' 'win32ui-smoke-error.txt') -ne 0) {
+    Stop-FailClosed 'win32ui_import_failed'
 }
 if ((Invoke-RunProcess $VenvPython @('-I', '-m', 'pip', 'freeze', '--all') $StepBudgets.DependencyInventory 'dependency-inventory.txt' 'dependency-inventory-error.txt') -ne 0) {
     Stop-FailClosed 'dependency_inventory_failed'
@@ -293,8 +307,10 @@ if ($resultBytes -gt 200MB) { Stop-FailClosed 'result_size_limit_exceeded' }
 [PSCustomObject]@{
     Status = if ($focusedExit -eq 0 -and $fullExit -eq 0) { 'passed' } else { 'failed' }
     SourceCommit = $ExpectedSourceCommit
-    SourceTree = 'a6d54f7d1a84c8173f793d5f5444e4dda1f42e62'
-    IndependentReviewSha256 = 'c26326f6e95bf028939e5fdf9be6f9693b35c55b974be4c283b87ea487d7a4c3'
+    SourceTree = '9d00a06db3ebbf128572b63509fe2af4c89d64bd'
+    ToolingBaseCommit = 'a65be51483f6a1b306fd6bf88027e26ebadd39e8'
+    VcRuntimeSha256 = $ExpectedVcRedistHash
+    ReviewContract = 'v9_exact_byte_review_required'
     PythonSourceInstallerSha256 = $ExpectedInstallerHash
     PythonRuntimeSha256 = $ExpectedRuntimeHash
     PythonRuntimeManifestSha256 = $ExpectedRuntimeManifestHash

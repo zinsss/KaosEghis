@@ -1,0 +1,14 @@
+Artifact: vc_redist.x64.exe
+Source URL: https://aka.ms/vs/17/release/vc_redist.x64.exe
+Retrieved: 2026-10-17 (Asia/Seoul)
+Size: 25635768 bytes
+SHA-256: cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b
+Product: Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.44.35211
+Signer subject: Microsoft Corporation
+Signer digest: SHA-256
+Embedded digest: verified byte-for-byte with osslsigncode 2.9
+Timestamp: 2025-06-11T06:43:18Z
+Windows Authenticode verification: Valid (Signature verified.)
+Independent verifier: GPD, PowerShell 7.6.7, 2026-10-17 (Asia/Seoul)
+Verification note: the independently downloaded official bytes matched this exact
+size and SHA-256 before Windows reported a valid Microsoft Corporation signature.

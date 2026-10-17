@@ -3,12 +3,12 @@ Set-StrictMode -Version Latest
 
 $ExpectedComputer = 'YHSHFM'
 $ExpectedAccount = 'YHSHFM\leejs'
-$BundleId = 'eghis-1dc9250dae01-win311-v5'
-$RunId = 'eghis-1dc9250dae01-win311-v5-run-04'
-$Root = 'E:\Kaos\.staging\KaosEghis-1dc9250dae01d236e3cfca45b8142e98519478bb-v5-run-04'
+$BundleId = 'eghis-576e1d3fd5d6-win311-v9'
+$RunId = 'eghis-576e1d3fd5d6-win311-v9-run-08'
+$Root = 'E:\Kaos\.staging\KaosEghis-576e1d3fd5d60c48c81b49a34ed44b22068629be-v9-run-08'
 $Package = Join-Path $Root "$BundleId.zip"
-$ExpectedPackageHash = '7ce1dc72f7fe4f9ae685772fc6438c3b2b31df6105877bd1d4c7805391acd5f6'
-$ExpectedPackageSize = 299243663
+$ExpectedPackageHash = '16e4380721d92af2d214c830e03777ae9110dbf02dcaaeaed761d1db068455f3'
+$ExpectedPackageSize = 324719145
 $ExpectedRuntimeHash = '1965edbb4b97913c2cd689a63b2a49624686ec85729525fe0219a267e6b057d5'
 $ExpectedRuntimeManifestHash = '75ccb5515181c316e050f29bb5629d90eaffa6756a31f7b2a126297cf7806460'
 $InboundParent = Join-Path $Root 'Inbound'

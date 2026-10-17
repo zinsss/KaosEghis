@@ -25,6 +25,7 @@ $runner = Get-Content -LiteralPath $runnerPath -Raw
 $packager = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'package-reviewed-results.ps1') -Raw
 foreach ($literal in @(
     '$GlobalDeadlineSeconds = 1200',
+    'VcRuntimeInstall = 180',
     'PythonProvision = 180',
     'PythonVersion = 30',
     'PythonBaseSmoke = 30',
@@ -32,6 +33,7 @@ foreach ($literal in @(
     'VenvCreate = 120',
     'DependencyInstall = 720',
     'PipCheck = 60',
+    'Win32UiSmoke = 30',
     'DependencyInventory = 60',
     'FocusedPytest = 600',
     'FullPytest = 3300',
@@ -43,6 +45,10 @@ foreach ($literal in @(
     "Stop-FailClosed 'global_deadline_exceeded'",
     'Confirm-RunDeadline',
     "'python-provision-process.json'",
+    "'vc-runtime-install-process.json'",
+    "Stop-FailClosed 'vc_runtime_hash_mismatch'",
+    "Stop-FailClosed 'vc_runtime_install_failed'",
+    "Stop-FailClosed 'win32ui_import_failed'",
     'DurationMilliseconds = [int64]$result.DurationMilliseconds',
     'TimedOut = [bool]$result.TimedOut',
     'ExitCode = $result.ExitCode'
@@ -79,8 +85,8 @@ foreach ($literal in @(
 )) {
     if (-not $packager.Contains($literal)) { throw 'packager_junit_contract_missing' }
 }
-$budgetTotal = 180 + 30 + 30 + 30 + 120 + 720 + 60 + 60 + 600 + 3300
-if ($budgetTotal -ne 5130) { throw 'runner_budget_total_invalid' }
+$budgetTotal = 180 + 180 + 30 + 30 + 30 + 120 + 720 + 60 + 30 + 60 + 600 + 3300
+if ($budgetTotal -ne 5340) { throw 'runner_budget_total_invalid' }
 
 [PSCustomObject]@{
     ExactVgpuTag = $true
@@ -90,6 +96,8 @@ if ($budgetTotal -ne 5130) { throw 'runner_budget_total_invalid' }
     ChildBudgetTotalSeconds = $budgetTotal
     ChildBudgetsCappedByGlobalDeadline = $true
     ProvisionEvidenceAllowlisted = $true
+    VcRuntimeInstallEvidenceAllowlisted = $true
+    Win32UiSmokeGatePresent = $true
     ProcessExitStabilizationPresent = $true
     PytestJUnitCrossCheckPresent = $true
     PackagerJUnitCrossCheckPresent = $true
